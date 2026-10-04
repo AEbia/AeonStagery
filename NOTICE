@@ -1,0 +1,25 @@
+AeonStagery
+Copyright 2026 White_AE
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product bundles and/or links third-party components that are distributed
+under their own licenses. The authoritative list, together with the license
+identifier of every shipped or bundled component and the notices required by
+their licenses, is maintained in THIRD_PARTY_NOTICES.md (a copy ships with the
+application as public/licenses/third-party-notices.md).
+
+Notably:
+
+- FFmpeg (GPL-3.0-or-later, via the `ffmpeg-static` package) is distributed
+  alongside this product and is invoked only as a separate process. Its license
+  text ships as public/licenses/ffmpeg/GPL-3.0.txt.
+- GSAP is distributed under the GreenSock Standard License.
+- JetBrains Mono, Noto Sans SC and Outfit are distributed under the SIL Open
+  Font License 1.1 (see public/licenses/fonts/).
+- Live2D Cubism runtimes are NOT distributed with release builds of this
+  product. They are proprietary Live2D Inc. software that users must obtain and
+  install themselves.
+
+Do not remove this NOTICE, LICENSE, THIRD_PARTY_NOTICES.md or the files under
+public/licenses/ from binary distributions.

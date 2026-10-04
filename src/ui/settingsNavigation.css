@@ -1,0 +1,64 @@
+.settings-dialog .settings-dialog__brand { padding-bottom: 14px; }
+.settings-dialog__scope { margin: 5px 0 0; font-size: 12px; color: var(--text-secondary); }
+.settings-template-panel { display: flex; flex-direction: column; gap: 16px; }
+.settings-template-panel__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-template-panel__empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-navigation__search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+  padding: 0 8px;
+  min-height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  background: var(--bg-primary);
+}
+.settings-navigation__search:focus-within { border-color: var(--accent-primary); }
+.settings-navigation__search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.settings-navigation__search input::-webkit-search-cancel-button { display: none; }
+.settings-dialog .settings-dialog__tabs.settings-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.settings-navigation .settings-dialog__tab { flex: 0 0 auto; min-height: 34px; padding-block: 7px; }
+.settings-navigation__group {
+  flex: 0 0 auto;
+  margin: 9px 10px 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.settings-navigation__group:first-child { margin-top: 0; }
+.settings-navigation__empty { color: var(--text-secondary); font-size: 12px; line-height: 1.8; }
+.settings-navigation__scope {
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settings-dialog .settings-dialog__sidebar-spacer { min-height: 8px; }
+.settings-dialog__content[hidden] { display: none; }

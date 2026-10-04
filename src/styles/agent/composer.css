@@ -1,0 +1,95 @@
+/* ─── Unified composer (shared welcome/conversation input box) ──────
+   One persistent surface pinned to the footer of both surfaces: same seat,
+   same width, same card chrome — the box never moves, widens or loses its
+   card look when a conversation starts. */
+.agent-composer-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 20px 16px;
+  background: var(--bg-primary);
+  z-index: 10;
+}
+
+/* Context-window usage chip in the header. */
+.agent-window__context-used {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  animation: agentBadgeIn var(--motion-enter-fast) var(--ease-emphasized) both;
+}
+
+.agent-window__context-used-bar {
+  width: 64px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--border-default);
+  overflow: hidden;
+}
+
+.agent-window__context-used-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary);
+  transform: scaleX(var(--context-usage-ratio, 0));
+  transform-origin: left;
+  transition: transform var(--motion-enter-normal) var(--ease-standard);
+}
+
+.agent-window__context-used--warn {
+  background: var(--warning-surface);
+  border-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--warning);
+}
+
+.agent-window__context-used--warn .agent-window__context-used-fill {
+  background: var(--warning);
+}
+
+.agent-window__context-used--compacting .agent-window__context-used-bar {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 30%, transparent);
+}
+
+/* Tool-activity inline detail, e.g. 「读取 scene · L5~L24 · 20 行」. */
+.agent-log__activity-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.agent-log__activity-detail::before {
+  content: ' · ';
+  color: var(--text-muted);
+  opacity: 0.65;
+}
+
+/* Responsive (window min 420px wide) */
+@media (max-width: 760px) {
+  .agent-sidebar { width: 232px; }
+}
+
+@media (max-width: 560px) {
+  .agent-sidebar { width: 200px; }
+  .agent-sidebar__conv-time { display: none; }
+  .agent-sidebar__conv-actions { gap: 0; }
+}
+
+@media (max-width: 520px) {
+  .agent-window__thread { padding: 14px 12px 22px; }
+  .agent-window__bubble--user { max-width: 86%; }
+}

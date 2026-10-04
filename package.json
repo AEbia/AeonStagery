@@ -1,0 +1,136 @@
+{
+  "name": "aeonstagery",
+  "version": "0.8.0-beta",
+  "author": "White_AE",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AEbia/aeonstagery.git"
+  },
+  "description": "A cinematic visual novel engine for video production with Live2D and GSAP animations.",
+  "main": "dist-electron/main.js",
+  "build": {
+    "appId": "com.aeonstagery.app",
+    "productName": "AeonStagery",
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "src/templates/default/assets/**/*",
+      "package.json",
+      "LICENSE",
+      "NOTICE",
+      "THIRD_PARTY_NOTICES.md",
+      "!dist/live2d.min.js",
+      "!dist/live2dcubismcore.min.js",
+      "!dist/vendor/**",
+      "!node_modules/untitled-pixi-live2d-engine/**"
+    ],
+    "extraResources": [
+      "projects/**/*"
+    ],
+    "asar": true,
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://aeonstagery.oss-cn-hangzhou.aliyuncs.com/",
+        "useMultipleRangeRequest": false
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "scripts": {
+    "sync:live2d-runtime": "node scripts/sync-live2d-runtime.mjs",
+    "clean:live2d-runtime": "node scripts/sync-live2d-runtime.mjs --mode=none",
+    "notices": "node scripts/generate-third-party-notices.mjs",
+    "notices:check": "node scripts/generate-third-party-notices.mjs --check",
+    "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
+    "migrate:scene-v2": "tsx scripts/migrate-scene-v2.ts",
+    "migrate:template-v2": "tsx scripts/migrate-template-v2.ts",
+    "postinstall": "node scripts/sync-live2d-runtime.mjs --quiet",
+    "predev": "npm run sync:live2d-runtime -- --quiet",
+    "dev": "vite",
+    "preelectron:dev": "npm run sync:live2d-runtime -- --quiet",
+    "prebuild": "npm run sync:live2d-runtime -- --quiet",
+    "verify:live2d-runtime": "node scripts/verify-live2d-runtime.mjs",
+    "verify:package": "node scripts/verify-package-contents.mjs",
+    "build": "tsc && vite build",
+    "lint": "eslint .",
+    "precheck": "npm run sync:live2d-runtime -- --quiet",
+    "check": "node scripts/check.mjs",
+    "pretest": "npm run sync:live2d-runtime -- --quiet",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npm run build && node scripts/run-e2e.mjs",
+    "preview": "vite preview",
+    "collab:server": "tsx server/collaboration/index.ts",
+    "agent:bridge": "tsx scripts/agent-bridge.ts",
+    "electron:dev": "vite & wait-on http://localhost:5173 && electron .",
+    "start": "electron .",
+    "pack": "node scripts/package.mjs none --dir",
+    "pack:verify": "node scripts/package.mjs verify --dir",
+    "dist": "node scripts/package.mjs none",
+    "dist:win": "node scripts/package.mjs none --win",
+    "dist:win:verify": "node scripts/package.mjs verify --win"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "electron-updater": "^6.8.9",
+    "ffmpeg-static": "^5.2.0",
+    "gsap": "^3.12.5",
+    "marked": "^14.1.4",
+    "monaco-editor": "^0.55.1",
+    "pixi-filters": "^6.1.5",
+    "pixi.js": "^8.20.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.21.0",
+    "yauzl": "^3.4.0",
+    "yjs": "^13.6.31"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^25.7.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
+    "@types/yauzl": "^3.4.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.1.6",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.8.1",
+    "electron-devtools-installer": "^4.0.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
+    "jsdom": "^29.1.1",
+    "jszip": "^3.10.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1",
+    "untitled-pixi-live2d-engine": "^1.3.5",
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^4.1.6",
+    "vitest-mock-extended": "^4.0.0",
+    "wait-on": "^8.0.1"
+  }
+}

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="248" viewBox="0 0 1680 248" fill="none">
+  <defs>
+    <filter id="shadow" x="-2%" y="-4%" width="104%" height="112%">
+      <feDropShadow dx="0" dy="5" stdDeviation="0" flood-color="#BEBEBE" flood-opacity="0.8"/>
+    </filter>
+    <pattern id="dots" width="45" height="33" patternUnits="userSpaceOnUse" patternTransform="skewX(-18)">
+      <circle cx="7" cy="7" r="5.5" fill="#BEBEBE"/>
+    </pattern>
+    <clipPath id="panelClip">
+      <rect x="2" y="2" width="1676" height="238" rx="36"/>
+    </clipPath>
+    <linearGradient id="dotFade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="white" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="white" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="white" stop-opacity="1"/>
+    </linearGradient>
+    <mask id="dotMask">
+      <rect x="1320" y="74" width="360" height="174" fill="url(#dotFade)"/>
+    </mask>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="2" y="2" width="1676" height="238" rx="36" fill="white" fill-opacity="0.8" stroke="#BEBEBE" stroke-opacity="0.8" stroke-width="2"/>
+    <g clip-path="url(#panelClip)" opacity="0.4" mask="url(#dotMask)">
+      <rect x="1300" y="60" width="400" height="205" fill="url(#dots)"/>
+    </g>
+  </g>
+</svg>

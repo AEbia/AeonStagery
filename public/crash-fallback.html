@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AeonStagery - 错误恢复</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #090a0f;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: rgba(20, 24, 33, 0.95);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .icon-box {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #f87171;
+      flex-shrink: 0;
+    }
+    h1 {
+      font-size: 19px;
+      font-weight: 600;
+      color: #f1f5f9;
+      letter-spacing: -0.01em;
+    }
+    .subtitle {
+      margin-top: 4px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .badge {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    .badge-title {
+      font-weight: 500;
+      color: #fca5a5;
+      margin-bottom: 2px;
+    }
+    .callout {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #bfdbfe;
+    }
+    .callout-title {
+      font-weight: 600;
+      color: #93c5fd;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .callout-warn {
+      margin-top: 4px;
+      color: #fcd34d;
+      font-weight: 500;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    button {
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    .btn-primary {
+      flex: 1;
+      min-width: 140px;
+      padding: 10px 18px;
+      background: #3b82f6;
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+    .btn-secondary {
+      padding: 10px 18px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .btn-secondary.copied {
+      background: rgba(34, 197, 94, 0.15);
+      color: #86efac;
+      border-color: rgba(34, 197, 94, 0.4);
+    }
+    .btn-tertiary {
+      padding: 10px 14px;
+      background: transparent;
+      color: #94a3b8;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 13px;
+    }
+    .btn-tertiary:hover {
+      color: #e2e8f0;
+      background: rgba(255, 255, 255, 0.04);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="icon-box">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      </div>
+      <div>
+        <h1>AeonStagery 遇到了意外错误</h1>
+        <p class="subtitle">渲染进程意外退出，已为您生成脱敏诊断报告。</p>
+      </div>
+    </div>
+
+    <div class="badge">
+      <div class="badge-title" id="error-title">渲染器进程异常退出 (Process Exit)</div>
+      <div id="error-desc" style="word-break: break-word; color: #cbd5e1;">进程已终止，请点击下方按钮重新载入应用。</div>
+      <div style="margin-top: 8px; font-size: 12px; color: #64748b;" id="report-id-container"></div>
+    </div>
+
+    <div class="callout">
+      <div class="callout-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+        <span>问题反馈提示</span>
+      </div>
+      <div style="margin-top: 4px; color: #e0f2fe;">
+        若需向开发者反馈此问题，<strong>请使用下方的【复制错误报告】或【打开报告文件】</strong>获取脱敏诊断信息。
+      </div>
+      <div class="callout-warn" style="display: flex; align-items: flex-start; gap: 6px; margin-top: 6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span>请勿直接发送本窗口截图，截图不含排查所需的系统环境与错误堆栈，开发者将无法定位原因。</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-primary" id="btn-restart">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+        </svg>
+        重启应用
+      </button>
+      <button class="btn-secondary" id="btn-copy">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+        <span id="btn-copy-text">复制错误报告</span>
+      </button>
+      <button class="btn-tertiary" id="btn-folder">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+        打开报告文件夹
+      </button>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const reportId = params.get('reportId') || 'crash-unspecified';
+    const reason = params.get('reason') || 'crashed';
+
+    document.getElementById('report-id-container').innerText = '诊断报告已就绪：' + reportId;
+    document.getElementById('error-desc').innerText = '退出原因：' + reason;
+
+    document.getElementById('btn-restart').addEventListener('click', () => {
+      if (window.aeonStageryAPI?.app?.restart) {
+        window.aeonStageryAPI.app.restart();
+      } else {
+        window.location.reload();
+      }
+    });
+
+    document.getElementById('btn-folder').addEventListener('click', () => {
+      if (window.aeonStageryAPI?.crash?.openReportDir) {
+        window.aeonStageryAPI.crash.openReportDir();
+      }
+    });
+
+    document.getElementById('btn-copy').addEventListener('click', async () => {
+      try {
+        let text = 'AeonStagery Crash Fallback Report: ' + reportId + ' (Reason: ' + reason + ')';
+        if (window.aeonStageryAPI?.crash?.getLatestReport) {
+          const report = await window.aeonStageryAPI.crash.getLatestReport();
+          if (report) {
+            text = JSON.stringify(report, null, 2);
+          }
+        }
+        await navigator.clipboard.writeText(text);
+        const btnText = document.getElementById('btn-copy-text');
+        btnText.innerText = '已复制脱敏诊断报告';
+        document.getElementById('btn-copy').classList.add('copied');
+        setTimeout(() => {
+          btnText.innerText = '复制错误报告';
+          document.getElementById('btn-copy').classList.remove('copied');
+        }, 3000);
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  </script>
+</body>
+</html>

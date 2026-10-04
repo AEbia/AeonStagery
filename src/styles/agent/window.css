@@ -1,0 +1,174 @@
+/* ─── Project Agent (ADR0023) ────────────────────────────── */
+/* ─── Project Agent window (ADR0023) ─────────────────────────
+   Conversation surface: the task reads as a dialogue with the
+   Agent. User task = right bubble; status = activity card with
+   phase steps; terminal report = final Agent message. */
+.agent-window {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  animation: uiWindowIn var(--motion-enter-normal) var(--ease-emphasized);
+  transform-origin: center;
+  overflow: hidden;
+}
+
+.agent-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  position: relative;
+}
+
+.agent-window__header {
+  flex-shrink: 0;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+  -webkit-app-region: drag;
+  z-index: 10;
+}
+
+.agent-window__identity {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-window__identity-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-window__identity-text strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.agent-window__identity-scene {
+  display: inline-flex;
+  align-items: center;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.agent-window__badge-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.agent-window__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  animation: agentBadgeIn var(--motion-enter-fast) var(--ease-emphasized) both;
+}
+
+.agent-window__badge--running {
+  background: var(--success-surface);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 28%, transparent);
+}
+
+/* A successful compaction is a lifecycle boundary: its paired bars converge
+   once, acknowledging the replacement without competing with the run pulse. */
+.agent-window__badge--compaction {
+  background: var(--warning-surface);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 28%, transparent);
+}
+
+.agent-window__badge--compaction:not(.agent-window__badge--compaction-paused) .agent-window__compress-mark {
+  animation: agentContextCompress 720ms var(--ease-emphasized) both;
+}
+
+.agent-window__badge--compaction-paused {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+.agent-window__compress-mark {
+  position: relative;
+  display: inline-block;
+  width: 13px;
+  height: 11px;
+  flex: 0 0 13px;
+}
+
+.agent-window__compress-mark-bar {
+  position: absolute;
+  top: 1px;
+  width: 4px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--radius-xs);
+}
+
+.agent-window__compress-mark-bar--left { left: 0; }
+.agent-window__compress-mark-bar--right { right: 0; }
+
+@keyframes agentContextCompress {
+  0%, 100% { transform: scaleX(1); }
+  45% { transform: scaleX(0.55); }
+  70% { transform: scaleX(0.75); }
+}
+
+.agent-window__pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-circle);
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  animation: agentPulse 1.6s var(--ease-standard) infinite;
+}
+
+@keyframes agentPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+@keyframes agentBadgeIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}

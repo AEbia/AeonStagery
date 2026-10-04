@@ -1,0 +1,216 @@
+{
+  "manifestSchemaVersion": 2,
+  "template": {
+    "id": "aeonstagery.default",
+    "name": "AeonStagery Default Templates",
+    "version": "2.0.0",
+    "category": "default",
+    "author": "AeonStagery",
+    "compatibility": {
+      "sceneSchemaVersion": 4
+    }
+  },
+  "assets": {
+    "root": "assets"
+  },
+  "defaults": {
+    "dialogueStyleId": "glass"
+  },
+  "authoringCombos": [
+    {
+      "id": "dialogue_push",
+      "name": "对话推进",
+      "category": "dialogue",
+      "payload": {
+        "kind": "dialoguePreset",
+        "dialogue": {
+          "type": "dialogue",
+          "params": {
+            "speaker": "$character",
+            "text": "对话内容",
+            "durationSeconds": 3
+          }
+        },
+        "companions": [
+          {
+            "anchor": "start",
+            "offset": 0,
+            "type": "characterPerformance",
+            "params": {
+              "target": "$character",
+              "motion": { "kind": "resource", "key": "idle" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "char_one_click_enter",
+      "name": "一键登场",
+      "category": "character",
+      "payload": {
+        "kind": "timelineFragment",
+        "statements": [
+          {
+            "time": 0,
+            "type": "characterPresence",
+            "params": {
+              "mode": "enter",
+              "id": "$character",
+              "position": [0.5, 1],
+              "scale": 1,
+              "transition": "fadeIn",
+              "durationSeconds": 0.3
+            }
+          },
+          {
+            "time": 0,
+            "type": "visualStyle",
+            "params": {
+              "scope": "object",
+              "target": "$character",
+              "slot": "integration",
+              "mode": "set",
+              "recipeId": "builtin:integration-soft",
+              "intensity": 0.8,
+              "blend": 0.36,
+              "contamination": 0.18,
+              "warmth": 0,
+              "colorBlendMode": "multiply"
+            }
+          },
+          {
+            "time": 0,
+            "type": "visualStyle",
+            "params": {
+              "scope": "object",
+              "target": "$character",
+              "slot": "rim-light",
+              "mode": "set",
+              "intensity": 1,
+              "color": "#ffffff",
+              "thickness": 10,
+              "angle": 45,
+              "softness": 2,
+              "durationSeconds": 0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "dialogueStyles": [
+    { "id": "glass", "name": "Premium Glass", "renderer": "glass" },
+    { "id": "minimal", "name": "Minimal", "renderer": "minimal" },
+    { "id": "classic", "name": "Classic", "renderer": "classic" },
+    {
+      "id": "pink-nameplate",
+      "name": "粉色名牌",
+      "renderer": "image-dialogue-v1",
+      "params": {
+        "textbox": {
+          "image": "ui/dialogue/pink-nameplate/textbox.svg",
+          "x": 120,
+          "y": 792,
+          "width": 1680,
+          "height": 248
+        },
+        "namebox": {
+          "image": "ui/dialogue/pink-nameplate/namebox.svg",
+          "nineSlice": [
+            45,
+            44,
+            110,
+            44
+          ],
+          "x": 150,
+          "y": 714,
+          "width": 430,
+          "height": 90
+        },
+        "text": {
+          "fontFile": "fonts/JiangChengYuanTi_500W.ttf",
+          "fontFamily": "JiangCheng Rounded",
+          "fontSize": 48,
+          "fontWeight": "400",
+          "color": "#505050",
+          "x": 176,
+          "y": 830,
+          "maxWidth": 1510,
+          "lineHeight": 62
+        },
+        "speaker": {
+          "fontFamily": "JiangCheng Rounded",
+          "fontSize": 47,
+          "fontWeight": "700",
+          "color": "#FFFFFF",
+          "padding": [
+            48,
+            0,
+            120,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "id": "immersive-subtitle",
+      "name": "沉浸字幕",
+      "renderer": "image-dialogue-v1",
+      "params": {
+        "textbox": {
+          "image": "ui/dialogue/immersive-subtitle/textbox.svg",
+          "x": 100,
+          "y": 800,
+          "width": 1720,
+          "height": 280,
+          "opacity": 0
+        },
+        "namebox": {
+          "image": "ui/dialogue/immersive-subtitle/namebox.svg",
+          "nineSlice": [
+            42,
+            40,
+            42,
+            38
+          ],
+          "x": 788,
+          "y": 724,
+          "width": 344,
+          "height": 84
+        },
+        "text": {
+          "fontFile": "fonts/JiangChengYuanTi_500W.ttf",
+          "fontFamily": "JiangCheng Rounded",
+          "fontSize": 42,
+          "fontWeight": "700",
+          "color": "#F1F1F1",
+          "x": 300,
+          "y": 820,
+          "maxWidth": 1320,
+          "lineHeight": 63,
+          "align": "center",
+          "strokeColor": "#242424",
+          "strokeWidth": 8,
+          "dropShadow": true,
+          "dropShadowColor": "#000000",
+          "dropShadowAlpha": 0.9,
+          "dropShadowBlur": 15,
+          "dropShadowDistance": 4
+        },
+        "speaker": {
+          "fontFamily": "JiangCheng Rounded",
+          "fontSize": 38,
+          "fontWeight": "700",
+          "color": "#FFFFFF",
+          "padding": [
+            43,
+            0,
+            43,
+            6
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+/* ─── Track Labels ──────────────────────────────────────────── */
+.track-label {
+  border-right: 1px solid var(--border-default) !important;
+  background: var(--bg-secondary) !important;
+  backdrop-filter: var(--blur-md);
+  color: var(--text-primary) !important;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding-left: 12px !important;
+  display: flex;
+  align-items: center;
+  transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.track-label__collapse {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.track-label__collapse:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.track-label__collapse:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+
+.track-label::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-primary);
+  opacity: 0.5;
+  transition: width 0.3s, opacity 0.3s, background-color 0.3s;
+}
+
+/* ADR-0022 performance placeholder: exact empty motion, lowered to no runtime
+   action — dashed, muted, selectable for filling the pending motion. */
+.track-block--placeholder {
+  background: color-mix(in srgb, var(--track-color, var(--color-character, var(--bg-tertiary))) 12%, var(--bg-secondary));
+  border: 1px dashed color-mix(in srgb, var(--track-color, var(--color-character, var(--border-default))) 60%, transparent);
+  border-left: 4px dashed var(--track-color, var(--color-character, var(--border-default)));
+  opacity: 0.6;
+}
+
+/* Lifecycle boundary transition band (presentation only; pad has no pointer). */
+.track-block--lifecycle-boundary {
+  --lifecycle-boundary-opacity-base: color-mix(in srgb, var(--track-color, var(--bg-tertiary)) 22%, var(--bg-secondary));
+  --lifecycle-boundary-opacity-above: color-mix(in srgb, var(--bg-surface) 58%, var(--lifecycle-boundary-opacity-base));
+  --lifecycle-boundary-opacity-below: var(--lifecycle-boundary-opacity-base);
+  --lifecycle-boundary-opacity-curve: var(--bg-surface);
+}
+
+.track-row[data-track-kind="background"] .track-label,
+.track-row[data-track-kind="environment"] .track-label {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--color-environment) 8%, var(--bg-secondary)) 0%, var(--bg-secondary) 100%) !important;
+}
+
+.track-row:hover .track-label {
+  background: var(--bg-hover) !important;
+}
+
+.track-row:hover .track-label::before {
+  opacity: 1;
+  width: 4px;
+}
+
+.track-row.is-selected-track {
+  background: color-mix(in srgb, var(--accent-primary) 4%, transparent) !important;
+}
+
+.track-row.is-selected-track .track-label {
+  color: var(--accent-primary) !important;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-secondary)) !important;
+}
+
+.track-row.is-selected-track .track-label::before {
+  opacity: 1;
+  width: 4px;
+  background: var(--accent-primary);
+}

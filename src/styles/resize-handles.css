@@ -1,0 +1,82 @@
+/* ─── Resize Handles ────────────────────────────────────────── */
+.resize-handle {
+  width: 4px;
+  background: transparent;
+  cursor: col-resize;
+  position: relative;
+  z-index: 20;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--accent-primary);
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 24px;
+  background: var(--border-highlight);
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.resize-handle:hover::after {
+  opacity: 1;
+}
+
+.resize-handle-horiz {
+  height: 4px;
+  background: transparent;
+  cursor: row-resize;
+  position: relative;
+  z-index: 20;
+  transition: background var(--transition-fast);
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.navigator-resize-extension {
+  position: absolute;
+  width: 4px;
+  transform: translateX(50%);
+  cursor: col-resize;
+  z-index: 80;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+
+.navigator-resize-extension:hover,
+.navigator-resize-extension:active {
+  background: var(--accent-primary);
+}
+
+.resize-handle-horiz:hover,
+.resize-handle-horiz:active {
+  background: var(--accent-primary);
+}
+
+.resize-handle-horiz::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  height: 2px;
+  width: 24px;
+  background: var(--border-highlight);
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.resize-handle-horiz:hover::after {
+  opacity: 1;
+}

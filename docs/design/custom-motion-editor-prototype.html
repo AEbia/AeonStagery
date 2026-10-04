@@ -1,0 +1,2722 @@
+<!DOCTYPE html>
+<!--
+  THESIS: 自定义动作（ADR-0029）编辑器的交互方案 —— 时间轴内联展开的关键帧/曲线视图，
+  拒绝把关键帧编辑做成独立模态或与场景脱节的散点表单。
+  OWN-WORLD: 沿用 AeonStagery 电影制作控制台（Cinematic Noir Workshop）—— 近黑蓝紫表面、
+  暖珊瑚焦点、JetBrains Mono 时间/数值、轨道语义色窄轨；曲线编辑区以「对齐标尺」的工作面出现。
+  STORY: 作者右键普通动作 → 转为自定义动作 → 时间轴上就地展开曲线，拖动菱形、切换参数、
+  编辑分段，全程与播放头、标尺、检查器保持同一时间语义。
+  FIRST VIEWPORT: 时间轴角色轨道上一条已展开的自定义动作编辑器 + 一条待转换的普通动作；
+  右侧检查器随选择切换「资源动作 / 自定义动作」两种表单。
+  FORM: 既有世界的内联扩展（不跑概念竞赛）；seed 不适用。
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
+-->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>自定义动作编辑器 · 交互方案 — AeonStagery</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap');
+
+:root {
+  --font-sans: 'Outfit', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-settle: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --success: #34d399;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --color-dialogue: #10b981;
+  --color-character: #60a5fa;
+  --color-camera: #f472b6;
+  --color-environment: #fbbf24;
+  --color-audio: #a78bfa;
+
+  --bg-primary: #f4f5f7;
+  --bg-secondary: rgba(255, 255, 255, 0.92);
+  --bg-tertiary: #edeef1;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e6e8ec;
+  --bg-hover: #f0f1f4;
+  --text-primary: #13151a;
+  --text-secondary: #4b5160;
+  --text-muted: #8c92a0;
+  --text-accent: #4f46e5;
+  --accent-primary: #4f46e5;
+  --accent-secondary: #6366f1;
+  --accent-glow: rgba(79, 70, 229, 0.15);
+  --accent-hover: #4338ca;
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-default: rgba(0, 0, 0, 0.07);
+  --border-highlight: rgba(0, 0, 0, 0.13);
+  --border-accent: rgba(79, 70, 229, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+  --app-gradient: linear-gradient(180deg, #f4f5f7 0%, #e8eaef 100%);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #11131a;
+  --bg-secondary: rgba(24, 25, 34, 0.92);
+  --bg-tertiary: #191b25;
+  --bg-surface: #1d1f2a;
+  --bg-elevated: #252735;
+  --bg-hover: #2b2d3d;
+  --text-primary: #f1eee9;
+  --text-secondary: #aaa4b4;
+  --text-muted: #706b7a;
+  --text-accent: #d88c7a;
+  --accent-primary: #d88c7a;
+  --accent-secondary: #8fa7c7;
+  --accent-glow: rgba(216, 140, 122, 0.22);
+  --accent-hover: #efac98;
+  --border-subtle: rgba(241, 238, 233, 0.05);
+  --border-default: rgba(198, 190, 210, 0.1);
+  --border-highlight: rgba(216, 140, 122, 0.28);
+  --border-accent: rgba(216, 140, 122, 0.42);
+  --shadow-sm: 0 1px 2px rgba(4, 5, 10, 0.34);
+  --shadow-md: 0 6px 18px rgba(4, 5, 10, 0.36);
+  --shadow-lg: 0 18px 42px rgba(4, 5, 10, 0.46);
+  --shadow-glow: 0 0 24px var(--accent-glow);
+  --app-gradient: radial-gradient(circle at 16% 0%, rgba(216, 140, 122, 0.11) 0%, transparent 34%), linear-gradient(180deg, #11131a 0%, #171923 100%);
+}
+
+[data-theme="pink"] {
+  --bg-primary: #f6ece6;
+  --bg-secondary: rgba(255, 250, 247, 0.88);
+  --bg-tertiary: #efe1da;
+  --bg-surface: rgba(255, 252, 249, 0.94);
+  --bg-elevated: #fff7f2;
+  --bg-hover: #f2e3dc;
+  --text-primary: #3f2d29;
+  --text-secondary: #7b625a;
+  --text-muted: #a5867a;
+  --text-accent: #b86f7b;
+  --accent-primary: #cea493;
+  --accent-secondary: #ffdade;
+  --accent-glow: rgba(255, 218, 222, 0.65);
+  --accent-hover: #b88d7d;
+  --border-subtle: rgba(146, 104, 92, 0.14);
+  --border-default: rgba(146, 104, 92, 0.22);
+  --border-highlight: rgba(206, 164, 147, 0.52);
+  --border-accent: rgba(206, 164, 147, 0.68);
+  --shadow-sm: 0 2px 4px rgba(63, 45, 41, 0.05);
+  --shadow-md: 0 6px 16px rgba(63, 45, 41, 0.08);
+  --shadow-lg: 0 16px 36px rgba(63, 45, 41, 0.12);
+  --shadow-glow: 0 0 26px var(--accent-glow);
+  --app-gradient: radial-gradient(circle at 12% 8%, rgba(255, 218, 222, 0.74) 0%, transparent 30%), linear-gradient(135deg, #f6ece6 0%, #efe1da 48%, #e2c8bc 100%);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; }
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  letter-spacing: -0.01em;
+}
+button { font-family: var(--font-sans); }
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-highlight); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+#root { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+/* ─── Top bar ─── */
+.top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 44px; padding: 0 16px; flex-shrink: 0;
+  background: var(--bg-secondary);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-subtle);
+  z-index: 100;
+}
+.top-bar__left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.top-bar__brand { font-size: 15px; font-weight: 800; letter-spacing: 0; display: flex; align-items: center; gap: 8px; }
+.top-bar__brand svg { color: var(--accent-primary); }
+.alpha-badge {
+  font-size: 9px; padding: 2px 6px; background: var(--accent-glow);
+  border: 1px solid var(--border-accent); border-radius: 4px;
+  color: var(--accent-secondary); text-transform: uppercase; font-weight: 700; letter-spacing: 0.06em;
+}
+.top-bar__project { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 10px; border-left: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.top-bar__right { display: flex; align-items: center; gap: 8px; }
+
+.seg { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.seg button {
+  min-height: 24px; padding: 0 10px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-muted); font-size: 11px; font-weight: 700;
+  cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.seg button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.seg button.is-active { background: var(--bg-elevated); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: all var(--transition-fast);
+  border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary);
+  white-space: nowrap; letter-spacing: 0;
+}
+.btn:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-highlight); color: var(--text-primary); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(0.985); transition-duration: 80ms; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn--primary { background: var(--accent-primary); color: #fff; border: none; font-weight: 600; }
+.btn--primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-glow); color: #fff; }
+.btn--sm { padding: 4px 10px; font-size: 11px; border-radius: var(--radius-sm); }
+.btn--icon { padding: 0; width: 30px; height: 30px; border-radius: var(--radius-md); background: transparent; border-color: transparent; color: var(--text-muted); }
+.btn--icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); box-shadow: none; }
+.btn--danger { color: var(--error); border-color: rgba(239, 68, 68, 0.25); }
+.btn--danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); border-color: var(--error); color: var(--error); }
+
+input[type="number"], input[type="text"] {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--text-primary); background: var(--bg-tertiary);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  padding: 5px 8px; font-size: 12px; outline: none;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+input:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 2px var(--accent-glow); }
+input:disabled { opacity: 0.45; cursor: not-allowed; }
+button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+
+/* ─── Main grid ─── */
+.main-content { display: flex; flex: 1; min-height: 0; position: relative; overflow: hidden; }
+
+/* ─── Stage ─── */
+.stage-area { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--app-gradient); position: relative; }
+.stage-scene { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.stage-vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 62%, rgba(216, 140, 122, 0.08) 0%, transparent 58%); pointer-events: none; }
+.stage-floor { position: absolute; left: 50%; bottom: 10%; width: 46%; height: 2px; transform: translateX(-50%); background: linear-gradient(90deg, transparent, rgba(216, 140, 122, 0.4), transparent); border-radius: 999px; pointer-events: none; }
+.character-stand {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  animation: charFloat 5s ease-in-out infinite alternate;
+}
+@keyframes charFloat { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+.character-stand svg { filter: drop-shadow(0 14px 34px rgba(4, 5, 10, 0.5)); }
+.character-tag {
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px;
+  border: 1px solid var(--border-default); border-radius: 999px;
+  background: var(--bg-secondary); backdrop-filter: blur(8px);
+  font-size: 11px; font-weight: 700; color: var(--text-secondary);
+}
+.character-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-character); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-character) 20%, transparent); }
+.stage-caption { position: absolute; left: 16px; bottom: 14px; font-size: 10.5px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.02em; }
+
+/* ─── Inspector ─── */
+.inspector {
+  width: 380px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--bg-secondary); border-left: 1px solid var(--border-subtle);
+}
+.inspector-header {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px;
+  padding: 11px 12px; border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface); box-shadow: var(--shadow-sm); flex-shrink: 0;
+}
+.inspector-header__intent { color: var(--accent-primary); font-size: 10px; font-weight: 800; letter-spacing: 0.04em; }
+.inspector-header__title { color: var(--text-primary); font-size: 17px; font-weight: 800; line-height: 1.15; }
+.inspector-header__meta { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
+.inspector-body { flex: 1; min-height: 0; overflow-y: auto; }
+.inspector-content { width: min(100%, 390px); margin: 0 auto; padding: 16px; }
+.inspector-section { padding: 4px 0 12px 0; }
+.inspector-section-title { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-primary); margin-bottom: 12px; margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.inspector-row { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 12px; margin-bottom: 8px; }
+.inspector-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inspector-row input[type="number"], .inspector-row input[type="text"] { width: 100%; }
+
+.custom-motion-card { border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-surface); padding: 10px 10px 4px; margin-bottom: 10px; }
+.custom-motion-card__head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.custom-motion-card__title { font-size: 12.5px; font-weight: 700; color: var(--text-primary); }
+.custom-tag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px;
+  background: var(--accent-glow); border: 1px solid var(--border-accent); color: var(--accent-primary);
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.motion-source-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-tertiary); margin-bottom: 8px;
+}
+.motion-source-row .mono { color: var(--text-primary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motion-source-row .hint { color: var(--text-muted); font-size: 10px; flex-shrink: 0; }
+.track-stats-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; margin-bottom: 8px; color: var(--text-secondary); font-size: 11.5px; }
+.track-stats-row .count { color: var(--text-primary); font-weight: 700; font-size: 12px; }
+.inspector-hint { color: var(--text-muted); font-size: 10.5px; line-height: 1.45; margin: 6px 0 10px; }
+
+.select-shell {
+  width: 100%; min-height: 32px; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--text-primary);
+}
+.select-shell:hover { background: var(--bg-hover); border-color: var(--border-highlight); }
+.select-shell .chev { color: var(--text-muted); }
+.spacer { flex: 1; }
+
+/* ─── Timeline ─── */
+.timeline-area {
+  height: 300px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--bg-primary); border-top: 1px solid var(--border-default); position: relative;
+}
+.timeline-scroll { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.timeline-hscroll { overflow-x: auto; overflow-y: hidden; height: 100%; position: relative; scrollbar-width: thin; }
+.timeline-inner { position: relative; min-width: 100%; height: 100%; }
+
+.ruler {
+  height: 32px; position: sticky; top: 0; z-index: 100; display: flex;
+  background: var(--bg-surface); border-bottom: 1px solid var(--border-default); cursor: crosshair; contain: content;
+}
+.ruler__header { width: 150px; flex-shrink: 0; border-right: 1px solid var(--border-subtle); background: var(--bg-elevated); display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--text-muted); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+.ruler__canvas { flex: 1; position: relative; }
+.ruler__canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ruler-tick--major { stroke: var(--border-highlight); }
+.ruler-tick--minor { stroke: var(--border-subtle); }
+.ruler-tick__label { fill: var(--text-muted); font-family: var(--font-mono); font-size: 8.5px; font-weight: 600; }
+
+.track-grid { position: absolute; top: 32px; left: 0; right: 0; bottom: 0; }
+.track-row {
+  position: absolute; left: 0; right: 0; height: 34px; display: flex;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.track-row.is-expanded { position: relative; }
+.track-row.is-expanded .track-label { height: 34px; }
+.track-label {
+  width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  padding-left: 12px; border-right: 1px solid var(--border-default);
+  background: var(--bg-secondary); backdrop-filter: blur(8px);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary);
+  position: relative;
+}
+.track-label::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--track-color, var(--accent-primary)); opacity: 0.5; }
+.track-label .track-count { margin-left: auto; margin-right: 10px; font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+.track-lane { position: relative; flex: 1; min-width: 0; }
+.track-lane--dialogue { --track-color: var(--color-dialogue); }
+.track-lane--character { --track-color: var(--color-character); }
+.track-lane--camera { --track-color: var(--color-camera); }
+
+.track-block {
+  position: absolute; top: 5px; height: 24px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--track-color) 22%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--track-color) 45%, transparent);
+  border-left: 3px solid var(--track-color);
+  display: flex; align-items: center; gap: 6px; padding: 0 6px;
+  font-size: 10.5px; font-weight: 600; color: var(--text-primary);
+  cursor: pointer; overflow: hidden; white-space: nowrap;
+  transition: filter var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  z-index: 2;
+}
+.track-block:hover { filter: brightness(1.1); border-color: var(--border-highlight); }
+.track-block.is-selected { border-color: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-glow); z-index: 3; }
+.track-block.is-expanded-block { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.track-block .block-icon { display: flex; opacity: 0.85; flex-shrink: 0; }
+.track-block .block-label { overflow: hidden; text-overflow: ellipsis; }
+.track-block .block-sub { color: var(--text-muted); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.track-block .block-dur { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); flex-shrink: 0; }
+.track-block .block-chevron { display: flex; color: var(--text-muted); flex-shrink: 0; transition: transform var(--transition-fast); }
+.track-block .block-chevron.is-open { transform: rotate(180deg); color: var(--accent-primary); }
+.track-block--custom { border-style: solid; }
+.track-block--custom .custom-diamond { color: var(--accent-primary); flex-shrink: 0; display: flex; }
+
+/* Expanded editor */
+.expanded-editor {
+  position: absolute; left: 0; right: 0; top: 34px; overflow: visible;
+  animation: editorOpen 260ms var(--ease-emphasized);
+  transform-origin: top;
+}
+@keyframes editorOpen { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.expanded-editor.is-closing { animation: editorClose 170ms ease-in forwards; }
+@keyframes editorClose { from { opacity: 1; } to { opacity: 0; transform: translateY(-4px); } }
+
+.editor-surface {
+  margin: 3px 0 8px 0; border: 1px solid var(--border-default);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+  box-shadow: var(--shadow-md); overflow: hidden;
+}
+.editor-surface--lanes { margin-left: 0; }
+.editor-surface:not(.editor-surface--lanes) { margin-left: 150px; }
+.editor-header {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 10px;
+  border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary);
+  flex-wrap: nowrap; min-height: 38px;
+}
+.editor-title { display: flex; align-items: center; gap: 7px; min-width: 0; flex-shrink: 1; }
+.editor-title .custom-diamond { color: var(--accent-primary); display: flex; flex-shrink: 0; }
+.editor-title__name { font-size: 12.5px; font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+.editor-title__src { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.editor-lease { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 800; border: 1px solid color-mix(in srgb, var(--success) 30%, transparent); background: color-mix(in srgb, var(--success) 9%, var(--bg-surface)); color: var(--success); flex-shrink: 0; }
+.editor-lease--busy { border-color: color-mix(in srgb, var(--warning) 34%, transparent); background: color-mix(in srgb, var(--warning) 10%, var(--bg-surface)); color: var(--warning); }
+.editor-spacer { flex: 1; }
+
+.param-chips { display: flex; align-items: center; gap: 4px; overflow-x: auto; max-width: 340px; padding: 2px 0; scrollbar-width: none; }
+.param-chips::-webkit-scrollbar { display: none; }
+.param-chip {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-default);
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  font-size: 10px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+.param-chip:hover { border-color: var(--border-highlight); color: var(--text-primary); background: var(--bg-hover); }
+.param-chip.is-active { border-color: var(--border-accent); background: var(--accent-glow); color: var(--accent-hover); }
+.param-chip .kf-count { font-family: var(--font-mono); font-size: 9px; opacity: 0.75; }
+
+.editor-num {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  color: var(--text-muted); font-size: 10px; font-weight: 700;
+}
+.editor-num input { width: 52px; padding: 3px 6px; font-size: 11px; text-align: right; }
+.view-toggle { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; }
+.view-toggle button {
+  padding: 3px 9px; border: 0; background: transparent; color: var(--text-muted);
+  font-size: 10.5px; font-weight: 700; cursor: pointer; transition: all var(--transition-fast);
+}
+.view-toggle button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.view-toggle button.is-active { background: var(--bg-elevated); color: var(--text-primary); }
+
+/* Keyframe lanes (default view: one low lane per parameter) */
+.kf-lanes { position: relative; margin-left: -1px; width: calc(100% + 2px); }
+.kf-lanes__fade {
+  position: absolute; top: 0; bottom: 0; background: var(--accent-glow); opacity: 0.55;
+  pointer-events: none; z-index: 2; border-right: 1px solid var(--border-accent);
+}
+.kf-lanes__fade span {
+  position: absolute; top: 4px; left: 6px; font-family: var(--font-mono); font-size: 9px;
+  color: var(--accent-primary); font-weight: 700; letter-spacing: 0.02em;
+}
+.kf-lanes__playhead {
+  position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent-primary);
+  opacity: 0.75; pointer-events: none; z-index: 3;
+}
+.kf-lane { display: flex; position: relative; border-bottom: 1px solid var(--border-subtle); }
+.kf-lane:last-child { border-bottom: 0; }
+.kf-lane.is-active { background: color-mix(in srgb, var(--accent-primary) 4%, transparent); }
+.kf-lane__label {
+  width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px 0 12px; border-right: 1px solid var(--border-subtle);
+  background: var(--bg-elevated); font-size: 10px; font-weight: 700; color: var(--text-secondary);
+  letter-spacing: 0.02em; position: relative; z-index: 2;
+}
+.kf-lane__label .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
+.kf-lane__label .kf-count { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); flex-shrink: 0; }
+.kf-lane__curve-btn {
+  width: 18px; height: 18px; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 4px; background: transparent; color: var(--text-muted);
+  cursor: pointer; opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+.kf-lane:hover .kf-lane__curve-btn { opacity: 1; }
+.kf-lane__curve-btn:hover { background: var(--bg-hover); color: var(--accent-primary); }
+.kf-lane__canvas { flex: 1; min-width: 0; position: relative; cursor: crosshair; }
+.kf-lane__canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.kf-tooltip {
+  position: fixed; z-index: 15000; pointer-events: none; white-space: nowrap;
+  padding: 4px 9px; border-radius: 6px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  background: var(--bg-elevated); border: 1px solid var(--border-highlight);
+  color: var(--text-primary); box-shadow: var(--shadow-md);
+  transform: translate(14px, 12px);
+}
+.kf-tooltip .kf-tooltip__param { color: var(--text-muted); font-weight: 700; margin-right: 7px; }
+.kf-tooltip .kf-tooltip__val { color: var(--accent-hover); font-weight: 700; }
+.kf-readout {
+  position: fixed; z-index: 15001; pointer-events: none; white-space: nowrap;
+  padding: 5px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  background: var(--bg-elevated); border: 1px solid var(--border-accent);
+  color: var(--accent-hover); box-shadow: var(--shadow-glow);
+  transform: translate(14px, 12px);
+}
+.kf-lanes__hint {
+  position: absolute; right: 10px; bottom: 4px; font-size: 9.5px; color: var(--text-muted);
+  font-weight: 600; pointer-events: none; z-index: 2; letter-spacing: 0.01em;
+}
+
+.editor-curve-wrap { position: relative; height: 148px; margin-left: -1px; width: calc(100% + 2px); }
+.curve-labels {
+  position: absolute; left: 10px; right: 10px; top: 6px; display: flex; justify-content: space-between;
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); pointer-events: none; z-index: 2;
+}
+.curve-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+.curve-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 12px; font-weight: 600; gap: 8px;
+}
+.curve-hint {
+  position: absolute; left: 10px; bottom: 5px; font-size: 9.5px; color: var(--text-muted);
+  font-weight: 600; pointer-events: none; z-index: 2; letter-spacing: 0.01em;
+}
+
+/* Keyframe list */
+.kf-list { height: 148px; overflow-y: auto; padding: 8px 10px; }
+.kf-list__head { display: flex; align-items: center; gap: 8px; padding: 3px 6px 7px; color: var(--text-muted); font-size: 10px; font-weight: 800; letter-spacing: 0.04em; }
+.kf-list__head .mono { flex: 1; text-align: right; }
+.kf-row {
+  display: grid; grid-template-columns: 56px 72px 96px 30px; gap: 6px; align-items: center;
+  padding: 3px 6px; border-radius: var(--radius-sm);
+}
+.kf-row:hover { background: var(--bg-hover); }
+.kf-row.is-selected { background: var(--accent-glow); }
+.kf-row .kf-idx { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; }
+.kf-row .kf-idx .lock { color: var(--accent-primary); display: flex; }
+.kf-row input { width: 100%; padding: 3px 6px; font-size: 11px; text-align: right; }
+.kf-row input:disabled { opacity: 0.55; }
+.kf-row .seg-select {
+  width: 100%; padding: 3px 4px; font-size: 10.5px; color: var(--text-primary);
+  background: var(--bg-tertiary); border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+  outline: none; cursor: pointer; font-family: var(--font-sans);
+}
+.kf-row .seg-select:focus { border-color: var(--accent-primary); }
+.kf-row .kf-del { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer; }
+.kf-row .kf-del:hover:not(:disabled) { background: rgba(239, 68, 68, 0.12); color: var(--error); }
+.kf-row .kf-del:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Playhead */
+.playhead {
+  position: absolute; top: 32px; bottom: 0; width: 1px; background: var(--accent-primary);
+  pointer-events: none; z-index: 90;
+}
+.playhead::before {
+  content: ''; position: absolute; top: -6px; left: -5px;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  border-top: 6px solid var(--accent-primary);
+}
+
+/* Selection bar */
+.selection-bar {
+  position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 120;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  background: var(--bg-secondary); backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg); animation: barIn 220ms var(--ease-emphasized);
+}
+@keyframes barIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.selection-bar__icon { display: flex; color: var(--track-color, var(--text-secondary)); flex-shrink: 0; }
+.selection-bar__title { font-size: 12.5px; font-weight: 800; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.selection-bar__meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.selection-bar__actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+/* Toast */
+.toast-stack { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 13000; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.toast {
+  display: flex; align-items: center; gap: 8px; max-width: 420px;
+  padding: 9px 14px; border-radius: var(--radius-md);
+  background: var(--bg-elevated); border: 1px solid var(--border-highlight);
+  box-shadow: var(--shadow-lg); font-size: 12px; font-weight: 600; color: var(--text-primary);
+  animation: toastIn 240ms var(--ease-emphasized);
+}
+.toast.is-leaving { animation: toastOut 200ms ease-in forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(-6px); } }
+.toast--error { border-color: color-mix(in srgb, var(--error) 34%, transparent); background: color-mix(in srgb, var(--error) 9%, var(--bg-elevated)); color: var(--error); }
+.toast--success { border-color: color-mix(in srgb, var(--success) 30%, transparent); background: color-mix(in srgb, var(--success) 8%, var(--bg-elevated)); color: var(--success); }
+.toast--warning { border-color: color-mix(in srgb, var(--warning) 34%, transparent); background: color-mix(in srgb, var(--warning) 9%, var(--bg-elevated)); color: var(--warning); }
+
+/* Dialog */
+.dialog-overlay {
+  position: fixed; inset: 0; z-index: 12000; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: rgba(0, 0, 0, 0.62); backdrop-filter: blur(6px);
+  animation: overlayIn 180ms ease-out;
+}
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+.dialog-surface {
+  width: min(520px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column;
+  overflow: hidden; border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  background: var(--bg-primary); box-shadow: 0 18px 72px rgba(0, 0, 0, 0.45);
+  animation: dialogIn 220ms var(--ease-emphasized);
+}
+@keyframes dialogIn { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-subtle); }
+.dialog-title { color: var(--text-primary); font-size: 14px; font-weight: 800; }
+.dialog-body { display: grid; gap: 12px; min-height: 0; overflow-y: auto; padding: 14px 16px; }
+.dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; background: var(--bg-secondary); border-top: 1px solid var(--border-subtle); }
+
+.conv-info {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px;
+  padding: 9px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.conv-info span { color: var(--text-muted); font-size: 10.5px; font-weight: 700; }
+.conv-info strong { color: var(--text-primary); font-size: 11px; font-weight: 700; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.density-grid { display: grid; gap: 7px; }
+.density-card {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  background: var(--bg-surface); cursor: pointer; transition: all var(--transition-fast);
+}
+.density-card:hover { border-color: var(--border-highlight); background: var(--bg-hover); }
+.density-card.is-selected { border-color: var(--border-accent); background: var(--accent-glow); }
+.density-card__radio {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--text-muted);
+  display: flex; align-items: center; justify-content: center; transition: border-color var(--transition-fast);
+}
+.density-card.is-selected .density-card__radio { border-color: var(--accent-primary); }
+.density-card.is-selected .density-card__radio::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-primary); }
+.density-card__name { font-size: 12.5px; font-weight: 800; color: var(--text-primary); }
+.density-card__desc { font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }
+.density-card__est { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.conv-note { padding: 8px 10px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-muted); font-size: 10.5px; line-height: 1.5; }
+.conv-blocker {
+  display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--error) 28%, transparent); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--error) 9%, var(--bg-surface)); color: var(--error);
+  font-size: 11px; font-weight: 700; line-height: 1.4;
+}
+.conv-blocker--warn { border-color: color-mix(in srgb, var(--warning) 34%, transparent); background: color-mix(in srgb, var(--warning) 10%, var(--bg-surface)); color: var(--warning); }
+.btn--busy { pointer-events: none; opacity: 0.75; }
+.spinner {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35); border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Notes panel */
+.notes-overlay { position: fixed; inset: 0; z-index: 11000; background: rgba(0, 0, 0, 0.3); backdrop-filter: blur(2px); animation: overlayIn 180ms ease-out; }
+.notes-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 360px; z-index: 11001;
+  display: flex; flex-direction: column; background: var(--bg-surface);
+  border-left: 1px solid var(--border-default); box-shadow: var(--shadow-lg);
+  animation: notesIn 280ms var(--ease-emphasized);
+}
+@keyframes notesIn { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.notes-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--border-subtle); }
+.notes-title { font-size: 15px; font-weight: 800; }
+.notes-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
+.notes-section { margin-bottom: 18px; }
+.notes-section h4 { font-size: 12px; font-weight: 800; color: var(--accent-primary); letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
+.notes-section p, .notes-section li { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+.notes-section ul { list-style: none; display: grid; gap: 7px; }
+.notes-section li { display: flex; gap: 8px; align-items: flex-start; }
+.notes-section li::before { content: ''; margin-top: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-primary); flex-shrink: 0; }
+.notes-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.notes-toggle-row span { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.notes-toggle-row small { display: block; font-size: 10px; color: var(--text-muted); font-weight: 500; margin-top: 2px; }
+.switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .rail { position: absolute; inset: 0; border-radius: 999px; background: var(--bg-elevated); border: 1px solid var(--border-default); transition: all var(--transition-fast); }
+.switch .thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); transition: all var(--transition-fast); }
+.switch input:checked + .rail { background: var(--accent-glow); border-color: var(--border-accent); }
+.switch input:checked ~ .thumb { transform: translateX(16px); background: var(--accent-primary); }
+
+/* Empty track hint */
+.empty-hint {
+  position: absolute; left: 50%; top: 34px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border: 1px dashed var(--border-highlight); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+  color: var(--text-muted); font-size: 11.5px; font-weight: 600; pointer-events: none;
+}
+.empty-hint .custom-diamond { color: var(--accent-primary); display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="top-bar">
+    <div class="top-bar__left">
+      <div class="top-bar__brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 7v10M7 12h10"/></svg>
+        AeonStagery<span class="alpha-badge">Alpha</span>
+      </div>
+      <div class="top-bar__project">EP02 · 茶会 — 场景编排</div>
+    </div>
+    <div class="top-bar__right">
+      <div class="seg" id="theme-seg" role="group" aria-label="主题">
+        <button data-theme-value="dark" class="is-active" title="深色工作台">深色</button>
+        <button data-theme-value="">浅色</button>
+        <button data-theme-value="pink">粉棕</button>
+      </div>
+      <button class="btn" id="btn-notes">方案说明</button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="stage-area">
+      <div class="stage-scene">
+        <div class="stage-vignette"></div>
+        <div class="stage-floor"></div>
+        <div class="character-stand">
+          <svg width="150" height="220" viewBox="0 0 150 220" fill="none" aria-hidden="true">
+            <ellipse cx="75" cy="74" rx="40" ry="46" fill="#2b2d3d"/>
+            <ellipse cx="75" cy="74" rx="40" ry="46" stroke="#8fa7c7" stroke-opacity="0.5"/>
+            <path d="M45 96 C45 84 105 84 105 96 L105 150 C105 168 45 168 45 150 Z" fill="#1d1f2a" stroke="#8fa7c7" stroke-opacity="0.35"/>
+            <ellipse cx="58" cy="70" rx="4.5" ry="5.5" fill="#8fa7c7" opacity="0.85"/>
+            <ellipse cx="92" cy="70" rx="4.5" ry="5.5" fill="#8fa7c7" opacity="0.85"/>
+            <path d="M63 86 Q75 93 87 86" stroke="#d88c7a" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+          <div class="character-tag"><span class="dot"></span>小夜 · Live2D</div>
+        </div>
+        <div class="stage-caption">舞台预览（方案示意）· 播放动作时此处实时表现关键帧</div>
+      </div>
+    </div>
+
+    <div class="inspector" id="inspector"></div>
+  </div>
+
+  <div class="timeline-area">
+    <div class="timeline-hscroll" id="timeline-hscroll">
+      <div class="timeline-inner" id="timeline-inner">
+        <div class="ruler" id="ruler">
+          <div class="ruler__header">时间轴</div>
+          <div class="ruler__canvas" id="ruler-canvas"></div>
+        </div>
+        <div class="track-grid" id="track-grid"></div>
+        <div class="playhead" id="playhead" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="selection-bar" id="selection-bar" style="display:none;"></div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack"></div>
+
+<div id="dialog-root"></div>
+<div id="notes-root"></div>
+
+<script>
+'use strict';
+
+/* ─────────── 场景数据（模拟 SceneDocumentV3 语义） ─────────── */
+const SCENE_DURATION = 12;
+
+const MOTION_NOD = {
+  kind: 'custom',
+  durationSeconds: 3.4,
+  fadeInSeconds: 0.5,
+  derivedFrom: { key: '点头_02.mtn', fadeInSeconds: 0.35, fadeOutSeconds: 0.3 },
+  tracks: [
+    {
+      parameterId: 'ParamAngleX', fadeInSeconds: 0.4,
+      keyframes: [
+        { time: 0, value: 0, segment: { type: 'linear' } },
+        { time: 0.4, value: 15, segment: { type: 'linear' } },
+        { time: 0.9, value: 6, segment: { type: 'bezier', controlPoints: [{ time: 1.02, value: 2 }, { time: 1.18, value: -6 }] } },
+        { time: 1.4, value: -8, segment: { type: 'linear' } },
+        { time: 1.9, value: 4, segment: { type: 'linear' } },
+        { time: 2.4, value: -2, segment: { type: 'linear' } },
+        { time: 3.4, value: 0 },
+      ],
+    },
+    {
+      parameterId: 'ParamAngleY',
+      keyframes: [
+        { time: 0, value: 0, segment: { type: 'linear' } },
+        { time: 0.5, value: -4, segment: { type: 'linear' } },
+        { time: 1.2, value: 3, segment: { type: 'linear' } },
+        { time: 2.0, value: -2, segment: { type: 'linear' } },
+        { time: 3.4, value: 0 },
+      ],
+    },
+    {
+      parameterId: 'ParamEyeLOpen',
+      keyframes: [
+        { time: 0, value: 1, segment: { type: 'linear' } },
+        { time: 0.85, value: 1, segment: { type: 'linear' } },
+        { time: 0.92, value: 0.05, segment: { type: 'stepped' } },
+        { time: 1.0, value: 1, segment: { type: 'linear' } },
+        { time: 2.0, value: 1, segment: { type: 'linear' } },
+        { time: 2.05, value: 0.05, segment: { type: 'stepped' } },
+        { time: 2.12, value: 1, segment: { type: 'linear' } },
+        { time: 3.4, value: 1 },
+      ],
+    },
+    {
+      parameterId: 'ParamEyeROpen',
+      keyframes: [
+        { time: 0, value: 1, segment: { type: 'linear' } },
+        { time: 0.85, value: 1, segment: { type: 'linear' } },
+        { time: 0.92, value: 0.05, segment: { type: 'inverseStepped' } },
+        { time: 1.0, value: 1, segment: { type: 'linear' } },
+        { time: 2.0, value: 1, segment: { type: 'linear' } },
+        { time: 2.05, value: 0.05, segment: { type: 'inverseStepped' } },
+        { time: 2.12, value: 1, segment: { type: 'linear' } },
+        { time: 3.4, value: 1 },
+      ],
+    },
+    {
+      parameterId: 'ParamMouthOpen',
+      keyframes: [
+        { time: 0, value: 0.05, segment: { type: 'linear' } },
+        { time: 0.5, value: 0.4, segment: { type: 'linear' } },
+        { time: 0.9, value: 0.15, segment: { type: 'linear' } },
+        { time: 1.4, value: 0.35, segment: { type: 'linear' } },
+        { time: 2.2, value: 0.1, segment: { type: 'linear' } },
+        { time: 3.4, value: 0.05 },
+      ],
+    },
+    {
+      parameterId: 'ParamSmile',
+      keyframes: [
+        { time: 0, value: 0.3, segment: { type: 'linear' } },
+        { time: 1.0, value: 0.7, segment: { type: 'linear' } },
+        { time: 2.0, value: 0.5, segment: { type: 'linear' } },
+        { time: 3.4, value: 0.3 },
+      ],
+    },
+  ],
+};
+
+const STATIC_TRACK_IDS = new Set(['ParamSmile']);
+
+const TRACKS = [
+  { id: 't-dialogue', label: '对话', kind: 'dialogue', blocks: [
+    { id: 'b-d1', time: 0.0, duration: 2.0, type: 'dialogue', label: '好久不见…' },
+    { id: 'b-d2', time: 8.0, duration: 2.0, type: 'dialogue', label: '这样啊…' },
+  ]},
+  { id: 't-character', label: '角色表演', kind: 'character', blocks: [
+    { id: 'b-nod', time: 1.0, duration: 3.4, type: 'motion', motion: MOTION_NOD },
+    { id: 'b-chat', time: 5.0, duration: 2.8, type: 'motion', motion: { kind: 'resource', key: '闲聊_01.mtn', fadeInSeconds: 0.4 } },
+    { id: 'b-wave', time: 9.0, duration: 2.2, type: 'motion', motion: { kind: 'resource', key: '摆手_02.mtn', fadeInSeconds: 0.3 } },
+  ]},
+  { id: 't-camera', label: '镜头', kind: 'camera', blocks: [
+    { id: 'b-cam', time: 3.5, duration: 1.2, type: 'camera', label: '推镜 · 平滑' },
+  ]},
+];
+
+/* 可转换的资源动作 → 模拟采样拟合出的自定义 Motion */
+const CONVERTIBLE_MOTIONS = {
+  '闲聊_01.mtn': {
+    durationSeconds: 2.8, fadeInSeconds: 0.4, derivedFromFadeIn: 0.4, derivedFromFadeOut: 0.3,
+    curves: {
+      ParamAngleX: (t) => 6.5 * Math.sin(2 * Math.PI * 1.3 * t),
+      ParamAngleY: (t) => 4 * Math.sin(2 * Math.PI * 1.1 * t + 0.5),
+      ParamAngleZ: (t) => 2.5 * Math.cos(2 * Math.PI * 1.7 * t),
+      ParamEyeLOpen: (t) => (Math.abs((t % 1.6) - 0.8) < 0.06 ? 0.05 : 1),
+      ParamEyeROpen: (t) => (Math.abs((t % 1.6) - 0.8) < 0.06 ? 0.05 : 1),
+      ParamMouthOpen: (t) => Math.max(0.02, 0.12 + 0.09 * Math.sin(2 * Math.PI * 9 * t)),
+      ParamSmile: () => 0.4,
+    },
+  },
+  '摆手_02.mtn': {
+    durationSeconds: 2.2, fadeInSeconds: 0.3, derivedFromFadeIn: 0.3, derivedFromFadeOut: 0.25,
+    curves: {
+      ParamAngleX: (t) => 5 * Math.sin(2 * Math.PI * 1.05 * t),
+      ParamAngleY: (t) => 10 * Math.sin(2 * Math.PI * 0.9 * t + 0.3),
+      ParamAngleZ: (t) => 6 * Math.sin(2 * Math.PI * 1.3 * t - 0.4),
+      ParamEyeLOpen: (t) => (Math.abs(t - 0.8) < 0.05 ? 0.05 : 1),
+      ParamEyeROpen: (t) => (Math.abs(t - 0.8) < 0.05 ? 0.05 : 1),
+      ParamMouthOpen: (t) => 0.1 + 0.06 * Math.sin(2 * Math.PI * 6 * t),
+      ParamSmile: () => 0.55,
+    },
+  },
+};
+
+/* ─────────── 状态 ─────────── */
+const state = {
+  selectedId: null,
+  expandedId: 'b-nod',
+  selectedParam: 'ParamAngleX',
+  selectedKf: null,
+  view: 'lanes',
+  playhead: 1.0,
+  playing: false,
+  pps: 72,
+  collabBusy: false,
+  dialog: null,
+  notesOpen: false,
+  drag: null,
+};
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+function byId(id) {
+  for (const track of TRACKS) {
+    const block = track.blocks.find((b) => b.id === id);
+    if (block) return { track, block };
+  }
+  return null;
+}
+
+function findBlock(id) { return byId(id)?.block ?? null; }
+function motionDuration(block) {
+  if (block.motion?.kind === 'custom') return block.motion.durationSeconds;
+  return block.duration;
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+function clamp(n, min, max) { return Math.min(max, Math.max(min, n)); }
+
+/* ─────────── 场景坐标 ─────────── */
+function contentWidth() {
+  const canvas = $('#ruler-canvas');
+  return Math.max(600, canvas.getBoundingClientRect().width);
+}
+function timeToX(t) { return t * state.pps; }
+
+function formatTime(t) {
+  const s = Math.max(0, t);
+  return s.toFixed(2) + 's';
+}
+
+/* ─────────── 渲染：标尺 ─────────── */
+function renderRuler() {
+  const canvas = $('#ruler-canvas');
+  const w = contentWidth();
+  const svgNS = 'http://www.w3.org/2000/svg';
+  canvas.innerHTML = '';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} 32`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  const pxPerTick = 8;
+  const steps = [0.1, 0.2, 0.5, 1, 2, 5, 10];
+  let step = steps.find((s) => s * state.pps >= pxPerTick) ?? 1;
+  for (let t = 0; t <= SCENE_DURATION + 0.001; t += step) {
+    const x = timeToX(t);
+    const major = Math.abs(t - Math.round(t)) < 0.001;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', x); line.setAttribute('y1', major ? 0 : 18);
+    line.setAttribute('x2', x); line.setAttribute('y2', 32);
+    line.setAttribute('stroke', major ? 'var(--border-highlight)' : 'var(--border-subtle)');
+    if (major) {
+      const label = document.createElementNS(svgNS, 'text');
+      label.setAttribute('x', x + 3); label.setAttribute('y', 12);
+      label.setAttribute('class', 'ruler-tick__label');
+      label.textContent = `${Math.round(t)}.0`;
+      svg.appendChild(label);
+    }
+    svg.appendChild(line);
+  }
+  canvas.appendChild(svg);
+}
+
+/* ─────────── 渲染：轨道与块 ─────────── */
+function blockColor(block) {
+  const track = byId(block.id).track;
+  return track.kind === 'dialogue' ? 'var(--color-dialogue)'
+    : track.kind === 'character' ? 'var(--color-character)'
+    : 'var(--color-camera)';
+}
+
+function renderTracks() {
+  const grid = $('#track-grid');
+  grid.innerHTML = '';
+  let y = 0;
+  for (const track of TRACKS) {
+    const isCharExpanded = track.id === 't-character' && state.expandedId;
+    let expandedHeight = 0;
+    if (isCharExpanded) {
+      const motion = expandedMotion();
+      const nLanes = motion ? motion.tracks.length : 6;
+      const bodyH = state.view === 'lanes' ? nLanes * 26 : 148;
+      const toolbarH = state.view === 'list' ? 0 : 32;
+      expandedHeight = 3 + 38 + bodyH + toolbarH + 8;
+    }
+    const row = document.createElement('div');
+    row.className = 'track-row' + (isCharExpanded ? ' is-expanded' : '');
+    row.style.top = `${y}px`;
+    row.style.height = isCharExpanded ? `${34 + expandedHeight}px` : '34px';
+    row.style.setProperty('--track-color', blockColor(track.blocks[0]));
+    const label = document.createElement('div');
+    label.className = 'track-label';
+    label.textContent = track.label;
+    const count = document.createElement('span');
+    count.className = 'track-count';
+    count.textContent = `${track.blocks.length} 段`;
+    label.appendChild(count);
+    row.appendChild(label);
+
+    const lane = document.createElement('div');
+    lane.className = `track-lane track-lane--${track.kind}`;
+    row.appendChild(lane);
+
+    if (isCharExpanded) {
+      const editor = renderExpandedEditor(track);
+      row.appendChild(editor);
+    }
+    grid.appendChild(row);
+
+    const laneRect = lane.getBoundingClientRect();
+    const laneWidth = laneRect.width;
+    for (const block of track.blocks) {
+      lane.appendChild(renderBlock(block, laneWidth));
+    }
+
+    y += isCharExpanded ? 34 + expandedHeight : 34;
+  }
+  grid.style.height = `${y}px`;
+}
+
+function renderBlock(block, laneWidth) {
+  const el = document.createElement('div');
+  const isCustom = block.motion?.kind === 'custom';
+  const isExpandedBlock = state.expandedId === block.id;
+  el.className = 'track-block'
+    + (state.selectedId === block.id ? ' is-selected' : '')
+    + (isExpandedBlock ? ' is-expanded-block' : '')
+    + (isCustom ? ' track-block--custom' : '');
+  el.style.left = `${timeToX(block.time)}px`;
+  el.style.width = `${Math.max(28, motionDuration(block) * state.pps - 4)}px`;
+  el.style.setProperty('--track-color', blockColor(block));
+  el.dataset.blockId = block.id;
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', block.type === 'dialogue' ? block.label : block.label ?? '播放动作');
+
+  const icon = document.createElement('span');
+  icon.className = 'block-icon';
+  icon.innerHTML = blockIconSvg(block);
+  el.appendChild(icon);
+
+  const label = document.createElement('span');
+  label.className = 'block-label';
+  if (block.type === 'dialogue') label.textContent = block.label;
+  else if (block.type === 'camera') label.textContent = block.label;
+  else if (isCustom) label.textContent = '自定义动作';
+  else label.textContent = block.motion.key;
+  el.appendChild(label);
+
+  if (isCustom) {
+    const sub = document.createElement('span');
+    sub.className = 'block-sub';
+    sub.textContent = block.motion.derivedFrom.key;
+    el.appendChild(sub);
+  }
+
+  const dur = document.createElement('span');
+  dur.className = 'block-dur';
+  dur.textContent = formatTime(motionDuration(block));
+  el.appendChild(dur);
+
+  if (block.type === 'motion') {
+    const chev = document.createElement('span');
+    chev.className = 'block-chevron' + (isExpandedBlock ? ' is-open' : '');
+    chev.innerHTML = chevronSvg();
+    el.appendChild(chev);
+  }
+
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    state.selectedId = block.id;
+    if (block.type === 'motion') {
+      if (block.motion?.kind === 'custom') {
+        state.expandedId = state.expandedId === block.id ? null : block.id;
+      } else if (isExpandedBlock) {
+        state.expandedId = null;
+      }
+    }
+    renderAll();
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
+  });
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    state.selectedId = block.id;
+    renderAll();
+    openBlockMenu(e.clientX, e.clientY, block);
+  });
+  return el;
+}
+
+function blockIconSvg(block) {
+  if (block.type === 'dialogue') {
+    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>`;
+  }
+  if (block.motion?.kind === 'custom') {
+    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z"/></svg>`;
+  }
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>`;
+}
+function chevronSvg() {
+  return `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
+}
+
+/* ─────────── 渲染：展开的关键帧/曲线编辑器 ─────────── */
+function expandedMotion() {
+  const block = findBlock(state.expandedId);
+  return block?.motion?.kind === 'custom' ? block.motion : null;
+}
+
+function renderExpandedEditor(track) {
+  const wrap = document.createElement('div');
+  wrap.className = 'expanded-editor';
+
+  const surface = document.createElement('div');
+  surface.className = 'editor-surface' + (state.view === 'lanes' ? ' editor-surface--lanes' : '');
+  wrap.appendChild(surface);
+
+  const header = document.createElement('div');
+  header.className = 'editor-header';
+  surface.appendChild(header);
+
+  const motion = expandedMotion();
+  const title = document.createElement('div');
+  title.className = 'editor-title';
+  title.innerHTML = `
+    <span class="custom-diamond"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z"/></svg></span>
+    <span class="editor-title__name">自定义动作</span>
+    <span class="editor-title__src mono">${motion.derivedFrom.key} · ${motion.tracks.length} 条轨道</span>`;
+  header.appendChild(title);
+
+  const lease = document.createElement('span');
+  lease.className = 'editor-lease' + (state.collabBusy ? ' editor-lease--busy' : '');
+  lease.innerHTML = state.collabBusy
+    ? '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> 协作者编辑中'
+    : '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z"/></svg> 已获得编辑权';
+  header.appendChild(lease);
+
+  const chips = document.createElement('div');
+  chips.className = 'param-chips';
+  chips.setAttribute('role', 'tablist');
+  chips.setAttribute('aria-label', '选择要编辑的参数');
+  for (const track of motion.tracks) {
+    const chip = document.createElement('button');
+    chip.className = 'param-chip' + (state.selectedParam === track.parameterId ? ' is-active' : '');
+    chip.setAttribute('role', 'tab');
+    chip.setAttribute('aria-selected', String(state.selectedParam === track.parameterId));
+    chip.innerHTML = `${track.parameterId} <span class="kf-count">${track.keyframes.length}</span>`;
+    chip.addEventListener('click', () => {
+      state.selectedParam = track.parameterId;
+      state.selectedKf = null;
+      renderAll();
+    });
+    chips.appendChild(chip);
+  }
+  header.appendChild(chips);
+
+  const spacer = document.createElement('div');
+  spacer.className = 'editor-spacer';
+  header.appendChild(spacer);
+
+  const numDur = document.createElement('label');
+  numDur.className = 'editor-num';
+  numDur.innerHTML = '时长 <input type="number" id="ed-duration" step="0.05" min="0.1" value="' + round2(motion.durationSeconds) + '" aria-label="动作时长（秒）">';
+  header.appendChild(numDur);
+
+  const numFade = document.createElement('label');
+  numFade.className = 'editor-num';
+  numFade.innerHTML = '淡入 <input type="number" id="ed-fadein" step="0.05" min="0" value="' + round2(motion.fadeInSeconds) + '" aria-label="动作淡入（秒）">';
+  header.appendChild(numFade);
+
+  const toggle = document.createElement('div');
+  toggle.className = 'view-toggle';
+  toggle.innerHTML = `
+    <button data-view="lanes" class="${state.view === 'lanes' ? 'is-active' : ''}" title="关键帧轨道（每参数一条）">轨道</button>
+    <button data-view="graph" class="${state.view === 'graph' ? 'is-active' : ''}" title="单参数曲线视图">曲线</button>
+    <button data-view="list" class="${state.view === 'list' ? 'is-active' : ''}" title="关键帧列表">列表</button>`;
+  header.appendChild(toggle);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn--icon';
+  closeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  closeBtn.setAttribute('aria-label', '收起关键帧编辑器');
+  closeBtn.addEventListener('click', () => { state.expandedId = null; renderAll(); });
+  header.appendChild(closeBtn);
+
+  const body = renderEditorBody(motion);
+  surface.appendChild(body);
+  if (state.view !== 'list') {
+    const toolbar = renderKeyframeToolbar(motion, selectedTrack(motion), state.selectedKf ?? 0);
+    surface.insertBefore(toolbar, body);
+  }
+  return wrap;
+}
+
+function renderEditorBody(motion) {
+  const body = document.createElement('div');
+  if (state.view === 'lanes') {
+    body.appendChild(renderKeyframeLanes(motion));
+    return body;
+  }
+  if (state.view === 'list') {
+    body.appendChild(renderKeyframeList(motion));
+    return body;
+  }
+  body.appendChild(renderCurve(motion));
+  return body;
+}
+
+function selectedTrack(motion) {
+  return motion.tracks.find((t) => t.parameterId === state.selectedParam) ?? motion.tracks[0];
+}
+
+function valueRange(track) {
+  let min = Infinity, max = -Infinity;
+  for (const kf of track.keyframes) { min = Math.min(min, kf.value); max = Math.max(max, kf.value); }
+  for (const seg of track.keyframes) {
+    if (seg.segment?.type === 'bezier') {
+      for (const cp of seg.segment.controlPoints) { min = Math.min(min, cp.value); max = Math.max(max, cp.value); }
+    }
+  }
+  if (!isFinite(min) || !isFinite(max)) { min = 0; max = 1; }
+  let pad = (max - min) * 0.18;
+  if (pad === 0) pad = 1;
+  return { min: min - pad, max: max + pad };
+}
+
+function segmentValueAt(kfA, kfB, t) {
+  if (!kfA.segment || !kfB) return kfA.value;
+  const type = kfA.segment.type;
+  if (type === 'stepped') return kfA.value;
+  if (type === 'inverseStepped') return kfB.value;
+  if (type === 'bezier') {
+    const [cp1, cp2] = kfA.segment.controlPoints;
+    const u = clamp((t - kfA.time) / (kfB.time - kfA.time), 0, 1);
+    const a = (1 - u) ** 3, b = 3 * (1 - u) ** 2 * u, c = 3 * (1 - u) * u ** 2, d = u ** 3;
+    return a * kfA.value + b * cp1.value + c * cp2.value + d * kfB.value;
+  }
+  const u = clamp((t - kfA.time) / (kfB.time - kfA.time), 0, 1);
+  return kfA.value + (kfB.value - kfA.value) * u;
+}
+
+/* ─────────── AE 风格关键帧交互辅助 ─────────── */
+
+function jumpToKeyframe(motion, dir) {
+  const track = selectedTrack(motion);
+  const cur = track.keyframes[state.selectedKf];
+  if (!cur) return;
+  let target = null;
+  if (dir < 0) {
+    for (let i = track.keyframes.length - 1; i >= 0; i--) {
+      if (track.keyframes[i].time < cur.time - 0.0001) { target = track.keyframes[i]; break; }
+    }
+  } else {
+    for (let i = 0; i < track.keyframes.length; i++) {
+      if (track.keyframes[i].time > cur.time + 0.0001) { target = track.keyframes[i]; break; }
+    }
+  }
+  if (!target) return;
+  const idx = track.keyframes.indexOf(target);
+  state.selectedKf = idx;
+  state.selectedParam = track.parameterId;
+  const block = findBlock(state.expandedId);
+  state.playhead = round2(block.time + target.time);
+  renderAll();
+}
+
+function showDragReadout(text, x, y) {
+  let el = document.querySelector('.kf-readout');
+  if (!el) { el = document.createElement('div'); el.className = 'kf-readout'; document.body.appendChild(el); }
+  el.textContent = text;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+}
+function hideDragReadout() {
+  document.querySelectorAll('.kf-readout').forEach((el) => el.remove());
+}
+
+function showKfTooltip(paramId, kf, anchorEl) {
+  const r = anchorEl.getBoundingClientRect();
+  const t = document.createElement('div');
+  t.className = 'kf-tooltip';
+  t.innerHTML = `<span class="kf-tooltip__param">${paramId}</span><span>${formatTime(kf.time)}</span> · <span class="kf-tooltip__val">${round2(kf.value)}</span>`;
+  t.style.left = `${r.left}px`;
+  t.style.top = `${r.top}px`;
+  t.dataset.kfTooltip = '1';
+  document.body.appendChild(t);
+}
+function hideKfTooltip() {
+  document.querySelectorAll('[data-kf-tooltip]').forEach((el) => el.remove());
+}
+
+/* 可拖拽数值：按住左右拖动快速调节（AE 的数字拖动），单击仍可键入 */
+function makeScrubbable(input, min, max, onSet) {
+  const span = (max - min) || 1;
+  const step = span / 160;
+  let sx = 0, sv = 0, moved = false, dragging = false;
+  const move = (e) => {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - sx) > 3) moved = true;
+    if (moved) onSet(clamp(sv + (e.clientX - sx) * step, min - span, max + span));
+  };
+  const up = () => {
+    dragging = false;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    if (!moved) input.focus();
+  };
+  input.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging = true; moved = false;
+    sx = e.clientX; sv = Number(input.value) || 0;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
+}
+
+function kfNavButton(dir, disabled) {
+  const b = document.createElement('button');
+  b.className = 'btn btn--icon';
+  b.style.cssText = 'width:26px;height:26px;flex-shrink:0;';
+  const title = dir < 0 ? '跳到上一个关键帧（←）' : '跳到下一个关键帧（→）';
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  b.disabled = !!disabled;
+  b.innerHTML = dir < 0
+    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5l-9 7 9 7M11 5l-9 7 9 7"/></svg>'
+    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l9 7-9 7M13 5l9 7-9 7"/></svg>';
+  return b;
+}
+
+function renderKeyframeLanes(motion) {
+  const block = findBlock(state.expandedId);
+  const laneH = 26;
+  const laneW = contentWidth();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'kf-lanes';
+
+  const overlays = document.createElement('div');
+  overlays.className = 'kf-lanes__overlays';
+  overlays.style.cssText = 'position:absolute;left:150px;top:0;bottom:0;right:0;pointer-events:none;z-index:2;';
+
+  if (motion.fadeInSeconds > 0) {
+    const band = document.createElement('div');
+    band.className = 'kf-lanes__fade';
+    band.style.left = `${block.time * state.pps}px`;
+    band.style.width = `${Math.min(motion.fadeInSeconds, motion.durationSeconds) * state.pps}px`;
+    band.innerHTML = `<span>淡入 ${round2(motion.fadeInSeconds)}s</span>`;
+    overlays.appendChild(band);
+  }
+
+  const playheadT = state.playhead - block.time;
+  if (playheadT >= 0 && playheadT <= motion.durationSeconds) {
+    const ph = document.createElement('div');
+    ph.className = 'kf-lanes__playhead';
+    ph.style.left = `${state.playhead * state.pps}px`;
+    overlays.appendChild(ph);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'kf-lanes__hint';
+  hint.textContent = '点空白加帧 · 拖菱形改时间/数值（Shift 微调）· 悬停行尾可进曲线视图';
+  overlays.appendChild(hint);
+  wrap.appendChild(overlays);
+
+  for (const track of motion.tracks) {
+    const lane = document.createElement('div');
+    lane.className = 'kf-lane' + (state.selectedParam === track.parameterId ? ' is-active' : '');
+    lane.style.height = `${laneH}px`;
+
+    const label = document.createElement('div');
+    label.className = 'kf-lane__label';
+    const idSpan = document.createElement('span');
+    idSpan.className = 'mono';
+    idSpan.textContent = track.parameterId;
+    label.appendChild(idSpan);
+    const count = document.createElement('span');
+    count.className = 'kf-count';
+    count.textContent = String(track.keyframes.length);
+    label.appendChild(count);
+    const curveBtn = document.createElement('button');
+    curveBtn.className = 'kf-lane__curve-btn';
+    curveBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c4-8 14-8 18 0"/><path d="M3 7c4 2 8 2 12 0"/></svg>';
+    curveBtn.title = '在此参数上打开曲线视图';
+    curveBtn.setAttribute('aria-label', `在曲线视图中编辑 ${track.parameterId}`);
+    curveBtn.addEventListener('click', () => {
+      state.selectedParam = track.parameterId;
+      state.view = 'graph';
+      state.selectedKf = null;
+      renderAll();
+    });
+    label.appendChild(curveBtn);
+    lane.appendChild(label);
+
+    const canvas = document.createElement('div');
+    canvas.className = 'kf-lane__canvas';
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${laneW} ${laneH}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('data-param', track.parameterId);
+    svg.setAttribute('aria-label', `${track.parameterId} 关键帧`);
+    svg.setAttribute('role', 'img');
+
+    const pathGroup = document.createElementNS(svgNS, 'g');
+    const kfs = track.keyframes;
+    for (let i = 0; i < kfs.length - 1; i++) {
+      const a = kfs[i], b = kfs[i + 1];
+      const path = document.createElementNS(svgNS, 'path');
+      let d;
+      if (a.segment?.type === 'stepped') {
+        d = `M ${(block.time + a.time) * state.pps} 13 L ${(block.time + b.time) * state.pps} 13 L ${(block.time + b.time) * state.pps} 13`;
+      } else if (a.segment?.type === 'inverseStepped') {
+        d = `M ${(block.time + a.time) * state.pps} 13 L ${(block.time + a.time) * state.pps} 13 L ${(block.time + b.time) * state.pps} 13`;
+      } else if (a.segment?.type === 'bezier') {
+        const [cp1, cp2] = a.segment.controlPoints;
+        d = `M ${(block.time + a.time) * state.pps} 13 C ${(block.time + cp1.time) * state.pps} 13, ${(block.time + cp2.time) * state.pps} 13, ${(block.time + b.time) * state.pps} 13`;
+      } else {
+        d = `M ${(block.time + a.time) * state.pps} 13 L ${(block.time + b.time) * state.pps} 13`;
+      }
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', 'var(--accent-primary)');
+      path.setAttribute('stroke-width', '1');
+      path.setAttribute('opacity', '0.35');
+      path.setAttribute('vector-effect', 'non-scaling-stroke');
+      pathGroup.appendChild(path);
+    }
+    svg.appendChild(pathGroup);
+
+    const kfGroup = document.createElementNS(svgNS, 'g');
+    kfs.forEach((kf, idx) => {
+      const isF0 = idx === 0 && Math.abs(kf.time) < 0.001;
+      const isSelected = state.selectedKf === idx && state.selectedParam === track.parameterId;
+      const g = document.createElementNS(svgNS, 'g');
+      g.setAttribute('data-kf', String(idx));
+      g.style.cursor = 'grab';
+      const cx = (block.time + kf.time) * state.pps;
+      const cy = laneH / 2;
+      const size = isSelected ? 6 : 5;
+      const d = document.createElementNS(svgNS, 'path');
+      d.setAttribute('d', `M ${cx} ${cy - size} L ${cx + size} ${cy} L ${cx} ${cy + size} L ${cx - size} ${cy} Z`);
+      d.setAttribute('fill', isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)');
+      d.setAttribute('stroke', isSelected ? 'var(--accent-hover)' : isF0 ? 'var(--accent-secondary)' : 'var(--accent-primary)');
+      d.setAttribute('stroke-width', '1.5');
+      d.setAttribute('vector-effect', 'non-scaling-stroke');
+      d.setAttribute('style', 'transition: transform var(--transition-fast); transform-origin: center; transform-box: fill-box;');
+      g.appendChild(d);
+      if (isF0) {
+        const lock = document.createElementNS(svgNS, 'circle');
+        lock.setAttribute('cx', cx); lock.setAttribute('cy', cy);
+        lock.setAttribute('r', '9');
+        lock.setAttribute('fill', 'none');
+        lock.setAttribute('stroke', 'var(--accent-primary)');
+        lock.setAttribute('stroke-dasharray', '2 2');
+        lock.setAttribute('opacity', '0.5');
+        lock.setAttribute('stroke-width', '1');
+        lock.setAttribute('vector-effect', 'non-scaling-stroke');
+        g.appendChild(lock);
+      }
+      const hit = document.createElementNS(svgNS, 'circle');
+      hit.setAttribute('cx', cx); hit.setAttribute('cy', cy); hit.setAttribute('r', '9');
+      hit.setAttribute('fill', 'transparent');
+      hit.style.cursor = 'grab';
+      g.appendChild(hit);
+      g.addEventListener('pointerdown', (e) => startLaneKeyframeDrag(e, track, idx));
+      g.addEventListener('mouseenter', () => { d.style.transform = 'scale(1.2)'; showKfTooltip(track.parameterId, kf, g); });
+      g.addEventListener('mouseleave', () => { d.style.transform = 'scale(1)'; hideKfTooltip(); });
+      kfGroup.appendChild(g);
+    });
+    svg.appendChild(kfGroup);
+
+    svg.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('[data-kf]')) return;
+      const rect = svg.getBoundingClientRect();
+      const sceneT = ((e.clientX - rect.left) / rect.width) * laneW / state.pps;
+      const t = clamp(sceneT - block.time, 0, motion.durationSeconds);
+      const time = round2(Math.round(t / 0.05) * 0.05);
+      if (track.keyframes.some((k) => Math.abs(k.time - time) < 0.001)) return;
+      const i = track.keyframes.findIndex((k) => k.time > time);
+      const value = i === -1
+        ? track.keyframes[track.keyframes.length - 1].value
+        : segmentValueAt(track.keyframes[i - 1], track.keyframes[i], time);
+      if (i === -1) {
+        track.keyframes.push({ time, value, segment: { type: 'linear' } });
+      } else {
+        const segment = track.keyframes[i - 1]?.segment ?? { type: 'linear' };
+        track.keyframes.splice(i, 0, { time, value, segment });
+      }
+      track.keyframes.sort((a, b) => a.time - b.time);
+      state.selectedParam = track.parameterId;
+      state.selectedKf = track.keyframes.findIndex((k) => Math.abs(k.time - time) < 0.001);
+      renderAll();
+    });
+
+    canvas.appendChild(svg);
+    lane.appendChild(canvas);
+    wrap.appendChild(lane);
+  }
+  return wrap;
+}
+
+function startLaneKeyframeDrag(e, track, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  const block = findBlock(state.expandedId);
+  const motion = block.motion;
+  const kf = track.keyframes[idx];
+  const isF0 = idx === 0 && Math.abs(kf.time) < 0.001;
+  const range = valueRange(track);
+  const startY = e.clientY;
+  const startValue = kf.value;
+  state.selectedParam = track.parameterId;
+  state.selectedKf = idx;
+  state.drag = { idx, isF0, param: track.parameterId };
+  hideKfTooltip();
+  renderAll();
+  const move = (ev) => {
+    if (!track.keyframes[idx]) { up(); return; }
+    const svgEl = document.querySelector(`.kf-lane__canvas svg[data-param="${track.parameterId}"]`);
+    if (!svgEl) return;
+    const r = svgEl.getBoundingClientRect();
+    const laneH = r.height || 26;
+    const sceneT = ((ev.clientX - r.left) / r.width) * contentWidth() / state.pps;
+    const time = round2(clamp(sceneT - block.time, 0, motion.durationSeconds));
+    const dv = (startY - ev.clientY) / laneH * (range.max - range.min);
+    const value = round2(ev.shiftKey ? startValue + dv * 0.1 : startValue + dv);
+    if (!isF0) {
+      const clash = track.keyframes.some((k, i) => i !== idx && Math.abs(k.time - time) < 0.001);
+      if (!clash) track.keyframes[idx].time = time;
+    }
+    track.keyframes[idx].value = clamp(value, -1000, 1000);
+    showDragReadout(`${formatTime(track.keyframes[idx].time)} · ${round2(track.keyframes[idx].value)}${ev.shiftKey ? ' · Shift' : ''}`, ev.clientX, ev.clientY);
+    renderAll();
+  };
+  const up = () => {
+    hideDragReadout();
+    state.drag = null;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+function renderCurve(motion) {
+  const block = findBlock(state.expandedId);
+  const track = selectedTrack(motion);
+  const range = valueRange(track);
+  const dur = motion.durationSeconds;
+  const height = 148;
+  const padT = 16, padB = 18, padR = 12;
+  const innerW = contentWidth() - padR;
+  const innerH = height - padT - padB;
+  const xOf = (t) => (block.time + t) * state.pps;
+  const yOf = (v) => padT + (1 - (v - range.min) / (range.max - range.min)) * innerH;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'editor-curve-wrap';
+
+  const labels = document.createElement('div');
+  labels.className = 'curve-labels';
+  labels.innerHTML = `<span>${round2(range.max)}</span><span>${round2(range.min)}</span>`;
+  wrap.appendChild(labels);
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('class', 'curve-canvas');
+  svg.setAttribute('viewBox', `0 0 ${contentWidth()} ${height}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-label', `${track.parameterId} 关键帧曲线`);
+  svg.setAttribute('role', 'img');
+
+  const grid = document.createElementNS(svgNS, 'g');
+  const startT = block.time;
+  const endT = block.time + dur;
+  for (let t = Math.floor(startT * 2) / 2; t <= endT + 0.001; t += 0.5) {
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', t * state.pps); line.setAttribute('y1', padT);
+    line.setAttribute('x2', t * state.pps); line.setAttribute('y2', height - padB);
+    line.setAttribute('stroke', 'var(--border-subtle)');
+    line.setAttribute('stroke-dasharray', t % 1 === 0 ? 'none' : '2 3');
+    grid.appendChild(line);
+  }
+  const hStep = (range.max - range.min) / 4;
+  for (let i = 0; i <= 4; i++) {
+    const v = range.min + hStep * i;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', block.time * state.pps); line.setAttribute('y1', yOf(v));
+    line.setAttribute('x2', (block.time + dur) * state.pps); line.setAttribute('y2', yOf(v));
+    line.setAttribute('stroke', 'var(--border-subtle)');
+    line.setAttribute('stroke-dasharray', '2 4');
+    grid.appendChild(line);
+  }
+  const zero = document.createElementNS(svgNS, 'line');
+  zero.setAttribute('x1', block.time * state.pps); zero.setAttribute('y1', yOf(0));
+  zero.setAttribute('x2', (block.time + dur) * state.pps); zero.setAttribute('y2', yOf(0));
+  zero.setAttribute('stroke', 'var(--border-highlight)');
+  zero.setAttribute('opacity', '0.55');
+  grid.appendChild(zero);
+  svg.appendChild(grid);
+
+  const fadeIn = motion.fadeInSeconds;
+  if (fadeIn > 0) {
+    const band = document.createElementNS(svgNS, 'rect');
+    band.setAttribute('x', xOf(0)); band.setAttribute('y', padT);
+    band.setAttribute('width', Math.min(fadeIn, dur) * state.pps);
+    band.setAttribute('height', innerH);
+    band.setAttribute('fill', 'var(--accent-glow)');
+    band.setAttribute('opacity', '0.6');
+    const fadeLabel = document.createElementNS(svgNS, 'text');
+    fadeLabel.setAttribute('x', xOf(0) + 6); fadeLabel.setAttribute('y', padT + 12);
+    fadeLabel.setAttribute('fill', 'var(--accent-primary)');
+    fadeLabel.setAttribute('font-family', 'var(--font-mono)');
+    fadeLabel.setAttribute('font-size', '9');
+    fadeLabel.textContent = `淡入 ${round2(fadeIn)}s`;
+    svg.appendChild(band);
+    svg.appendChild(fadeLabel);
+  }
+
+  const pathGroup = document.createElementNS(svgNS, 'g');
+  const kfs = track.keyframes;
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const a = kfs[i], b = kfs[i + 1];
+    const path = document.createElementNS(svgNS, 'path');
+    let d;
+    if (a.segment?.type === 'stepped') {
+      d = `M ${xOf(a.time)} ${yOf(a.value)} L ${xOf(b.time)} ${yOf(a.value)} L ${xOf(b.time)} ${yOf(b.value)}`;
+    } else if (a.segment?.type === 'inverseStepped') {
+      d = `M ${xOf(a.time)} ${yOf(a.value)} L ${xOf(a.time)} ${yOf(b.value)} L ${xOf(b.time)} ${yOf(b.value)}`;
+    } else if (a.segment?.type === 'bezier') {
+      const [cp1, cp2] = a.segment.controlPoints;
+      d = `M ${xOf(a.time)} ${yOf(a.value)} C ${xOf(cp1.time)} ${yOf(cp1.value)}, ${xOf(cp2.time)} ${yOf(cp2.value)}, ${xOf(b.time)} ${yOf(b.value)}`;
+    } else {
+      d = `M ${xOf(a.time)} ${yOf(a.value)} L ${xOf(b.time)} ${yOf(b.value)}`;
+    }
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'var(--accent-primary)');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linejoin', 'round');
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+    pathGroup.appendChild(path);
+  }
+  svg.appendChild(pathGroup);
+
+  if (state.selectedKf !== null && kfs[state.selectedKf]?.segment?.type === 'bezier' && kfs[state.selectedKf + 1]) {
+    const a = kfs[state.selectedKf], b = kfs[state.selectedKf + 1];
+    const [cp1, cp2] = a.segment.controlPoints;
+    const handle = document.createElementNS(svgNS, 'g');
+    for (const [cp, kf] of [[cp1, a], [cp2, b]]) {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', xOf(kf.time)); line.setAttribute('y1', yOf(kf.value));
+      line.setAttribute('x2', xOf(cp.time)); line.setAttribute('y2', yOf(cp.value));
+      line.setAttribute('stroke', 'var(--accent-secondary)');
+      line.setAttribute('stroke-dasharray', '3 3');
+      line.setAttribute('vector-effect', 'non-scaling-stroke');
+      handle.appendChild(line);
+    }
+    for (const [idx, cp] of [cp1, cp2].entries()) {
+      const c = document.createElementNS(svgNS, 'rect');
+      c.setAttribute('x', xOf(cp.time) - 3); c.setAttribute('y', yOf(cp.value) - 3);
+      c.setAttribute('width', 6); c.setAttribute('height', 6);
+      c.setAttribute('rx', 1);
+      c.setAttribute('fill', 'var(--bg-elevated)');
+      c.setAttribute('stroke', 'var(--accent-secondary)');
+      c.setAttribute('data-cp', String(idx));
+      c.style.cursor = 'grab';
+      handle.appendChild(c);
+    }
+    svg.appendChild(handle);
+  }
+
+  const kfGroup = document.createElementNS(svgNS, 'g');
+  for (let i = 0; i < kfs.length; i++) {
+    const kf = kfs[i];
+    const g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('data-kf', String(i));
+    g.style.cursor = 'grab';
+    const isF0 = i === 0 && Math.abs(kf.time) < 0.001;
+    const isSelected = state.selectedKf === i;
+    const d = document.createElementNS(svgNS, 'path');
+    const cx = xOf(kf.time), cy = yOf(kf.value);
+    const size = isSelected ? 6.5 : 5.5;
+    d.setAttribute('d', `M ${cx} ${cy - size} L ${cx + size} ${cy} L ${cx} ${cy + size} L ${cx - size} ${cy} Z`);
+    d.setAttribute('fill', isSelected ? 'var(--accent-primary)' : 'var(--bg-elevated)');
+    d.setAttribute('stroke', isSelected ? 'var(--accent-hover)' : isF0 ? 'var(--accent-secondary)' : 'var(--accent-primary)');
+    d.setAttribute('stroke-width', '1.6');
+    d.setAttribute('vector-effect', 'non-scaling-stroke');
+    d.setAttribute('style', 'transition: transform var(--transition-fast); transform-origin: center; transform-box: fill-box;');
+    g.appendChild(d);
+    if (isF0) {
+      const lock = document.createElementNS(svgNS, 'circle');
+      lock.setAttribute('cx', cx); lock.setAttribute('cy', cy);
+      lock.setAttribute('r', '9');
+      lock.setAttribute('fill', 'none');
+      lock.setAttribute('stroke', 'var(--accent-primary)');
+      lock.setAttribute('stroke-dasharray', '2 2');
+      lock.setAttribute('opacity', '0.5');
+      lock.setAttribute('stroke-width', '1');
+      lock.setAttribute('vector-effect', 'non-scaling-stroke');
+      g.appendChild(lock);
+    }
+    const hit = document.createElementNS(svgNS, 'circle');
+    hit.setAttribute('cx', cx); hit.setAttribute('cy', cy); hit.setAttribute('r', '9');
+    hit.setAttribute('fill', 'transparent');
+    hit.style.cursor = 'grab';
+    g.appendChild(hit);
+    g.addEventListener('pointerdown', (e) => startKeyframeDrag(e, i));
+    g.addEventListener('mouseenter', () => { d.style.transform = 'scale(1.2)'; showKfTooltip(track.parameterId, kf, g); });
+    g.addEventListener('mouseleave', () => { d.style.transform = 'scale(1)'; hideKfTooltip(); });
+    kfGroup.appendChild(g);
+  }
+  svg.appendChild(kfGroup);
+
+  svg.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('[data-kf]') || e.target.closest('[data-cp]')) return;
+    const rect = svg.getBoundingClientRect();
+    const sceneT = ((e.clientX - rect.left) / rect.width) * contentWidth() / state.pps;
+    const t = clamp(sceneT - block.time, 0, dur);
+    const time = round2(Math.round(t / 0.05) * 0.05);
+    const existing = track.keyframes.find((k) => Math.abs(k.time - time) < 0.001);
+    if (existing) {
+      const idx = track.keyframes.indexOf(existing);
+      state.selectedKf = idx;
+      renderAll();
+      return;
+    }
+    const value = round2(range.max - ((e.clientY - rect.top) / rect.height) * (range.max - range.min));
+    const i = track.keyframes.findIndex((k) => k.time > time);
+    if (i === -1) {
+      track.keyframes.push({ time, value });
+    } else {
+      const prev = track.keyframes[i - 1];
+      const segment = prev && i - 1 !== track.keyframes.length - 1
+        ? prev.segment ?? { type: 'linear' }
+        : { type: 'linear' };
+      track.keyframes.splice(i, 0, { time, value, segment });
+    }
+    track.keyframes.sort((a, b) => a.time - b.time);
+    state.selectedKf = track.keyframes.findIndex((k) => Math.abs(k.time - time) < 0.001);
+    renderAll();
+  });
+
+  wrap.appendChild(svg);
+
+  const hint = document.createElement('div');
+  hint.className = 'curve-hint';
+  hint.textContent = '点曲线空白处添加关键帧 · 拖动菱形调整时间/数值（Shift 微调）· 首帧 (0.0s) 锁定';
+  wrap.appendChild(hint);
+
+  const playheadOverlay = renderPlayheadOverlay(motion);
+  if (playheadOverlay) wrap.appendChild(playheadOverlay);
+  return wrap;
+}
+
+function renderKeyframeToolbar(motion, track, idx) {
+  const bar = document.createElement('div');
+  bar.className = 'kf-toolbar';
+  bar.style.cssText = `
+    display: flex; align-items: center; gap: 10px; padding: 4px 12px; min-height: 32px;
+    border-bottom: 1px solid var(--border-subtle); background: var(--bg-elevated);
+    font-size: 11px; flex-wrap: wrap;
+  `;
+  if (state.selectedKf === null) {
+    const hint = document.createElement('span');
+    hint.style.cssText = 'color: var(--text-muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;';
+    hint.textContent = '点击一个关键帧进行编辑 · 拖动菱形可同时调整时间与数值（← → 在关键帧间跳转）';
+    bar.appendChild(hint);
+    return bar;
+  }
+  const kf = track.keyframes[idx];
+  const isF0 = idx === 0 && Math.abs(kf.time) < 0.001;
+  const kfRange = valueRange(track);
+  const id = document.createElement('span');
+  id.style.cssText = 'color: var(--text-muted); font-size: 9.5px; font-weight: 800; letter-spacing: 0.04em;';
+  id.textContent = `关键帧 ${idx + 1}${isF0 ? ' · 首帧（锁定）' : ''}`;
+  bar.appendChild(id);
+
+  const nav = document.createElement('span');
+  nav.style.cssText = 'display:inline-flex;align-items:center;gap:2px;flex-shrink:0;';
+  const prevBtn = kfNavButton(-1, idx === 0);
+  prevBtn.addEventListener('click', () => jumpToKeyframe(motion, -1));
+  const nextBtn = kfNavButton(1, idx === track.keyframes.length - 1);
+  nextBtn.addEventListener('click', () => jumpToKeyframe(motion, 1));
+  nav.appendChild(prevBtn);
+  nav.appendChild(nextBtn);
+  bar.appendChild(nav);
+
+  const mkInput = (label, value, min, max, step, onCommit, disabled) => {
+    const wrapInput = document.createElement('label');
+    wrapInput.style.cssText = 'display:inline-flex;align-items:center;gap:5px;color:var(--text-muted);font-weight:700;';
+    wrapInput.innerHTML = `<span>${label}</span>`;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = String(step);
+    input.min = String(min);
+    input.max = String(max);
+    input.value = String(value);
+    input.disabled = !!disabled;
+    input.style.width = '58px';
+    input.setAttribute('aria-label', label);
+    input.addEventListener('change', () => onCommit(Number(input.value)));
+    wrapInput.appendChild(input);
+    return wrapInput;
+  };
+
+  const timeInput = mkInput('时间', round2(kf.time), 0, round2(motion.durationSeconds), 0.01, (v) => {
+    if (isF0) return;
+    const vv = round2(clamp(v, 0, motion.durationSeconds));
+    const clash = track.keyframes.some((k, i) => i !== idx && Math.abs(k.time - vv) < 0.001);
+    if (clash) { toast('该时刻已有关键帧，请换一个时间', 'error'); return; }
+    kf.time = vv;
+    track.keyframes.sort((a, b) => a.time - b.time);
+    renderAll();
+  }, isF0);
+  bar.appendChild(timeInput);
+
+  const valueInput = mkInput('值', round2(kf.value), -1000, 1000, 0.05, (v) => {
+    kf.value = round2(clamp(v, -1000, 1000));
+    renderAll();
+  }, false);
+  bar.appendChild(valueInput);
+  makeScrubbable(valueInput, kfRange.min, kfRange.max, (v) => {
+    kf.value = round2(clamp(v, -1000, 1000));
+    renderAll();
+  });
+
+  if (idx < track.keyframes.length - 1) {
+    const segWrap = document.createElement('label');
+    segWrap.style.cssText = 'display:inline-flex;align-items:center;gap:5px;color:var(--text-muted);font-weight:700;';
+    segWrap.innerHTML = '<span>分段</span>';
+    const seg = document.createElement('select');
+    seg.style.cssText = 'padding:3px 6px;font-size:10.5px;color:var(--text-primary);background:var(--bg-tertiary);border:1px solid var(--border-default);border-radius:var(--radius-sm);outline:none;cursor:pointer;';
+    seg.setAttribute('aria-label', '关键帧分段类型');
+    const segType = kf.segment?.type ?? 'linear';
+    for (const [val, label] of [['linear', '直线'], ['bezier', '贝塞尔'], ['stepped', '阶梯'], ['inverseStepped', '逆阶梯']]) {
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = label;
+      if (val === segType) opt.selected = true;
+      seg.appendChild(opt);
+    }
+    seg.addEventListener('change', () => {
+      const next = { type: seg.value };
+      if (seg.value === 'bezier') {
+        const nxt = track.keyframes[idx + 1];
+        const dx = nxt.time - kf.time;
+        next.controlPoints = [
+          { time: round2(kf.time + dx * 0.35), value: round2(kf.value) },
+          { time: round2(kf.time + dx * 0.65), value: round2(nxt.value) },
+        ];
+      }
+      kf.segment = next;
+      renderAll();
+    });
+    segWrap.appendChild(seg);
+    bar.appendChild(segWrap);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'btn btn--sm btn--danger';
+  del.style.cssText = 'margin-left:auto;';
+  del.textContent = '删除';
+  del.disabled = isF0;
+  del.addEventListener('click', () => {
+    if (isF0) { toast('首帧 (0.0s) 受保护，不能删除', 'error'); return; }
+    track.keyframes.splice(idx, 1);
+    state.selectedKf = null;
+    renderAll();
+  });
+  bar.appendChild(del);
+  return bar;
+}
+
+function renderPlayheadOverlay(motion) {
+  const block = findBlock(state.expandedId);
+  const t = state.playhead - block.time;
+  if (t < 0 || t > motion.durationSeconds) return null;
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position: absolute; top: 0; bottom: 0; left: ${(block.time + t) * state.pps}px;
+    width: 1px; background: var(--accent-primary); opacity: 0.75; pointer-events: none; z-index: 3;
+  `;
+  return el;
+}
+
+function startKeyframeDrag(e, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  const block = findBlock(state.expandedId);
+  const motion = block.motion;
+  const track = selectedTrack(motion);
+  const range = valueRange(track);
+  const kf = track.keyframes[idx];
+  const isF0 = idx === 0 && Math.abs(kf.time) < 0.001;
+  state.selectedKf = idx;
+  state.drag = { idx, isF0 };
+  hideKfTooltip();
+  renderAll();
+  const move = (ev) => {
+    if (!track.keyframes[idx]) { up(); return; }
+    const svgEl = document.querySelector('.curve-canvas');
+    if (!svgEl) return;
+    const r = svgEl.getBoundingClientRect();
+    const sceneT = ((ev.clientX - r.left) / r.width) * contentWidth() / state.pps;
+    const time = round2(clamp(sceneT - block.time, 0, motion.durationSeconds));
+    const normY = 1 - (ev.clientY - r.top) / (r.height || 148);
+    const midV = (range.max + range.min) / 2;
+    const value = round2(ev.shiftKey
+      ? midV + (normY - 0.5) * (range.max - range.min) * 0.1
+      : range.min + normY * (range.max - range.min));
+    const current = track.keyframes[idx];
+    if (current) {
+      if (!isF0) {
+        const clash = track.keyframes.some((k, i) => i !== idx && Math.abs(k.time - time) < 0.001);
+        if (!clash) current.time = time;
+      }
+      current.value = clamp(value, -1000, 1000);
+      showDragReadout(`${formatTime(current.time)} · ${round2(current.value)}${ev.shiftKey ? ' · Shift' : ''}`, ev.clientX, ev.clientY);
+    }
+    renderAll();
+  };
+  const up = () => {
+    hideDragReadout();
+    state.drag = null;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+}
+
+function renderKeyframeList(motion) {
+  const track = selectedTrack(motion);
+  const list = document.createElement('div');
+  list.className = 'kf-list';
+  const head = document.createElement('div');
+  head.className = 'kf-list__head';
+  head.innerHTML = `<span>${track.parameterId} 关键帧</span><span class="mono">${track.keyframes.length} 帧 · 时长 ${round2(motion.durationSeconds)}s</span>`;
+  list.appendChild(head);
+  track.keyframes.forEach((kf, idx) => {
+    const isF0 = idx === 0 && Math.abs(kf.time) < 0.001;
+    const row = document.createElement('div');
+    row.className = 'kf-row' + (state.selectedKf === idx ? ' is-selected' : '');
+    row.addEventListener('click', () => {
+      state.selectedKf = state.selectedKf === idx ? null : idx;
+      renderAll();
+    });
+    const idxCell = document.createElement('span');
+    idxCell.className = 'kf-idx';
+    idxCell.innerHTML = `${isF0 ? '<span class="lock"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>' : ''}${idx + 1}`;
+    row.appendChild(idxCell);
+
+    const tInput = document.createElement('input');
+    tInput.type = 'number';
+    tInput.step = '0.01';
+    tInput.min = '0';
+    tInput.max = String(round2(motion.durationSeconds));
+    tInput.value = String(round2(kf.time));
+    tInput.disabled = isF0;
+    tInput.setAttribute('aria-label', `关键帧 ${idx + 1} 时间`);
+    tInput.addEventListener('change', (e) => {
+      const v = round2(clamp(Number(e.target.value) || 0, 0, motion.durationSeconds));
+      const clash = track.keyframes.some((k, i) => i !== idx && Math.abs(k.time - v) < 0.001);
+      if (clash) { toast('该时刻已有关键帧，请换一个时间', 'error'); e.target.value = round2(kf.time); return; }
+      kf.time = v;
+      track.keyframes.sort((a, b) => a.time - b.time);
+      renderAll();
+    });
+    row.appendChild(tInput);
+
+    const vInput = document.createElement('input');
+    vInput.type = 'number';
+    vInput.step = '0.05';
+    vInput.value = String(round2(kf.value));
+    vInput.setAttribute('aria-label', `关键帧 ${idx + 1} 值`);
+    vInput.addEventListener('change', (e) => {
+      kf.value = round2(Number(e.target.value) || 0);
+      renderAll();
+    });
+    row.appendChild(vInput);
+
+    const seg = document.createElement('select');
+    seg.className = 'seg-select';
+    seg.setAttribute('aria-label', `关键帧 ${idx + 1} 分段类型`);
+    const segType = kf.segment?.type ?? 'linear';
+    if (idx < track.keyframes.length - 1) {
+      for (const [val, label] of [['linear', '直线'], ['bezier', '贝塞尔'], ['stepped', '阶梯'], ['inverseStepped', '逆阶梯']]) {
+        const opt = document.createElement('option');
+        opt.value = val; opt.textContent = label;
+        if (val === segType) opt.selected = true;
+        seg.appendChild(opt);
+      }
+    } else {
+      const opt = document.createElement('option');
+      opt.textContent = '—';
+      opt.selected = true;
+      seg.appendChild(opt);
+      seg.disabled = true;
+    }
+    seg.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const next = { type: seg.value };
+      if (seg.value === 'bezier') {
+        const nxt = track.keyframes[idx + 1];
+        const dx = nxt.time - kf.time;
+        next.controlPoints = [
+          { time: round2(kf.time + dx * 0.35), value: round2(kf.value) },
+          { time: round2(kf.time + dx * 0.65), value: round2(nxt.value) },
+        ];
+      }
+      kf.segment = next;
+      renderAll();
+    });
+    row.appendChild(seg);
+
+    const del = document.createElement('button');
+    del.className = 'kf-del';
+    del.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+    del.disabled = isF0;
+    del.setAttribute('aria-label', `删除关键帧 ${idx + 1}`);
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isF0) { toast('首帧 (0.0s) 受保护，不能删除', 'error'); return; }
+      track.keyframes.splice(idx, 1);
+      state.selectedKf = null;
+      renderAll();
+    });
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+  return list;
+}
+
+/* ─────────── 播放头 ─────────── */
+function renderPlayhead() {
+  const el = $('#playhead');
+  const x = timeToX(state.playhead);
+  const width = contentWidth();
+  if (state.playhead < 0 || state.playhead > SCENE_DURATION) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.style.left = `${x}px`;
+  if (x > width - 4) el.style.display = 'none';
+}
+
+/* ─────────── 选择栏 ─────────── */
+function renderSelectionBar() {
+  const bar = $('#selection-bar');
+  const selected = state.selectedId ? findBlock(state.selectedId) : null;
+  if (!selected) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  const located = byId(state.selectedId);
+  const block = located.block;
+  const track = located.track;
+  const isCustom = block.motion?.kind === 'custom';
+  bar.style.setProperty('--track-color', blockColor(block));
+  bar.innerHTML = '';
+
+  const icon = document.createElement('span');
+  icon.className = 'selection-bar__icon';
+  icon.innerHTML = blockIconSvg(block);
+  bar.appendChild(icon);
+
+  const title = document.createElement('span');
+  title.className = 'selection-bar__title';
+  title.textContent = block.type === 'dialogue' ? block.label
+    : isCustom ? '自定义动作'
+    : block.type === 'camera' ? block.label
+    : block.motion.key;
+  bar.appendChild(title);
+
+  const meta = document.createElement('span');
+  meta.className = 'selection-bar__meta';
+  meta.innerHTML = `${formatTime(block.time)} → ${formatTime(block.time + motionDuration(block))} <span style="opacity:0.7">· ${track.label}</span>`;
+  bar.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'selection-bar__actions';
+
+  const seekBtn = document.createElement('button');
+  seekBtn.className = 'btn btn--icon';
+  seekBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l9-9 9 9"/></svg>';
+  seekBtn.title = '跳到动作起点';
+  seekBtn.setAttribute('aria-label', '跳到动作起点');
+  seekBtn.addEventListener('click', () => { state.playhead = block.time; renderAll(); });
+  actions.appendChild(seekBtn);
+
+  if (block.type === 'motion' && !isCustom) {
+    const convBtn = document.createElement('button');
+    convBtn.className = 'btn btn--sm btn--primary';
+    convBtn.textContent = '转为自定义动作…';
+    convBtn.addEventListener('click', () => openConversionDialog(block));
+    actions.appendChild(convBtn);
+  }
+  if (isCustom) {
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn--sm btn--primary';
+    editBtn.innerHTML = '编辑关键帧';
+    editBtn.addEventListener('click', () => {
+      state.expandedId = block.id;
+      renderAll();
+    });
+    actions.appendChild(editBtn);
+  }
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn btn--sm';
+  copyBtn.textContent = '复制';
+  copyBtn.addEventListener('click', () => toast('已复制动作（方案示意）', 'success'));
+  actions.appendChild(copyBtn);
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn btn--sm btn--danger';
+  delBtn.textContent = '删除';
+  delBtn.addEventListener('click', () => {
+    toast('删除动作（方案示意，不真正修改文档）', 'warning');
+  });
+  actions.appendChild(delBtn);
+
+  bar.appendChild(actions);
+}
+
+/* ─────────── 检查器 ─────────── */
+function renderInspector() {
+  const inspector = $('#inspector');
+  const selected = state.selectedId ? findBlock(state.selectedId) : null;
+  if (!selected) {
+    inspector.innerHTML = `
+      <div class="inspector-header">
+        <div class="inspector-header__intent">未选择</div>
+        <div class="inspector-header__title">检查器</div>
+        <div class="inspector-header__meta">—</div>
+      </div>
+      <div class="inspector-body"><div class="inspector-content">
+        <p style="color:var(--text-muted);font-size:12px;line-height:1.7;">选中时间轴上的动作查看参数。选择一条普通动作，可通过「转为自定义动作…」把它变成可编辑关键帧的自定义动作。</p>
+      </div></div>`;
+    return;
+  }
+  const located = byId(state.selectedId);
+  const block = located.block;
+  const track = located.track;
+  const isCustom = block.motion?.kind === 'custom';
+
+  const head = document.createElement('div');
+  head.className = 'inspector-header';
+  head.innerHTML = `
+    <div class="inspector-header__intent">${isCustom ? '自定义动作' : block.type === 'dialogue' ? '对话' : block.type === 'camera' ? '镜头' : '播放动作'}</div>
+    <div class="inspector-header__title">${block.type === 'dialogue' ? block.label : isCustom ? '自定义动作' : block.type === 'camera' ? block.label : block.motion.key}</div>
+    <div class="inspector-header__meta">${formatTime(block.time)} · ${track.label}</div>`;
+  inspector.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'inspector-body';
+  const content = document.createElement('div');
+  content.className = 'inspector-content';
+  body.appendChild(content);
+
+  if (block.type === 'motion') {
+    content.appendChild(renderMotionSection(block, isCustom));
+    if (isCustom) {
+      content.appendChild(renderPerformanceSection());
+    }
+  } else if (block.type === 'dialogue') {
+    const sec = section('台词');
+    row(sec, '台词文本', `<input type="text" value="${block.label}" aria-label="台词文本">`);
+    row(sec, '语速', `<input type="number" value="1.0" step="0.1" aria-label="语速">`);
+    row(sec, '口型', `<div class="select-shell">自动 <span class="chev">▾</span></div>`);
+    content.appendChild(sec);
+  } else {
+    const sec = section('运镜');
+    row(sec, '运镜动作', `<div class="select-shell">推镜 <span class="chev">▾</span></div>`);
+    row(sec, '时长', `<input type="number" value="1.2" step="0.1" aria-label="时长">`);
+    row(sec, '缓动', `<div class="select-shell">平滑 <span class="chev">▾</span></div>`);
+    content.appendChild(sec);
+  }
+  inspector.appendChild(body);
+}
+
+function section(title) {
+  const sec = document.createElement('div');
+  sec.className = 'inspector-section';
+  const h = document.createElement('div');
+  h.className = 'inspector-section-title';
+  h.textContent = title;
+  sec.appendChild(h);
+  return sec;
+}
+
+function row(sec, label, innerHtml) {
+  const r = document.createElement('div');
+  r.className = 'inspector-row';
+  const l = document.createElement('label');
+  l.className = 'inspector-label';
+  l.textContent = label;
+  const v = document.createElement('div');
+  v.innerHTML = innerHtml;
+  r.appendChild(l);
+  r.appendChild(v);
+  sec.appendChild(r);
+}
+
+function renderMotionSection(block, isCustom) {
+  const sec = section(isCustom ? '动作' : '动作');
+  if (isCustom) {
+    const motion = block.motion;
+    const card = document.createElement('div');
+    card.className = 'custom-motion-card';
+    card.innerHTML = `
+      <div class="custom-motion-card__head">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="color:var(--accent-primary)"><path d="M12 3l2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z"/></svg>
+        <span class="custom-motion-card__title">自定义动作</span>
+        <span class="custom-tag">可编辑关键帧</span>
+      </div>
+      <div class="motion-source-row">
+        <span class="mono" title="${motion.derivedFrom.key}">${motion.derivedFrom.key}</span>
+        <span class="hint">由普通动作转换</span>
+      </div>
+      <div class="inspector-row" style="margin-bottom:8px;">
+        <label class="inspector-label" for="ins-duration">时长</label>
+        <input type="number" id="ins-duration" step="0.05" min="0.1" value="${round2(motion.durationSeconds)}" aria-label="动作时长（秒）">
+      </div>
+      <div class="inspector-row" style="margin-bottom:8px;">
+        <label class="inspector-label" for="ins-fadein">淡入</label>
+        <input type="number" id="ins-fadein" step="0.05" min="0" max="${round2(motion.durationSeconds)}" value="${round2(motion.fadeInSeconds)}" aria-label="动作淡入（秒）">
+      </div>
+      <div class="track-stats-row">
+        <span>参数轨道</span><span class="count">${motion.tracks.length} 条 · ${motion.tracks.reduce((n, t) => n + t.keyframes.length, 0)} 帧</span>
+      </div>`;
+    card.querySelector('#ins-duration').addEventListener('change', (e) => {
+      const v = round2(clamp(Number(e.target.value) || 0.1, 0.1, SCENE_DURATION));
+      if (v < motion.fadeInSeconds) { toast('时长不能短于淡入时长', 'error'); e.target.value = round2(motion.durationSeconds); return; }
+      motion.durationSeconds = v;
+      block.duration = v;
+      renderAll();
+    });
+    card.querySelector('#ins-fadein').addEventListener('change', (e) => {
+      const v = round2(clamp(Number(e.target.value) || 0, 0, motion.durationSeconds));
+      motion.fadeInSeconds = v;
+      renderAll();
+    });
+    sec.appendChild(card);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn--primary';
+    editBtn.style.width = '100%';
+    editBtn.innerHTML = '编辑关键帧';
+    editBtn.addEventListener('click', () => {
+      state.expandedId = block.id;
+      renderAll();
+    });
+    sec.appendChild(editBtn);
+
+    const hint = document.createElement('div');
+    hint.className = 'inspector-hint';
+    hint.textContent = '关键帧曲线在时间轴就地展开编辑；修改会实时校验（首帧锁定、时间不冲突、时长不小于淡入）。';
+    sec.appendChild(hint);
+  } else {
+    const shell = document.createElement('div');
+    shell.className = 'select-shell';
+    shell.innerHTML = `${block.motion.key} <span class="chev">▾</span>`;
+    shell.title = '动作选择（方案示意）';
+    row(sec, '动作名', shell.outerHTML);
+    row(sec, '淡入', `<input type="number" value="${round2(block.motion.fadeInSeconds ?? 0)}" step="0.05" min="0" aria-label="淡入">`);
+    const convBtn = document.createElement('button');
+    convBtn.className = 'btn btn--primary';
+    convBtn.style.width = '100%';
+    convBtn.textContent = '转为自定义动作…';
+    convBtn.addEventListener('click', () => openConversionDialog(block));
+    sec.appendChild(convBtn);
+    const hint = document.createElement('div');
+    hint.className = 'inspector-hint';
+    hint.textContent = '转换为自定义动作后，可在时间轴上展开曲线、自由编辑关键帧。转换不修改源动作文件。';
+    sec.appendChild(hint);
+  }
+  return sec;
+}
+
+function renderPerformanceSection() {
+  const sec = section('角色表演');
+  row(sec, '表情', `<div class="select-shell">微笑 <span class="chev">▾</span></div>`);
+  row(sec, '视线', `<div class="select-shell">跟随镜头 <span class="chev">▾</span></div>`);
+  row(sec, '眨眼', `<div class="select-shell">自动 <span class="chev">▾</span></div>`);
+  const hint = document.createElement('div');
+  hint.className = 'inspector-hint';
+  hint.textContent = 'v3 语义中已移除动作的顶层「时长 / 循环 / 优先级」字段；本表单不再暴露这些过时控件。';
+  sec.appendChild(hint);
+  return sec;
+}
+
+/* ─────────── 转换对话框 ─────────── */
+function openConversionDialog(block) {
+  state.dialog = { kind: 'conversion', blockId: block.id, density: 'standard', busy: false };
+  renderDialog();
+}
+
+function simulateConversion(block, density) {
+  const src = CONVERTIBLE_MOTIONS[block.motion.key];
+  const motion = {
+    kind: 'custom',
+    durationSeconds: src.durationSeconds,
+    fadeInSeconds: block.motion.fadeInSeconds ?? src.fadeInSeconds,
+    derivedFrom: { key: block.motion.key, fadeInSeconds: src.derivedFromFadeIn, fadeOutSeconds: src.derivedFromFadeOut },
+    tracks: [],
+  };
+  const fps = 30;
+  const tolerance = density === 'perFrame' ? 0
+    : density === 'sparse' ? 0.05
+    : density === 'fine' ? 0.005
+    : 0.02;
+  for (const [paramId, fn] of Object.entries(src.curves)) {
+    const samples = [];
+    for (let f = 0; f <= src.durationSeconds * fps; f++) {
+      const t = f / fps;
+      samples.push({ time: round2(t), value: round2(fn(t)) });
+    }
+    if (tolerance === 0) {
+      motion.tracks.push({ parameterId: paramId, keyframes: samples.map((s) => ({ ...s, segment: { type: 'linear' } })) });
+      continue;
+    }
+    const kept = [samples[0]];
+    for (let i = 1; i < samples.length - 1; i++) {
+      const last = kept[kept.length - 1];
+      const next = samples[samples.length - 1];
+      const interp = last.value + (next.value - last.value) * ((samples[i].time - last.time) / (next.time - last.time));
+      if (Math.abs(interp - samples[i].value) > tolerance) kept.push(samples[i]);
+    }
+    kept.push(samples[samples.length - 1]);
+    const keyframes = kept.map((s, i) => ({
+      ...s,
+      segment: i < kept.length - 1 ? { type: 'linear' } : undefined,
+    }));
+    motion.tracks.push({ parameterId: paramId, keyframes });
+  }
+  motion.tracks.forEach((t) => {
+    if (t.keyframes.length === 2 && Math.abs(t.keyframes[0].value - t.keyframes[1].value) < 0.001) {
+      STATIC_TRACK_IDS.add(t.parameterId);
+    }
+  });
+  return motion;
+}
+
+function estimateKeyframes(block, density) {
+  const src = CONVERTIBLE_MOTIONS[block.motion.key];
+  let total = 0;
+  const fps = 30;
+  const tolerance = density === 'perFrame' ? 0
+    : density === 'sparse' ? 0.05
+    : density === 'fine' ? 0.005
+    : 0.02;
+  for (const fn of Object.values(src.curves)) {
+    const samples = [];
+    for (let f = 0; f <= src.durationSeconds * fps; f++) {
+      const t = f / fps;
+      samples.push({ time: t, value: fn(t) });
+    }
+    if (tolerance === 0) { total += samples.length; continue; }
+    let count = 2;
+    let lastVal = samples[0].value;
+    for (let i = 1; i < samples.length - 1; i++) {
+      const last = samples[0];
+      const next = samples[samples.length - 1];
+      const interp = last.value + (next.value - last.value) * ((samples[i].time - last.time) / (next.time - last.time));
+      if (Math.abs(interp - samples[i].value) > tolerance || Math.abs(samples[i].value - lastVal) > tolerance * 6) { count++; lastVal = samples[i].value; }
+    }
+    total += count;
+  }
+  return total;
+}
+
+function renderDialog() {
+  const root = $('#dialog-root');
+  root.innerHTML = '';
+  if (!state.dialog) return;
+  const d = state.dialog;
+  if (d.kind !== 'conversion') return;
+
+  const block = findBlock(d.blockId);
+  const densities = [
+    { id: 'sparse', name: '稀疏', desc: '最少关键帧，曲线最平滑（拟合误差 5%）' },
+    { id: 'standard', name: '标准', desc: '平衡精度与可编辑性，推荐（误差 2%）' },
+    { id: 'fine', name: '精细', desc: '保留更多细节（误差 0.5%）' },
+    { id: 'perFrame', name: '逐帧', desc: '每个场景帧一个关键帧，最精确也最庞大' },
+  ];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', '转为自定义动作');
+
+  const surface = document.createElement('div');
+  surface.className = 'dialog-surface';
+  surface.innerHTML = `
+    <div class="dialog-header">
+      <div class="dialog-title">转为自定义动作</div>
+      <button class="btn btn--icon" data-close aria-label="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="dialog-body">
+      <div class="conv-info">
+        <div><span>角色</span><strong>小夜</strong></div>
+        <div><span>源动作</span><strong class="mono">${block.motion.key}</strong></div>
+        <div><span>时长</span><strong class="mono">${formatTime(block.motion.durationSeconds ?? CONVERTIBLE_MOTIONS[block.motion.key]?.durationSeconds ?? block.duration)}</strong></div>
+        <div><span>密度档位</span><strong>${densityName(d.density)}</strong></div>
+      </div>
+      <div class="density-grid" role="radiogroup" aria-label="关键帧密度">
+        ${densities.map((den) => `
+          <div class="density-card ${d.density === den.id ? 'is-selected' : ''}" role="radio" aria-checked="${d.density === den.id}" data-density="${den.id}" tabindex="0">
+            <div class="density-card__radio"></div>
+            <div><div class="density-card__name">${den.name}</div><div class="density-card__desc">${den.desc}</div></div>
+            <div class="density-card__est">约 ${estimateKeyframes(block, den.id)} 帧</div>
+          </div>`).join('')}
+      </div>
+      <div class="conv-note">转换把源动作的参数曲线采样并拟合为线性关键帧（拟合算法 v1）。转换是非破坏性的：源动作文件不会被修改；转换后仍可随时回到这里重选密度重新转换。</div>
+      ${state.collabBusy ? '<div class="conv-blocker">协作者「小白」正持有此动作的编辑租约。请等待对方释放后再转换。</div>' : ''}
+    </div>
+    <div class="dialog-footer">
+      <button class="btn" data-close>取消</button>
+      <button class="btn btn--primary ${d.busy ? 'btn--busy' : ''}" data-convert>${d.busy ? '<span class="spinner"></span>采样拟合中…' : '开始转换'}</button>
+    </div>`;
+
+  overlay.appendChild(surface);
+  root.appendChild(overlay);
+
+  overlay.addEventListener('pointerdown', (e) => {
+    if (e.target === overlay) closeDialog();
+  });
+  surface.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeDialog));
+  surface.querySelectorAll('.density-card').forEach((card) => {
+    const activate = () => {
+      d.density = card.dataset.density;
+      renderDialog();
+    };
+    card.addEventListener('click', activate);
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
+  });
+  const convertBtn = surface.querySelector('[data-convert]');
+  convertBtn.addEventListener('click', () => {
+    if (state.collabBusy) {
+      toast('编辑租约被协作者占用，无法转换', 'error');
+      return;
+    }
+    d.busy = true;
+    renderDialog();
+    setTimeout(() => {
+      const block = findBlock(d.blockId);
+      if (!block) { closeDialog(); return; }
+      block.motion = simulateConversion(block, d.density);
+      block.duration = block.motion.durationSeconds;
+      state.dialog = null;
+      state.selectedId = d.blockId;
+      state.expandedId = d.blockId;
+      state.selectedKf = null;
+      state.selectedParam = block.motion.tracks[0]?.parameterId ?? state.selectedParam;
+      state.view = 'graph';
+      renderAll();
+      toast('已转为自定义动作，可在时间轴上展开编辑', 'success');
+    }, 900);
+  });
+}
+
+function densityName(id) {
+  return { sparse: '稀疏', standard: '标准', fine: '精细', perFrame: '逐帧' }[id] ?? id;
+}
+
+function closeDialog() {
+  state.dialog = null;
+  renderDialog();
+}
+
+/* ─────────── 右键菜单 ─────────── */
+function openBlockMenu(x, y, block) {
+  closeBlockMenu();
+  const items = [];
+  if (block.type === 'motion') {
+    if (block.motion?.kind === 'custom') {
+      items.push({ label: '编辑关键帧', icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6z"/></svg>', action: () => { state.expandedId = block.id; renderAll(); } });
+      items.push({ label: '重新转换（重选密度）…', icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>', action: () => openConversionDialog(block) });
+    } else {
+      items.push({ label: '转为自定义动作…', icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>', action: () => openConversionDialog(block) });
+    }
+  }
+  items.push({ label: '复制', icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="9" height="7" rx="1.8"/><rect x="11" y="5" width="9" height="7" rx="1.8" opacity="0.72"/></svg>', action: () => toast('已复制动作（方案示意）', 'success') });
+  items.push({ label: '删除', danger: true, icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>', action: () => toast('删除动作（方案示意，不真正修改文档）', 'warning') });
+
+  const menu = document.createElement('div');
+  menu.className = 'block-menu';
+  menu.style.cssText = `
+    position: fixed; left: ${x}px; top: ${y}px; z-index: 14000; min-width: 172px;
+    display: flex; flex-direction: column; gap: 2px; padding: 6px;
+    background: var(--bg-secondary); border: 1px solid var(--border-default);
+    border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    animation: barIn 160ms var(--ease-settle);
+  `;
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '区块操作');
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.setAttribute('role', 'menuitem');
+    btn.style.cssText = `
+      display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 0; border-radius: 6px;
+      background: transparent; width: 100%; text-align: left; font-family: inherit; font-size: 12px;
+      font-weight: 600; color: ${item.danger ? 'var(--error)' : 'var(--text-primary)'}; cursor: pointer;
+    `;
+    btn.innerHTML = `${item.icon}<span>${item.label}</span>`;
+    btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--bg-hover)'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
+    btn.addEventListener('click', () => { closeBlockMenu(); item.action(); });
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const dismiss = (e) => {
+    if (!menu.contains(e.target)) closeBlockMenu();
+    window.removeEventListener('pointerdown', dismiss);
+  };
+  window.addEventListener('pointerdown', dismiss);
+}
+
+function closeBlockMenu() {
+  document.querySelectorAll('.block-menu').forEach((el) => el.remove());
+}
+
+/* ─────────── 方案说明面板 ─────────── */
+function renderNotes() {
+  const root = $('#notes-root');
+  root.innerHTML = '';
+  if (!state.notesOpen) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'notes-overlay';
+  overlay.addEventListener('click', () => { state.notesOpen = false; renderNotes(); });
+  const panel = document.createElement('div');
+  panel.className = 'notes-panel';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', '方案说明');
+  panel.innerHTML = `
+    <div class="notes-head">
+      <div class="notes-title">方案说明</div>
+      <button class="btn btn--icon" data-close-notes aria-label="关闭"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="notes-body">
+      <div class="notes-section">
+        <h4>一 · 时间轴展开编辑</h4>
+        <ul>
+          <li>点自定义动作片段右下角的箭头（或直接点片段），编辑器在片段所在轨道下方就地展开——关键帧轨道与上方标尺、播放头共用同一时间轴。</li>
+          <li>默认「轨道」视图：每个参数一条低轨道，菱形关键帧平铺在共享时间轴上，一眼看清整个动作的结构。</li>
+          <li>轨道上点空白处加帧；拖动菱形可同时调整时间（左右）与数值（上下），按住 Shift 微调，拖动时实时显示数值；点菱形弹出工具条（上一个/下一个关键帧、时间、值、分段类型、删除），也可用键盘 ← → 在关键帧间跳转；悬停行尾的曲线按钮进入该参数的单参数曲线视图。</li>
+          <li>「曲线」视图：单参数的精细编辑，支持贝塞尔（拖控制点微调）、阶梯、逆阶梯分段。</li>
+          <li>首帧（0.0s）锁定：时间不可移、不可删；删除与改时间冲突都会给出明确提示。</li>
+          <li>「列表」视图提供逐帧的精确数值编辑，便于键盘用户与精细调参。</li>
+        </ul>
+      </div>
+      <div class="notes-section">
+        <h4>二 · 自定义动作入口</h4>
+        <ul>
+          <li>选中任意普通动作（资源 motion），在时间轴底部选择栏、检查器或右键菜单里点「转为自定义动作…」。</li>
+          <li>弹出对话框选择密度：稀疏 / 标准 / 精细 / 逐帧，并预估关键帧数量。</li>
+          <li>转换由后端命令层完成（采样 → 拟合 → 租约 → 原子提交）；UI 只发出意图、展示结果，不含任何转换逻辑。</li>
+        </ul>
+      </div>
+      <div class="notes-section">
+        <h4>三 · 检查器表单</h4>
+        <ul>
+          <li>自定义动作在检查器中显示独立表单：来源动作（只读）、时长、淡入、轨道统计，和「编辑关键帧」入口。</li>
+          <li>普通动作仍使用原动作选择器，并新增转换入口。</li>
+          <li>v3 已移除顶层「时长 / 循环 / 优先级」字段，本方案不再暴露这些过时控件。</li>
+        </ul>
+      </div>
+      <div class="notes-section">
+        <h4>四 · 协作与校验</h4>
+        <ul>
+          <li>编辑自定义动作需要持有协作租约；被协作者占用时显示只读提示并阻止编辑/转换。</li>
+          <li>所有修改实时走 codec 严格校验：乱序、重复、越界、非有限值一律拒绝并给出中文提示。</li>
+        </ul>
+      </div>
+      <div class="notes-section">
+        <h4>演示控制</h4>
+        <div class="notes-toggle-row">
+          <div><span>模拟协作者占用</span><small>打开后：编辑区变只读、转换被租约拒绝</small></div>
+          <label class="switch"><input type="checkbox" id="sim-collab" ${state.collabBusy ? 'checked' : ''}><span class="rail"></span><span class="thumb"></span></label>
+        </div>
+      </div>
+    </div>`;
+  root.appendChild(overlay);
+  root.appendChild(panel);
+  panel.querySelector('[data-close-notes]').addEventListener('click', () => { state.notesOpen = false; renderNotes(); });
+  panel.querySelector('#sim-collab').addEventListener('change', (e) => {
+    state.collabBusy = e.target.checked;
+    renderNotes();
+    renderAll();
+  });
+}
+
+/* ─────────── 提示 ─────────── */
+function toast(message, kind = 'info') {
+  const stack = $('#toast-stack');
+  const el = document.createElement('div');
+  el.className = `toast toast--${kind}`;
+  const icons = {
+    success: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+    error: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>',
+    warning: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17h.01"/></svg>',
+    info: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>',
+  };
+  el.innerHTML = `${icons[kind] ?? icons.info}<span>${message}</span>`;
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('is-leaving');
+    setTimeout(() => el.remove(), 220);
+  }, 2600);
+}
+
+/* ─────────── 播放头交互 ─────────── */
+function seekFromEvent(clientX) {
+  const canvas = $('#ruler-canvas');
+  const rect = canvas.getBoundingClientRect();
+  const t = (clientX - rect.left) / state.pps;
+  state.playhead = clamp(t, 0, SCENE_DURATION);
+}
+
+function initRulerInteraction() {
+  const ruler = $('#ruler');
+  let dragging = false;
+  ruler.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    seekFromEvent(e.clientX);
+    renderAll();
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    seekFromEvent(e.clientX);
+    renderAll();
+  });
+  window.addEventListener('pointerup', () => { dragging = false; });
+
+  const hscroll = $('#timeline-hscroll');
+  hscroll.addEventListener('scroll', () => {
+    const offset = hscroll.scrollLeft;
+    $('#ruler-canvas').style.transform = `translateX(${-offset}px)`;
+  });
+}
+
+/* ─────────── 播放 ─────────── */
+let rafId = null;
+function playLoop() {
+  if (!state.playing) return;
+  state.playhead += 1 / 60;
+  if (state.playhead > SCENE_DURATION) state.playhead = 0;
+  renderPlayhead();
+  rafId = requestAnimationFrame(playLoop);
+}
+
+function togglePlay() {
+  state.playing = !state.playing;
+  if (state.playing) {
+    if (state.playhead >= SCENE_DURATION) state.playhead = 0;
+    playLoop();
+  } else if (rafId) {
+    cancelAnimationFrame(rafId);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+    e.preventDefault();
+    togglePlay();
+  }
+  if (e.key === 'Escape') {
+    if (state.dialog) closeDialog();
+    else if (state.notesOpen) { state.notesOpen = false; renderNotes(); }
+    else closeBlockMenu();
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    const motion = expandedMotion();
+    if (!motion || state.selectedKf === null || state.view === 'list') return;
+    const track = selectedTrack(motion);
+    const idx = state.selectedKf;
+    if (idx === 0 && Math.abs(track.keyframes[idx].time) < 0.001) {
+      toast('首帧 (0.0s) 受保护，不能删除', 'error');
+      return;
+    }
+    track.keyframes.splice(idx, 1);
+    state.selectedKf = null;
+    renderAll();
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+    const motion = expandedMotion();
+    if (!motion || state.selectedKf === null) return;
+    e.preventDefault();
+    jumpToKeyframe(motion, e.key === 'ArrowLeft' ? -1 : 1);
+  }
+});
+
+/* ─────────── 主题 ─────────── */
+function initTheme() {
+  $('#theme-seg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-theme-value]');
+    if (!btn) return;
+    document.documentElement.dataset.theme = btn.dataset.themeValue;
+    $$('#theme-seg button').forEach((b) => b.classList.toggle('is-active', b === btn));
+  });
+}
+
+/* ─────────── 装配 ─────────── */
+function renderAll() {
+  renderRuler();
+  renderTracks();
+  renderPlayhead();
+  renderSelectionBar();
+  renderInspector();
+  renderDialog();
+  renderNotes();
+  bindEditorHeader();
+  renderPlayButton();
+}
+
+function bindEditorHeader() {
+  const motion = expandedMotion();
+  if (!motion) return;
+  const durInput = $('#ed-duration');
+  const fadeInput = $('#ed-fadein');
+  if (durInput && !durInput.dataset.bound) {
+    durInput.dataset.bound = '1';
+    durInput.addEventListener('change', () => {
+      const v = round2(clamp(Number(durInput.value) || 0.1, 0.1, SCENE_DURATION));
+      if (v < motion.fadeInSeconds) { toast('时长不能短于淡入时长', 'error'); durInput.value = round2(motion.durationSeconds); return; }
+      const block = findBlock(state.expandedId);
+      motion.durationSeconds = v;
+      block.duration = v;
+      renderAll();
+    });
+  }
+  if (fadeInput && !fadeInput.dataset.bound) {
+    fadeInput.dataset.bound = '1';
+    fadeInput.addEventListener('change', () => {
+      const v = round2(clamp(Number(fadeInput.value) || 0, 0, motion.durationSeconds));
+      motion.fadeInSeconds = v;
+      renderAll();
+    });
+  }
+  $$('.view-toggle button').forEach((btn) => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      state.view = btn.dataset.view;
+      state.selectedKf = null;
+      renderAll();
+    });
+  });
+}
+
+function renderPlayButton() {
+  const stage = $('.stage-scene');
+  const existing = stage.querySelector('.stage-play');
+  if (existing) existing.remove();
+  const btn = document.createElement('button');
+  btn.className = 'stage-play';
+  btn.style.cssText = `
+    position: absolute; left: 50%; bottom: 42px; transform: translateX(-50%);
+    width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent-primary); color: #fff; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 16px var(--accent-glow); z-index: 5;
+    transition: transform var(--transition-fast), background-color var(--transition-fast);
+  `;
+  btn.setAttribute('aria-label', state.playing ? '暂停' : '播放');
+  btn.innerHTML = state.playing
+    ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg>'
+    : '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"/></svg>';
+  btn.addEventListener('mouseenter', () => { btn.style.transform = 'translateX(-50%) scale(1.06)'; });
+  btn.addEventListener('mouseleave', () => { btn.style.transform = 'translateX(-50%) scale(1)'; });
+  btn.addEventListener('click', () => { togglePlay(); renderAll(); });
+  stage.appendChild(btn);
+}
+
+/* ─────────── 初始 ─────────── */
+initTheme();
+initRulerInteraction();
+$('#btn-notes').addEventListener('click', () => { state.notesOpen = true; renderNotes(); });
+renderAll();
+</script>
+</body>
+</html>

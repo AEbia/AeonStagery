@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="90" viewBox="0 0 430 90" fill="none">
+  <defs>
+    <linearGradient id="fill" x1="3" y1="3" x2="84.557490" y2="174.131503" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9507A"/>
+      <stop offset=".2" stop-color="#FF5081"/>
+      <stop offset=".2" stop-color="#FF3B72"/>
+      <stop offset="1" stop-color="#FF3B72"/>
+    </linearGradient>
+    <clipPath id="inside">
+      <rect x="3" y="3" width="424" height="84" rx="42"/>
+    </clipPath>
+  </defs>
+  <rect x="3" y="3" width="424" height="84" rx="42" fill="url(#fill)"/>
+  <g clip-path="url(#inside)" stroke="#FFF" stroke-width="5">
+    <path d="m369 66 47-47M361 58l47-47M385 84l43-43M402 88l28-28M377 74l47-47"/>
+  </g>
+  <rect x="3" y="3" width="424" height="84" rx="42" stroke="#FFF" stroke-width="6"/>
+  <path d="m391.15 51.63-8.95-.71a8.4 8.4 0 0 1-7.57-5.25l-3.52-7.98a4.18 4.18 0 0 0-7.67 0l-3.52 7.98a8.4 8.4 0 0 1-7.57 5.25l-8.95.71c-3.62.3-5.11 4.65-2.34 6.87l6.82 5.55a8.36 8.36 0 0 1 2.77 8.48l-2.13 8.28c-.85 3.43 3.09 6.16 6.29 4.34l7.67-4.44a9.55 9.55 0 0 1 9.38 0l7.67 4.44c3.2 1.82 7.14-.91 6.29-4.34l-2.13-8.28a8.36 8.36 0 0 1 2.77-8.48l6.82-5.55c2.77-2.22 1.28-6.56-2.13-6.87Z" fill="#FF3B72" stroke="#FFF" stroke-width="5"/>
+</svg>

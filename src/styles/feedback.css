@@ -1,0 +1,455 @@
+/* ─── Toasts ───────────────────────────────────────────────── */
+.app-toast-region {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+
+.app-toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 280px;
+  max-width: 460px;
+  padding: 11px 13px 13px 13px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+  pointer-events: auto;
+  user-select: text;
+  overflow: hidden;
+  animation: uiToastIn var(--motion-enter-normal) var(--ease-emphasized);
+  transform-origin: top right;
+  transition:
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+[data-theme="dark"] .app-toast {
+  background: rgba(23, 25, 35, 0.94);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.app-toast:hover {
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.app-toast--leaving {
+  animation: uiToastOut var(--motion-exit-fast) var(--ease-standard) forwards;
+  pointer-events: none;
+}
+
+/* Type variations */
+.app-toast--success {
+  --toast-accent: var(--success);
+  border-left: 3px solid var(--success);
+}
+.app-toast--success .app-toast__icon-wrapper {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.app-toast--error {
+  --toast-accent: var(--error);
+  border-left: 3px solid var(--error);
+}
+.app-toast--error .app-toast__icon-wrapper {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.app-toast--warning {
+  --toast-accent: var(--warning);
+  border-left: 3px solid var(--warning);
+}
+.app-toast--warning .app-toast__icon-wrapper {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.app-toast--info {
+  --toast-accent: var(--accent-primary);
+  border-left: 3px solid var(--accent-primary);
+}
+.app-toast--info .app-toast__icon-wrapper {
+  color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+
+.app-toast__icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.app-toast__icon {
+  flex-shrink: 0;
+}
+
+.app-toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.app-toast__message {
+  word-break: break-word;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-toast__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-lg);
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--toast-accent, currentColor) 18%, transparent);
+  color: var(--toast-accent, var(--text-primary));
+  line-height: 1.2;
+}
+
+.app-toast__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.app-toast__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.app-toast__btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.app-toast__btn--close {
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.app-toast__btn--close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.app-toast__btn--copy {
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.app-toast__btn--copy:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}
+
+.app-toast__btn-text {
+  font-size: 11px;
+}
+
+.app-toast__btn--action {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.app-toast__btn--action:hover {
+  background: var(--accent-hover);
+}
+
+.app-toast__progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--toast-accent, var(--accent-primary));
+  opacity: 0.45;
+  transform-origin: left center;
+  animation-name: uiToastProgress;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  pointer-events: none;
+}
+
+@keyframes uiToastProgress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+
+@media (max-width: 760px) {
+  .timeline-selection-bar {
+    right: 8px;
+    max-width: calc(100% - 16px);
+  }
+  .timeline-selection-bar__identity {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .timeline-selection-bar__identity,
+  .timeline-selection-bar__status,
+  .timeline-selection-bar__track-select {
+    max-width: 130px;
+  }
+}
+
+@keyframes timelineSelectionIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes uiPopoverIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--motion-distance-sm) * -1)) scale(var(--motion-panel-scale));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes uiIndeterminateProgress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(360%);
+  }
+}
+
+@keyframes uiDetailFloatIn {
+  from {
+    opacity: 0;
+    transform: translate3d(8px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes uiDetailFloatOut {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(8px, 0, 0);
+  }
+}
+
+@keyframes uiDetailSplitIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes uiDetailSplitOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes uiContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance-sm));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes uiListItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance-sm));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes uiWindowIn {
+  from {
+    opacity: 0;
+    transform: scale(var(--motion-panel-scale));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes uiDrawerIn {
+  from {
+    opacity: 0.72;
+    transform: translateX(calc(var(--motion-distance-md) * -1));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes uiToastIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px) translateY(calc(var(--motion-distance-sm) * -1)) scale(var(--motion-panel-scale));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0) scale(1);
+  }
+}
+
+@keyframes uiToastOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(10px) scale(0.98);
+  }
+}
+
+@keyframes uiSoftPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .btn,
+  .card,
+  .top-bar__menu-item,
+  .validation-pill,
+  .context-panel__tab,
+  .character-directory__list-item,
+  .workspace-tools-window__tab,
+  .workspace-tools-diagnostics__issue,
+  .timeline-item,
+  .app-toast {
+    transform: none !important;
+  }
+
+  .top-bar__menu,
+  .collaboration-popover,
+  .context-panel,
+  .inspector-workspace__pane,
+  .inspector-view-picker__menu,
+  .workspace-tools-window,
+  .workspace-tools-window__view,
+  .character-directory__detail,
+  .character-directory__section,
+  .workspace-tools-diagnostics__issue,
+  .workspace-tools-snapshot__metrics > div,
+  .workspace-tools-snapshot__character,
+  .app-toast,
+  .app-toast__progress,
+  .recording-dot,
+  .collaboration-dot--connecting,
+  .collaboration-dot--seeding,
+  .validation-pill--error {
+    animation: none !important;
+  }
+
+  .timeline-selection-bar {
+    animation: none;
+    transition: none;
+  }
+}

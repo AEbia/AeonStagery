@@ -1,0 +1,23 @@
+/* Keep this order aligned with the original global stylesheet cascade. */
+@import './foundation.css';
+@import './settings.css';
+@import './shell.css';
+@import './controls.css';
+@import './stage.css';
+@import './side-panel.css';
+@import './resize-handles.css';
+@import './bottom-panel.css';
+@import './feedback.css';
+@import './timeline/list.css';
+@import './timeline/editor.css';
+@import './timeline/track-labels.css';
+@import './timeline/ruler-status.css';
+@import './shared-components.css';
+@import './voice-workbench.css';
+@import './ai-prose.css';
+@import './agent/window.css';
+@import './agent/thread.css';
+@import './agent/activity.css';
+@import './agent/composer.css';
+@import './agent/sidebar.css';
+@import './agent/popovers.css';

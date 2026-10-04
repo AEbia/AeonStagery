@@ -1,0 +1,386 @@
+.fl-spotlight,
+.fl-lesson-modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 30000;
+  pointer-events: none;
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
+
+.fl-spotlight__blocker,
+.fl-spotlight__target-blocker,
+.fl-spotlight__missing-target {
+  position: fixed;
+  z-index: 30001;
+  pointer-events: auto;
+}
+
+.fl-spotlight__missing-target {
+  inset: 0;
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  backdrop-filter: var(--blur-md);
+}
+
+.fl-spotlight__hole {
+  position: fixed;
+  z-index: 30002;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--accent-primary) 88%, white);
+  box-shadow:
+    0 0 0 9999px color-mix(in srgb, var(--bg-primary) 76%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--accent-primary) 20%, transparent),
+    var(--shadow-glow);
+  pointer-events: none;
+  transition:
+    top 260ms var(--ease-emphasized),
+    left 260ms var(--ease-emphasized),
+    width 260ms var(--ease-emphasized),
+    height 260ms var(--ease-emphasized);
+}
+
+.fl-spotlight__hole > span {
+  position: absolute;
+  inset: -7px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 68%, transparent);
+  border-radius: inherit;
+  animation: fl-spotlight-pulse 1800ms var(--ease-standard) infinite;
+}
+
+.fl-spotlight__card {
+  position: fixed;
+  z-index: 30004;
+  width: min(340px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: grid;
+  gap: 9px;
+  padding: 16px;
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-premium);
+  backdrop-filter: var(--blur-md);
+  pointer-events: auto;
+  animation: fl-lesson-card-in 200ms var(--ease-emphasized) both;
+}
+
+.fl-spotlight__card--waiting {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.fl-spotlight__card-header,
+.fl-lesson-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fl-spotlight__step,
+.fl-lesson-dialog__eyebrow {
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.fl-spotlight__close,
+.fl-lesson-dialog__close {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+}
+
+.fl-spotlight__card h2,
+.fl-lesson-dialog h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 17px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.fl-spotlight__card p,
+.fl-lesson-dialog p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+  letter-spacing: 0;
+}
+
+.fl-spotlight__status,
+.fl-lesson-dialog__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border-left: 2px solid var(--border-highlight);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.fl-spotlight__status[data-tone="checking"],
+.fl-lesson-dialog__status[data-tone="checking"] {
+  border-left-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.fl-spotlight__status[data-tone="success"],
+.fl-lesson-dialog__status[data-tone="success"] {
+  border-left-color: var(--success);
+  background: var(--success-surface);
+  color: var(--success);
+}
+
+.fl-spotlight__status[data-tone="warning"],
+.fl-lesson-dialog__status[data-tone="warning"] {
+  border-left-color: var(--warning);
+  background: var(--warning-surface);
+  color: var(--warning);
+}
+
+.fl-spotlight__action {
+  justify-self: start;
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.fl-lesson-modal-layer {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  backdrop-filter: var(--blur-md);
+  pointer-events: auto;
+  animation: fl-lesson-scrim-in 160ms ease-out both;
+}
+
+.fl-lesson-dialog {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  display: grid;
+  gap: 13px;
+  padding: 20px;
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-md);
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-premium);
+  animation: fl-lesson-card-in 200ms var(--ease-emphasized) both;
+}
+
+.fl-lesson-dialog--celebration {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--success) 58%, var(--border-highlight));
+  box-shadow:
+    var(--shadow-premium),
+    0 0 32px color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.fl-lesson-dialog--celebration .fl-lesson-dialog__icon {
+  background: var(--success-surface);
+  color: var(--success);
+  animation: fl-lesson-success-pop 560ms var(--ease-emphasized) both;
+}
+
+.fl-lesson-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fl-lesson-confetti span {
+  position: absolute;
+  top: -12px;
+  left: 8%;
+  width: 5px;
+  height: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-primary);
+  opacity: 0;
+  animation: fl-lesson-confetti-fall 1800ms var(--ease-standard) forwards;
+  animation-delay: 0ms;
+}
+
+.fl-lesson-confetti span:nth-child(1) { left: 8%; background: var(--success); }
+.fl-lesson-confetti span:nth-child(2) { left: 17%; animation-delay: 55ms; }
+.fl-lesson-confetti span:nth-child(3) { left: 26%; background: var(--warning); animation-delay: 110ms; }
+.fl-lesson-confetti span:nth-child(4) { left: 35%; background: var(--success); animation-delay: 165ms; }
+.fl-lesson-confetti span:nth-child(5) { left: 44%; animation-delay: 220ms; }
+.fl-lesson-confetti span:nth-child(6) { left: 53%; background: var(--warning); animation-delay: 275ms; }
+.fl-lesson-confetti span:nth-child(7) { left: 62%; background: var(--success); animation-delay: 330ms; }
+.fl-lesson-confetti span:nth-child(8) { left: 71%; animation-delay: 385ms; }
+.fl-lesson-confetti span:nth-child(9) { left: 80%; background: var(--warning); animation-delay: 440ms; }
+.fl-lesson-confetti span:nth-child(10) { left: 89%; background: var(--success); animation-delay: 495ms; }
+
+.fl-lesson-dialog__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.fl-lesson-dialog__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--accent-glow);
+  color: var(--accent-primary);
+}
+
+.fl-lesson-dialog__copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.fl-lesson-dialog__choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 3px;
+}
+
+.fl-lesson-dialog__choices .btn {
+  min-height: 38px;
+  white-space: normal;
+}
+
+.fl-lesson-spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  border-radius: var(--radius-circle);
+  animation: fl-lesson-spin 720ms linear infinite;
+}
+
+[data-tutorial-target="timeline-blank-start"] {
+  position: absolute;
+  top: 38px;
+  bottom: 8px;
+  left: 100px;
+  width: 168px;
+  min-height: 32px;
+  pointer-events: none;
+}
+
+[data-tutorial-target="timeline-blank-after-entrance"] {
+  position: absolute;
+  top: 38px;
+  bottom: 8px;
+  left: 100px;
+  width: 168px;
+  min-height: 32px;
+  pointer-events: none;
+}
+
+@keyframes fl-lesson-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fl-spotlight-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.012); }
+}
+
+@keyframes fl-lesson-card-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes fl-lesson-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fl-lesson-success-pop {
+  0% { transform: scale(0.72) rotate(-8deg); }
+  60% { transform: scale(1.1) rotate(3deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes fl-lesson-confetti-fall {
+  0% { opacity: 0; transform: translateY(0) rotate(0); }
+  12% { opacity: 0.9; }
+  100% { opacity: 0; transform: translateY(210px) rotate(240deg); }
+}
+
+.fl-spotlight__card--waiting {
+  animation-name: fl-lesson-waiting-card-in;
+}
+
+@keyframes fl-lesson-waiting-card-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)) scale(0.985); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+[data-perf="low"] .fl-spotlight__hole,
+[data-perf="low"] .fl-spotlight__card,
+[data-perf="low"] .fl-lesson-dialog {
+  box-shadow: 0 0 0 2px var(--border-highlight);
+}
+
+[data-perf="low"] .fl-spotlight__hole > span {
+  animation: none;
+  opacity: 0.65;
+}
+
+[data-perf="low"] .fl-lesson-confetti {
+  display: none;
+}
+
+[data-perf="low"] .fl-lesson-dialog--celebration .fl-lesson-dialog__icon {
+  animation: none;
+}
+
+@media (max-width: 520px) {
+  .fl-lesson-dialog__choices {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fl-spotlight__hole,
+  .fl-spotlight__card,
+  .fl-lesson-dialog,
+  .fl-lesson-modal-layer {
+    transition: none;
+    animation: none;
+  }
+
+  .fl-spotlight__hole > span {
+    animation: none;
+    opacity: 0.65;
+  }
+
+
+  .fl-lesson-confetti,
+  .fl-lesson-dialog--celebration .fl-lesson-dialog__icon {
+    animation: none;
+  }
+
+  .fl-lesson-confetti {
+    display: none;
+  }
+}

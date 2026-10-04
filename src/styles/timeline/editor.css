@@ -1,0 +1,589 @@
+/* ─── Track Editor ──────────────────────────────────────────── */
+.track-block {
+  contain: layout style paint;
+  transition: transform var(--transition-normal);
+  background: color-mix(in srgb, var(--track-color, var(--bg-tertiary)) 22%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--track-color, var(--border-default)) 45%, transparent);
+  border-left: 4px solid var(--track-color, var(--border-default));
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+/* Lifecycle boundary transition band (presentation only; pad has no pointer). */
+.track-block--lifecycle-boundary {
+  --lifecycle-boundary-opacity-base: color-mix(in srgb, var(--track-color, var(--bg-tertiary)) 22%, var(--bg-secondary));
+  --lifecycle-boundary-opacity-above: color-mix(in srgb, var(--bg-surface) 58%, var(--lifecycle-boundary-opacity-base));
+  --lifecycle-boundary-opacity-below: var(--lifecycle-boundary-opacity-base);
+  --lifecycle-boundary-opacity-curve: var(--bg-surface);
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-transition-band {
+  overflow: hidden;
+  background: var(--lifecycle-boundary-opacity-base);
+  border-right: 1px solid color-mix(in srgb, var(--track-color, var(--border-default)) 38%, transparent);
+}
+
+[data-theme="dark"] .track-block--lifecycle-boundary {
+  --lifecycle-boundary-opacity-above: color-mix(in srgb, var(--text-primary) 34%, var(--lifecycle-boundary-opacity-base));
+  --lifecycle-boundary-opacity-curve: var(--text-primary);
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-opacity-plot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-opacity-region--above {
+  fill: var(--lifecycle-boundary-opacity-above);
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-opacity-region--below {
+  fill: var(--lifecycle-boundary-opacity-below);
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-opacity-curve {
+  fill: none;
+  stroke: var(--lifecycle-boundary-opacity-curve);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.track-block--lifecycle-boundary .lifecycle-boundary-pad {
+  background: var(--lifecycle-boundary-opacity-below);
+  pointer-events: none;
+}
+
+.track-block--lifecycle-boundary[data-lifecycle-boundary="end"] .lifecycle-boundary-pad {
+  background: var(--lifecycle-boundary-opacity-above);
+}
+
+.track-block--lifecycle-boundary .track-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: -1px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--lifecycle-boundary-opacity-curve) 82%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--track-color, var(--border-default)) 28%, transparent),
+    0 0 4px color-mix(in srgb, var(--track-color, var(--accent-primary)) 22%, transparent);
+  pointer-events: none;
+}
+
+.lifecycle-pair-relationship-line {
+  background: color-mix(in srgb, var(--track-color, var(--border-default)) 55%, transparent);
+  opacity: 0.55;
+  border-radius: var(--radius-xs);
+}
+
+.lifecycle-pair-relationship-line.is-active {
+  opacity: 0.9;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--track-color, var(--accent-primary)) 25%, transparent);
+}
+
+/* Dialogue companion relationship rail: mounted only while the relationship
+   is selected or hovered, so idle timelines remain visually unchanged. */
+.companion-relationship-rail {
+  overflow: visible;
+}
+
+.companion-relationship-rail__path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--track-color, var(--accent-primary)) 72%, var(--bg-surface));
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.78;
+  vector-effect: non-scaling-stroke;
+}
+
+.companion-relationship-rail__anchor {
+  fill: color-mix(in srgb, var(--track-color, var(--accent-primary)) 76%, var(--bg-surface));
+  stroke: var(--bg-surface);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.track-block.is-pair-peer {
+  outline: 1px solid color-mix(in srgb, var(--track-color, var(--accent-primary)) 65%, transparent);
+  outline-offset: 1px;
+}
+
+[data-perf="high"] .track-block {
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-normal), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+
+[data-perf="high"] .track-block.is-selected,
+[data-perf="high"] .track-block.is-dragging,
+[data-perf="high"] .track-block.is-resizing,
+[data-perf="high"] .track-block:hover {
+  backdrop-filter: var(--blur-md);
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+}
+
+[data-perf="high"] .track-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0));
+  pointer-events: none;
+}
+
+.track-block:hover {
+  filter: brightness(1.1);
+  border-color: var(--border-highlight);
+}
+
+[data-perf="high"] .track-block:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.track-block.is-selected {
+  border-color: var(--accent-primary) !important;
+  z-index: 100 !important;
+}
+
+.track-block.is-collaboration-editing {
+  border-color: color-mix(in srgb, var(--accent-primary) 54%, var(--track-color, var(--border-default))) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 28%, transparent);
+}
+
+.collaboration-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  z-index: 140;
+  pointer-events: none;
+  background: var(--success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 45%, transparent);
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.collaboration-playhead__handle {
+  position: absolute;
+  top: -2px;
+  left: -6px;
+  width: 14px;
+  height: 9px;
+  border-radius: var(--radius-xs);
+  background: var(--success);
+  clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+}
+
+.collaboration-playhead__label {
+  position: absolute;
+  top: 10px;
+  left: 7px;
+  max-width: 96px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.collaboration-pointer {
+  position: absolute;
+  z-index: 140;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.collaboration-pointer__dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--success) 68%, var(--accent-primary));
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.collaboration-pointer__label {
+  position: absolute;
+  left: 8px;
+  top: -9px;
+  max-width: 96px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--success) 24%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+
+.track-block--active {
+  filter: brightness(1.2);
+}
+
+.track-block.is-dragging {
+  will-change: transform;
+  z-index: 1000 !important;
+  opacity: 0.9;
+  transform: scale(1.01);
+}
+
+.track-block.is-resizing {
+  will-change: width;
+  z-index: 1000 !important;
+  opacity: 0.92;
+}
+
+[data-perf="high"] .track-block.is-dragging {
+  box-shadow: var(--shadow-lg) !important;
+}
+
+[data-perf="high"] .track-block.is-resizing {
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.track-block:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.track-density-block {
+  position: absolute;
+  top: 7px;
+  height: 18px;
+  min-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+  pointer-events: none;
+  contain: strict;
+}
+
+.track-rail-layer,
+.track-summary-layer,
+.track-anchor-layer,
+.track-detail-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  contain: layout style paint;
+}
+
+.timeline-snap-guide {
+  position: absolute;
+  top: 32px;
+  bottom: 0;
+  width: 2px;
+  z-index: 90;
+  pointer-events: none;
+  background: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 16px var(--accent-glow);
+}
+
+.timeline-snap-guide span {
+  position: sticky;
+  top: 38px;
+  display: inline-flex;
+  transform: translateX(6px);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-accent);
+  background: var(--bg-surface);
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.timeline-feedback-hud {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1200;
+  pointer-events: none;
+  padding: 4px 8px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(12px);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.track-summary-layer {
+  z-index: 1;
+}
+
+.track-rail-layer > *,
+.track-summary-layer > *,
+.track-anchor-layer > *,
+.track-detail-layer > * {
+  pointer-events: auto;
+}
+
+.track-rail-layer {
+  z-index: 0;
+}
+
+.track-rail-layer > * {
+  pointer-events: none;
+}
+
+.track-anchor-layer {
+  z-index: 2;
+}
+
+.track-detail-layer {
+  z-index: 3;
+}
+
+.track-summary-block {
+  position: absolute;
+  top: 6px;
+  height: 20px;
+  border: 1px solid color-mix(in srgb, var(--summary-color, var(--border-default)) 34%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--summary-color, var(--bg-elevated)) 12%, var(--bg-surface));
+  cursor: pointer;
+  padding: 0 8px 0 0;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+  contain: layout style paint;
+  overflow: hidden;
+}
+
+.track-summary-block:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--summary-color, var(--border-highlight)) 52%, transparent);
+  background: color-mix(in srgb, var(--summary-color, var(--bg-hover)) 16%, var(--bg-surface));
+}
+
+.track-summary-block[data-track-kind="background"] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--summary-color, var(--bg-elevated)) 18%, var(--bg-surface)) 0%, color-mix(in srgb, var(--summary-color, var(--bg-elevated)) 8%, var(--bg-surface)) 100%);
+}
+
+.track-summary-block[data-issue-severity="error"] {
+  border-color: color-mix(in srgb, var(--error) 56%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.12);
+}
+
+/* Color-coded left borders */
+.timeline-item--dialogue { border-left: 3px solid var(--color-dialogue); }
+.timeline-item--character { border-left: 3px solid var(--color-character); }
+.timeline-item--placeholder { opacity: 0.7; border-left-style: dashed; }
+.timeline-item--camera { border-left: 3px solid var(--color-camera); }
+.timeline-item--environment { border-left: 3px solid var(--color-environment); }
+.timeline-item--audio { border-left: 3px solid var(--color-audio); }
+
+.track-summary-block__accent {
+  width: 4px;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--summary-color, var(--accent-primary)) 72%, white 6%);
+  flex-shrink: 0;
+}
+
+.track-summary-block__content {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.track-summary-block__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.track-summary-block__icon {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--summary-color, var(--text-secondary)) 70%, transparent);
+  flex-shrink: 0;
+}
+
+.track-summary-block__icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.track-summary-block__label {
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.track-summary-block__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.track-summary-block__issue-badge {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+}
+
+.track-summary-block__issue-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+.track-summary-block__issue-badge--error {
+  color: color-mix(in srgb, var(--error) 88%, white 12%);
+}
+
+.track-summary-block__issue-badge--warning {
+  color: color-mix(in srgb, var(--warning) 88%, white 12%);
+}
+
+.track-anchor-pin {
+  position: absolute;
+  top: 1px;
+  width: 14px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  transform: translateX(-50%);
+  cursor: move;
+  contain: layout style paint;
+}
+
+.track-anchor-pin__stem {
+  display: block;
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  width: 2px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--track-color, var(--accent-primary)) 62%, transparent);
+}
+
+.track-anchor-pin__head {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-xs) var(--radius-xs) var(--radius-sm) var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--track-color, var(--border-default)) 48%, transparent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.track-anchor-pin[data-has-repeat="true"] .track-anchor-pin__head {
+  border-color: color-mix(in srgb, var(--warning) 58%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--warning) 18%, var(--bg-surface)) 0%, var(--bg-surface) 100%);
+}
+
+.track-anchor-pin[data-has-issue="true"] .track-anchor-pin__head {
+  border-color: color-mix(in srgb, var(--error) 68%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--error) 20%, var(--bg-surface)) 0%, var(--bg-surface) 100%);
+}
+
+.track-anchor-pin[data-collaboration-editing="true"] .track-anchor-pin__head {
+  border-color: color-mix(in srgb, var(--accent-primary) 68%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-primary) 24%, var(--bg-surface)) 0%, var(--bg-surface) 100%);
+}
+
+.track-anchor-pin[data-collaboration-editing="true"] .track-anchor-pin__stem {
+  background: color-mix(in srgb, var(--accent-primary) 78%, transparent);
+}
+
+.track-anchor-pin.is-selected .track-anchor-pin__head {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.timeline-spotlight-window {
+  position: absolute;
+  top: 32px;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 16%, rgba(255, 255, 255, 0.12) 50%, rgba(255, 255, 255, 0.08) 84%, transparent 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,0.04),
+    0 0 24px rgba(255,255,255,0.05);
+}
+
+.track-summary-tooltip {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  backdrop-filter: var(--blur-md);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+}
+
+.track-summary-tooltip__title {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.track-summary-tooltip__range,
+.track-summary-tooltip__meta,
+.track-summary-tooltip__types {
+  font-size: 10px;
+  color: var(--text-secondary);
+}

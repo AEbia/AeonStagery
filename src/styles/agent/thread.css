@@ -1,0 +1,626 @@
+/* ─── Thread ─────────────────────────────────────────────── */
+/* Harness-style shared content column: thread and composer share one
+   centered column width, so sending never moves or widens the composer. */
+.agent-window__thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: min(860px, 100%);
+  margin: 0 auto;
+}
+
+/* Direction-aware continuity when switching conversations */
+.agent-window__thread--switching-forward {
+  animation: agentThreadSwitchForward 180ms var(--ease-emphasized) both;
+}
+
+.agent-window__thread--switching-back {
+  animation: agentThreadSwitchBack 180ms var(--ease-emphasized) both;
+}
+
+@keyframes agentThreadSwitchForward {
+  from { opacity: 0.4; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes agentThreadSwitchBack {
+  from { opacity: 0.4; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ─── Turn rhythm ──────────────────────────────────────────
+   An exchange reads as one unit: the user ask, the agent
+   reply, its work log and the turn status sit close
+   together; the 14px gap separates whole turns. */
+.agent-window__msg--user + .agent-log__assistant,
+.agent-window__msg--user + .agent-log__activity,
+.agent-window__msg--user + .agent-window__msg--user,
+.agent-window__msg--user + .agent-turn-status {
+  margin-top: -6px;
+}
+
+.agent-log__assistant + .agent-log__activity,
+.agent-log__activity + .agent-log__activity,
+.agent-log__activity + .agent-turn-status {
+  margin-top: -8px;
+}
+
+.agent-window__thread > * {
+  animation: agentMessageIn var(--motion-enter-normal) var(--ease-emphasized) both;
+}
+
+@keyframes agentMessageIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-window__empty {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 20px;
+  text-align: center;
+}
+
+.agent-window__empty-mark {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+  color: var(--accent-primary);
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-window__empty p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.agent-window__empty--idle .agent-window__empty-mark {
+  animation: agentIdleBreath 2.6s var(--ease-standard) infinite;
+}
+
+@keyframes agentIdleBreath {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 12px transparent; }
+}
+
+.agent-window__empty-hint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 320px;
+}
+
+/* ─── Messages ───────────────────────────────────────────── */
+.agent-window__msg {
+  display: flex;
+  gap: 12px;
+}
+
+.agent-window__msg--user {
+  justify-content: flex-end;
+}
+
+.agent-window__msg--agent {
+  align-items: flex-start;
+}
+
+.agent-window__agent-mark {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  margin-top: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+  color: var(--accent-primary);
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  font-size: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-window__bubble--user {
+  max-width: min(560px, 84%);
+  padding: 10px 16px;
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
+}
+
+.agent-window__task-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-window__msg--queued {
+  margin-top: 8px;
+}
+
+.agent-window__queued-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.agent-window__bubble--queued {
+  opacity: 0.9;
+  border-style: dashed;
+}
+
+.agent-window__queued-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-muted);
+  padding: 0 4px;
+  user-select: none;
+}
+
+.agent-window__agent-card {
+  min-width: 0;
+  flex: 1;
+  max-width: 580px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-window__agent-card--paused {
+  border-color: var(--border-highlight);
+  box-shadow: var(--shadow-md);
+}
+
+/* Notices */
+.agent-window__notice {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: var(--warning-surface);
+  color: var(--warning);
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
+}
+
+.agent-window__notice--error {
+  background: var(--error-surface);
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 24%, transparent);
+}
+
+/* Paused */
+.agent-window__paused-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.agent-window__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Conversation log: assistant replies and tool activities sit directly on
+   the page (ADR0023) — no bubbles, no cards. */
+.agent-log__assistant {
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-log__assistant-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* Markdown rendering of assistant replies (project Agent window). */
+.markdown-body {
+  font-size: 14.5px;
+  line-height: 1.72;
+  color: var(--text-primary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body table,
+.markdown-body pre {
+  margin: 0 0 12px;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin: 20px 0 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.markdown-body h1 {
+  font-size: 19px;
+}
+
+.markdown-body h2 {
+  font-size: 16.5px;
+}
+
+.markdown-body h3,
+.markdown-body h4 {
+  font-size: 15px;
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: 14px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 24px;
+}
+
+.markdown-body li + li {
+  margin-top: 4px;
+}
+
+.markdown-body blockquote {
+  padding: 4px 0 4px 14px;
+  border-left: 3px solid var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-glow) 30%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+}
+
+.markdown-body code {
+  padding: 0.18em 0.45em;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--text-accent);
+}
+
+.markdown-body pre {
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-primary);
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13.5px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+}
+
+.markdown-body th {
+  background: var(--bg-tertiary);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.markdown-body hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.agent-log__activity {
+  max-width: 680px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  row-gap: 4px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--motion-enter-fast) var(--ease-standard);
+}
+
+.agent-log__activity:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+}
+
+.agent-log__activity-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.agent-log__activity--context-compaction {
+  color: var(--warning);
+  animation: agentContextCompactionLogIn var(--motion-enter-normal) var(--ease-emphasized) both;
+}
+
+.agent-log__activity--context-compaction .agent-log__activity-text {
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.agent-log__activity-icon--context-compaction {
+  width: 12px;
+  height: 12px;
+  color: var(--warning);
+}
+
+.agent-log__activity-icon--context-compaction .agent-window__compress-mark {
+  transform-origin: center;
+  animation: agentContextCompress 720ms var(--ease-emphasized) both;
+}
+
+@keyframes agentContextCompactionLogIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-log__activity-text {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-log__activity-button {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--motion-enter-fast) var(--ease-standard);
+}
+
+.agent-log__activity-button:hover .agent-log__activity-text {
+  color: var(--text-secondary);
+}
+
+.agent-log__activity-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.agent-log__activity-button svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: transform var(--motion-enter-fast) var(--ease-standard);
+}
+
+.agent-log__activity-chevron--open {
+  transform: rotate(180deg);
+}
+
+.agent-log__activity-facts {
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 6px 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg-tertiary) 45%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.agent-log__activity-facts > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.agent-log__activity-content {
+  max-height: 340px;
+  margin: 2px 0 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-surface) 65%, transparent);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Harness-style turn status line: the latest round's state anchored in the
+   flow — shimmering 「运行中」 + live clock while running, then the settled
+   state with its duration until the next round starts. */
+.agent-turn-status {
+  max-width: 680px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 12.5px;
+  animation: agentRunstripIn var(--motion-enter-normal) var(--ease-emphasized) both;
+}
+
+@keyframes agentRunstripIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.agent-turn-status__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-turn-status__shimmer {
+  font-weight: 700;
+  background: linear-gradient(90deg,
+    var(--accent-primary) 0%,
+    var(--accent-primary) 40%,
+    color-mix(in srgb, var(--accent-primary) 40%, transparent) 50%,
+    var(--accent-primary) 60%,
+    var(--accent-primary) 100%);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: agentTurnShimmer 1.8s linear infinite;
+}
+
+@keyframes agentTurnShimmer {
+  to { background-position: 0 0; }
+}
+
+.agent-turn-status__label {
+  font-weight: 700;
+  color: var(--success);
+}
+
+.agent-turn-status__label--error {
+  color: var(--error);
+}
+
+.agent-turn-status__clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.agent-turn-status__phase,
+.agent-turn-status__model {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-turn-status__reads {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.agent-turn-status__pause {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--motion-enter-fast) var(--ease-standard);
+}
+
+.agent-turn-status__pause:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-highlight);
+}
+
+.agent-turn-status__error {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}

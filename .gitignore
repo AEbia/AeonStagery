@@ -1,0 +1,97 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Dependency directories
+node_modules/
+
+# TypeScript
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Output directories
+dist
+dist-electron
+release
+coverage/
+
+# Assets / Resources
+background/
+figure/
+
+# IDEs and editors
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Agent / local workflow files
+.claude/
+.impeccable/
+AGENTS.md
+CLAUDE.md
+CONTEXT.md
+docs/agents/
+docs/superpowers/
+*对照表*.txt
+.superpowers/
+
+*.png
+*.webp
+*.jpg
+*.jpeg
+!build/icon.png
+!public/icon*.png
+!public/apple-touch-icon.png
+!public/favicon*.png
+!public/logo.png
+!src/assets/icon.png
+!src/assets/logo.png
+casual-2023/
+projects/
+*.mp4
+demo/
+.aeonstagery-collab
+.aeonstagery-collab
+.superpowers
+.generated/
+.playwright-cli/
+# Live2D runtimes are never committed. They are staged locally (see ADR-0035).
+# Local sources default to `.local/live2d/live2d.min.js` and
+# `.local/cubism-web-sdk/`, or whatever LIVE2D_CUBISM2_CORE /
+# CUBISM_WEB_SDK_DIR point at.
+public/live2d.min.js
+public/live2dcubismcore.min.js
+public/vendor/cubism-web/
+src/assets/live2d.min.js
+.local/
+test-results/
+.scratch/

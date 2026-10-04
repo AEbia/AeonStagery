@@ -1,0 +1,260 @@
+/* ─── CSS Variables ─────────────────────────────────────────── */
+:root {
+  /* Typography */
+  --font-sans: 'Outfit', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-settle: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-enter-fast: 140ms;
+  --motion-enter-normal: 200ms;
+  --motion-enter-panel: 260ms;
+  --motion-exit-fast: 160ms;
+  --motion-exit-panel: 200ms;
+  --motion-distance-sm: 4px;
+  --motion-distance-md: 8px;
+  --motion-hover-lift: -1px;
+  --motion-press-scale: 0.985;
+  --motion-panel-scale: 0.985;
+
+  /* ─── Corner Radius Tokens (Primitive Scale) ─────────────────── */
+  --radius-none: 0;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+  --radius-circle: 50%;
+
+  /* ─── Corner Radius Hierarchy (Semantic Tokens) ───────────────── */
+  /* Level 1: Micro & Indicators (2px) */
+  --radius-indicator: var(--radius-xs);
+  --radius-hairline: var(--radius-xs);
+
+  /* Level 2: Compact Items & Track Blocks (4px) */
+  --radius-track-block: var(--radius-sm);
+  --radius-control-sm: var(--radius-sm);
+  --radius-badge: var(--radius-sm);
+  --radius-tag: var(--radius-sm);
+  --radius-tooltip: var(--radius-sm);
+
+  /* Level 3: Standard Interactive Controls (8px) */
+  --radius-control: var(--radius-md);
+  --radius-button: var(--radius-md);
+  --radius-input: var(--radius-md);
+  --radius-menu: var(--radius-md);
+  --radius-dropdown: var(--radius-md);
+  --radius-tab: var(--radius-md);
+
+  /* Level 4: Surface & Panel Containers (12px) */
+  --radius-surface: var(--radius-lg);
+  --radius-card: var(--radius-lg);
+  --radius-panel: var(--radius-lg);
+  --radius-popover: var(--radius-lg);
+
+  /* Level 5: Modals & Dialog Windows (16px) */
+  --radius-dialog: var(--radius-xl);
+  --radius-modal: var(--radius-xl);
+  --radius-window: var(--radius-xl);
+
+  /* Level 6: Hero & Wizard (24px) */
+  --radius-hero: var(--radius-2xl);
+
+  /* Level 7: Pill & Circular Affordances (9999px / 50%) */
+  --radius-pill: var(--radius-full);
+  --radius-switch: var(--radius-full);
+
+  /* Semantic Action Colors */
+  --success: #34d399;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --success-surface: color-mix(in srgb, var(--success) 10%, var(--bg-surface));
+  --warning-surface: color-mix(in srgb, var(--warning) 10%, var(--bg-surface));
+  --error-surface: color-mix(in srgb, var(--error) 10%, var(--bg-surface));
+
+  --color-dialogue: #10b981;
+  --color-character: #60a5fa;
+  --color-camera: #f472b6;
+  --color-environment: #fbbf24;
+  --color-audio: #a78bfa;
+
+  /* ── Light Theme (Clean Studio) ───────────────────────────── */
+  --bg-primary: #f4f5f7;
+  --bg-secondary: rgba(255, 255, 255, 0.92);
+  --bg-tertiary: #edEEf1;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e6e8ec;
+  --bg-hover: #f0f1f4;
+  --timeline-bg: var(--bg-primary);
+
+  --text-primary: #13151a;
+  --text-secondary: #4b5160;
+  --text-muted: #8c92a0;
+  --text-accent: #4f46e5;
+
+  --accent-primary: #4f46e5;
+  --accent-secondary: #6366f1;
+  --accent-glow: rgba(79, 70, 229, 0.15);
+  --accent-hover: #4338ca;
+
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-default: rgba(0, 0, 0, 0.07);
+  --border-highlight: rgba(0, 0, 0, 0.13);
+  --border-accent: rgba(79, 70, 229, 0.3);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+  --shadow-premium: 0 8px 32px rgba(0, 0, 0, 0.12);
+
+  --blur-md: blur(8px);
+  --blur-lg: blur(16px);
+  --blur-xl: blur(24px);
+
+  --app-gradient: linear-gradient(180deg, #f4f5f7 0%, #e8eaef 100%);
+  --premium-gradient: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 100%);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #11131a;
+  --bg-secondary: rgba(24, 25, 34, 0.92);
+  --bg-tertiary: #191b25;
+  --bg-surface: #1d1f2a;
+  --bg-elevated: #252735;
+  --bg-hover: #2b2d3d;
+
+  --text-primary: #f1eee9;
+  --text-secondary: #aaa4b4;
+  --text-muted: #706b7a;
+  --text-accent: #d88c7a;
+
+  --accent-primary: #d88c7a;
+  --accent-secondary: #8fa7c7;
+  --accent-glow: rgba(216, 140, 122, 0.22);
+  --accent-hover: #efac98;
+
+  --border-subtle: rgba(241, 238, 233, 0.05);
+  --border-default: rgba(198, 190, 210, 0.1);
+  --border-highlight: rgba(216, 140, 122, 0.28);
+  --border-accent: rgba(216, 140, 122, 0.42);
+
+  --shadow-sm: 0 1px 2px rgba(4, 5, 10, 0.34);
+  --shadow-md: 0 6px 18px rgba(4, 5, 10, 0.36);
+  --shadow-lg: 0 18px 42px rgba(4, 5, 10, 0.46);
+  --shadow-glow: 0 0 24px var(--accent-glow);
+  --shadow-premium: 0 18px 48px rgba(4, 5, 10, 0.52);
+
+  --app-gradient: radial-gradient(circle at 16% 0%, rgba(216, 140, 122, 0.11) 0%, transparent 34%), linear-gradient(180deg, #11131a 0%, #171923 100%);
+  --premium-gradient: linear-gradient(180deg, rgba(255,255,255,0.035) 0%, transparent 100%);
+}
+
+/* ─── Performance Mode ──────────────────────────────────────── */
+[data-perf="low"] {
+  --blur-md: none !important;
+  --blur-lg: none !important;
+  --blur-xl: none !important;
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: 0 4px 8px rgba(0,0,0,0.2);
+  --shadow-glow: none;
+  --shadow-premium: none;
+  --motion-hover-lift: 0px;
+  --motion-press-scale: 1;
+  --motion-panel-scale: 1;
+}
+
+[data-perf="low"] * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+[data-perf="low"] .track-block {
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+[data-perf="low"] .status-bar__stat:hover {
+  background: transparent;
+}
+
+[data-perf="low"] .btn,
+[data-perf="low"] .card,
+[data-perf="low"] .top-bar__menu,
+[data-perf="low"] .collaboration-popover,
+  [data-perf="low"] .ai-prose-workbench-window,
+[data-perf="low"] .context-panel,
+[data-perf="low"] .inspector-workspace__pane,
+[data-perf="low"] .inspector-view-picker__menu,
+[data-perf="low"] .workspace-tools-window,
+[data-perf="low"] .workspace-tools-window__view,
+[data-perf="low"] .character-directory__detail,
+[data-perf="low"] .character-directory__section,
+[data-perf="low"] .workspace-tools-diagnostics__issue,
+[data-perf="low"] .workspace-tools-snapshot__metrics > div,
+[data-perf="low"] .workspace-tools-snapshot__character,
+[data-perf="low"] .app-toast,
+[data-perf="low"] .app-toast__progress,
+[data-perf="low"] .timeline-selection-bar,
+[data-perf="low"] .recording-dot,
+[data-perf="low"] .collaboration-dot--connecting,
+[data-perf="low"] .collaboration-dot--seeding,
+[data-perf="low"] .agent-window .agent-window__pulse,
+[data-perf="low"] .agent-window .agent-window__empty-mark,
+[data-perf="low"] .agent-window .agent-window__thread > *,
+[data-perf="low"] .agent-window .agent-window__thread--switching-forward,
+[data-perf="low"] .agent-window .agent-window__thread--switching-back,
+[data-perf="low"] .agent-window .agent-window__badge,
+[data-perf="low"] .agent-window .agent-window__compress-mark,
+[data-perf="low"] .agent-window .agent-log__activity--context-compaction,
+[data-perf="low"] .agent-window .agent-model-panel,
+[data-perf="low"] .agent-window .agent-turn-status__shimmer,
+[data-perf="low"] .agent-window .agent-turn-status,
+[data-perf="low"] .agent-window .agent-reply-pending__caret,
+[data-perf="low"] .agent-window .agent-reply-streaming__caret,
+[data-perf="low"] .agent-window .agent-tool-spinner,
+[data-perf="low"] .agent-window .agent-log__activity--live {
+  animation: none !important;
+  transform: none !important;
+}
+
+/* ─── Glass & Visual Effects ───────────────────────────────── */
+[data-glass="off"] .settings-dialog {
+  backdrop-filter: none !important;
+  background: var(--bg-surface) !important;
+}
+
+[data-glass="on"] .settings-dialog {
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2500;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: var(--blur-lg);
+  animation: settingsOverlayIn 180ms ease-out;
+}
+
+.dialog-overlay.is-closing {
+  animation: settingsOverlayOut 220ms ease-in forwards;
+}
+
+.settings-dialog {
+  animation: settingsDialogIn 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: center;
+}
+
+.settings-dialog.is-closing {
+  animation: settingsDialogOut 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
