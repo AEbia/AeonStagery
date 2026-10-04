@@ -320,6 +320,61 @@ describe('WorkspaceToolsWindow script draft', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('keeps seven variants visible and accepts a WMDL file for the seventh variant', async () => {
+    const api = (window as any).aeonStageryAPI;
+    api.dialog = {
+      showOpen: vi.fn(async () => ({
+        canceled: false,
+        filePaths: ['D:/project/models/variant-seven.wmdl'],
+      })),
+    };
+    api.path = {
+      relative: vi.fn(async () => 'models/variant-seven.wmdl'),
+    };
+
+    const variants = Array.from({ length: 7 }, (_, index) => ({
+      name: `副模型${index + 1}`,
+      model: `models/variant-${index + 1}.model3.json`,
+    }));
+    const snapshot = {
+      ...createSnapshot('scene-a', 'characters'),
+      sceneMeta: { title: '多副模型', characters: [{ id: 'hero', name: '主角', variants }] },
+    };
+    render(<WorkspaceToolsWindow />);
+    await showSnapshot(snapshot);
+
+    expect(document.querySelectorAll('.character-directory__variant')).toHaveLength(7);
+    fireEvent.click(screen.getAllByTitle('选择副模型文件')[6]);
+
+    await waitFor(() => {
+      expect(api.dialog.showOpen).toHaveBeenCalledWith(expect.objectContaining({
+        filters: expect.arrayContaining([
+          expect.objectContaining({ extensions: expect.arrayContaining(['wmdl']) }),
+        ]),
+      }));
+      expect(sendCommand).toHaveBeenCalledWith({
+        type: 'character-command',
+        command: {
+          kind: 'update-character-variant-model',
+          charId: 'hero',
+          variantIndex: 6,
+          nextModel: 'models/variant-seven.wmdl',
+        },
+      });
+    });
+
+    const updatedVariants = variants.map((variant, index) => (
+      index === 6 ? { ...variant, model: 'models/variant-seven.wmdl' } : variant
+    ));
+    await showSnapshot({
+      ...snapshot,
+      sceneMeta: { title: '多副模型', characters: [{ id: 'hero', name: '主角', variants: updatedVariants }] },
+    });
+    const updatedRows = document.querySelectorAll('.character-directory__variant');
+    expect(updatedRows).toHaveLength(7);
+    expect(updatedRows[6].textContent).toContain('models/variant-seven.wmdl');
+  });
+
   it('keeps a draft bound to its original scene and blocks applying it to another scene', async () => {
     render(<WorkspaceToolsWindow />);
     const sceneA = createSnapshot('scene-a', 'script');

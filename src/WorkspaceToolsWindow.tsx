@@ -170,7 +170,7 @@ const DetachedCharacterPanel: React.FC<{
     const result = await api.dialog.showOpen({
       title: '选择 Live2D 模型文件',
       properties: ['openFile'],
-      filters: [{ name: 'Live2D 模型', extensions: ['json'] }],
+      filters: [{ name: 'Live2D 模型', extensions: ['json', 'wmdl'] }],
     });
     const selectedPath = result.filePaths?.[0];
     if (result.canceled || !selectedPath) return;
