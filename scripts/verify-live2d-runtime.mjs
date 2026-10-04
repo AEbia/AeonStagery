@@ -11,9 +11,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readRuntimeManifest, sha256File, FALLBACK_MARKER } from './lib/live2dRuntimeStaging.mjs';
+import { readRuntimeManifest, sha256File } from './lib/live2dRuntimeStaging.mjs';
 import {
-  FRAMEWORK_MARKERS,
+  CUBISM_ENGINE_MARKER,
   findMarkers,
   listDirectoryNames,
   listRuntimeNamedFiles,
@@ -53,10 +53,13 @@ if (manifest.mode !== mode) {
   fail(`staging manifest mode is "${manifest.mode}" but the gate ran with --mode=${mode}; re-run the sync step.`);
 }
 
+if (!fs.existsSync(distRoot)) fail('built renderer is missing; run the build before verifying runtime staging.');
+if (findMarkers(distRoot, [CUBISM_ENGINE_MARKER])[CUBISM_ENGINE_MARKER].length === 0) {
+  fail('built renderer does not contain the modern Cubism engine.');
+}
+
 const publicRuntimeFiles = listRuntimeNamedFiles(publicRoot);
 const distRuntimeFiles = listRuntimeNamedFiles(distRoot);
-const distFallback = findMarkers(distRoot, [FALLBACK_MARKER]);
-const distFramework = findMarkers(distRoot, FRAMEWORK_MARKERS);
 const packagedLive2DPackages = listDirectoryNames(path.join(projectRoot, 'node_modules'), LIVE2D_PACKAGE_DIR_NAMES);
 
 if (mode === 'none') {
@@ -66,16 +69,6 @@ if (mode === 'none') {
   for (const filePath of distRuntimeFiles) {
     fail(`dist/ still contains a Live2D runtime artifact: ${path.relative(projectRoot, filePath)}`);
   }
-  if (distFallback[FALLBACK_MARKER].length === 0) {
-    fail('dist/ does not contain the Cubism Web fallback stub; the release bundle may have picked up a real SDK.');
-  } else {
-    notes.push(`fallback stub present in ${distFallback[FALLBACK_MARKER].join(', ')}`);
-  }
-  for (const marker of FRAMEWORK_MARKERS) {
-    if (distFramework[marker].length > 0) {
-      fail(`dist/ bundles official Cubism Web framework code ("${marker}") in ${distFramework[marker].join(', ')}`);
-    }
-  }
   if (packagedLive2DPackages.length > 0) {
     notes.push(
       'local node_modules still contains Live2D-derived packages (dev-only): '
@@ -84,8 +77,11 @@ if (mode === 'none') {
     );
   }
 } else {
+  if (distRuntimeFiles.some((file) => file.includes(`${path.sep}vendor${path.sep}`))) {
+    fail('built renderer contains obsolete external Cubism shaders.');
+  }
   if (!manifest.families.cubism2) fail('verify mode requires the Cubism 2.1 core to be staged');
-  if (!manifest.families.cubism3Plus) fail('verify mode requires the Cubism Web (3/4/5) framework to be staged');
+  if (!manifest.families.cubism3Plus) fail('verify mode requires the Cubism 3/4/5 Core to be staged');
 
   for (const entry of manifest.files) {
     const absolute = path.join(projectRoot, entry.path);
@@ -97,17 +93,11 @@ if (mode === 'none') {
     if (actual !== entry.sha256) {
       fail(`staged runtime file changed after staging: ${entry.path}`);
     }
-  }
-
-  for (const marker of FRAMEWORK_MARKERS) {
-    if (distFramework[marker].length === 0) {
-      fail(`dist/ does not bundle official Cubism Web framework code ("${marker}"); verification build is incomplete`);
+    const builtFile = path.join(distRoot, entry.path.replace(/^public\//, ''));
+    if (!fs.existsSync(builtFile) || sha256File(builtFile) !== entry.sha256) {
+      fail(`built runtime file is missing or changed: ${entry.path}`);
     }
   }
-  if (distFallback[FALLBACK_MARKER].length > 0) {
-    fail(`dist/ still contains the fallback stub (${distFallback[FALLBACK_MARKER].join(', ')}); the real SDK was not used`);
-  }
-  notes.push(`staged ${manifest.files.length} runtime file(s) verified by sha256`);
 }
 
 for (const note of notes) console.log(`[verify-live2d-runtime] ${note}`);

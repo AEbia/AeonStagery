@@ -7,9 +7,7 @@ import { expect, it, vi } from 'vitest';
 const stageManagerMocks = vi.hoisted(() => ({
   appInit: vi.fn(),
   ensureLive2DRenderPipe: vi.fn(async () => undefined),
-  registerOfficialCubismWebDrawPipe: vi.fn(),
   customAnimInit: vi.fn(),
-  setOfficialCubismWebPreviewResolution: vi.fn(),
 }));
 
 vi.mock('pixi.js', () => {
@@ -45,22 +43,13 @@ vi.mock('../engine/Live2DEngineBridge', () => ({
   ensureLive2DRenderPipe: stageManagerMocks.ensureLive2DRenderPipe,
 }));
 
-vi.mock('../engine/OfficialCubismWebDrawPipe', () => ({
-  registerOfficialCubismWebDrawPipe: stageManagerMocks.registerOfficialCubismWebDrawPipe,
-}));
-
 vi.mock('../engine/CustomAnimHost', () => ({
   customAnimHost: { init: stageManagerMocks.customAnimInit },
-}));
-
-vi.mock('../engine/OfficialCubismWebPreview', () => ({
-  setOfficialCubismWebPreviewResolution: stageManagerMocks.setOfficialCubismWebPreviewResolution,
 }));
 
 it('enables Pixi back-buffer support when initializing the stage for advanced blend modes', async () => {
   vi.resetModules();
   stageManagerMocks.appInit.mockClear();
-  stageManagerMocks.setOfficialCubismWebPreviewResolution.mockClear();
   Object.defineProperty(window, 'devicePixelRatio', {
     configurable: true,
     value: 2,
@@ -81,7 +70,6 @@ it('enables Pixi back-buffer support when initializing the stage for advanced bl
 
   stageManager.setPreviewResolution(0.5);
   expect(stageManager.getPreviewResolution()).toBe(0.5);
-  expect(stageManagerMocks.setOfficialCubismWebPreviewResolution).toHaveBeenLastCalledWith(0.5);
   expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 1);
   expect(stageManager.getApp().render).toHaveBeenCalledTimes(1);
   expect(canvas.style.width).toBe(originalStyle.width);
@@ -89,10 +77,8 @@ it('enables Pixi back-buffer support when initializing the stage for advanced bl
 
   stageManager.setPreviewResolution(0.25);
   expect(stageManager.getPreviewResolution()).toBe(0.25);
-  expect(stageManagerMocks.setOfficialCubismWebPreviewResolution).toHaveBeenLastCalledWith(0.25);
   expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 0.5);
 
   stageManager.setPreviewResolution(1);
-  expect(stageManagerMocks.setOfficialCubismWebPreviewResolution).toHaveBeenLastCalledWith(1);
   expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 2);
 });

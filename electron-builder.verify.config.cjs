@@ -25,7 +25,7 @@
  * vice versa) provably preserves it.
  *
  * This artifact must never be redistributed publicly (ADR-0035): it contains
- * Live2D Framework source.
+ * user-supplied Live2D Core scripts.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -36,7 +36,6 @@ const projectRoot = __dirname;
 const runtimeResources = [
   { from: 'public/live2d.min.js', to: 'live2d-runtime/live2d.min.js' },
   { from: 'public/live2dcubismcore.min.js', to: 'live2d-runtime/live2dcubismcore.min.js' },
-  { from: 'public/vendor/cubism-web', to: 'live2d-runtime/vendor/cubism-web' },
 ];
 
 const missing = [];

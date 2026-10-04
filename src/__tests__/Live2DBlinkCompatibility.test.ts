@@ -76,7 +76,7 @@ describe('Task 2 Live2D blink compatibility', () => {
     const setBlink = vi.fn();
     const controls = getLive2DRuntimeAdapter({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     }).getControls();
 

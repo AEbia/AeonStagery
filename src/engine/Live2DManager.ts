@@ -1169,8 +1169,8 @@ class Live2DManager {
    *
    * Called from takeOverCustomMotion and lazily re-invoked by updateAll so a
    * motion that started before its model finished loading still gets staged
-   * once the model arrives. A failed install (runtime without the emitter
-   * seam, e.g. official-cubism-web) is recorded per custom-motion state
+   * once the model arrives. A failed install (runtime without the writable Cubism 2
+   * seam, e.g. untitled-pixi-live2d-engine-cubism) is recorded per custom-motion state
    * object — otherwise updateAll would retry the (always failing) install
    * every frame.
    */
@@ -1219,7 +1219,7 @@ class Live2DManager {
    */
   private restoreCustomMotionBaseline(entry: CharacterEntry): void {
     if (!entry.model) return;
-    if (entry.runtime?.adapterId === 'official-cubism-web') {
+    if (entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism') {
       if (entry.idleSnapshot) {
         getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, entry.idleSnapshot as ModelSnapshot);
       }
@@ -2568,7 +2568,7 @@ class Live2DManager {
     // 将动作作为后台任务踢出，_motionMutex 负责串行化。
     this._pendingMotionCount = 0;
     for (const entry of targetMap.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'official-cubism-web') {
+      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
         continue;
       }
       if ((entry as any)._pendingPlayMotion) {
@@ -2627,7 +2627,7 @@ class Live2DManager {
 
     // 保持 _currentDt 为初始值 0，确保 render 钩子在播放时不重复推进时间
     for (const entry of this.characters.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'official-cubism-web') {
+      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
         continue;
       }
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !this._scriptEngine?.isReconstructing) {

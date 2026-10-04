@@ -145,10 +145,6 @@ vi.mock('../engine/Live2DEngineBridge', () => ({
   ensureLive2DRenderPipe: vi.fn(async () => {}),
 }));
 
-vi.mock('../engine/OfficialCubismWebDrawPipe', () => ({
-  registerOfficialCubismWebDrawPipe: vi.fn(),
-}));
-
 describe('StageManager environment layer clear lifecycle', () => {
   beforeEach(() => {
     delayedCalls.length = 0;

@@ -1128,7 +1128,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1159,7 +1159,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1202,7 +1202,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1243,7 +1243,7 @@ describe('CharacterSynchronizer', () => {
     live2D.listCharacters.mockReturnValue(['char1']);
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([['char1', {
-      runtime: { adapterId: 'official-cubism-web' },
+      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' },
     }]]));
     let renderedParameter = 2;
     (live2D as any).restoreSeekState = vi.fn(async (_id: string, restore: any) => {

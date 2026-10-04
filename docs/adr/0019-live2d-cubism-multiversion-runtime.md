@@ -34,6 +34,18 @@ ADR-0013 与 ADR-0018 的 bundle 决策继续有效：协作 scene 仍保存 pro
 - `Live2DRuntimeResolver` 负责把 runtime family 映射到 adapter id 与支持状态。
 - `Live2DRuntimeAdapter` 负责 runtime 初始化与模型实例创建。
 
-Cubism 2 当前由 `Cubism2PixiLive2DAdapter` 包住原有 `pixi-live2d-display/cubism2` 路径，并保留 mask size 等现有兼容修复。Cubism 3/4/5 当前由 `OfficialCubismWebLive2DAdapter` 明确占位：resolver 会把 `.model3.json` / `.moc3` 模型路由到该 adapter，但在官方 Cubism Web SDK 接入前保持 unsupported，使 UI、BakeEngine 与 ValidationDaemon 获得一致的可解释失败。
+Cubism 2 当前由 `Cubism2PixiLive2DAdapter` 包住 `untitled-pixi-live2d-engine/cubism-legacy` 路径，保留现有兼容修复。Cubism 3/4/5 由 `CubismPixiLive2DAdapter` 使用 `untitled-pixi-live2d-engine/cubism`，只需要用户提供 `live2dcubismcore.min.js`。`Live2DEngineBridge` 集中加载两个入口，并注册能够识别两个入口模型实例的共享原生 Pixi 绘制管线。
+
+### 2026-10-05: Cubism 3/4/5 implementation replacement
+
+- 原 `official-cubism-web` adapter、`@cubism/*` generated SDK alias、独立画布和外部 Shader 链路移除。运行时描述与临时快照使用 `untitled-pixi-live2d-engine-cubism` adapter ID。
+- `CubismPixiModel` 在现有 controls interface 后适配新引擎：提前执行模拟使 Seek、参数读取、快照和 Bake 不依赖下一次绘制；渲染不重复推进模拟。
+- 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情清理与异步取消、确定性 blink/breath、Core 更新前的参数注入以及多模型扩容后的内存视图刷新。
+- 使用引擎内置的原生 Pixi 渲染，预览质量随舞台 renderer resolution 生效；Bake 通过 Pixi v8 RenderTexture contract 绘制。
+- Cubism 2.1 的 core、动作与私有 controls 不变。3/4/5 的 Core 缺失时仍只在对应模型加载处报告明确错误。
+
+Implementation: `src/engine/CubismPixiSdk.ts`, `src/engine/CubismPixiModel.ts`, `src/engine/Live2DEngineBridge.ts`, `src/engine/Live2DRuntimeAdapter.ts`.
+Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
+
 
 下一阶段接入 Cubism 5 时，优先填充 `OfficialCubismWebLive2DAdapter` 的 init/create/model control 能力，而不是继续在 `Live2DManager`、`Live2DMotionController` 或 `BakeEngine` 中新增 Cubism 5 私有字段分支。

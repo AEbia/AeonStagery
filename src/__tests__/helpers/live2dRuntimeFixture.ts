@@ -41,6 +41,7 @@ export function resolveCubism2CorePath(): string | null {
 export function resolveCubismWebCorePath(): string | null {
   const configured = process.env.CUBISM_WEB_SDK_DIR?.trim();
   const candidates = [
+    ...(process.env.LIVE2D_CUBISM_CORE ? [process.env.LIVE2D_CUBISM_CORE] : []),
     ...(configured ? [path.join(configured, 'Core', 'live2dcubismcore.min.js')] : []),
     path.join(projectRoot, 'public', 'live2dcubismcore.min.js'),
   ];
@@ -53,23 +54,6 @@ export function resolveCubismWebCorePath(): string | null {
 
 export function hasCubism2Core(): boolean {
   return resolveCubism2CorePath() !== null;
-}
-
-/**
- * True when the official Cubism Web framework (not the build-time fallback
- * stub) is staged under `.generated/cubism-web`.
- */
-export function hasCubismWebFramework(): boolean {
-  const frameworkEntry = path.join(
-    projectRoot,
-    '.generated',
-    'cubism-web',
-    'src',
-    'live2dcubismframework.ts',
-  );
-  if (!fs.existsSync(frameworkEntry)) return false;
-  const content = fs.readFileSync(frameworkEntry, 'utf8');
-  return !content.includes('Auto-generated fallback shim');
 }
 
 /** True when the vendor engine package is installed (dev-time dependency). */

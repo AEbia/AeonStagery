@@ -7,50 +7,13 @@ export interface Live2DRuntimeAvailabilityReport {
 }
 
 const RUNTIME_SCRIPT_FILES = ['live2d.min.js', 'live2dcubismcore.min.js'] as const;
-const CUBISM_WEB_VENDOR_DIR = path.join('vendor', 'cubism-web');
-const CUBISM_WEB_SHADER_PROBE = path.join(CUBISM_WEB_VENDOR_DIR, 'Shaders', 'WebGL', 'vertshadersrc.vert');
-
 function hasCubism3PlusRuntime(root: string): boolean {
-  return fs.existsSync(path.join(root, 'live2dcubismcore.min.js'))
-    && fs.existsSync(path.join(root, CUBISM_WEB_SHADER_PROBE));
-}
-
-/**
- * Copy `sourceDir` into `targetDir` without ever overwriting or deleting an
- * existing target file. Returns how many files were added.
- *
- * Update safety (ADR-0035): the user-controlled runtime root under userData is
- * authoritative. An app update — including one that ships no runtime at all —
- * may only fill in missing files; it must never replace or remove a runtime the
- * user already has.
- */
-function copyMissingRecursive(sourceDir: string, targetDir: string): number {
-  let copied = 0;
-  const stack: Array<{ source: string; target: string }> = [{ source: sourceDir, target: targetDir }];
-
-  while (stack.length > 0) {
-    const current = stack.pop() as { source: string; target: string };
-    for (const entry of fs.readdirSync(current.source, { withFileTypes: true })) {
-      const sourcePath = path.join(current.source, entry.name);
-      const targetPath = path.join(current.target, entry.name);
-      if (entry.isDirectory()) {
-        stack.push({ source: sourcePath, target: targetPath });
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (fs.existsSync(targetPath)) continue;
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.copyFileSync(sourcePath, targetPath);
-      copied += 1;
-    }
-  }
-
-  return copied;
+  return fs.existsSync(path.join(root, 'live2dcubismcore.min.js'));
 }
 
 /**
  * Seed-root existence per runtime family. The Cubism Web (3/4/5) family needs
- * both the core script and its shader vendor directory to be usable.
+ * only the core script to be usable.
  */
 export function inspectLive2DRuntimeSeed(sourceRoot: string): Live2DRuntimeAvailabilityReport {
   return {
@@ -92,8 +55,8 @@ export function ensureLive2DRuntimeFiles(
   }
   if (!seed.cubism3Plus && !hasCubism3PlusRuntime(targetRoot)) {
     warn(
-      `[Live2D] Official Cubism Web runtime seed (live2dcubismcore.min.js / vendor/cubism-web) is missing under ${sourceRoot}. ` +
-      'Stage one with `npm run sync:live2d-runtime` (CUBISM_WEB_SDK_DIR) to enable Cubism 3/4/5 models.',
+      `[Live2D] Cubism 3/4/5 runtime seed (live2dcubismcore.min.js) is missing under ${sourceRoot}. ` +
+      'Stage one with `npm run sync:live2d-runtime` (LIVE2D_CUBISM_CORE) to enable Cubism 3/4/5 models.',
     );
   }
 
@@ -104,12 +67,6 @@ export function ensureLive2DRuntimeFiles(
     if (fs.existsSync(targetPath)) continue;
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.copyFileSync(sourcePath, targetPath);
-  }
-
-  const shaderSourceRoot = path.join(sourceRoot, CUBISM_WEB_VENDOR_DIR);
-  const shaderTargetRoot = path.join(targetRoot, CUBISM_WEB_VENDOR_DIR);
-  if (fs.existsSync(shaderSourceRoot)) {
-    copyMissingRecursive(shaderSourceRoot, shaderTargetRoot);
   }
 
   return {

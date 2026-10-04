@@ -156,11 +156,11 @@ describe('BakeEngine runtime routing', () => {
 
     vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
@@ -240,11 +240,11 @@ describe('BakeEngine runtime routing', () => {
     });
     vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
@@ -321,7 +321,7 @@ describe('BakeEngine runtime routing', () => {
   it('keeps composed cubism3-plus bake paths rejected for now', async () => {
     const officialCreateModel = vi.fn();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
@@ -348,7 +348,7 @@ describe('BakeEngine runtime routing', () => {
       if (modelPath.endsWith('.model3.json')) {
         return {
           runtimeFamily: 'cubism3-plus',
-          adapterId: 'official-cubism-web',
+          adapterId: 'untitled-pixi-live2d-engine-cubism',
           supported: true,
         };
       }
@@ -670,7 +670,7 @@ describe('BakeEngine runtime routing', () => {
       id: 'rana',
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       model: {},

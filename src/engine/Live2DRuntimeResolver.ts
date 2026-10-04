@@ -1,6 +1,6 @@
 import type { Live2DRuntimeFamily } from '../services/collaboration/assets/Live2DModelEntry';
 import { describeLive2DModelEntrypoint } from '../services/collaboration/assets/Live2DModelEntry';
-import { getOfficialCubismSdkStatus } from './OfficialCubismWebSdk';
+import { getCubismPixiSdkStatus } from './CubismPixiSdk';
 
 /**
  * Positive "confirmed missing" overrides, set by the Cubism 2 runtime
@@ -20,7 +20,7 @@ export function isLive2DCubism2RuntimeAvailable(): boolean {
   return runtimeAvailabilityFlags.cubism2;
 }
 
-export type Live2DAdapterId = 'pixi-live2d-display-cubism2' | 'official-cubism-web' | 'unknown';
+export type Live2DAdapterId = 'pixi-live2d-display-cubism2' | 'untitled-pixi-live2d-engine-cubism' | 'unknown';
 
 export interface Live2DRuntimeDescriptor {
   runtimeFamily: Live2DRuntimeFamily;
@@ -40,10 +40,10 @@ export function resolveLive2DRuntimeDescriptor(modelPath: string, parsedJson?: a
   }
 
   if (entry.runtimeFamily === 'cubism3-plus') {
-    const sdkStatus = getOfficialCubismSdkStatus();
+    const sdkStatus = getCubismPixiSdkStatus();
     return {
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: sdkStatus.available,
     };
   }
@@ -61,8 +61,8 @@ export function getUnsupportedLive2DRuntimeMessage(modelPath: string, runtime: L
     return `Live2D 模型 "${modelPath}" 需要 Cubism 2.1 运行时，但 live2d.min.js 缺失或未加载。`;
   }
   if (runtime.runtimeFamily === 'cubism3-plus') {
-    const sdkStatus = getOfficialCubismSdkStatus();
-    return `Live2D 模型 "${modelPath}" 需要 Cubism 3/4/5 runtime adapter。${sdkStatus.message ?? '官方 Cubism Web runtime 当前不可用。'}`;
+    const sdkStatus = getCubismPixiSdkStatus();
+    return `Live2D 模型 "${modelPath}" 需要 Cubism 3/4/5 runtime adapter。${sdkStatus.message ?? 'Cubism 3/4/5 runtime 当前不可用。'}`;
   }
   return `Live2D 模型 "${modelPath}" 使用当前未支持的 runtime。`;
 }

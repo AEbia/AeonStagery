@@ -303,7 +303,7 @@ export class CharacterSynchronizer {
 
     for (const [id, state] of desiredChars) {
       const entry = this.live2D.getAllCharacters?.().get(id);
-      if (entry?.runtime?.adapterId !== 'official-cubism-web' || !this.live2D.restoreSeekState || !this.live2D.hasCharacter(id)) {
+      if (entry?.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism' || !this.live2D.restoreSeekState || !this.live2D.hasCharacter(id)) {
         continue;
       }
       const motion = state.motion && state.motion.output.kind === 'resource'

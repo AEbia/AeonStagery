@@ -11,8 +11,7 @@
  * - This module has NO UI side effects. It only calls
  *   `setLive2DCubism2RuntimeAvailable()` on the resolver; missing runtimes
  *   surface exclusively where a matching model is loaded. Cubism 3+ keeps its
- *   existing live `getOfficialCubismSdkStatus()` gate and is intentionally
- *   left alone here.
+ *   live Core check in `getCubismPixiSdkStatus()`.
  */
 
 import { setLive2DCubism2RuntimeAvailable } from './Live2DRuntimeResolver';

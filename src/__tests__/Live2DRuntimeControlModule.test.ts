@@ -100,7 +100,7 @@ describe('createLive2DModelHandle', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       controls,
@@ -126,7 +126,7 @@ describe('createLive2DModelHandle', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       controls,
@@ -183,7 +183,7 @@ describe('createLive2DModelHandle', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       controls,

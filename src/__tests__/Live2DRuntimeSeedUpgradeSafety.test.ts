@@ -76,7 +76,7 @@ describe('Live2D runtime seed upgrade safety', () => {
     expect(report.cubism2).toBe(true);
   });
 
-  it('merges a partially missing shader tree additively, without touching existing files', () => {
+  it('preserves old user shaders without copying obsolete shader seeds', () => {
     const sourceRoot = makeTempDir('aeon-live2d-shader-seed-');
     const targetRoot = makeTempDir('aeon-live2d-shader-target-');
 
@@ -91,8 +91,7 @@ describe('Live2D runtime seed upgrade safety', () => {
     const report = ensureLive2DRuntimeFiles(sourceRoot, targetRoot, () => {});
 
     expect(fs.readFileSync(shaderProbe(targetRoot), 'utf8')).toBe('user-vert');
-    expect(fs.readFileSync(shaderProbe(targetRoot, 'vendor/cubism-web/Shaders/WebGL/fragshadersrccopy.frag'), 'utf8'))
-      .toBe('seed-frag');
+    expect(fs.existsSync(shaderProbe(targetRoot, 'vendor/cubism-web/Shaders/WebGL/fragshadersrccopy.frag'))).toBe(false);
     expect(report).toEqual({ cubism2: true, cubism3Plus: true });
   });
 
@@ -106,6 +105,6 @@ describe('Live2D runtime seed upgrade safety', () => {
 
     expect(warnings.some((warning) => warning.includes('Cubism 2.1 runtime seed is missing'))).toBe(false);
     // The Cubism Web family is genuinely absent everywhere, so it still warns.
-    expect(warnings.some((warning) => warning.includes('Cubism Web runtime seed'))).toBe(true);
+    expect(warnings.some((warning) => warning.includes('Cubism 3/4/5 runtime seed'))).toBe(true);
   });
 });

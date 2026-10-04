@@ -1,19 +1,7 @@
-/**
- * AeonStagery — Live2D Engine Bridge
- *
- * `untitled-pixi-live2d-engine` ships its entry points ("." and
- * "./cubism-legacy") as two fully self-contained bundles. Each bundle carries
- * its OWN copies of `Live2DPipe`/`Live2DModel`. The pipe's `execute()` uses
- * `instanceof Live2DModel` to tell a model apart from prepare pseudo
- * instructions; when the app registers the main-entry plugin (as
- * StageManager used to do) while models are created from "./cubism-legacy"
- * (as the Cubism 2 adapter does), `instanceof` fails and the pipe treats the
- * model as a prepare instruction — the first render frame after a character
- * enters the stage throws `TypeError: instruction.prepare is not a function`.
- *
- * Both consumers MUST therefore obtain the engine from the single entry
- * exported here. The literal import below is the only place in src/ allowed
- * to reference the engine module (guarded by Live2DEngineBridge.test.ts).
+/** Live2D engine imports and render-pipe registration.
+ * The legacy and modern entries ship separate model constructors. Mixed
+ * stages dispatch both through a shared native Pixi pipe; all consumers load
+ * the same entry here to preserve class identity within each runtime family.
  */
 import * as PIXI from 'pixi.js';
 import { waitForLive2DRuntimeBootstrap } from './Live2DRuntimeAvailability';
@@ -73,30 +61,51 @@ export async function loadLive2DEngineModule(): Promise<Live2DEngineModule> {
   }
 }
 
+/** Modern entry remains independent of the optional Cubism 2.1 core. */
+export async function loadCubismEngineModule(): Promise<Live2DEngineModule & { cubismReady: () => Promise<void> }> {
+  await waitForLive2DRuntimeBootstrap();
+  if (!hasCubismCore()) throw new Error('Cubism 3/4/5 requires live2dcubismcore.min.js.');
+  return await import('untitled-pixi-live2d-engine/cubism') as any;
+}
+
+function hasCubismCore(): boolean {
+  return typeof window !== 'undefined'
+    && typeof (window.Live2DCubismCore as any)?.Version?.csmGetVersion === 'function';
+}
+
 let live2DRenderPipeRegistered = false;
 
-/**
- * Register the Live2D render pipe extension with PIXI *before* any renderer
- * is created. Uses the same engine copy as `loadLive2DEngineModule()`.
- *
- * When the install has no Cubism 2.1 runtime (the default release package,
- * ADR-0035) there is nothing to render and the engine bundle cannot even be
- * evaluated, so registration is skipped with a warning. Stage initialization
- * must not fail because of an absent optional runtime.
+/** Both bundles use the same pipe name but different model constructors.
+ * Dispatch to each model's native render method so mixed stages and bake
+ * renderers can accept either bundle without cross-bundle instanceof checks.
  */
 export async function ensureLive2DRenderPipe(): Promise<void> {
   if (live2DRenderPipeRegistered) return;
   await waitForLive2DRuntimeBootstrap();
-  if (!isLive2DEngineLoadable()) {
-    console.warn(`[Live2D] ${CUBISM2_UNAVAILABLE_MESSAGE} Skipping render-pipe registration.`);
+  const legacy = isLive2DEngineLoadable() ? await loadLive2DEngineModule() : null;
+  const modern = hasCubismCore() ? await loadCubismEngineModule() : null;
+  const base = legacy ?? modern;
+  if (!base?.Live2DPlugin) {
+    console.warn('[Live2D] No runtime Core is available. Skipping render-pipe registration.');
     return;
   }
-  const { Live2DPlugin } = await loadLive2DEngineModule();
-  PIXI.extensions.add(Live2DPlugin);
+  if (legacy && modern) {
+    class CombinedLive2DPipe extends base.Live2DPlugin {
+      execute(instruction: any): void {
+        if (instruction instanceof legacy!.Live2DModel || instruction instanceof modern!.Live2DModel) {
+          if (instruction.visible && instruction.alpha > 0) instruction.renderLive2D(this.renderer);
+        } else {
+          instruction.prepare();
+        }
+      }
+    }
+    PIXI.extensions.add(CombinedLive2DPipe as any);
+  } else {
+    PIXI.extensions.add(base.Live2DPlugin);
+  }
   live2DRenderPipeRegistered = true;
 }
 
-/** Test-only: reset the registration flag so the guard can be re-exercised. */
 export function __resetLive2DRenderPipeRegistrationForTests(): void {
   live2DRenderPipeRegistered = false;
 }

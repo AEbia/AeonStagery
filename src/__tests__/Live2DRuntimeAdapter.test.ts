@@ -4,19 +4,21 @@ import {
   Cubism2PixiLive2DModelControls,
   Cubism2PixiLive2DAdapter,
   getLive2DRuntimeAdapter,
-  OfficialCubismWebLive2DAdapter,
+  CubismPixiLive2DAdapter,
 } from '../engine/Live2DRuntimeAdapter';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
-import * as sdk from '../engine/OfficialCubismWebSdk';
+import * as sdk from '../engine/CubismPixiSdk';
 import { setLive2DCubism2RuntimeAvailable } from '../engine/Live2DRuntimeResolver';
-import { OfficialCubismWebModelInstance } from '../engine/OfficialCubismWebModel';
+import { createCubismPixiModel } from '../engine/CubismPixiModel';
 import { applyRenderHook } from '../engine/Live2DModelSetup';
 
-vi.mock('../engine/OfficialCubismWebModel', () => ({
-  OfficialCubismWebModelInstance: {
-    create: vi.fn(async (modelUrl: string) => ({ modelUrl, internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } } })),
-  },
+vi.mock('../engine/CubismPixiModel', () => ({
+  createCubismPixiModel: vi.fn(async (modelUrl: string) => ({ modelUrl, internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } } })),
+}));
+vi.mock('../engine/Live2DEngineBridge', () => ({
+  loadCubismEngineModule: vi.fn(async () => ({ Live2DModel: {}, config: {} })),
+  loadLive2DEngineModule: vi.fn(),
 }));
 
 describe('Live2DRuntimeAdapter', () => {
@@ -116,18 +118,18 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('returns a clear error when the official Cubism Web SDK is unavailable', async () => {
-    vi.spyOn(sdk, 'getOfficialCubismSdkStatus').mockReturnValue({
+    vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: false,
       initialized: false,
       message: '官方 Cubism Web SDK Core 脚本缺失或未加载（/live2dcubismcore.min.js）。',
     });
-    vi.spyOn(sdk, 'initOfficialCubismWebSdk').mockRejectedValue(
+    vi.spyOn(sdk, 'initCubismPixiSdk').mockRejectedValue(
       new Error('官方 Cubism Web SDK Core 脚本缺失或未加载（/live2dcubismcore.min.js）。'),
     );
 
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
 
-    expect(adapter.id).toBe('official-cubism-web');
+    expect(adapter.id).toBe('untitled-pixi-live2d-engine-cubism');
     expect(adapter.supported).toBe(false);
     expect(adapter.isReady()).toBe(false);
     expect(adapter.getUnsupportedMessage('figure/tomori/tomori.model3.json'))
@@ -137,14 +139,14 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('initializes the official Cubism Web runtime once and creates a real model wrapper when SDK is available', async () => {
-    const initOfficialCubismWebSdk = vi.spyOn(sdk, 'initOfficialCubismWebSdk').mockResolvedValue(undefined);
-    vi.spyOn(sdk, 'getOfficialCubismSdkStatus').mockReturnValue({
+    const initCubismPixiSdk = vi.spyOn(sdk, 'initCubismPixiSdk').mockResolvedValue(undefined);
+    vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: true,
       initialized: false,
       message: null,
     });
 
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
 
     await adapter.init();
     await adapter.init();
@@ -152,9 +154,9 @@ describe('Live2DRuntimeAdapter', () => {
 
     expect(adapter.supported).toBe(true);
     expect(adapter.isReady()).toBe(true);
-    expect(initOfficialCubismWebSdk.mock.calls.length).toBeGreaterThanOrEqual(1);
-    expect(OfficialCubismWebModelInstance.create).toHaveBeenCalledWith(
-      'asset://localhost/figure/tomori/tomori.model3.json',
+    expect(initCubismPixiSdk.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(createCubismPixiModel).toHaveBeenCalledWith(
+      'asset://localhost/figure/tomori/tomori.model3.json', {},
     );
     expect(model).toEqual(expect.objectContaining({
       modelUrl: 'asset://localhost/figure/tomori/tomori.model3.json',
@@ -170,9 +172,9 @@ describe('Live2DRuntimeAdapter', () => {
 
     expect(getLive2DRuntimeAdapter({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: false,
-    }).id).toBe('official-cubism-web');
+    }).id).toBe('untitled-pixi-live2d-engine-cubism');
   });
 
   it('creates a Cubism 2 model handle facade that delegates low-risk controls', () => {
@@ -227,7 +229,7 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('creates an official Cubism Web model handle facade that delegates low-risk controls', () => {
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
     const setExpression = vi.fn();
     const setParameterValueByIndex = vi.fn();
     const parameterValues = new Float32Array([0, Number.NaN]);
@@ -263,7 +265,7 @@ describe('Live2DRuntimeAdapter', () => {
     };
     const handle = adapter.createModelHandle('rana', model, {
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
 
@@ -592,7 +594,7 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('applies official Cubism Web snapshots and injected parameters through runtime controls', () => {
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
     const controls = adapter.getControls();
     const setParameterValueByIndex = vi.fn();
     const setPartOpacityByIndex = vi.fn();
@@ -657,7 +659,7 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('describes invalid official Cubism Web state through runtime controls', () => {
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
     const controls = adapter.getControls();
 
     expect(controls.describeInvalidState({
@@ -674,7 +676,7 @@ describe('Live2DRuntimeAdapter', () => {
   });
 
   it('routes official Cubism Web motion and expression controls through the model instance wrapper', async () => {
-    const adapter = new OfficialCubismWebLive2DAdapter();
+    const adapter = new CubismPixiLive2DAdapter();
     const controls = adapter.getControls();
     const preloadMotion = vi.fn().mockResolvedValue(undefined);
     const stopAllMotions = vi.fn();
@@ -727,7 +729,7 @@ describe('Live2DRuntimeAdapter', () => {
     cubism2Controls.renderForBake({ render: cubism2Render }, renderer);
     expect(cubism2Render).toHaveBeenCalledWith(renderer);
 
-    const officialControls = new OfficialCubismWebLive2DAdapter().getControls();
+    const officialControls = new CubismPixiLive2DAdapter().getControls();
     const renderForBake = vi.fn();
     const render = vi.fn();
     const renderTexture = { id: 'offscreen' };

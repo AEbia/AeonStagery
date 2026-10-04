@@ -1,27 +1,9 @@
-/**
- * AeonStagery — markers shared by the Live2D packaging gates (ADR-0035).
- *
- * The release gate must prove, from the built artifact alone, that no Live2D
- * runtime code shipped. Two classes of evidence are used:
- *
- *   1. file names  — the runtime script / vendor layout is fixed;
- *   2. code markers — the fallback stub's message is present in `none` builds
- *      and absent in `verify` builds, while framework-only literals do the
- *      opposite.
- *
- * `FRAMEWORK_MARKERS` are string literals and preserved property names taken
- * from the official framework source, so they survive minification.
+/** External Core and obsolete SDK artifacts excluded from release packages.
+ * The npm engine's bundled Framework and shaders are expected in both modes.
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { FALLBACK_MARKER } from './live2dRuntimeStaging.mjs';
-
-export { FALLBACK_MARKER };
-
-export const FRAMEWORK_MARKERS = [
-  'CubismFramework.startUp() is already done.',
-  'csmSetLogFunction',
-];
+export const CUBISM_ENGINE_MARKER = 'Could not find Cubism runtime.';
 
 export const RUNTIME_FILE_BASENAMES = ['live2d.min.js', 'live2dcubismcore.min.js'];
 

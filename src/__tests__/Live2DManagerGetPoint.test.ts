@@ -437,7 +437,7 @@ describe('Live2DManager.getPoint', () => {
     const setInjectedParameter = vi.fn();
     const syncInputParameters = vi.fn();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({
         setInjectedParameter,
         syncInputParameters,
@@ -450,7 +450,7 @@ describe('Live2DManager.getPoint', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       injectedParams: { PARAM_MOUTH_OPEN_Y: 0.6 },
@@ -480,8 +480,8 @@ describe('Live2DManager.getPoint', () => {
     const cubism2Controls = mockControls({ advanceFrame: cubism2AdvanceFrame });
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
-      runtime?.adapterId === 'official-cubism-web'
-        ? mockAdapter({ id: 'official-cubism-web', getControls: () => cubism5Controls })
+      runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
         : mockAdapter({ getControls: () => cubism2Controls })
     ) as any);
 
@@ -500,7 +500,7 @@ describe('Live2DManager.getPoint', () => {
       motionEpoch: 0,
     });
     const cubism2Model = createEntry('soyo', 'pixi-live2d-display-cubism2', 'cubism2');
-    const cubism5Model = createEntry('rana', 'official-cubism-web', 'cubism3-plus');
+    const cubism5Model = createEntry('rana', 'untitled-pixi-live2d-engine-cubism', 'cubism3-plus');
     (manager as any).characters = new Map([
       ['soyo', cubism2Model],
       ['rana', cubism5Model],
@@ -566,8 +566,8 @@ describe('Live2DManager.getPoint', () => {
     const cubism2Controls = mockControls({ advanceFrame: cubism2AdvanceFrame });
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
-      runtime?.adapterId === 'official-cubism-web'
-        ? mockAdapter({ id: 'official-cubism-web', getControls: () => cubism5Controls })
+      runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
         : mockAdapter({ getControls: () => cubism2Controls })
     ) as any);
 
@@ -580,7 +580,7 @@ describe('Live2DManager.getPoint', () => {
       motionEpoch: 0,
     });
     const cubism2Model = createEntry('soyo', 'pixi-live2d-display-cubism2', 'cubism2') as any;
-    const cubism5Model = createEntry('rana', 'official-cubism-web', 'cubism3-plus');
+    const cubism5Model = createEntry('rana', 'untitled-pixi-live2d-engine-cubism', 'cubism3-plus');
     cubism2Model._pendingPlayMotion = {
       key: 'wave',
       priority: 3,
@@ -661,7 +661,7 @@ describe('Live2DManager.getPoint', () => {
       source: 'runtime',
     }];
     const adapterSpy = vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({
         getParameterValues: () => [{ index: 2, name: 'PARAM_FALLBACK', value: 0.25 }],
         getParameterMetadata: () => metadata,
@@ -674,7 +674,7 @@ describe('Live2DManager.getPoint', () => {
         model,
         runtime: {
           runtimeFamily: 'cubism3-plus',
-          adapterId: 'official-cubism-web',
+          adapterId: 'untitled-pixi-live2d-engine-cubism',
           supported: true,
         },
         injectedParams: {},

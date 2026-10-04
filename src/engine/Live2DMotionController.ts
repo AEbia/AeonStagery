@@ -159,7 +159,7 @@ export class Live2DMotionController {
     const preserveTinyOffset = skipHardReset || scriptEngine?.isReconstructing === true;
     const targetOffset = normalizeLive2DMotionOffset(offset, { preserveTinyOffset });
     const shouldCaptureHandoffAtIntent =
-      entry?.runtime?.adapterId === 'official-cubism-web'
+      entry?.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
       || (preserveTinyOffset && isLive2DMotionHandoffOffset(targetOffset));
 
     if (!entry) {
