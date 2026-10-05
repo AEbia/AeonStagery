@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CollaborationPresencePeerV2 } from '../api/types/collaboration';
 import {
@@ -40,6 +40,7 @@ function makeController(overrides: Partial<SemanticCollaborationSessionControlle
     completeResourceAgreement: vi.fn(),
     completeServerSceneAgreement: vi.fn(),
     cancelResourceTransfer: vi.fn(),
+    sessionCredentials: null,
     ...overrides,
   };
 }
@@ -358,5 +359,169 @@ describe('CollaborationConnectPanel status UX', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /协作/ }));
     expect(screen.getByText(/Server rejected admission: unknown_fields_present/)).toBeTruthy();
+  });
+
+  it('shows server credentials (invite link, password, token) in the status tab when provided', () => {
+    render(
+      <CollaborationConnectPanel
+        currentProject={{ metadata: { name: '协作项目' } } as any}
+        sceneDocument={{ schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'scene-1', meta: { title: '协作场景' }, statements: [] }}
+        status="connected"
+        peers={[]}
+        controller={makeController()}
+        serverCredentials={{
+          connectionPassword: 'secret123',
+          accessToken: 'tok_abc',
+          inviteUrls: ['ws://192.168.1.100:12345?token=tok_abc'],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+
+    // Credentials section should be present
+    expect(screen.getByTestId('collaboration-credentials')).toBeTruthy();
+
+    // Invite link input
+    const inviteInput = screen.getByLabelText('协作邀请链接') as HTMLInputElement;
+    expect(inviteInput.value).toBe('ws://192.168.1.100:12345?token=tok_abc');
+
+    // Password input – masked by default
+    const passwordInput = screen.getByLabelText('协作房间密码') as HTMLInputElement;
+    expect(passwordInput.value).toBe('secret123');
+    expect(passwordInput.type).toBe('password');
+
+    // Token input – masked by default
+    const tokenInput = screen.getByLabelText('协作访问 Token') as HTMLInputElement;
+    expect(tokenInput.value).toBe('tok_abc');
+    expect(tokenInput.type).toBe('password');
+
+    // Clicking the eye button reveals the password
+    fireEvent.click(screen.getByLabelText('显示密码'));
+    expect((screen.getByLabelText('协作房间密码') as HTMLInputElement).type).toBe('text');
+
+    // Copy buttons exist
+    expect(screen.getByTitle('复制邀请链接')).toBeTruthy();
+    expect(screen.getByTitle('复制密码')).toBeTruthy();
+    expect(screen.getByTitle('复制 Token')).toBeTruthy();
+  });
+
+  it('hides the credentials section when serverCredentials is null', () => {
+    render(
+      <CollaborationConnectPanel
+        currentProject={{ metadata: { name: '协作项目' } } as any}
+        sceneDocument={{ schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'scene-1', meta: { title: '协作场景' }, statements: [] }}
+        status="connected"
+        peers={[]}
+        controller={makeController()}
+        serverCredentials={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    expect(screen.queryByTestId('collaboration-credentials')).toBeNull();
+  });
+
+  it('shows server credentials in the members tab when switching tabs', () => {
+    render(
+      <CollaborationConnectPanel
+        currentProject={{ metadata: { name: '协作项目' } } as any}
+        sceneDocument={{ schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'scene-1', meta: { title: '协作场景' }, statements: [] }}
+        status="connected"
+        peers={makePeers(2)}
+        controller={makeController()}
+        serverCredentials={{
+          connectionPassword: 'room_secret_999',
+          serverAddress: '192.168.1.50:12345',
+          inviteUrls: ['ws://192.168.1.50:12345?token=tok_member'],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    // Switch to members tab
+    fireEvent.click(screen.getByRole('tab', { name: '成员' }));
+
+    // Credentials section should be visible in members tab too
+    expect(screen.getByTestId('collaboration-credentials')).toBeTruthy();
+    const inviteInput = screen.getByLabelText('协作邀请链接') as HTMLInputElement;
+    expect(inviteInput.value).toBe('ws://192.168.1.50:12345?token=tok_member');
+    const passwordInput = screen.getByLabelText('协作房间密码') as HTMLInputElement;
+    expect(passwordInput.value).toBe('room_secret_999');
+    const addressInput = screen.getByLabelText('协作服务地址') as HTMLInputElement;
+    expect(addressInput.value).toBe('192.168.1.50:12345');
+  });
+
+  it('shows server address row and falls back to generating invite URL when inviteUrls is empty', () => {
+    render(
+      <CollaborationConnectPanel
+        currentProject={{ metadata: { name: '协作项目' } } as any}
+        sceneDocument={{ schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'scene-1', meta: { title: '协作场景' }, statements: [] }}
+        status="connected"
+        peers={[]}
+        controller={makeController({ endpoint: '127.0.0.1:54321' })}
+        serverCredentials={{
+          accessToken: 'tok_derived',
+          localUrl: '127.0.0.1:54321',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    expect(screen.getByTestId('collaboration-credentials')).toBeTruthy();
+
+    // Derived invite URL from token and localUrl
+    const inviteInput = screen.getByLabelText('协作邀请链接') as HTMLInputElement;
+    expect(inviteInput.value).toContain('token=tok_derived');
+    expect(inviteInput.value).toContain('127.0.0.1:54321');
+
+    // Server address row
+    const addressInput = screen.getByLabelText('协作服务地址') as HTMLInputElement;
+    expect(addressInput.value).toBe('127.0.0.1:54321');
+  });
+
+  it('copies credentials to clipboard when copy buttons are clicked', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    render(
+      <CollaborationConnectPanel
+        currentProject={{ metadata: { name: '协作项目' } } as any}
+        sceneDocument={{ schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'scene-1', meta: { title: '协作场景' }, statements: [] }}
+        status="connected"
+        peers={[]}
+        controller={makeController()}
+        serverCredentials={{
+          connectionPassword: 'mypassword',
+          accessToken: 'mytoken',
+          serverAddress: '10.0.0.5:12345',
+          inviteUrls: ['ws://10.0.0.5:12345?token=mytoken'],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('复制服务地址'));
+    });
+    expect(writeText).toHaveBeenCalledWith('10.0.0.5:12345');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('复制密码'));
+    });
+    expect(writeText).toHaveBeenCalledWith('mypassword');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('复制邀请链接'));
+    });
+    expect(writeText).toHaveBeenCalledWith('ws://10.0.0.5:12345?token=mytoken');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('复制 Token'));
+    });
+    expect(writeText).toHaveBeenCalledWith('mytoken');
   });
 });

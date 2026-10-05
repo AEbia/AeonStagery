@@ -15,10 +15,11 @@ import {
 } from '../services/collaboration/CollaborationPresence';
 import { deriveCollaborationResourceUx } from '../services/collaboration/CollaborationResourceUxModel';
 import { deriveCollaborationStatusUx } from '../services/collaboration/CollaborationStatusUxModel';
-import { IconUsers, IconX } from './icons';
+import { IconCheck, IconCopy, IconEye, IconEyeOff, IconUsers, IconX } from './icons';
 import { CollaborationAssetHandshakePanel } from './CollaborationAssetHandshakePanel';
 import { CollaborationResourceAgreementDialog } from './CollaborationResourceAgreementDialog';
 import { CollaborationServerSceneAgreementDialogV2 } from './CollaborationServerSceneAgreementDialogV2';
+import { withCollaborationAccessToken } from '../services/collaboration/CollaborationTransport';
 import { useOutsidePointerDown } from './hooks/useOutsidePointerDown';
 import type { SemanticCollaborationSessionController } from './useSemanticCollaborationSession';
 
@@ -36,12 +37,22 @@ export {
   getCollaborativeAssetManifestAgreementSignature,
 } from './useSemanticCollaborationSession';
 
+export interface CollaborationServerCredentials {
+  connectionPassword?: string;
+  accessToken?: string;
+  inviteUrls?: string[];
+  localUrl?: string;
+  lanUrls?: string[];
+  serverAddress?: string;
+}
+
 interface CollaborationConnectPanelProps {
   currentProject: ProjectState | null;
   sceneDocument: CurrentSceneDocument | SceneDocumentV5 | null;
   status: CollaborationConnectionStatus;
   peers: CollaborationPresencePeerV2[];
   controller: SemanticCollaborationSessionController;
+  serverCredentials?: CollaborationServerCredentials | null;
   disabled?: boolean;
 }
 
@@ -104,11 +115,15 @@ export function CollaborationConnectPanel({
   status,
   peers,
   controller,
+  serverCredentials,
   disabled,
 }: CollaborationConnectPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<CollaborationTab>('status');
   const [isResourceReviewOpen, setIsResourceReviewOpen] = useState(false);
+  const [showCredentialPassword, setShowCredentialPassword] = useState(false);
+  const [showCredentialToken, setShowCredentialToken] = useState(false);
+  const [copiedCredentialField, setCopiedCredentialField] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -157,6 +172,160 @@ export function CollaborationConnectPanel({
     setActiveTab('status');
   }, []);
   useOutsidePointerDown(panelRef, closePanel);
+
+  const handleCopyCredential = useCallback(async (text: string, fieldId: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+      setCopiedCredentialField(fieldId);
+      setTimeout(() => {
+        setCopiedCredentialField((curr) => (curr === fieldId ? null : curr));
+      }, 1800);
+    } catch {
+      // clipboard fallback – silent
+    }
+  }, []);
+
+  const effectiveServerAddress = serverCredentials?.serverAddress || serverCredentials?.lanUrls?.[0] || serverCredentials?.localUrl;
+  const effectiveInviteUrls = useMemo(() => {
+    if (serverCredentials?.inviteUrls && serverCredentials.inviteUrls.length > 0) {
+      return serverCredentials.inviteUrls;
+    }
+    if (serverCredentials?.accessToken && (effectiveServerAddress || controller.endpoint)) {
+      const base = effectiveServerAddress || controller.endpoint;
+      return [withCollaborationAccessToken(base, serverCredentials.accessToken)];
+    }
+    return [];
+  }, [controller.endpoint, effectiveServerAddress, serverCredentials]);
+
+  const hasCredentials = Boolean(
+    serverCredentials && (
+      effectiveInviteUrls.length > 0
+      || serverCredentials.connectionPassword
+      || serverCredentials.accessToken
+      || effectiveServerAddress
+    ),
+  );
+
+  const renderCredentials = () => {
+    if (!hasCredentials || !serverCredentials) return null;
+    return (
+      <div className="collaboration-credentials" data-testid="collaboration-credentials">
+        {effectiveInviteUrls.length > 0 && (
+          <div className="collaboration-credential-row">
+            <span className="collaboration-credential-label">邀请链接</span>
+            <div className="collaboration-credential-value-row">
+              <input
+                className="collaboration-credential-input"
+                readOnly
+                value={effectiveInviteUrls[0]}
+                aria-label="协作邀请链接"
+              />
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-copy"
+                onClick={() => { void handleCopyCredential(effectiveInviteUrls[0], 'invite'); }}
+                title="复制邀请链接"
+              >
+                {copiedCredentialField === 'invite' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                <span>{copiedCredentialField === 'invite' ? '已复制' : '复制'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {serverCredentials.connectionPassword && (
+          <div className="collaboration-credential-row">
+            <span className="collaboration-credential-label">房间密码</span>
+            <div className="collaboration-credential-value-row">
+              <input
+                className="collaboration-credential-input"
+                type={showCredentialPassword ? 'text' : 'password'}
+                readOnly
+                value={serverCredentials.connectionPassword}
+                aria-label="协作房间密码"
+              />
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-toggle"
+                onClick={() => setShowCredentialPassword((v) => !v)}
+                title={showCredentialPassword ? '隐藏密码' : '显示密码'}
+                aria-label={showCredentialPassword ? '隐藏密码' : '显示密码'}
+              >
+                {showCredentialPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-copy"
+                onClick={() => { void handleCopyCredential(serverCredentials.connectionPassword!, 'password'); }}
+                title="复制密码"
+              >
+                {copiedCredentialField === 'password' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                <span>{copiedCredentialField === 'password' ? '已复制' : '复制'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {effectiveServerAddress && (
+          <div className="collaboration-credential-row">
+            <span className="collaboration-credential-label">服务地址</span>
+            <div className="collaboration-credential-value-row">
+              <input
+                className="collaboration-credential-input"
+                readOnly
+                value={effectiveServerAddress}
+                aria-label="协作服务地址"
+              />
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-copy"
+                onClick={() => { void handleCopyCredential(effectiveServerAddress, 'server-address'); }}
+                title="复制服务地址"
+              >
+                {copiedCredentialField === 'server-address' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                <span>{copiedCredentialField === 'server-address' ? '已复制' : '复制'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {serverCredentials.accessToken && (
+          <div className="collaboration-credential-row">
+            <span className="collaboration-credential-label">访问 Token</span>
+            <div className="collaboration-credential-value-row">
+              <input
+                className="collaboration-credential-input"
+                type={showCredentialToken ? 'text' : 'password'}
+                readOnly
+                value={serverCredentials.accessToken}
+                aria-label="协作访问 Token"
+              />
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-toggle"
+                onClick={() => setShowCredentialToken((v) => !v)}
+                title={showCredentialToken ? '隐藏 Token' : '显示 Token'}
+                aria-label={showCredentialToken ? '隐藏 Token' : '显示 Token'}
+              >
+                {showCredentialToken ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm collaboration-credential-copy"
+                onClick={() => { void handleCopyCredential(serverCredentials.accessToken!, 'token'); }}
+                title="复制 Token"
+              >
+                {copiedCredentialField === 'token' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                <span>{copiedCredentialField === 'token' ? '已复制' : '复制'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -285,6 +454,8 @@ export function CollaborationConnectPanel({
                   {!lastError && <span>{statusUx.detail}</span>}
                 </div>
 
+                {renderCredentials()}
+
                 <div className="collaboration-summary">
                   <span>连接目标</span>
                   <strong>{controller.endpoint}</strong>
@@ -397,6 +568,7 @@ export function CollaborationConnectPanel({
                     </>
                   )}
                 </div>
+                {renderCredentials()}
               </>
             )}
 

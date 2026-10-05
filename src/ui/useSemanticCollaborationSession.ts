@@ -1,3 +1,9 @@
+import {
+  collaborationEndpointWithPassword,
+  getCollaborationAccessToken,
+  normalizeCollaborationEndpoint,
+  withCollaborationAccessToken,
+} from '../services/collaboration/CollaborationTransport';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CollaborationConnectionStatus,
@@ -50,8 +56,16 @@ import { showToast } from './Toast';
 
 export type CollaborationStartMode = 'host-or-join' | 'host' | 'join-existing';
 
+export interface CollaborationSessionCredentials {
+  connectionPassword?: string;
+  accessToken?: string;
+  inviteUrls?: string[];
+  serverAddress?: string;
+}
+
 export interface CollaborationStartOptions {
   endpoint?: string;
+  password?: string;
   displayName?: string;
   project?: ProjectState | null;
 }
@@ -81,6 +95,7 @@ export interface SemanticCollaborationSessionController {
   isOffline: boolean;
   statusHint: string;
   selfIdentity: CollaborationIdentity | null;
+  sessionCredentials: CollaborationSessionCredentials | null;
   connectCurrentProject: () => Promise<boolean>;
   hostCurrentScene: (options?: CollaborationStartOptions) => Promise<boolean>;
   joinExistingRoom: (options?: CollaborationStartOptions) => Promise<boolean>;
@@ -256,6 +271,7 @@ export function useSemanticCollaborationSession({
   const [lastResourceAgreementProposal, setLastResourceAgreementProposal] = useState<CollaborationAssetAgreementProposal | null>(null);
   const [serverSceneAgreement, setServerSceneAgreement] = useState<SemanticServerSceneAgreementDialogState | null>(null);
   const [isRefreshingResources, setIsRefreshingResources] = useState(false);
+  const [sessionCredentials, setSessionCredentials] = useState<CollaborationSessionCredentials | null>(null);
   const { selectedActionIds } = useEditorSelection();
   const layerRef = useRef<CollaborativeDocumentLayerV3 | null>(null);
   const clientRef = useRef<CollaborationClientV3 | null>(null);
@@ -273,7 +289,7 @@ export function useSemanticCollaborationSession({
 
   useEffect(() => { selectedActionIdsRef.current = selectedActionIds; }, [selectedActionIds]);
   useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.endpoint', endpoint);
+    if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.endpoint', endpoint.split('#')[0]);
   }, [endpoint]);
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.displayName', displayName);
@@ -340,6 +356,7 @@ export function useSemanticCollaborationSession({
     setLastResourceAgreementProposal(null);
     setServerSceneAgreement(null);
     setAssetHandshake(createEmptyAssetHandshakeState());
+    setSessionCredentials(null);
     setLastError(null);
     onSelfChange(null);
     onPeersChange([]);
@@ -395,7 +412,19 @@ export function useSemanticCollaborationSession({
     mode: CollaborationStartMode,
     options: CollaborationStartOptions = {},
   ): Promise<boolean> => {
-    const cleanEndpoint = (options.endpoint ?? endpoint).trim();
+    let cleanEndpoint = (options.endpoint ?? endpoint).trim();
+    let computedToken: string | undefined;
+    try {
+      cleanEndpoint = await collaborationEndpointWithPassword(cleanEndpoint, options.password ?? '');
+      if (cleanEndpoint) {
+        normalizeCollaborationEndpoint(cleanEndpoint);
+        computedToken = getCollaborationAccessToken(cleanEndpoint);
+      }
+    }
+    catch (error) {
+      showToast(error instanceof Error ? error.message : '协作地址或密码无效', 'error');
+      return false;
+    }
     const project = options.project ?? currentProject;
     const fileAccess = contextValue.services.fileAccess;
     const projectResources = contextValue.services.projectResources;
@@ -424,7 +453,7 @@ export function useSemanticCollaborationSession({
     };
     selfRef.current = self;
     onSelfChange(self);
-    setEndpoint(cleanEndpoint);
+    setEndpoint(normalizeCollaborationEndpoint(cleanEndpoint));
     if (options.displayName !== undefined) setDisplayName(options.displayName);
     setLastError(null);
 
@@ -495,7 +524,7 @@ export function useSemanticCollaborationSession({
     const roomId = `${collaborationProjectId}:main`;
     try {
       const layer = await orchestrator.start({
-        endpoint: cleanEndpoint,
+        endpoint: normalizeCollaborationEndpoint(cleanEndpoint),
         identity: self,
         client,
         documentStore: contextValue.stores.document,
@@ -586,6 +615,14 @@ export function useSemanticCollaborationSession({
         },
       });
       layerRef.current = layer;
+      const normalizedEndpoint = normalizeCollaborationEndpoint(cleanEndpoint);
+      const inviteUrl = computedToken ? withCollaborationAccessToken(normalizedEndpoint, computedToken) : undefined;
+      setSessionCredentials({
+        connectionPassword: options.password || undefined,
+        accessToken: computedToken || undefined,
+        inviteUrls: inviteUrl ? [inviteUrl] : [],
+        serverAddress: normalizedEndpoint,
+      });
       showToast('已连接语义协作房间', 'success');
       return true;
     } catch (error) {
@@ -668,6 +705,7 @@ export function useSemanticCollaborationSession({
     isOffline,
     statusHint,
     selfIdentity: selfRef.current,
+    sessionCredentials,
     connectCurrentProject: () => startSession('host-or-join'),
     hostCurrentScene: (options?: CollaborationStartOptions) => startSession('host', options),
     joinExistingRoom: (options?: CollaborationStartOptions) => startSession('join-existing', options),
