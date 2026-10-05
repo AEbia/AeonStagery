@@ -80,6 +80,7 @@ describe('CollaborativeDocumentLayerV3', () => {
 
     const docV5 = makeDocV5();
     const appliedDocs: SceneDocumentV5[] = [];
+    const onInitialDocumentApplied = vi.fn();
 
     const layer = new CollaborativeDocumentLayerV3({
       client: clientStub as any,
@@ -89,6 +90,7 @@ describe('CollaborativeDocumentLayerV3', () => {
       applyDocument: async (doc) => {
         appliedDocs.push(doc);
       },
+      onInitialDocumentApplied,
     });
 
     await layer.connect();
@@ -98,6 +100,7 @@ describe('CollaborativeDocumentLayerV3', () => {
     expect(serverState).not.toBeNull();
     expect((serverState as any)?.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V3);
     expect((serverState as any)?.sceneSchemaVersion).toBe(SCENE_SCHEMA_VERSION_V5);
+    expect(onInitialDocumentApplied).toHaveBeenCalledTimes(1);
     expect(layer.getStatus()).toBe('connected');
 
     layer.dispose();
@@ -167,22 +170,25 @@ describe('CollaborativeDocumentLayerV3', () => {
   });
 
   it('synchronizes remote v5 updates and applies canonical v5 document', async () => {
+    let remoteListener: ((state: CollaborativeSceneStateV3 | null) => void | Promise<void>) | undefined;
+    const initialState = makeStateV3();
+    const lifecycle: string[] = [];
     const clientStub = {
-      join: vi.fn(async () => makeStateV3()),
+      join: vi.fn(async () => initialState),
       seed: vi.fn(),
-      getState: vi.fn(() => makeStateV3()),
+      getState: vi.fn(() => initialState),
       publishState: vi.fn(),
-      subscribe: vi.fn(() => () => {}),
-      subscribeRealtimeConnection: vi.fn((listener: (c: boolean) => void) => {
-        listener(true);
+      subscribe: vi.fn((listener: (state: CollaborativeSceneStateV3 | null) => void | Promise<void>) => {
+        remoteListener = listener;
         return () => {};
       }),
+      subscribeRealtimeStatus: vi.fn(() => () => {}),
       connectRealtime: vi.fn(async () => {}),
-      isRealtimeConnected: vi.fn(() => true),
       dispose: vi.fn(),
     };
 
     const appliedDocs: SceneDocumentV5[] = [];
+    const onInitialDocumentApplied = vi.fn(() => lifecycle.push('clear-history'));
     const layer = new CollaborativeDocumentLayerV3({
       client: clientStub as any,
       collaborationProjectId: 'proj_v3',
@@ -190,12 +196,25 @@ describe('CollaborativeDocumentLayerV3', () => {
       getSceneDocument: () => makeDocV5(),
       applyDocument: async (doc) => {
         appliedDocs.push(doc);
+        lifecycle.push('apply');
       },
+      afterApplyState: async () => { lifecycle.push('persist'); },
+      onInitialDocumentApplied,
     });
 
     await layer.connect();
+    expect(lifecycle.slice(0, 3)).toEqual(['apply', 'clear-history', 'persist']);
+    expect(onInitialDocumentApplied).toHaveBeenCalledTimes(1);
     expect(appliedDocs.length).toBeGreaterThan(0);
     expect(appliedDocs[0].schemaVersion).toBe(SCENE_SCHEMA_VERSION_V5);
+
+    const nextState: CollaborativeSceneStateV3 = {
+      ...initialState,
+      meta: { ...initialState.meta, title: 'Updated remote scene' },
+    };
+    await remoteListener?.(nextState);
+    expect(onInitialDocumentApplied).toHaveBeenCalledTimes(1);
+    expect(lifecycle.slice(3)).toEqual(['apply', 'persist']);
 
     layer.dispose();
   });

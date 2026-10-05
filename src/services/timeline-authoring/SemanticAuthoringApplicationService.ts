@@ -332,6 +332,12 @@ export class SemanticAuthoringApplicationService {
     return true;
   }
 
+  clearHistory(): void {
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this.notifyHistory();
+  }
+
   get canUndo(): boolean { return this.undoStack.length > 0; }
   get canRedo(): boolean { return this.redoStack.length > 0; }
 

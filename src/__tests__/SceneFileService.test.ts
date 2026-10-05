@@ -11,6 +11,7 @@ import type {
 } from '../services/document/DocumentProjectionPorts';
 import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
 import { SemanticScenePipeline } from '../services/semantic-scene';
+import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
 
 
 describe('SceneFileService', () => {
@@ -19,6 +20,7 @@ describe('SceneFileService', () => {
   let editorStore: EditorStore;
   let documentFilePath: DocumentFilePathPort;
   let saveStatusPort: EditorSaveStatusPort;
+  let semanticAuthoring: SemanticAuthoringApplicationService;
   let service: SceneFileService;
 
   const exampleScene = {
@@ -85,6 +87,7 @@ describe('SceneFileService', () => {
         projectPreparedScene: vi.fn(async () => undefined),
       },
     );
+    semanticAuthoring = new SemanticAuthoringApplicationService(documentStore, semanticCoordinator);
 
     service = new SceneFileService(
       fileAccessMock as unknown as IFileAccess,
@@ -92,6 +95,8 @@ describe('SceneFileService', () => {
       documentFilePath,
       saveStatusPort,
       semanticCoordinator,
+      undefined,
+      () => semanticAuthoring.clearHistory(),
     );
   });
 
@@ -165,6 +170,46 @@ describe('SceneFileService', () => {
         expect(documentStore.filePath).toBe('/inline/raw-scene.json');
         expect(documentStore.getCurrentSceneDocumentSnapshot()?.sceneId).toBe('test-example');
       }
+    });
+
+    it('clears prior document history after successfully loading a different scene', async () => {
+      await service.loadFromRawJson(JSON.stringify(exampleScene), '/project-a/main.scene.json');
+      await semanticAuthoring.replaceDocument({
+        ...exampleScene,
+        meta: { ...exampleScene.meta, title: 'Edited scene A' },
+      });
+      expect(semanticAuthoring.canUndo).toBe(true);
+
+      const sceneB = {
+        ...exampleScene,
+        sceneId: 'scene-project-b',
+        meta: { ...exampleScene.meta, title: 'Scene B' },
+      };
+      fileAccessMock.readFile.mockResolvedValue({ data: JSON.stringify(sceneB) });
+      const result = await service.loadFromPath('/project-b/main.scene.json');
+
+      expect(result.success).toBe(true);
+      expect(semanticAuthoring.canUndo).toBe(false);
+      expect(semanticAuthoring.canRedo).toBe(false);
+      expect(await semanticAuthoring.undo()).toBe(false);
+      expect(await semanticAuthoring.redo()).toBe(false);
+      expect(documentStore.getCurrentSceneDocumentSnapshot()?.sceneId).toBe('scene-project-b');
+      expect(documentStore.filePath).toBe('/project-b/main.scene.json');
+    });
+
+    it('preserves history when replacement input fails before changing the current scene', async () => {
+      await service.loadFromRawJson(JSON.stringify(exampleScene), '/project-a/main.scene.json');
+      await semanticAuthoring.replaceDocument({
+        ...exampleScene,
+        meta: { ...exampleScene.meta, title: 'Edited scene A' },
+      });
+
+      const result = await service.loadFromRawJson('{invalid json', '/project-b/main.scene.json');
+
+      expect(result.success).toBe(false);
+      expect(semanticAuthoring.canUndo).toBe(true);
+      expect(documentStore.getCurrentSceneDocumentSnapshot()?.meta.title).toBe('Edited scene A');
+      expect(documentStore.filePath).toBe('/project-a/main.scene.json');
     });
 
     it('loads a schemaVersion 3 document through migration and reports migration warnings as issues', async () => {
