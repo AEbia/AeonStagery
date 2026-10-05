@@ -11,6 +11,7 @@ import {
   deriveCollaborationPasswordToken,
   collaborationAssetUploadMemoryReservationBytes,
   hasCollaborationAuthenticationAttempt,
+  isCollaborationOriginAllowed,
   isCollaborationRequestAuthorized,
   parseCollaborationRequestUrl,
   readCollaborationBody,
@@ -166,7 +167,7 @@ export async function startCollaborationServer(options: CollaborationServerOptio
   const accessToken = connectionPassword !== undefined
     ? deriveCollaborationPasswordToken(connectionPassword, passwordSalt)
     : createCollaborationAccessToken(options.accessToken);
-  const allowedOrigins = new Set(options.allowedOrigins ?? ['null', 'http://localhost:5173', 'http://127.0.0.1:5173']);
+  const allowedOrigins = options.allowedOrigins === undefined ? undefined : new Set(options.allowedOrigins);
   if (options.schemaVersion !== undefined && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2
     && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
     throw new Error('Unsupported collaboration schema version');
@@ -197,7 +198,7 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     const remoteAddress = request.socket.remoteAddress ?? '';
     response.setHeader('cache-control', 'no-store');
     const origin = request.headers.origin;
-    if (origin && allowedOrigins.has(origin)) {
+    if (origin && isCollaborationOriginAllowed(origin, allowedOrigins)) {
       response.setHeader('access-control-allow-origin', origin);
       response.setHeader('vary', 'Origin');
       response.setHeader('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
@@ -219,7 +220,7 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     response.once('close', release);
     try {
       const url = parseCollaborationRequestUrl(request.url);
-      if (origin && !allowedOrigins.has(origin)) {
+      if (origin && !isCollaborationOriginAllowed(origin, allowedOrigins)) {
         throw new CollaborationRequestError(403, 'Collaboration origin is not allowed');
       }
 
@@ -389,7 +390,7 @@ export async function startCollaborationServer(options: CollaborationServerOptio
       const remoteAddress = request.socket.remoteAddress ?? '';
       const url = parseCollaborationRequestUrl(request.url);
       if (url.pathname !== '/sync') throw new CollaborationRequestError(404, 'Not found');
-      if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) {
+      if (request.headers.origin && !isCollaborationOriginAllowed(request.headers.origin, allowedOrigins)) {
         throw new CollaborationRequestError(403, 'Origin not allowed');
       }
       if (authRateLimiter.isBlocked(remoteAddress)) {

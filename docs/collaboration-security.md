@@ -8,6 +8,14 @@ on every IPv4 interface; a public interface or router port forwarding can make t
 server reachable from the public internet. The host firewall and router determine
 which remote addresses can connect.
 
+By default, HTTP and WebSocket origins allow the desktop app's file origins
+(`null` for HTTP, `file://` for WebSocket) and local HTTP development renderers on
+`localhost`, `127.0.0.0/8`, or `[::1]`, on any port. Each peer can run Vite on a different local port, such as
+5173 and 5174. Other web origins are rejected. An explicit `allowedOrigins` list
+(or `AEONSTAGERY_COLLAB_ORIGINS` for the standalone server) replaces this default
+with exact origin matching. The embedded server uses the default for local
+renderers and an explicit list for a custom non-local renderer origin.
+
 The server's invitation URLs use `http://`. The invite credential remains in the
 URL fragment and is not sent as part of the HTTP request. Remote HTTP and WebSocket
 requests authenticate with a short-lived, single-use HMAC proof tied to the source

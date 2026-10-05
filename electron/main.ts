@@ -23,6 +23,7 @@ import {
 import { registerGptSovitsHandlers, stopGptSovitsProcess } from './gpt-sovits';
 import { clearAllVoiceSessionsSync, registerVoiceAuthoringHandlers } from './voice-authoring';
 import type { CollaborationServerStatus } from '../server/collaboration/server';
+import { isCollaborationOriginAllowed } from '../server/collaboration/security';
 import { EmbeddedCollaborationServer } from './embeddedCollaborationServer';
 import {
   listCollaborationSessions,
@@ -2303,7 +2304,7 @@ ipcMain.handle('collaborationServer:start', async (event, input: { projectId: st
       projectId: input.projectId,
       host: input.host || '0.0.0.0',
       password: input.password,
-      allowedOrigins: ['null', rendererOrigin],
+      allowedOrigins: isCollaborationOriginAllowed(rendererOrigin) ? undefined : ['null', 'file://', rendererOrigin],
       port: Number(input.port ?? 12345),
     });
     return { success: true, ...result };

@@ -6,7 +6,7 @@ import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startCollaborationServer, type RunningCollaborationServer } from '../../server/collaboration/server';
 import { collaborationEndpointWithPassword } from '../services/collaboration/CollaborationTransport';
-import { COLLABORATION_LIMITS } from '../../server/collaboration/security';
+import { COLLABORATION_LIMITS, createCollaborationAuthProof } from '../../server/collaboration/security';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
 import { authenticatedFetch } from './helpers/collaborationAuth';
@@ -77,6 +77,85 @@ describe('collaboration server security boundary', () => {
     expect(allowed.headers.get('access-control-allow-origin')).toBe('null');
     expect(allowed.headers.get('access-control-allow-headers')).toContain('authorization');
     await expect(handshakeStatus(connect(protocols(), 'https://evil.example'))).resolves.toBe(403);
+  });
+
+  it.each([
+    'null',
+    'file://',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5199',
+    'http://[::1]:5174',
+  ])('allows peers using a different local development origin: %s', async (origin) => {
+    const status = server.getStatus();
+    const salt = await fetch(`${status.localUrl}/auth/salt`, { headers: { origin } });
+    expect(salt.status).toBe(200);
+    expect(salt.headers.get('access-control-allow-origin')).toBe(origin);
+
+    const preflight = await fetch(`${status.localUrl}/health`, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'x-collaboration-nonce,x-collaboration-proof',
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('x-collaboration-proof');
+
+    const challenge = await fetch(`${status.localUrl}/auth/challenge`, { headers: { origin } });
+    expect(challenge.status).toBe(200);
+    expect(challenge.headers.get('access-control-allow-origin')).toBe(origin);
+    const { nonce } = await challenge.json() as { nonce: string };
+    const health = await fetch(`${status.localUrl}/health`, {
+      headers: {
+        origin,
+        'x-collaboration-nonce': nonce,
+        'x-collaboration-proof': createCollaborationAuthProof(status.accessToken, nonce, 'GET', '/health'),
+      },
+    });
+    expect(health.status).toBe(200);
+    expect(health.headers.get('access-control-allow-origin')).toBe(origin);
+
+    const wsChallenge = await fetch(`${status.localUrl}/auth/challenge`, { headers: { origin } });
+    const { nonce: wsNonce } = await wsChallenge.json() as { nonce: string };
+    const wsProof = createCollaborationAuthProof(status.accessToken, wsNonce, 'GET', '/sync');
+    const socket = new WebSocket(
+      `${status.localUrl.replace('http:', 'ws:')}/sync?authNonce=${wsNonce}&authProof=${wsProof}`,
+      ['aeonstagery-collaboration'],
+      { origin },
+    );
+    sockets.add(socket);
+    await opened(socket);
+    expect(socket.protocol).toBe('aeonstagery-collaboration');
+  });
+
+  it.each([
+    'http://localhost.evil.example:5173',
+    'http://127.0.0.1.evil.example:5173',
+    'http://192.168.1.10:5173',
+  ])('rejects origins outside local development: %s', async (origin) => {
+    const response = await fetch(`${server.getStatus().localUrl}/auth/challenge`, { headers: { origin } });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    await expect(handshakeStatus(connect(protocols(), origin))).resolves.toBe(403);
+  });
+
+  it('honors an explicit origin allowlist without adding local development origins', async () => {
+    await server.stop();
+    const origin = 'https://editor.example';
+    server = await startCollaborationServer({
+      host: '127.0.0.1', port: 0, dataDir: tempDir, allowedOrigins: [origin],
+    });
+    const allowed = await fetch(`${server.getStatus().localUrl}/auth/salt`, { headers: { origin } });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe(origin);
+    const rejected = await fetch(`${server.getStatus().localUrl}/auth/salt`, {
+      headers: { origin: 'http://localhost:5174' },
+    });
+    expect(rejected.status).toBe(403);
+    await expect(handshakeStatus(connect(protocols(), 'http://localhost:5174'))).resolves.toBe(403);
   });
 
   it('authenticates websocket upgrade without putting credentials in URLs or response protocols', async () => {

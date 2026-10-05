@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual, pbkdf2Sync } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { isIP } from 'node:net';
 
 export const COLLABORATION_LIMITS = {
   jsonBytes: 16 * 1024 * 1024,
@@ -27,6 +28,22 @@ let reservedAssetUploadMemoryBytes = 0;
 export class CollaborationRequestError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
+  }
+}
+
+/** Desktop peers can use independent local Vite ports; explicit allowlists stay exact. */
+export function isCollaborationOriginAllowed(origin: string, allowedOrigins?: ReadonlySet<string>): boolean {
+  if (allowedOrigins) return allowedOrigins.has(origin);
+  // Chromium sends null for file-renderer fetches, but file:// for WebSockets.
+  if (origin === 'null' || origin === 'file://') return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== 'http:' || url.origin !== origin) return false;
+    return url.hostname === 'localhost'
+      || url.hostname === '[::1]'
+      || (isIP(url.hostname) === 4 && url.hostname.startsWith('127.'));
+  } catch {
+    return false;
   }
 }
 
