@@ -102,6 +102,38 @@ describe('FrameCaptureEngine', () => {
     expect(engine).toBeDefined();
   });
 
+  it('stops at a frame boundary after cancellation and restores preview state', async () => {
+    const backend = createMockBackend();
+    const controller = new AbortController();
+    backend.encodeFrame.mockImplementation(async () => { controller.abort(); });
+    const onProgress = vi.fn();
+    await expect(engine.capture({
+      fps: 60, rangeStart: 0, rangeEnd: 1, width: 1, height: 1,
+      bitrateBps: 12_000_000, outputPath: '/tmp/test.mp4', codec: 'libx264',
+      backend, onProgress, signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(backend.encodeFrame).toHaveBeenCalledTimes(1);
+    expect(backend.finish).not.toHaveBeenCalled();
+    expect(backend.abort).toHaveBeenCalledWith(true);
+    expect(stage.resumeTicker).toHaveBeenCalled();
+    expect(playback.setSilentMode).toHaveBeenLastCalledWith(false);
+    expect(live2D.setExportMode).toHaveBeenLastCalledWith(false);
+    expect(document.body.classList.contains('is-exporting')).toBe(false);
+  });
+
+  it('cleans up when cancellation arrives during backend initialization', async () => {
+    const backend = createMockBackend();
+    const controller = new AbortController();
+    backend.init.mockImplementation(async () => { controller.abort(); });
+    await expect(engine.capture({
+      fps: 60, rangeStart: 0, rangeEnd: 1, width: 1, height: 1,
+      bitrateBps: 12_000_000, outputPath: '/tmp/test.mp4', codec: 'libx264',
+      backend, onProgress: vi.fn(), signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(backend.abort).toHaveBeenCalledWith(true);
+    expect(backend.encodeFrame).not.toHaveBeenCalled();
+  });
+
   it('capture calls backend.init with correct config', async () => {
     const backend = createMockBackend();
     const onProgress = vi.fn();

@@ -217,6 +217,40 @@ async function finishStream(state: StreamState): Promise<{ success: true; code: 
  * Register all FFmpeg-related IPC handlers.
  */
 export function registerFFmpegHandlers(): void {
+  let activeStreamState: StreamState | null = null;
+  const conversions = new Set<{ child: any; outputPath: string; cancelled: boolean; closed: Promise<void> }>();
+  let streamOutputPath: string | null = null;
+  let streamClosed: Promise<void> | null = null;
+
+  // Wait for process handles to close before removing incomplete output files.
+  ipcMain.handle('ffmpeg:cancelExport', async () => {
+    const state = activeStreamState;
+    const outputPath = streamOutputPath;
+    const closed = streamClosed;
+    const runningConversions = [...conversions];
+    if (state && !state.closed) {
+      recordStreamFailure(state, 'Export cancelled', true);
+    }
+    for (const conversion of runningConversions) {
+      conversion.cancelled = true;
+      conversion.child.kill();
+    }
+    await Promise.all([closed, ...runningConversions.map((conversion) => conversion.closed)]);
+    if (activeStreamState === state) {
+      activeStreamState = null;
+      streamOutputPath = null;
+      streamClosed = null;
+    }
+    const outputs = new Set([
+      ...(state && outputPath ? [outputPath] : []),
+      ...runningConversions.map((conversion) => conversion.outputPath),
+    ]);
+    for (const output of outputs) {
+      await fs.promises.rm(output, { force: true });
+    }
+    return { success: true };
+  });
+
   // Convert WebM to MP4
   ipcMain.handle('ffmpeg:convert', async (
     _event,
@@ -266,6 +300,12 @@ export function registerFFmpegHandlers(): void {
         return;
       }
 
+      const conversion = {
+        child, outputPath, cancelled: false,
+        closed: new Promise<void>((resolveClosed) => child.once('close', resolveClosed)),
+      };
+      conversions.add(conversion);
+
       child.stderr?.on('data', (data: any) => {
         const msg = data.toString();
         stderrAccum += msg;
@@ -287,7 +327,10 @@ export function registerFFmpegHandlers(): void {
       });
 
       child.on('close', (code: number | null, signal?: string | null) => {
-        if (code !== 0) {
+        conversions.delete(conversion);
+        if (conversion.cancelled) {
+          finish({ success: false, error: 'Export cancelled' });
+        } else if (code !== 0) {
           const suffix = signal ? ` (${signal})` : '';
           const message = `转码失败 (Code ${code ?? 'unknown'}${suffix})`;
           console.error(`[FFmpeg Convert] ${message}`);
@@ -336,8 +379,6 @@ export function registerFFmpegHandlers(): void {
   });
 
   // ─── Deterministic Offline Rendering (Accelerated Export) ───
-
-  let activeStreamState: StreamState | null = null;
 
   ipcMain.handle('ffmpeg:startStreamExport', async (
     _event,
@@ -473,6 +514,8 @@ export function registerFFmpegHandlers(): void {
 
     const state = createStreamState(child, width * height * 4);
     activeStreamState = state;
+    streamOutputPath = outputPath;
+    streamClosed = new Promise<void>((resolveClosed) => child.once('close', resolveClosed));
 
     child.stderr?.on('data', (data: any) => {
       const msg = data.toString();

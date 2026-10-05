@@ -261,6 +261,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('ffmpeg:pushEncodedChunk', chunkData),
     endStreamExport: () =>
       ipcRenderer.invoke('ffmpeg:endStreamExport'),
+    cancelExport: () => ipcRenderer.invoke('ffmpeg:cancelExport'),
     onLog: (callback: (msg: string) => void) => {
       const listener = (_event: any, msg: string) => callback(msg);
       ipcRenderer.on('ffmpeg:log', listener);

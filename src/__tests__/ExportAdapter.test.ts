@@ -91,6 +91,7 @@ function createPreparedScene(overrides: Partial<PreparedCompiledScene> = {}): Pr
 function createMockElectronAPI() {
   return {
     export: {
+      cancelExport: vi.fn().mockResolvedValue({ success: true }),
       startStreamExport: vi.fn().mockResolvedValue({ success: true }),
       pushEncodedChunk: vi.fn().mockResolvedValue({ success: true }),
       pushFrame: vi.fn().mockResolvedValue({ success: true }),
@@ -99,6 +100,7 @@ function createMockElectronAPI() {
       getTempDir: vi.fn().mockResolvedValue('/tmp'),
     },
     fs: {
+      removeFile: vi.fn().mockResolvedValue({ success: true }),
       exists: vi.fn().mockResolvedValue(false),
       readFile: vi.fn().mockResolvedValue({ success: false }),
       writeFile: vi.fn().mockResolvedValue({ success: true }),
@@ -144,6 +146,73 @@ describe('ExportAdapter', () => {
 
   it('constructor requires all dependencies', () => {
     expect(adapter).toBeDefined();
+  });
+
+  it('does not start an export when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await adapter.export({} as any, vi.fn(), controller.signal);
+    expect(result).toEqual({ success: false, cancelled: true });
+    expect(electronAPI.export.startStreamExport).not.toHaveBeenCalled();
+    expect(electronAPI.export.cancelExport).not.toHaveBeenCalled();
+  });
+
+  it('cancels during capture, restores preview, and allows a subsequent export', async () => {
+    documentStore.setPreparedScene(createPreparedScene());
+    const controller = new AbortController();
+    const config = {
+      format: 'mp4' as const, codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1,
+      includeAudio: true, backend: 'rawpixels' as const, outputPath: '/output/test.mp4',
+    };
+    electronAPI.export.pushFrame.mockImplementationOnce(async () => {
+      controller.abort();
+      return { success: true };
+    });
+    const progress = vi.fn();
+    const result = await adapter.export(config, progress, controller.signal);
+    expect(result).toEqual({ success: false, cancelled: true });
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.pushFrame).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(expect.stringMatching(/^\/tmp\/video_/));
+    expect(stageAdapter.resumeTicker).toHaveBeenCalled();
+    expect(playbackAdapter.setSilentMode).toHaveBeenLastCalledWith(false);
+    expect(live2DManager.setExportMode).toHaveBeenLastCalledWith(false);
+    expect(progress.mock.calls.some(([p]: any[]) => p.phase === 'done')).toBe(false);
+
+    const retry = await adapter.export({ ...config, includeAudio: false, rangeEnd: 1 / 60 }, vi.fn());
+    expect(retry.success).toBe(true);
+  });
+
+  it('cancels a running conversion and does not report completion', async () => {
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0,
+      params: { text: 'Hello', speakerId: 'char1', voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    } as any] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    const controller = new AbortController();
+    let settleConversion!: (result: { success: boolean }) => void;
+    electronAPI.export.convert.mockImplementation(() => {
+      const result = new Promise<{ success: boolean }>((resolve) => { settleConversion = resolve; });
+      controller.abort();
+      return result;
+    });
+    electronAPI.export.cancelExport.mockImplementation(async () => {
+      settleConversion({ success: false });
+      return { success: true };
+    });
+    const progress = vi.fn();
+    const result = await adapter.export({
+      format: 'mp4', codec: 'libx265', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: true, backend: 'webcodecs', outputPath: '/output/test.mp4',
+    }, progress, controller.signal);
+    expect(result).toEqual({ success: false, cancelled: true });
+    expect(electronAPI.export.convert).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(progress.mock.calls.some(([p]) => p.phase === 'done')).toBe(false);
   });
 
   it.each([undefined, 'audio', 'none'])('samples voice mouth parameters at export frame time with lipSync=%s', async (lipSync) => {

@@ -39,6 +39,7 @@ export interface ExportProgress {
 
 export interface ExportResult {
   success: boolean;
+  cancelled?: boolean;
   outputPath?: string;
   error?: string;
 }
