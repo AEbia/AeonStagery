@@ -15,6 +15,8 @@ import { PlaybackStore } from '../ui/store/PlaybackStore';
 interface MockEngine {
   play: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
+  isPlaying: ReturnType<typeof vi.fn>;
+  onPlayingChange: ReturnType<typeof vi.fn>;
   seek: ReturnType<typeof vi.fn>;
   setLoop: ReturnType<typeof vi.fn>;
   setLoopEnabled: ReturnType<typeof vi.fn>;
@@ -23,9 +25,22 @@ interface MockEngine {
 }
 
 function createMockEngine(): MockEngine {
+  let playing = false;
+  const listeners = new Set<(playing: boolean) => void>();
   return {
-    play: vi.fn(),
-    pause: vi.fn(),
+    play: vi.fn(() => {
+      playing = true;
+      listeners.forEach(listener => listener(playing));
+    }),
+    pause: vi.fn(() => {
+      playing = false;
+      listeners.forEach(listener => listener(playing));
+    }),
+    isPlaying: vi.fn(() => playing),
+    onPlayingChange: vi.fn((callback: (playing: boolean) => void) => {
+      listeners.add(callback);
+      return () => { listeners.delete(callback); };
+    }),
     seek: vi.fn().mockResolvedValue(undefined),
     setLoop: vi.fn(),
     setLoopEnabled: vi.fn(),
@@ -52,6 +67,7 @@ describe('PlaybackAdapter', () => {
   });
 
   afterEach(() => {
+    adapter.dispose();
     globalThis.requestAnimationFrame = originalRequestAnimationFrame as any;
     globalThis.cancelAnimationFrame = originalCancelAnimationFrame as any;
   });
@@ -89,7 +105,8 @@ describe('PlaybackAdapter', () => {
       adapter.play();
       adapter.play();
 
-      expect(globalThis.cancelAnimationFrame).toHaveBeenCalledTimes(1);
+      expect(globalThis.requestAnimationFrame).toHaveBeenCalledTimes(1);
+      expect(globalThis.cancelAnimationFrame).not.toHaveBeenCalled();
     });
 
     it('starts pushing live time updates while playing', () => {
