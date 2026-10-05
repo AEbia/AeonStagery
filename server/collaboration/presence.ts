@@ -41,6 +41,9 @@ export function createPresenceIdentity(url: URL): CollaborationIdentity | null {
   const clientId = url.searchParams.get('clientId');
   const displayName = url.searchParams.get('displayName');
   if (!clientId || !displayName) return null;
+  if (clientId.length > 128 || displayName.length > 128 || /[\u0000-\u001f\u007f]/.test(clientId + displayName)) {
+    throw new Error('Invalid collaboration presence identity');
+  }
   return { clientId, displayName };
 }
 

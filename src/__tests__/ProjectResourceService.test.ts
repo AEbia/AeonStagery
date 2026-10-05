@@ -325,7 +325,7 @@ describe('ProjectResourceService', () => {
 
   it('converts mounted references to project-relative collaboration references', () => {
     expect(service.toCollaborationReference('@mount/shared-library/figure/casual-2023/model.json'))
-      .toBe('.aeonstagery/mounts/shared-library/figure/casual-2023/model.json');
+      .toBe('figure/casual-2023/model.json');
   });
 
   it('keeps the source reference stable when a mount is rebound to another local path', async () => {

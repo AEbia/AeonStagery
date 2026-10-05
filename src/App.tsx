@@ -1,3 +1,4 @@
+import { isMatchingCollaborationServerHost, withCollaborationAccessToken } from './services/collaboration/CollaborationTransport';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { isSettingsDialogTab } from './ui/settingsNavigation';
 import { eventBus } from './api/events';
@@ -66,7 +67,7 @@ import type {
   CollaborationPresencePeerV2,
 } from './api/types/collaboration';
 import type { CustomMotionEditLeaseGate } from './services/timeline-authoring/CustomMotionEditLeaseGate';
-import { CollaborationConnectPanel } from './ui/CollaborationConnectPanel';
+import { CollaborationConnectPanel, type CollaborationServerCredentials } from './ui/CollaborationConnectPanel';
 import { useSemanticCollaborationSession } from './ui/useSemanticCollaborationSession';
 import {
   areWorkspaceToolsSceneIdentitiesEqual,
@@ -87,6 +88,9 @@ type CollaborationServerStatus = {
   dataDir: string;
   localUrl: string;
   lanUrls: string[];
+  accessToken?: string;
+  connectionPassword?: string;
+  inviteUrls?: string[];
   assetRoot: string;
   hasState: boolean;
 };
@@ -298,6 +302,7 @@ function AppContent({
     onPeersChange: setCollaborationPeers,
     onPresencePublisherChange: setCollaborationPresencePublisher,
     onLeaseGateChange: setCustomMotionEditLeaseGate,
+    collaborationServerStatus,
   });
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
@@ -747,7 +752,7 @@ function AppContent({
     return false;
   }, [contextValue.services.sceneFile]);
 
-  const showProjectWorkflowResult = useCallback((result: any, mode: 'create' | 'open' | 'recent') => {
+  const showProjectWorkflowResult = useCallback((result: any, mode: 'create' | 'open' | 'recent', notifySuccess = true) => {
     if (!result.success) {
       if (result.outcome === 'project_create_failed') {
         showToast(`创建项目失败: ${result.error}`, 'error');
@@ -765,7 +770,7 @@ function AppContent({
     }
 
     const verb = mode === 'create' ? '已创建项目并加载默认场景' : '已打开项目并加载默认场景';
-    showToast(`${verb}: ${result.project.metadata.name}`, 'success');
+    if (notifySuccess) showToast(`${verb}: ${result.project.metadata.name}`, 'success');
     if (result.issues && result.issues.length > 0) {
       const errors = result.issues.filter((i: any) => i.severity === 'error');
       const warnings = result.issues.filter((i: any) => i.severity === 'warning');
@@ -971,10 +976,11 @@ function AppContent({
     showProjectWorkflowResult(workflowResult, 'recent');
   }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
 
-  const startInternalCollaborationServer = useCallback(async (input: { projectId: string; port: number }) => {
+  const startInternalCollaborationServer = useCallback(async (input: { projectId: string; port: number; allowNetwork?: boolean; password?: string }) => {
     const result = await window.aeonStageryAPI.collaborationServer.start({
       projectId: input.projectId,
-      host: '0.0.0.0',
+      host: input.allowNetwork === false ? '127.0.0.1' : '0.0.0.0',
+      password: input.password,
       port: input.port,
     });
     if (!result.success || !result.status) {
@@ -986,9 +992,9 @@ function AppContent({
 
   const serverStatusToEndpoint = useCallback((status: CollaborationServerStatus, reachableUrl?: string) => {
     try {
-      return new URL(reachableUrl ?? status.localUrl).host;
+      return withCollaborationAccessToken(new URL(reachableUrl ?? status.localUrl).origin, status.accessToken);
     } catch {
-      return `127.0.0.1:${status.port}`;
+      return withCollaborationAccessToken(`http://127.0.0.1:${status.port}`, status.accessToken);
     }
   }, []);
 
@@ -1002,7 +1008,11 @@ function AppContent({
     for (const candidate of candidates) {
       const baseUrl = candidate.replace(/\/+$/, '');
       try {
-        const response = await fetch(`${baseUrl}/health`, { cache: 'no-store' });
+        const response = await fetch(`${baseUrl}/health`, {
+          cache: 'no-store',
+          redirect: 'error',
+          ...(status.accessToken ? { headers: { authorization: `Bearer ${status.accessToken}` } } : {}),
+        });
         if (response.ok) {
           return serverStatusToEndpoint(status, baseUrl);
         }
@@ -1023,7 +1033,7 @@ function AppContent({
     }
     if (current.status?.hasState) {
       setCollaborationServerStatus(current.status);
-      showToast('协作房间已保存在本机服务器，可再次主持连接。', 'warning');
+      showToast('协作房间仍保留在本机服务器，可重新连接。', 'warning');
       return;
     }
     const result = await window.aeonStageryAPI.collaborationServer.stop().catch((error: unknown) => ({
@@ -1032,10 +1042,10 @@ function AppContent({
     }));
     if (result.success) {
       setCollaborationServerStatus(null);
-      showToast('主持未完成，已停止刚启动的本机协作服务器；房间未创建。', 'warning');
+      showToast('未能进入协作，刚启动的本机协作服务器已停止。', 'warning');
       return;
     }
-    showToast(`主持未完成，房间未创建；但本机服务器停止失败: ${result.error || '未知错误'}`, 'error');
+    showToast(`未能进入协作，且本机协作服务器停止失败：${result.error || '未知错误'}`, 'error');
   }, []);
 
   const handleHostNewCollaboration = useCallback(async ({
@@ -1043,15 +1053,19 @@ function AppContent({
     rootPath,
     displayName,
     port,
+    allowNetwork,
+    password,
   }: {
     name: string;
     rootPath: string;
     displayName: string;
     port: number;
+    allowNetwork?: boolean;
+    password?: string;
   }) => {
     setIsCollaborationJoinHomeLocked(true);
     const workflowResult = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({ name, rootPath });
-    showProjectWorkflowResult(workflowResult, 'create');
+    showProjectWorkflowResult(workflowResult, 'create', false);
     if (!workflowResult.success || !workflowResult.project) {
       setIsCollaborationJoinHomeLocked(false);
       return;
@@ -1063,18 +1077,21 @@ function AppContent({
       const { status: serverStatus, reused } = await startInternalCollaborationServer({
         projectId: workflowResult.project.metadata.projectId,
         port,
+        allowNetwork,
+        password,
       });
       stopServerOnFailure = !reused && !serverStatus.hasState;
       const endpoint = await resolveReachableInternalCollaborationEndpoint(serverStatus);
       const ok = await collaborationController.hostCurrentScene({
         endpoint,
         displayName,
+        password: password || serverStatus.connectionPassword,
         project: workflowResult.project,
+        isServerHost: true,
       });
       if (ok) {
         roomCreated = true;
         setCollaborationServerStatus({ ...serverStatus, hasState: true });
-        showToast('已主持新剧本协作房间', 'success');
       } else {
         if (stopServerOnFailure) {
           stopServerOnFailure = false;
@@ -1104,9 +1121,13 @@ function AppContent({
   const handleHostExistingCollaboration = useCallback(async ({
     displayName,
     port,
+    allowNetwork,
+    password,
   }: {
     displayName: string;
     port: number;
+    allowNetwork?: boolean;
+    password?: string;
   }) => {
     setIsCollaborationJoinHomeLocked(true);
     const result = await window.aeonStageryAPI.dialog.showOpen({
@@ -1120,7 +1141,7 @@ function AppContent({
     }
 
     const workflowResult = await contextValue.services.projectOpenWorkflow.openProjectAndLoadDefaultScene(result.filePaths[0]);
-    showProjectWorkflowResult(workflowResult, 'open');
+    showProjectWorkflowResult(workflowResult, 'open', false);
     if (!workflowResult.success || !workflowResult.project) {
       setIsCollaborationJoinHomeLocked(false);
       return;
@@ -1132,18 +1153,21 @@ function AppContent({
       const { status: serverStatus, reused } = await startInternalCollaborationServer({
         projectId: workflowResult.project.metadata.projectId,
         port,
+        allowNetwork,
+        password,
       });
       stopServerOnFailure = !reused && !serverStatus.hasState;
       const endpoint = await resolveReachableInternalCollaborationEndpoint(serverStatus);
       const ok = await collaborationController.hostCurrentScene({
         endpoint,
         displayName,
+        password: password || serverStatus.connectionPassword,
         project: workflowResult.project,
+        isServerHost: true,
       });
       if (ok) {
         roomCreated = true;
         setCollaborationServerStatus({ ...serverStatus, hasState: true });
-        showToast('已主持已有剧本协作房间', 'success');
       } else {
         if (stopServerOnFailure) {
           stopServerOnFailure = false;
@@ -1174,10 +1198,12 @@ function AppContent({
     endpoint,
     displayName,
     rootPath,
+    password,
   }: {
     endpoint: string;
     displayName: string;
     rootPath: string;
+    password?: string;
   }) => {
     setIsCollaborationJoinHomeLocked(true);
     let roomCreated = false;
@@ -1192,31 +1218,46 @@ function AppContent({
       }
 
       if (!workflowResult.scenePath) {
-        showToast('协作项目缺少本地主剧本路径', 'error');
+        showToast('协作目录未能准备好本地场景文件，请重新选择目录后重试', 'error');
         return;
       }
 
       const loadResult = await contextValue.services.sceneFile.loadFromPath(workflowResult.scenePath);
       if (!loadResult.success) {
-        showToast(`加载本地主剧本失败: ${'error' in loadResult ? loadResult.error : '未知错误'}`, 'error');
+        showToast(`加载协作目录中的本地场景失败：${'error' in loadResult ? loadResult.error : '未知错误'}`, 'error');
         return;
       }
 
+      let currentServerStatus = collaborationServerStatus;
+      if (!currentServerStatus && window.aeonStageryAPI?.collaborationServer?.getStatus) {
+        try {
+          const res = await window.aeonStageryAPI.collaborationServer.getStatus();
+          if (res?.success && res.status) {
+            currentServerStatus = res.status;
+            setCollaborationServerStatus(res.status);
+          }
+        } catch {
+          // ignore error fetching server status
+        }
+      }
+      const isServerHost = isMatchingCollaborationServerHost(endpoint, currentServerStatus);
+
       const ok = await collaborationController.joinExistingRoom({
         endpoint,
+        password,
         displayName,
         project: workflowResult.project,
+        isServerHost,
       });
       if (!ok) return;
       roomCreated = true;
-      showToast('已加入服务器协作房间', 'success');
     } finally {
       releaseCollaborationJoinHomeLockAfterRoomCreated(
         roomCreated,
         setIsCollaborationJoinHomeLocked,
       );
     }
-  }, [collaborationController, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile]);
+  }, [collaborationController, collaborationServerStatus, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile]);
 
   const handleStopCollaborationServer = useCallback(async () => {
     const result = await window.aeonStageryAPI.collaborationServer.stop();
@@ -1309,7 +1350,44 @@ function AppContent({
     handleZoomOut,
     isPanning,
   } = useViewport(stageRef, !showProjectHome);
-  const shouldShowCollaborationPanel = collaborationStatus !== 'disconnected' || collaborationController.isBusy;
+  const effectiveServerCredentials: CollaborationServerCredentials | null = useMemo(() => {
+    if (collaborationServerStatus?.running) {
+      const lanOrLocal = collaborationServerStatus.lanUrls[0] || collaborationServerStatus.localUrl;
+      const fallbackInvite = collaborationServerStatus.accessToken
+        ? [withCollaborationAccessToken(lanOrLocal, collaborationServerStatus.accessToken)]
+        : undefined;
+      const inviteUrls = (collaborationServerStatus.inviteUrls && collaborationServerStatus.inviteUrls.length > 0)
+        ? collaborationServerStatus.inviteUrls
+        : (collaborationController.sessionCredentials?.inviteUrls?.length
+          ? collaborationController.sessionCredentials.inviteUrls
+          : fallbackInvite);
+
+      return {
+        ...collaborationServerStatus,
+        connectionPassword: collaborationServerStatus.connectionPassword
+          || collaborationController.sessionCredentials?.connectionPassword,
+        accessToken: collaborationServerStatus.accessToken
+          || collaborationController.sessionCredentials?.accessToken,
+        inviteUrls,
+        serverAddress: lanOrLocal,
+      };
+    }
+    if (collaborationController.sessionCredentials) {
+      return {
+        connectionPassword: collaborationController.sessionCredentials.connectionPassword,
+        accessToken: collaborationController.sessionCredentials.accessToken,
+        inviteUrls: collaborationController.sessionCredentials.inviteUrls,
+        localUrl: collaborationController.sessionCredentials.serverAddress,
+        serverAddress: collaborationController.sessionCredentials.serverAddress,
+      };
+    }
+    return collaborationServerStatus;
+  }, [collaborationController.sessionCredentials, collaborationServerStatus]);
+
+  const shouldShowCollaborationPanel =
+    collaborationStatus !== 'disconnected'
+    || collaborationController.isBusy
+    || Boolean(collaborationServerStatus?.running);
   const saveShortcutTitle = useMemo(() => {
     const [binding] = getEffectiveShortcutBindings(settings.keyboardShortcuts, 'app.save');
     const suffix = binding ? ` (${formatShortcutBinding(binding)})` : '';
@@ -1416,6 +1494,7 @@ function AppContent({
                 status={collaborationStatus}
                 peers={collaborationPeers}
                 controller={collaborationController}
+                serverCredentials={effectiveServerCredentials}
                 disabled={!initialized || showProjectHome}
               />
             )}

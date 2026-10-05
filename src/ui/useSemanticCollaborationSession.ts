@@ -1,9 +1,17 @@
+import {
+  collaborationEndpointWithPassword,
+  getCollaborationAccessToken,
+  isMatchingCollaborationServerHost,
+  normalizeCollaborationEndpoint,
+  withCollaborationAccessToken,
+} from '../services/collaboration/CollaborationTransport';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CollaborationConnectionStatus,
   CollaborationIdentity,
   CollaborationPresencePatchV2,
   CollaborationPresencePeerV2,
+  CollaborationServerStatus,
   CollaborativeAssetManifest,
 } from '../api/types/collaboration';
 import type { ProjectState } from '../api/types/project';
@@ -43,17 +51,26 @@ import {
 import {
   reducePresenceMessage,
 } from '../services/collaboration/CollaborationPresence';
-import { deriveCollaborationResourceUx } from '../services/collaboration/CollaborationResourceUxModel';
 import { deriveCollaborationStatusUx } from '../services/collaboration/CollaborationStatusUxModel';
 import { useEditorSelection } from './store/storeHooks';
 import { showToast } from './Toast';
 
 export type CollaborationStartMode = 'host-or-join' | 'host' | 'join-existing';
 
+export interface CollaborationSessionCredentials {
+  connectionPassword?: string;
+  accessToken?: string;
+  inviteUrls?: string[];
+  serverAddress?: string;
+}
+
 export interface CollaborationStartOptions {
   endpoint?: string;
+  password?: string;
   displayName?: string;
   project?: ProjectState | null;
+  isServerHost?: boolean;
+  skipServerSceneAgreement?: boolean;
 }
 
 export interface ResourceAgreementDialogState {
@@ -81,6 +98,7 @@ export interface SemanticCollaborationSessionController {
   isOffline: boolean;
   statusHint: string;
   selfIdentity: CollaborationIdentity | null;
+  sessionCredentials: CollaborationSessionCredentials | null;
   connectCurrentProject: () => Promise<boolean>;
   hostCurrentScene: (options?: CollaborationStartOptions) => Promise<boolean>;
   joinExistingRoom: (options?: CollaborationStartOptions) => Promise<boolean>;
@@ -237,6 +255,7 @@ export function useSemanticCollaborationSession({
   onPeersChange,
   onPresencePublisherChange,
   onLeaseGateChange,
+  collaborationServerStatus,
 }: {
   contextValue: BootstrapContext;
   currentProject: ProjectState | null;
@@ -247,6 +266,7 @@ export function useSemanticCollaborationSession({
   onPeersChange: (peers: CollaborationPresencePeerV2[]) => void;
   onPresencePublisherChange?: (publisher: ((patch?: Partial<CollaborationPresencePatchV2>) => void) | null) => void;
   onLeaseGateChange?: (gate: CustomMotionEditLeaseGate | null) => void;
+  collaborationServerStatus?: CollaborationServerStatus | null;
 }): SemanticCollaborationSessionController {
   const [endpoint, setEndpoint] = useState(() => readStoredInput('aeonstagery.collaboration.endpoint', '127.0.0.1:12345'));
   const [displayName, setDisplayName] = useState(() => readStoredInput('aeonstagery.collaboration.displayName', '导演'));
@@ -256,6 +276,7 @@ export function useSemanticCollaborationSession({
   const [lastResourceAgreementProposal, setLastResourceAgreementProposal] = useState<CollaborationAssetAgreementProposal | null>(null);
   const [serverSceneAgreement, setServerSceneAgreement] = useState<SemanticServerSceneAgreementDialogState | null>(null);
   const [isRefreshingResources, setIsRefreshingResources] = useState(false);
+  const [sessionCredentials, setSessionCredentials] = useState<CollaborationSessionCredentials | null>(null);
   const { selectedActionIds } = useEditorSelection();
   const layerRef = useRef<CollaborativeDocumentLayerV3 | null>(null);
   const clientRef = useRef<CollaborationClientV3 | null>(null);
@@ -268,12 +289,13 @@ export function useSemanticCollaborationSession({
   const selectedActionIdsRef = useRef<SelectedActionIdCollection>(selectedActionIds);
   const selfRef = useRef<CollaborationIdentity | null>(null);
   const forceResourceRefreshRef = useRef(false);
+  const resourceRefreshRef = useRef<{ verified: boolean; errorReported: boolean } | null>(null);
   const remoteTargetScenePathRef = useRef<string | undefined>(undefined);
   const lastPublishedPlayheadRef = useRef<{ time: number; sentAt: number } | null>(null);
 
   useEffect(() => { selectedActionIdsRef.current = selectedActionIds; }, [selectedActionIds]);
   useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.endpoint', endpoint);
+    if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.endpoint', endpoint.split('#')[0]);
   }, [endpoint]);
   useEffect(() => {
     if (typeof window !== 'undefined') window.localStorage.setItem('aeonstagery.collaboration.displayName', displayName);
@@ -308,13 +330,11 @@ export function useSemanticCollaborationSession({
       itemPlans,
     });
     setAssetHandshake(nextHandshake);
+    if (resourceRefreshRef.current && direction === 'local') {
+      if (handshakeStatus === 'verified') resourceRefreshRef.current.verified = true;
+    }
     if (proposal && handshakeStatus === 'verified') {
       setLastResourceAgreementProposal(proposal);
-      const ux = deriveCollaborationResourceUx(
-        nextHandshake,
-        { proposal },
-      );
-      showToast(ux.riskSummary.hasOnlyReuse ? '协作资源已校验，无需额外同步' : ux.headline, 'success');
     }
   }, []);
 
@@ -340,6 +360,7 @@ export function useSemanticCollaborationSession({
     setLastResourceAgreementProposal(null);
     setServerSceneAgreement(null);
     setAssetHandshake(createEmptyAssetHandshakeState());
+    setSessionCredentials(null);
     setLastError(null);
     onSelfChange(null);
     onPeersChange([]);
@@ -395,15 +416,27 @@ export function useSemanticCollaborationSession({
     mode: CollaborationStartMode,
     options: CollaborationStartOptions = {},
   ): Promise<boolean> => {
-    const cleanEndpoint = (options.endpoint ?? endpoint).trim();
+    let cleanEndpoint = (options.endpoint ?? endpoint).trim();
+    let computedToken: string | undefined;
+    try {
+      cleanEndpoint = await collaborationEndpointWithPassword(cleanEndpoint, options.password ?? '');
+      if (cleanEndpoint) {
+        normalizeCollaborationEndpoint(cleanEndpoint);
+        computedToken = getCollaborationAccessToken(cleanEndpoint);
+      }
+    }
+    catch (error) {
+      showToast(error instanceof Error ? error.message : '协作地址或密码无效', 'error');
+      return false;
+    }
     const project = options.project ?? currentProject;
     const fileAccess = contextValue.services.fileAccess;
     const projectResources = contextValue.services.projectResources;
     const rawDocument = contextValue.stores.document.getCurrentSceneDocumentSnapshot();
-    if (!cleanEndpoint) { showToast('请输入协作服务器 IP 和端口', 'warning'); return false; }
+    if (!cleanEndpoint) { showToast('请输入协作服务器地址和端口', 'warning'); return false; }
     if (!project) { showToast('请先创建或打开一个项目', 'warning'); return false; }
     if (!fileAccess || !projectResources || !rawDocument) {
-      showToast('当前运行环境缺少语义场景或协作素材能力', 'error');
+      showToast('无法开始协作：请先加载场景，并确认当前版本支持协作资源同步', 'error');
       return false;
     }
 
@@ -424,9 +457,15 @@ export function useSemanticCollaborationSession({
     };
     selfRef.current = self;
     onSelfChange(self);
-    setEndpoint(cleanEndpoint);
+    setEndpoint(normalizeCollaborationEndpoint(cleanEndpoint));
     if (options.displayName !== undefined) setDisplayName(options.displayName);
     setLastError(null);
+
+    const isServerHost = Boolean(
+      options.isServerHost ||
+      (collaborationServerStatus && isMatchingCollaborationServerHost(cleanEndpoint, collaborationServerStatus))
+    );
+    const skipServerSceneAgreement = Boolean(options.skipServerSceneAgreement || isServerHost);
 
     const client = new CollaborationClientV3({ endpoint: cleanEndpoint, identity: self });
     const leaseClient = client as unknown as {
@@ -444,13 +483,17 @@ export function useSemanticCollaborationSession({
     leaseGateRef.current = leaseGate;
     onLeaseGateChange?.(leaseGate);
     const resourceAgreement = new CollaborativeResourceAgreementAdapter({
-      show: (request) => setResourceAgreement(request),
+      show: (request) => {
+        if (!skipServerSceneAgreement) setResourceAgreement(request);
+      },
       clear: () => setResourceAgreement(null),
     });
     resourceAgreementRef.current = resourceAgreement;
     const serverSceneAgreement = new CollaborativeServerSceneAgreementAdapterV3({
       presenter: {
-        show: (request) => setServerSceneAgreement(request),
+        show: (request) => {
+          if (!skipServerSceneAgreement) setServerSceneAgreement(request);
+        },
         clear: () => setServerSceneAgreement(null),
       },
       safetyPaths: new CollaborativeServerSceneSafetyPathAdapterV3({
@@ -481,7 +524,12 @@ export function useSemanticCollaborationSession({
       },
       uploader: new CollaborativeAssetUploader({ fileAccess, projectResources, client }),
       downloader: new CollaborativeAssetDownloader({ fileAccess, projectResources, client }),
-      confirmAgreement: async (request) => resourceAgreement.request(request),
+      confirmAgreement: async (request) => {
+        // The host owns the server scene, so its asset agreement is accepted
+        // without a dialog; the gate discards the confirmation result.
+        if (skipServerSceneAgreement) return;
+        return resourceAgreement.request(request);
+      },
       onHandshake: (event) => showAssetHandshake(event.manifest, event.status, event.direction, event.error, event.proposal, event.transfer),
     });
     gateRef.current = gate;
@@ -493,9 +541,17 @@ export function useSemanticCollaborationSession({
     const orchestrator = new CollaborativeSessionOrchestratorV3(admissionGate);
     const collaborationProjectId = project.metadata.projectId;
     const roomId = `${collaborationProjectId}:main`;
+    let starting = true;
+    let announcedReady = false;
+    const startup: { status: CollaborationConnectionStatus; failure?: { error: unknown } } = { status: 'connecting' };
+    const announceReady = () => {
+      if (announcedReady) return;
+      announcedReady = true;
+      showToast(mode === 'host' ? '已开始主持协作房间' : '已加入协作房间', 'success');
+    };
     try {
       const layer = await orchestrator.start({
-        endpoint: cleanEndpoint,
+        endpoint: normalizeCollaborationEndpoint(cleanEndpoint),
         identity: self,
         client,
         documentStore: contextValue.stores.document,
@@ -536,6 +592,7 @@ export function useSemanticCollaborationSession({
             await serverSceneAgreement.request(state, {
               assetAgreementProposal: acceptedJoinProposal,
               blockingIssues: collectBlockingAssetIssues(acceptedJoinProposal),
+              skipDialog: skipServerSceneAgreement,
             });
           }
 
@@ -559,34 +616,60 @@ export function useSemanticCollaborationSession({
             const committedPaths = await serverSceneAgreement.commitAcceptedServerDocument(document);
             if (committedPaths) return;
           } catch (error) {
-            throw new Error(`协作保存错误: ${formatError(error)}`);
+            throw new Error(`保存协作场景的本地副本失败：${formatError(error)}`);
           }
           if (contextValue.services.sceneFile.saveCurrentSceneDocument) {
             const result = await contextValue.services.sceneFile.saveCurrentSceneDocument(document as any, targetPath);
             if (!result.success) {
-              throw new Error(`协作保存错误: ${'error' in result ? result.error : '未知错误'}`);
+              throw new Error(`保存协作场景的本地副本失败：${'error' in result ? result.error : '未知错误'}`);
             }
             return;
           }
           try {
             await fileAccess.writeFile(targetPath, JSON.stringify(document, null, 2));
           } catch (error) {
-            throw new Error(`协作保存错误: ${formatError(error)}`);
+            throw new Error(`保存协作场景的本地副本失败：${formatError(error)}`);
           }
         },
         onStatusChange: (nextStatus) => {
+          startup.status = nextStatus;
           onStatusChange(nextStatus);
-          if (nextStatus === 'connected') setLastError(null);
+          if (nextStatus === 'connected') {
+            setLastError(null);
+            if (!starting) announceReady();
+          }
         },
         onSynchronizedState: () => contextValue.stores.editor._setSaveStatus('idle'),
         onError: (error) => {
           const message = formatError(error);
           setLastError(message);
-          showToast(`协作同步失败: ${message}`, 'error');
+          // Startup errors also reach the catch below. Report that operation once.
+          if (starting) {
+            startup.failure = { error };
+            return;
+          }
+          const refreshing = resourceRefreshRef.current;
+          if (refreshing) refreshing.errorReported = true;
+          showToast(`${refreshing ? '协作资源校验失败' : '协作同步失败'}：${message}`, 'error');
         },
       });
       layerRef.current = layer;
-      showToast('已连接语义协作房间', 'success');
+      starting = false;
+      const normalizedEndpoint = normalizeCollaborationEndpoint(cleanEndpoint);
+      const inviteUrl = computedToken ? withCollaborationAccessToken(normalizedEndpoint, computedToken) : undefined;
+      setSessionCredentials({
+        connectionPassword: options.password || undefined,
+        accessToken: computedToken || undefined,
+        inviteUrls: inviteUrl ? [inviteUrl] : [],
+        serverAddress: normalizedEndpoint,
+      });
+      if (startup.failure) {
+        showToast(`协作连接或场景同步未完成：${formatError(startup.failure.error)}`, 'error');
+      } else if (startup.status === 'connected') {
+        announceReady();
+      } else if (startup.status === 'offline') {
+        showToast('实时连接已断开；请重试连接后继续协作编辑', 'warning');
+      }
       return true;
     } catch (error) {
       const message = formatError(error);
@@ -608,21 +691,33 @@ export function useSemanticCollaborationSession({
       onSelfChange(null);
       onPeersChange([]);
       onStatusChange('error');
-      showToast(`协作连接失败: ${message}`, 'error');
+      showToast(`连接协作房间失败：${message}`, 'error');
       return false;
     }
-  }, [contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
+  }, [collaborationServerStatus, contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
 
   const refreshCollaborativeResources = useCallback(async () => {
-    if (!layerRef.current || status !== 'connected') return;
+    if (!layerRef.current || status !== 'connected' || resourceRefreshRef.current) return;
+    const refresh = { verified: false, errorReported: false };
+    resourceRefreshRef.current = refresh;
     forceResourceRefreshRef.current = true;
     setIsRefreshingResources(true);
     try {
       await layerRef.current.publishCurrentSceneNow(true);
-      showToast('已请求重新校验协作资源', 'success');
+      // The publish queue can resolve after reporting an error or skipping work.
+      if (!refresh.errorReported) {
+        showToast(
+          refresh.verified
+            ? '协作资源校验已完成'
+            : '本次未执行资源校验，请等待场景同步完成后重试',
+          refresh.verified ? 'success' : 'info',
+        );
+      }
     } catch (error) {
       setLastError(formatError(error));
+      if (!refresh.errorReported) showToast(`协作资源校验失败：${formatError(error)}`, 'error');
     } finally {
+      resourceRefreshRef.current = null;
       forceResourceRefreshRef.current = false;
       setIsRefreshingResources(false);
     }
@@ -640,7 +735,9 @@ export function useSemanticCollaborationSession({
     const client = clientRef.current;
     if (!client) return;
     setLastError(null);
-    client.reconnectRealtime();
+    // Fire-and-forget: the attempt reports progress through the connection and
+    // error subscriptions this hook already holds.
+    void client.reconnectRealtime();
   }, []);
 
   useEffect(() => () => {
@@ -668,6 +765,7 @@ export function useSemanticCollaborationSession({
     isOffline,
     statusHint,
     selfIdentity: selfRef.current,
+    sessionCredentials,
     connectCurrentProject: () => startSession('host-or-join'),
     hostCurrentScene: (options?: CollaborationStartOptions) => startSession('host', options),
     joinExistingRoom: (options?: CollaborationStartOptions) => startSession('join-existing', options),

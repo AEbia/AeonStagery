@@ -321,3 +321,17 @@ export function assertCollaborativeSceneStateV3(value: unknown): asserts value i
     throw new Error(`Expected collaboration state schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
   }
 }
+
+export interface CollaborationServerStatus {
+  running: boolean;
+  host: string;
+  port: number;
+  dataDir: string;
+  localUrl: string;
+  lanUrls: string[];
+  accessToken?: string;
+  connectionPassword?: string;
+  inviteUrls?: string[];
+  assetRoot: string;
+  hasState: boolean;
+}
