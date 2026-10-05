@@ -265,17 +265,23 @@ describe('ProjectHome collaboration entry', () => {
     });
   });
 
-  it('uses collaboration copy that frames joins as main-scene overwrite and presence as awareness only', () => {
+  it('provides a clean collaboration view without warning clutter, with password visibility toggle', () => {
     renderHome();
 
     fireEvent.click(screen.getByRole('button', { name: /协作/ }));
-    expect(screen.getByText(/本地项目和当前场景播种集中式协作房间/)).toBeTruthy();
-    expect(screen.getByText(/同步计划会先展示/)).toBeTruthy();
-    expect(screen.getByText(/成员位置和编辑提示只用于协作感知，不限制操作/)).toBeTruthy();
+    expect(screen.queryByText(/资源同步会先确认，再写入/)).toBeNull();
+    expect(screen.queryByText(/同步计划会先展示/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /加入房间/ }));
-    expect(screen.getByText(/确认后，服务器剧本会覆写本地项目的主剧本 JSON/)).toBeTruthy();
-    expect(screen.getByText(/写入前只备份 JSON，资源不会自动备份/)).toBeTruthy();
+    expect(screen.queryByText(/加入前会校验服务器资源/)).toBeNull();
+    expect(screen.queryByText(/确认后，服务器剧本会覆写本地项目的主剧本 JSON/)).toBeNull();
+
+    const pwdInput = screen.getByPlaceholderText('输入主持人提供的密码') as HTMLInputElement;
+    expect(pwdInput.type).toBe('password');
+    const eyeToggle = screen.getByRole('button', { name: '显示密码' });
+    fireEvent.click(eyeToggle);
+    expect(pwdInput.type).toBe('text');
+    expect(screen.getByRole('button', { name: '隐藏密码' })).toBeTruthy();
   });
 
   it('reads a selected WebGAL script and shows a conversion preview', async () => {
@@ -364,4 +370,109 @@ describe('ProjectHome collaboration entry', () => {
     expect(screen.getByRole('button', { name: /新建项目/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /开始教程/ })).toBeTruthy();
   });
+  it('defaults hosting to network access and forwards a local-only/password choice', async () => {
+    const onHostExistingCollaboration = vi.fn(async () => undefined);
+    renderHome({ onHostExistingCollaboration });
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    fireEvent.click(screen.getByRole('button', { name: /主持已有剧本/ }));
+    const network = screen.getByRole('checkbox', { name: /允许其他设备连接/ }) as HTMLInputElement;
+    expect(network.checked).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText('留空自动生成随机密码'), { target: { value: 'my room password' } });
+    fireEvent.click(network);
+    fireEvent.click(screen.getByRole('button', { name: /选择项目并主持/ }));
+    await waitFor(() => expect(onHostExistingCollaboration).toHaveBeenCalledWith({
+      displayName: '导演', port: 12345, allowNetwork: false, password: 'my room password',
+    }));
+  });
+
+  it('forwards a manual connection password without adding it to the address', () => {
+    const onJoinCollaboration = vi.fn(async () => undefined);
+    renderHome({ onJoinCollaboration });
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    fireEvent.click(screen.getByRole('button', { name: /加入房间/ }));
+    fireEvent.change(screen.getByPlaceholderText('输入主持人提供的密码'), { target: { value: 'my room password' } });
+    fireEvent.click(screen.getByRole('button', { name: /^加入房间$/ }));
+    expect(onJoinCollaboration).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: '127.0.0.1:12345', password: 'my room password',
+    }));
+  });
+
+  it('switches directly between collaboration modes using segmented tabs without menu bounce', () => {
+    renderHome();
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+    fireEvent.click(screen.getByRole('button', { name: /加入房间/ }));
+    expect(screen.getByText('服务器')).toBeTruthy();
+
+    // Directly switch to host existing via tab
+    fireEvent.click(screen.getByRole('tab', { name: '切换到主持已有剧本' }));
+    expect(screen.getByRole('button', { name: /选择项目并主持/ })).toBeTruthy();
+
+    // Directly switch to host new via tab
+    fireEvent.click(screen.getByRole('tab', { name: '切换到主持新剧本' }));
+    expect(screen.getByPlaceholderText('例如：第 1 话协作')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /创建并主持/ })).toBeTruthy();
+  });
+
+  it('renders server credentials card with view and copy capabilities for password and token', () => {
+    const onStopCollaborationServer = vi.fn();
+    renderHome({
+      collaborationServerStatus: {
+        running: true,
+        host: '127.0.0.1',
+        port: 12345,
+        dataDir: 'D:/data',
+        localUrl: 'http://127.0.0.1:12345',
+        lanUrls: ['http://192.168.1.10:12345'],
+        connectionPassword: 'secret-password',
+        accessToken: 'secret-access-token-12345',
+        inviteUrls: ['http://192.168.1.10:12345/#token=secret-access-token-12345'],
+        assetRoot: 'D:/data/assets',
+        hasState: true,
+      },
+      onStopCollaborationServer,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /协作/ }));
+
+    // Status header is rendered
+    expect(screen.getByText(/本机服务器 运行中/)).toBeTruthy();
+    expect(screen.getByText('http://127.0.0.1:12345')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '停止服务器' })).toBeTruthy();
+
+    // Invite URL item
+    expect(screen.getByDisplayValue('http://192.168.1.10:12345/#token=secret-access-token-12345')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '复制链接' })).toBeTruthy();
+
+    // Password item with eye toggle
+    const pwdInput = screen.getByLabelText('协作连接密码') as HTMLInputElement;
+    expect(pwdInput.value).toBe('secret-password');
+    expect(pwdInput.type).toBe('password');
+    const pwdEye = screen.getAllByRole('button', { name: '显示密码' })[0];
+    fireEvent.click(pwdEye);
+    expect(pwdInput.type).toBe('text');
+    expect(screen.getByRole('button', { name: '复制密码' })).toBeTruthy();
+
+    // Token item with eye toggle
+    const tokenInput = screen.getByLabelText('协作访问 Token') as HTMLInputElement;
+    expect(tokenInput.value).toBe('secret-access-token-12345');
+    expect(tokenInput.type).toBe('password');
+    const tokenEye = screen.getByRole('button', { name: '显示 Token' });
+    fireEvent.click(tokenEye);
+    expect(tokenInput.type).toBe('text');
+    expect(screen.getByRole('button', { name: '复制 Token' })).toBeTruthy();
+
+    // Details initially hidden
+    expect(screen.queryByText('资源目录')).toBeNull();
+
+    // Toggle details
+    fireEvent.click(screen.getByRole('button', { name: '连接详情' }));
+    expect(screen.getByText('资源目录')).toBeTruthy();
+    expect(screen.getByText('http://192.168.1.10:12345')).toBeTruthy();
+
+    // Stop server action
+    fireEvent.click(screen.getByRole('button', { name: '停止服务器' }));
+    expect(onStopCollaborationServer).toHaveBeenCalledOnce();
+  });
+
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IconArrowLeft, IconFile, IconFolder, IconInfo, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
+import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
 import { MAX_RECENT_PROJECTS } from '../SettingsStore';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import type {
@@ -54,6 +54,9 @@ interface ProjectHomeProps {
     dataDir: string;
     localUrl: string;
     lanUrls: string[];
+    connectionPassword?: string;
+    accessToken?: string;
+    inviteUrls?: string[];
     assetRoot: string;
     hasState: boolean;
   } | null;
@@ -69,9 +72,9 @@ interface ProjectHomeProps {
   onImportTemplatePackage: () => void | Promise<void>;
   onOpenRecentProject: (projectFilePath: string) => void | Promise<void>;
   onRemoveRecentProject: (projectFilePath: string) => void;
-  onHostNewCollaboration: (payload: { name: string; rootPath: string; displayName: string; port: number }) => void | Promise<void>;
-  onHostExistingCollaboration: (payload: { displayName: string; port: number }) => void | Promise<void>;
-  onJoinCollaboration: (payload: { endpoint: string; displayName: string; rootPath: string }) => void | Promise<void>;
+  onHostNewCollaboration: (payload: { name: string; rootPath: string; displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
+  onHostExistingCollaboration: (payload: { displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
+  onJoinCollaboration: (payload: { endpoint: string; displayName: string; rootPath: string; password?: string }) => void | Promise<void>;
   onStopCollaborationServer: () => void | Promise<void>;
   onStartTutorial: () => void;
   onChooseExternalLibrary: () => void | Promise<void>;
@@ -166,6 +169,9 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const [joinEndpoint, setJoinEndpoint] = useState(collaborationEndpoint);
   const [collaborationName, setCollaborationName] = useState(collaborationDisplayName);
   const [collaborationPort, setCollaborationPort] = useState('12345');
+  const [allowNetwork, setAllowNetwork] = useState(true);
+  const [hostPassword, setHostPassword] = useState('');
+  const [joinPassword, setJoinPassword] = useState('');
   const [joinRootPath, setJoinRootPath] = useState(buildProjectPath(defaultProjectLocation, 'AeonStagery Collaboration Session'));
   const [isJoinRootPathDirty, setIsJoinRootPathDirty] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -179,6 +185,27 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const [webgalSpeed, setWebgalSpeed] = useState(1.5);
   const [isReadingWebgalScript, setIsReadingWebgalScript] = useState(false);
   const [isImportingTemplate, setIsImportingTemplate] = useState(false);
+  const [copiedServerField, setCopiedServerField] = useState<string | null>(null);
+  const [showServerDetails, setShowServerDetails] = useState(false);
+  const [showHostPassword, setShowHostPassword] = useState(false);
+  const [showJoinPassword, setShowJoinPassword] = useState(false);
+  const [showServerPassword, setShowServerPassword] = useState(false);
+  const [showServerToken, setShowServerToken] = useState(false);
+
+  const handleCopyServerInfo = async (text: string, fieldId: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+      setCopiedServerField(fieldId);
+      setTimeout(() => {
+        setCopiedServerField((curr) => (curr === fieldId ? null : curr));
+      }, 1800);
+    } catch {
+      // fallback
+    }
+  };
+
   const removeRecentDialogRef = useModalDialog(
     () => setProjectToRemove(null),
     projectToRemove !== null,
@@ -575,6 +602,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
         rootPath: trimmedRootPath,
         displayName: collaborationName.trim() || '导演',
         port: parseCollaborationPort(),
+        allowNetwork,
+        ...(hostPassword ? { password: hostPassword } : {}),
       });
     } finally {
       setIsSubmitting(false);
@@ -588,6 +617,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       await onHostExistingCollaboration({
         displayName: collaborationName.trim() || '导演',
         port: parseCollaborationPort(),
+        allowNetwork,
+        ...(hostPassword ? { password: hostPassword } : {}),
       });
     } finally {
       setIsSubmitting(false);
@@ -603,6 +634,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
     try {
       await onJoinCollaboration({
         endpoint: trimmedEndpoint,
+        ...(joinPassword ? { password: joinPassword } : {}),
         displayName: collaborationName.trim() || '导演',
         rootPath: trimmedRootPath,
       });
@@ -1048,13 +1080,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                     <span className="ph-breadcrumb-current">协作</span>
                   )}
                 </nav>
-                <div className="ph-section-title">
-                  协作
-                  <InfoTip content="主持会用本地项目和当前场景播种集中式协作房间；加入会在确认后用服务器剧本覆写本地主剧本 JSON。" />
-                </div>
-                <div className="ph-sr-only">
-                  主持会用本地项目和当前场景播种集中式协作房间；加入会在确认后用服务器剧本覆写本地主剧本 JSON。
-                </div>
+                <div className="ph-section-title">协作</div>
               </div>
               <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('start')}>
                 <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
@@ -1062,27 +1088,196 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
             </div>
 
             {collaborationServerStatus && (
-              <div className="ph-server-status ph-stagger-2">
-                <div className="ph-server-status-main">
-                  <span className="ph-live-dot ph-live-dot--success" />
-                  <span>本机服务器 {collaborationServerStatus.running ? '运行中' : '已停止'}</span>
-                  <strong>{collaborationServerStatus.localUrl}</strong>
+              <div className="ph-server-credentials-card ph-server-capsule ph-stagger-2">
+                <div className="ph-server-capsule-bar">
+                  <div className="ph-server-capsule-main">
+                    <span className="ph-live-dot ph-live-dot--success" />
+                    <span className="ph-server-capsule-label">
+                      本机服务器 {collaborationServerStatus.running ? '运行中' : '已停止'}
+                    </span>
+                    <strong className="ph-server-capsule-url">{collaborationServerStatus.localUrl}</strong>
+                    <button
+                      type="button"
+                      className="btn ph-btn-micro"
+                      onClick={() => { void handleCopyServerInfo(collaborationServerStatus.localUrl, 'url'); }}
+                      title="复制服务地址"
+                    >
+                      {copiedServerField === 'url' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                      <span>{copiedServerField === 'url' ? '已复制' : '复制'}</span>
+                    </button>
+                  </div>
+
+                  <div className="ph-server-capsule-actions">
+                    <button
+                      type="button"
+                      className="btn ph-btn-micro"
+                      onClick={() => setShowServerDetails((v) => !v)}
+                      title="展开或折叠详细网络与资源信息"
+                    >
+                      {showServerDetails ? '收起详情' : '连接详情'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ph-btn-micro ph-btn-danger-outline"
+                      onClick={() => { void onStopCollaborationServer(); }}
+                    >
+                      停止服务器
+                    </button>
+                  </div>
                 </div>
-                <div className="ph-server-resource-status">
-                  <span>资源目录</span>
-                  <strong title={collaborationServerStatus.assetRoot}>{collaborationServerStatus.assetRoot}</strong>
-                  <span>{collaborationServerStatus.hasState ? '已有房间状态' : '等待首次发布'}</span>
+
+                <div className="ph-credentials-grid">
+                  {collaborationServerStatus.inviteUrls && collaborationServerStatus.inviteUrls.length > 0 && (
+                    <div className="ph-credential-item ph-credential-item--featured">
+                      <div className="ph-credential-header">
+                        <span className="ph-credential-label">邀请链接（包含访问凭证，协作者直接粘贴即可加入）</span>
+                        <button
+                          type="button"
+                          className="btn ph-btn-micro ph-btn-copy"
+                          onClick={() => { void handleCopyServerInfo(collaborationServerStatus.inviteUrls![0], 'server-invite'); }}
+                          title="复制完整邀请链接"
+                        >
+                          {copiedServerField === 'server-invite' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                          <span>{copiedServerField === 'server-invite' ? '已复制' : '复制链接'}</span>
+                        </button>
+                      </div>
+                      <div className="ph-credential-input-wrapper">
+                        <input
+                          className="ph-input ph-font-mono ph-credential-input"
+                          readOnly
+                          value={collaborationServerStatus.inviteUrls[0]}
+                          aria-label="协作邀请链接"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {collaborationServerStatus.connectionPassword && (
+                    <div className="ph-credential-item">
+                      <div className="ph-credential-header">
+                        <span className="ph-credential-label">房间密码</span>
+                        <button
+                          type="button"
+                          className="btn ph-btn-micro ph-btn-copy"
+                          onClick={() => { void handleCopyServerInfo(collaborationServerStatus.connectionPassword!, 'server-pwd'); }}
+                          title="复制连接密码"
+                        >
+                          {copiedServerField === 'server-pwd' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                          <span>{copiedServerField === 'server-pwd' ? '已复制' : '复制密码'}</span>
+                        </button>
+                      </div>
+                      <div className="ph-credential-input-wrapper ph-password-input-row">
+                        <input
+                          className="ph-input ph-font-mono ph-credential-input"
+                          type={showServerPassword ? 'text' : 'password'}
+                          readOnly
+                          value={collaborationServerStatus.connectionPassword}
+                          aria-label="协作连接密码"
+                        />
+                        <button
+                          type="button"
+                          className="ph-input-eye-btn"
+                          onClick={() => setShowServerPassword((v) => !v)}
+                          title={showServerPassword ? '隐藏密码' : '显示密码'}
+                          aria-label={showServerPassword ? '隐藏密码' : '显示密码'}
+                        >
+                          {showServerPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {collaborationServerStatus.accessToken && (
+                    <div className="ph-credential-item">
+                      <div className="ph-credential-header">
+                        <span className="ph-credential-label">访问 Token</span>
+                        <button
+                          type="button"
+                          className="btn ph-btn-micro ph-btn-copy"
+                          onClick={() => { void handleCopyServerInfo(collaborationServerStatus.accessToken!, 'server-token'); }}
+                          title="复制访问 Token"
+                        >
+                          {copiedServerField === 'server-token' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                          <span>{copiedServerField === 'server-token' ? '已复制' : '复制 Token'}</span>
+                        </button>
+                      </div>
+                      <div className="ph-credential-input-wrapper ph-password-input-row">
+                        <input
+                          className="ph-input ph-font-mono ph-credential-input"
+                          type={showServerToken ? 'text' : 'password'}
+                          readOnly
+                          value={collaborationServerStatus.accessToken}
+                          aria-label="协作访问 Token"
+                        />
+                        <button
+                          type="button"
+                          className="ph-input-eye-btn"
+                          onClick={() => setShowServerToken((v) => !v)}
+                          title={showServerToken ? '隐藏 Token' : '显示 Token'}
+                          aria-label={showServerToken ? '隐藏 Token' : '显示 Token'}
+                        >
+                          {showServerToken ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="ph-credential-item">
+                    <div className="ph-credential-header">
+                      <span className="ph-credential-label">服务地址（局域网 / 本机）</span>
+                      <button
+                        type="button"
+                        className="btn ph-btn-micro ph-btn-copy"
+                        onClick={() => {
+                          const endpoint = collaborationServerStatus.lanUrls[0] || collaborationServerStatus.localUrl;
+                          void handleCopyServerInfo(endpoint, 'server-endpoint');
+                        }}
+                        title="复制服务地址"
+                      >
+                        {copiedServerField === 'server-endpoint' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
+                        <span>{copiedServerField === 'server-endpoint' ? '已复制' : '复制地址'}</span>
+                      </button>
+                    </div>
+                    <div className="ph-credential-input-wrapper">
+                      <input
+                        className="ph-input ph-font-mono ph-credential-input"
+                        readOnly
+                        value={collaborationServerStatus.lanUrls[0] || collaborationServerStatus.localUrl}
+                        aria-label="协作服务地址"
+                      />
+                    </div>
+                  </div>
                 </div>
-                {collaborationServerStatus.lanUrls.length > 0 && (
-                  <div className="ph-server-urls">
-                    {collaborationServerStatus.lanUrls.map((url) => (
-                      <span key={url}>{url}</span>
-                    ))}
+
+                {showServerDetails && (
+                  <div className="ph-server-details-panel">
+                    <div className="ph-server-resource-status">
+                      <span>资源目录</span>
+                      <strong title={collaborationServerStatus.assetRoot}>{collaborationServerStatus.assetRoot}</strong>
+                      <span>{collaborationServerStatus.hasState ? '已有房间状态' : '等待首次发布'}</span>
+                    </div>
+                    {collaborationServerStatus.lanUrls.length > 0 && (
+                      <div className="ph-server-urls">
+                        <span style={{ alignSelf: 'center', opacity: 0.7 }}>局域网：</span>
+                        {collaborationServerStatus.lanUrls.map((url) => (
+                          <span
+                            key={url}
+                            onClick={() => { void handleCopyServerInfo(url, url); }}
+                            title="点击复制该地址"
+                            style={{ cursor: 'pointer' }}
+                          >
+                            {url}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {collaborationServerStatus.connectionPassword && (
+                      <Field label="连接密码（仅分享给协作者）">
+                        <input className="ph-input" readOnly value={collaborationServerStatus.connectionPassword} />
+                      </Field>
+                    )}
                   </div>
                 )}
-                <button className="btn ph-btn-tiny" onClick={() => { void onStopCollaborationServer(); }}>
-                  停止服务器
-                </button>
               </div>
             )}
 
@@ -1105,67 +1300,50 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
             />
 
             {collaborationMode === 'menu' && (
-              <>
-                <div className="ph-stagger-3">
-                  <ResourceSafetyNote
-                    title="资源同步会先确认，再写入"
-                    lines={[
-                      '同步计划会先展示，再执行下载、复制、替换或上传。',
-                      '成员位置和编辑提示只用于协作感知，不限制操作。',
-                    ]}
-                  />
-                </div>
-
-                <div className="ph-collab-choice-grid ph-stagger-4">
-                  <Tooltip content="新建项目并立即播种协作房间" title="主持新剧本">
-                    <button className="btn ph-action-card ph-action-card--primary" onClick={() => navigateTo('collab-host-new')}>
-                      <span className="ph-action-icon"><IconPlus width={21} height={21} /></span>
-                      <span className="ph-action-copy">
-                        <span className="ph-action-title">主持新剧本</span>
-                      </span>
-                    </button>
-                  </Tooltip>
-                  <Tooltip content="选择 project.json 或项目目录后主持" title="主持已有剧本">
-                    <button className="btn ph-action-card" onClick={() => navigateTo('collab-host-existing')}>
-                      <span className="ph-action-icon"><IconFolder width={21} height={21} /></span>
-                      <span className="ph-action-copy">
-                        <span className="ph-action-title">主持已有剧本</span>
-                      </span>
-                    </button>
-                  </Tooltip>
-                  <Tooltip content="输入服务器地址并选择本地目录" title="加入房间">
-                    <button className="btn ph-action-card" onClick={() => navigateTo('collab-join')}>
-                      <span className="ph-action-icon"><IconUsers width={21} height={21} /></span>
-                      <span className="ph-action-copy">
-                        <span className="ph-action-title">加入房间</span>
-                      </span>
-                    </button>
-                  </Tooltip>
-                </div>
-              </>
+              <div className="ph-collab-choice-grid ph-stagger-3">
+                <Tooltip content="新建项目并立即播种协作房间" title="主持新剧本">
+                  <button className="btn ph-action-card ph-action-card--collab" onClick={() => navigateTo('collab-host-new')}>
+                    <span className="ph-action-icon"><IconPlus width={21} height={21} /></span>
+                    <span className="ph-action-copy">
+                      <span className="ph-action-title">主持新剧本</span>
+                      <span className="ph-action-desc">新建本地项目并启动房间</span>
+                    </span>
+                  </button>
+                </Tooltip>
+                <Tooltip content="选择 project.json 或项目目录后主持" title="主持已有剧本">
+                  <button className="btn ph-action-card ph-action-card--collab" onClick={() => navigateTo('collab-host-existing')}>
+                    <span className="ph-action-icon"><IconFolder width={21} height={21} /></span>
+                    <span className="ph-action-copy">
+                      <span className="ph-action-title">主持已有剧本</span>
+                      <span className="ph-action-desc">复用本地项目播种协作</span>
+                    </span>
+                  </button>
+                </Tooltip>
+                <Tooltip content="输入服务器地址并选择本地目录" title="加入房间">
+                  <button className="btn ph-action-card ph-action-card--collab ph-action-card--featured" onClick={() => navigateTo('collab-join')}>
+                    <span className="ph-action-icon"><IconUsers width={21} height={21} /></span>
+                    <span className="ph-action-copy">
+                      <span className="ph-action-title">加入房间</span>
+                      <span className="ph-action-desc">连接服务器并同步场景剧本</span>
+                    </span>
+                  </button>
+                </Tooltip>
+              </div>
             )}
 
             {collaborationMode === 'host-new' && (
               <div className="ph-collab-form-stack ph-stagger-3">
                 <div className="ph-section-header">
-                  <div>
-                    <div className="ph-section-title">
-                      主持新剧本
-                      <InfoTip content="会创建本地项目、启动本机服务器，并用本地场景播种集中式协作房间。" />
-                    </div>
+                  <div className="ph-header-titles">
+                    <div className="ph-section-title">主持新剧本</div>
                   </div>
                   <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
                     <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
                   </button>
                 </div>
 
-                <ResourceSafetyNote
-                  title="主持前会发布本地资源"
-                  lines={[
-                    '系统会构建当前场景引用资源的同步计划，并在复制或上传前展示。',
-                    '外部素材会先复制进项目资源目录；缺失或冲突会在同步计划中阻止继续。',
-                  ]}
-                />
+                <CollabModeTabs currentMode="host-new" onSelectMode={navigateTo} />
+
                 <div className="ph-form-grid">
                   <Field label="项目名称">
                     <input
@@ -1175,22 +1353,6 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="例如：第 1 话协作"
                     />
                   </Field>
-                  <Field label="项目位置">
-                    <div className="ph-browse-row">
-                      <input
-                        className="ph-input"
-                        value={hostProjectRootPath}
-                        onChange={(event) => {
-                          setIsHostRootPathDirty(true);
-                          setHostProjectRootPath(event.target.value);
-                        }}
-                        placeholder="选择新项目目录"
-                      />
-                      <button className="btn ph-btn-compact" onClick={() => { void handleBrowseHostLocation(); }}>
-                        浏览
-                      </button>
-                    </div>
-                  </Field>
                   <Field label="昵称">
                     <input
                       className="ph-input"
@@ -1199,6 +1361,24 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="导演"
                     />
                   </Field>
+                  <div className="ph-field-full">
+                    <Field label="项目位置">
+                      <div className="ph-browse-row">
+                        <input
+                          className="ph-input"
+                          value={hostProjectRootPath}
+                          onChange={(event) => {
+                            setIsHostRootPathDirty(true);
+                            setHostProjectRootPath(event.target.value);
+                          }}
+                          placeholder="选择新项目目录"
+                        />
+                        <button className="btn ph-btn-compact" onClick={() => { void handleBrowseHostLocation(); }}>
+                          浏览
+                        </button>
+                      </div>
+                    </Field>
+                  </div>
                   <Field label="端口">
                     <input
                       className="ph-input"
@@ -1207,11 +1387,37 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="12345"
                     />
                   </Field>
+                  <Field label="协作密码（选填，任意长度）">
+                    <div className="ph-password-input-row">
+                      <input
+                        className="ph-input"
+                        type={showHostPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={hostPassword}
+                        onChange={(event) => setHostPassword(event.target.value)}
+                        placeholder="留空自动生成随机密码"
+                      />
+                      <button
+                        type="button"
+                        className="ph-input-eye-btn"
+                        onClick={() => setShowHostPassword((v) => !v)}
+                        title={showHostPassword ? '隐藏密码' : '显示密码'}
+                        aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
+                      >
+                        {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                      </button>
+                    </div>
+                  </Field>
+                  <div className="ph-field-full">
+                    <label className="ph-hint-text ph-checkbox-row">
+                      <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
+                      <span>允许其他设备连接（局域网 / 公网）</span>
+                    </label>
+                  </div>
                 </div>
                 <div className="ph-footer-row">
                   <div className="ph-hint-text">
-                    <span>局域网或穿透连接</span>
-                    <InfoTip content="监听 0.0.0.0，可用局域网 IP 或 TCP 内网穿透转发同一端口。" />
+                    <span>{allowNetwork ? '允许其他设备连接' : '仅本机连接'}</span>
                   </div>
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
@@ -1227,24 +1433,16 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
             {collaborationMode === 'host-existing' && (
               <div className="ph-collab-form-stack ph-stagger-3">
                 <div className="ph-section-header">
-                  <div>
-                    <div className="ph-section-title">
-                      主持已有剧本
-                      <InfoTip content="选择已有本地项目后，会启动或复用该项目的本机协作房间。首次主持会发布当前场景；再次主持会恢复服务器状态。" />
-                    </div>
+                  <div className="ph-header-titles">
+                    <div className="ph-section-title">主持已有剧本</div>
                   </div>
                   <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
                     <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
                   </button>
                 </div>
 
-                <ResourceSafetyNote
-                  title="主持现有项目会校验当前场景"
-                  lines={[
-                    '启动房间后会为当前场景生成资源同步计划，并在下载、复制、替换或上传前展示。',
-                    '再次主持同一项目会恢复原房间；已有协作状态以服务器为准，覆盖本地场景前会请你确认。',
-                  ]}
-                />
+                <CollabModeTabs currentMode="host-existing" onSelectMode={navigateTo} />
+
                 <div className="ph-form-grid">
                   <Field label="昵称">
                     <input
@@ -1262,11 +1460,37 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="12345"
                     />
                   </Field>
+                  <Field label="协作密码（选填，任意长度）">
+                    <div className="ph-password-input-row">
+                      <input
+                        className="ph-input"
+                        type={showHostPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
+                        value={hostPassword}
+                        onChange={(event) => setHostPassword(event.target.value)}
+                        placeholder="留空自动生成随机密码"
+                      />
+                      <button
+                        type="button"
+                        className="ph-input-eye-btn"
+                        onClick={() => setShowHostPassword((v) => !v)}
+                        title={showHostPassword ? '隐藏密码' : '显示密码'}
+                        aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
+                      >
+                        {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                      </button>
+                    </div>
+                  </Field>
+                  <div className="ph-field-full">
+                    <label className="ph-hint-text ph-checkbox-row">
+                      <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
+                      <span>允许其他设备连接（局域网 / 公网）</span>
+                    </label>
+                  </div>
                 </div>
                 <div className="ph-footer-row">
                   <div className="ph-hint-text">
                     <span>复用原房间及资源</span>
-                    <InfoTip content="同一项目会复用原协作房间及资源；首次主持才创建新房间。" />
                   </div>
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
@@ -1282,27 +1506,16 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
             {collaborationMode === 'join' && (
               <div className="ph-collab-form-stack ph-stagger-3">
                 <div className="ph-section-header">
-                  <div>
-                    <div className="ph-section-title">
-                      加入房间
-                      <InfoTip content="确认后，服务器剧本会覆写本地项目的主剧本 JSON。" />
-                    </div>
-                    <div className="ph-sr-only">
-                      确认后，服务器剧本会覆写本地项目的主剧本 JSON。
-                    </div>
+                  <div className="ph-header-titles">
+                    <div className="ph-section-title">加入房间</div>
                   </div>
                   <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
                     <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
                   </button>
                 </div>
 
-                <ResourceSafetyNote
-                  title="加入前会校验服务器资源"
-                  lines={[
-                    '服务器剧本会写入本地主剧本；写入前只备份 JSON，资源不会自动备份。',
-                    '资源只按服务器清单复用、下载或替换；阻塞问题会禁止继续。',
-                  ]}
-                />
+                <CollabModeTabs currentMode="join" onSelectMode={navigateTo} />
+
                 <div className="ph-form-grid">
                   <Field label="服务器">
                     <input
@@ -1312,6 +1525,27 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="127.0.0.1:12345"
                     />
                   </Field>
+                  <Field label="连接密码（使用完整邀请链接时可留空）">
+                    <div className="ph-password-input-row">
+                      <input
+                        className="ph-input"
+                        type={showJoinPassword ? 'text' : 'password'}
+                        autoComplete="off"
+                        value={joinPassword}
+                        onChange={(event) => setJoinPassword(event.target.value)}
+                        placeholder="输入主持人提供的密码"
+                      />
+                      <button
+                        type="button"
+                        className="ph-input-eye-btn"
+                        onClick={() => setShowJoinPassword((v) => !v)}
+                        title={showJoinPassword ? '隐藏密码' : '显示密码'}
+                        aria-label={showJoinPassword ? '隐藏密码' : '显示密码'}
+                      >
+                        {showJoinPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                      </button>
+                    </div>
+                  </Field>
                   <Field label="昵称">
                     <input
                       className="ph-input"
@@ -1320,27 +1554,27 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="导演"
                     />
                   </Field>
-                  <Field label="本地协作工作区">
-                    <div className="ph-browse-row">
-                      <input
-                        className="ph-input"
-                        value={joinRootPath}
-                        onChange={(event) => {
-                          setIsJoinRootPathDirty(true);
-                          setJoinRootPath(event.target.value);
-                        }}
-                        placeholder="选择空目录或已有项目目录"
-                      />
-                      <button className="btn ph-btn-compact" onClick={() => { void handleBrowseJoinLocation(); }}>
-                        浏览
-                      </button>
-                    </div>
-                  </Field>
+                  <div className="ph-field-full">
+                    <Field label="本地协作工作区">
+                      <div className="ph-browse-row">
+                        <input
+                          className="ph-input"
+                          value={joinRootPath}
+                          onChange={(event) => {
+                            setIsJoinRootPathDirty(true);
+                            setJoinRootPath(event.target.value);
+                          }}
+                          placeholder="选择空目录或已有项目目录"
+                        />
+                        <button className="btn ph-btn-compact" onClick={() => { void handleBrowseJoinLocation(); }}>
+                          浏览
+                        </button>
+                      </div>
+                    </Field>
+                  </div>
                 </div>
                 <div className="ph-footer-row">
-                  <div className="ph-hint-text">
-                    <InfoTip content="空目录会创建协作项目；已有工作区必须包含 project.json。" />
-                  </div>
+                  <div />
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
                     onClick={() => { void handleJoinCollaboration(); }}
@@ -1571,20 +1805,47 @@ const ExternalLibraryManager = ({
   </section>
 );
 
-const ResourceSafetyNote = ({
-  title,
-  lines,
-}: {
-  title: string;
-  lines: string[];
-}) => (
-  <div className="ph-safety-note">
-    <strong>{title}</strong>
-    {lines.map((line) => (
-      <span key={line}>{line}</span>
-    ))}
+const CollabModeTabs: React.FC<{
+  currentMode: CollaborationMode;
+  onSelectMode: (target: NavigationTarget) => void;
+}> = ({ currentMode, onSelectMode }) => (
+  <div className="ph-collab-mode-tabs" role="tablist" aria-label="协作模式选择">
+    <button
+      type="button"
+      role="tab"
+      aria-selected={currentMode === 'join'}
+      aria-label="切换到加入房间"
+      className={`ph-collab-mode-tab ${currentMode === 'join' ? 'ph-collab-mode-tab--active' : ''}`}
+      onClick={() => onSelectMode('collab-join')}
+    >
+      <IconUsers width={14} height={14} />
+      <span>加入房间</span>
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={currentMode === 'host-existing'}
+      aria-label="切换到主持已有剧本"
+      className={`ph-collab-mode-tab ${currentMode === 'host-existing' ? 'ph-collab-mode-tab--active' : ''}`}
+      onClick={() => onSelectMode('collab-host-existing')}
+    >
+      <IconFolder width={14} height={14} />
+      <span>主持已有剧本</span>
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={currentMode === 'host-new'}
+      aria-label="切换到主持新剧本"
+      className={`ph-collab-mode-tab ${currentMode === 'host-new' ? 'ph-collab-mode-tab--active' : ''}`}
+      onClick={() => onSelectMode('collab-host-new')}
+    >
+      <IconPlus width={14} height={14} />
+      <span>主持新剧本</span>
+    </button>
   </div>
 );
+
 
 const formatRecentTime = (iso: string) => {
   const time = new Date(iso);
