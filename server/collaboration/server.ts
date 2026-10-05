@@ -1,6 +1,8 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import {
+  CollaborationAuthChallengeStore,
+  CollaborationAuthRateLimiter,
   COLLABORATION_LIMITS,
   CollaborationRequestError,
   createCollaborationAccessToken,
@@ -8,6 +10,7 @@ import {
   createCollaborationPasswordSalt,
   deriveCollaborationPasswordToken,
   collaborationAssetUploadMemoryReservationBytes,
+  hasCollaborationAuthenticationAttempt,
   isCollaborationRequestAuthorized,
   parseCollaborationRequestUrl,
   readCollaborationBody,
@@ -188,14 +191,17 @@ export async function startCollaborationServer(options: CollaborationServerOptio
   }
 
   let activeRequests = 0;
+  const authChallenges = new CollaborationAuthChallengeStore();
+  const authRateLimiter = new CollaborationAuthRateLimiter();
   const server = http.createServer(async (request, response) => {
+    const remoteAddress = request.socket.remoteAddress ?? '';
     response.setHeader('cache-control', 'no-store');
     const origin = request.headers.origin;
     if (origin && allowedOrigins.has(origin)) {
       response.setHeader('access-control-allow-origin', origin);
       response.setHeader('vary', 'Origin');
       response.setHeader('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
-      response.setHeader('access-control-allow-headers', 'content-type, authorization');
+      response.setHeader('access-control-allow-headers', 'content-type, authorization, x-collaboration-nonce, x-collaboration-proof');
     }
     if (activeRequests >= COLLABORATION_LIMITS.httpRequests) {
       response.setHeader('connection', 'close');
@@ -223,15 +229,33 @@ export async function startCollaborationServer(options: CollaborationServerOptio
         return;
       }
 
+      if (authRateLimiter.isBlocked(remoteAddress)) {
+        response.setHeader('retry-after', String(Math.ceil(COLLABORATION_LIMITS.authenticationBlockMs / 1000)));
+        throw new CollaborationRequestError(429, 'Too many failed collaboration authentication attempts');
+      }
+
       if (request.method === 'GET' && url.pathname === '/auth/salt') {
         sendJson(response, 200, { salt: passwordSalt });
         return;
       }
 
-      if (!isCollaborationRequestAuthorized(request, accessToken)) {
+      if (request.method === 'GET' && url.pathname === '/auth/challenge') {
+        sendJson(response, 200, { nonce: authChallenges.issue(remoteAddress) });
+        return;
+      }
+
+      if (!isCollaborationRequestAuthorized(request, accessToken, authChallenges)) {
         response.setHeader('www-authenticate', 'Bearer');
+        if (
+          hasCollaborationAuthenticationAttempt(request)
+          && authRateLimiter.recordFailure(remoteAddress)
+        ) {
+          response.setHeader('retry-after', String(Math.ceil(COLLABORATION_LIMITS.authenticationBlockMs / 1000)));
+          throw new CollaborationRequestError(429, 'Too many failed collaboration authentication attempts');
+        }
         throw new CollaborationRequestError(401, 'Collaboration access token is required');
       }
+      authRateLimiter.recordSuccess(remoteAddress);
 
       if (request.method === 'GET' && url.pathname === '/health') {
         sendJson(response, 200, {
@@ -362,14 +386,28 @@ export async function startCollaborationServer(options: CollaborationServerOptio
   server.on('upgrade', (request, socket, head) => {
     socket.on('error', () => socket.destroy());
     try {
+      const remoteAddress = request.socket.remoteAddress ?? '';
       const url = parseCollaborationRequestUrl(request.url);
       if (url.pathname !== '/sync') throw new CollaborationRequestError(404, 'Not found');
       if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) {
         throw new CollaborationRequestError(403, 'Origin not allowed');
       }
-      if (!isCollaborationRequestAuthorized(request, accessToken, true)) {
+      if (authRateLimiter.isBlocked(remoteAddress)) {
+        throw new CollaborationRequestError(429, 'Too many failed collaboration authentication attempts');
+      }
+      if (!isCollaborationRequestAuthorized(request, accessToken, authChallenges, true)) {
+        if (
+          hasCollaborationAuthenticationAttempt(request, true)
+          && authRateLimiter.recordFailure(remoteAddress)
+        ) {
+          throw new CollaborationRequestError(429, 'Too many failed collaboration authentication attempts');
+        }
         throw new CollaborationRequestError(401, 'Unauthorized');
       }
+      authRateLimiter.recordSuccess(remoteAddress);
+      url.searchParams.delete('authNonce');
+      url.searchParams.delete('authProof');
+      request.url = `${url.pathname}${url.search}`;
       if (wss.clients.size >= COLLABORATION_LIMITS.clients) {
         throw new CollaborationRequestError(503, 'Too many clients');
       }

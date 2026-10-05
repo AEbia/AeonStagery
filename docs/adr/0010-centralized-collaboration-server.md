@@ -30,14 +30,16 @@ status: accepted
 ## Server Access Boundary
 
 当前 single-room 服务默认监听 `0.0.0.0`，允许其他设备连接；主持人可切换为仅本机监听。
-HTTP 数据接口与 WebSocket upgrade 都必须校验房间凭证。主持可设置任意长度密码，留空
-生成随机密码；邀请链接作为可选快捷连接方式承载相同权限。复杂账号、逐成员权限与审计仍后置。
+HTTP 数据接口与 WebSocket upgrade 都必须校验房间凭证。远程连接使用按来源限速的一次性
+HMAC 挑战响应，避免传输可重放的长期 bearer 凭证；协作数据仍需通过 TLS 才能抵御网络窃听。
+主持可设置房间密码，留空生成随机密码；邀请链接作为可选快捷连接方式承载相同权限。复杂账号、
+逐成员权限与审计仍后置。
 
 服务端只发布已上传至 collaboration asset store 的共享副本，不挂载整个项目目录或任意
 本地文件。素材读写必须约束路径及符号链接边界，协议入口须限制请求体、连接数量及
 待处理更新，错误与健康响应不得暴露本机目录。
 
-运行配置、密码与邀请链接生命周期、部署限制见
+运行配置、认证限速、密码与邀请链接生命周期、明文连接的部署限制见
 [Collaboration server access](../collaboration-security.md)。实现入口为
 [`server/collaboration/security.ts`](../../server/collaboration/security.ts)、
 [`server/collaboration/server.ts`](../../server/collaboration/server.ts) 与
