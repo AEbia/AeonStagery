@@ -122,7 +122,6 @@ export function CollaborationConnectPanel({
   const [activeTab, setActiveTab] = useState<CollaborationTab>('status');
   const [isResourceReviewOpen, setIsResourceReviewOpen] = useState(false);
   const [showCredentialPassword, setShowCredentialPassword] = useState(false);
-  const [showCredentialToken, setShowCredentialToken] = useState(false);
   const [copiedCredentialField, setCopiedCredentialField] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -203,7 +202,6 @@ export function CollaborationConnectPanel({
     serverCredentials && (
       effectiveInviteUrls.length > 0
       || serverCredentials.connectionPassword
-      || serverCredentials.accessToken
       || effectiveServerAddress
     ),
   );
@@ -291,38 +289,6 @@ export function CollaborationConnectPanel({
           </div>
         )}
 
-        {serverCredentials.accessToken && (
-          <div className="collaboration-credential-row">
-            <span className="collaboration-credential-label">访问 Token</span>
-            <div className="collaboration-credential-value-row">
-              <input
-                className="collaboration-credential-input"
-                type={showCredentialToken ? 'text' : 'password'}
-                readOnly
-                value={serverCredentials.accessToken}
-                aria-label="协作访问 Token"
-              />
-              <button
-                type="button"
-                className="btn btn--sm collaboration-credential-toggle"
-                onClick={() => setShowCredentialToken((v) => !v)}
-                title={showCredentialToken ? '隐藏 Token' : '显示 Token'}
-                aria-label={showCredentialToken ? '隐藏 Token' : '显示 Token'}
-              >
-                {showCredentialToken ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
-              </button>
-              <button
-                type="button"
-                className="btn btn--sm collaboration-credential-copy"
-                onClick={() => { void handleCopyCredential(serverCredentials.accessToken!, 'token'); }}
-                title="复制 Token"
-              >
-                {copiedCredentialField === 'token' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
-                <span>{copiedCredentialField === 'token' ? '已复制' : '复制'}</span>
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   };

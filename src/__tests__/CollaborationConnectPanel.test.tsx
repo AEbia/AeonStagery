@@ -287,7 +287,7 @@ describe('CollaborationConnectPanel status UX', () => {
     expect(screen.getAllByText('用服务器版替换').length).toBeGreaterThan(0);
     expect(screen.queryByText(/本地同路径文件存在但内容不同/)).toBeNull();
     expect(screen.getAllByText(/background\/bg\.png/).length).toBeGreaterThan(0);
-    expect(screen.getByText('确认资源计划并加入')).toBeTruthy();
+    expect(screen.getByText('同步并加入')).toBeTruthy();
   });
 
   it('renders v3 server scene agreement dialog with canonical v5 document comparison', () => {
@@ -338,9 +338,9 @@ describe('CollaborationConnectPanel status UX', () => {
       />,
     );
 
-    expect(screen.getByText('确认覆写本地主剧本')).toBeTruthy();
+    expect(screen.getByText('加入协作房间')).toBeTruthy();
     expect(screen.getByText('1 条语句')).toBeTruthy();
-    expect(screen.getByText('确认资源计划并加入')).toBeTruthy();
+    expect(screen.getByText('同步并加入')).toBeTruthy();
   });
 
   it('displays connection error reason in the status popover when lastError is set', () => {
@@ -361,7 +361,7 @@ describe('CollaborationConnectPanel status UX', () => {
     expect(screen.getByText(/Server rejected admission: unknown_fields_present/)).toBeTruthy();
   });
 
-  it('shows server credentials (invite link, password, token) in the status tab when provided', () => {
+  it('shows the invite link and password without a standalone token row', () => {
     render(
       <CollaborationConnectPanel
         currentProject={{ metadata: { name: '协作项目' } } as any}
@@ -391,10 +391,7 @@ describe('CollaborationConnectPanel status UX', () => {
     expect(passwordInput.value).toBe('secret123');
     expect(passwordInput.type).toBe('password');
 
-    // Token input – masked by default
-    const tokenInput = screen.getByLabelText('协作访问 Token') as HTMLInputElement;
-    expect(tokenInput.value).toBe('tok_abc');
-    expect(tokenInput.type).toBe('password');
+    expect(screen.queryByLabelText('协作访问 Token')).toBeNull();
 
     // Clicking the eye button reveals the password
     fireEvent.click(screen.getByLabelText('显示密码'));
@@ -403,7 +400,7 @@ describe('CollaborationConnectPanel status UX', () => {
     // Copy buttons exist
     expect(screen.getByTitle('复制邀请链接')).toBeTruthy();
     expect(screen.getByTitle('复制密码')).toBeTruthy();
-    expect(screen.getByTitle('复制 Token')).toBeTruthy();
+    expect(screen.queryByTitle('复制 Token')).toBeNull();
   });
 
   it('hides the credentials section when serverCredentials is null', () => {
@@ -519,9 +516,9 @@ describe('CollaborationConnectPanel status UX', () => {
     });
     expect(writeText).toHaveBeenCalledWith('ws://10.0.0.5:12345?token=mytoken');
 
-    await act(async () => {
-      fireEvent.click(screen.getByTitle('复制 Token'));
-    });
-    expect(writeText).toHaveBeenCalledWith('mytoken');
+    // The raw access token is no longer surfaced as its own copyable row; it only
+    // travels inside the invite link.
+    expect(screen.queryByTitle('复制 Token')).toBeNull();
+    expect(writeText).not.toHaveBeenCalledWith('mytoken');
   });
 });

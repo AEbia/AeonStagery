@@ -414,7 +414,7 @@ describe('ProjectHome collaboration entry', () => {
     expect(screen.getByRole('button', { name: /创建并主持/ })).toBeTruthy();
   });
 
-  it('renders server credentials card with view and copy capabilities for password and token', () => {
+  it('renders server credentials without a standalone token item', () => {
     const onStopCollaborationServer = vi.fn();
     renderHome({
       collaborationServerStatus: {
@@ -453,14 +453,8 @@ describe('ProjectHome collaboration entry', () => {
     expect(pwdInput.type).toBe('text');
     expect(screen.getByRole('button', { name: '复制密码' })).toBeTruthy();
 
-    // Token item with eye toggle
-    const tokenInput = screen.getByLabelText('协作访问 Token') as HTMLInputElement;
-    expect(tokenInput.value).toBe('secret-access-token-12345');
-    expect(tokenInput.type).toBe('password');
-    const tokenEye = screen.getByRole('button', { name: '显示 Token' });
-    fireEvent.click(tokenEye);
-    expect(tokenInput.type).toBe('text');
-    expect(screen.getByRole('button', { name: '复制 Token' })).toBeTruthy();
+    expect(screen.queryByLabelText('协作访问 Token')).toBeNull();
+    expect(screen.queryByRole('button', { name: '复制 Token' })).toBeNull();
 
     // Details initially hidden
     expect(screen.queryByText('资源目录')).toBeNull();

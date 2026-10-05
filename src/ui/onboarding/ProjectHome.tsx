@@ -190,7 +190,6 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const [showHostPassword, setShowHostPassword] = useState(false);
   const [showJoinPassword, setShowJoinPassword] = useState(false);
   const [showServerPassword, setShowServerPassword] = useState(false);
-  const [showServerToken, setShowServerToken] = useState(false);
 
   const handleCopyServerInfo = async (text: string, fieldId: string) => {
     try {
@@ -1130,7 +1129,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                   {collaborationServerStatus.inviteUrls && collaborationServerStatus.inviteUrls.length > 0 && (
                     <div className="ph-credential-item ph-credential-item--featured">
                       <div className="ph-credential-header">
-                        <span className="ph-credential-label">邀请链接（包含访问凭证，协作者直接粘贴即可加入）</span>
+                        <span className="ph-credential-label">协作邀请链接</span>
                         <button
                           type="button"
                           className="btn ph-btn-micro ph-btn-copy"
@@ -1182,41 +1181,6 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           aria-label={showServerPassword ? '隐藏密码' : '显示密码'}
                         >
                           {showServerPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {collaborationServerStatus.accessToken && (
-                    <div className="ph-credential-item">
-                      <div className="ph-credential-header">
-                        <span className="ph-credential-label">访问 Token</span>
-                        <button
-                          type="button"
-                          className="btn ph-btn-micro ph-btn-copy"
-                          onClick={() => { void handleCopyServerInfo(collaborationServerStatus.accessToken!, 'server-token'); }}
-                          title="复制访问 Token"
-                        >
-                          {copiedServerField === 'server-token' ? <IconCheck width={12} height={12} /> : <IconCopy width={12} height={12} />}
-                          <span>{copiedServerField === 'server-token' ? '已复制' : '复制 Token'}</span>
-                        </button>
-                      </div>
-                      <div className="ph-credential-input-wrapper ph-password-input-row">
-                        <input
-                          className="ph-input ph-font-mono ph-credential-input"
-                          type={showServerToken ? 'text' : 'password'}
-                          readOnly
-                          value={collaborationServerStatus.accessToken}
-                          aria-label="协作访问 Token"
-                        />
-                        <button
-                          type="button"
-                          className="ph-input-eye-btn"
-                          onClick={() => setShowServerToken((v) => !v)}
-                          title={showServerToken ? '隐藏 Token' : '显示 Token'}
-                          aria-label={showServerToken ? '隐藏 Token' : '显示 Token'}
-                        >
-                          {showServerToken ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
                         </button>
                       </div>
                     </div>
@@ -1301,30 +1265,30 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
 
             {collaborationMode === 'menu' && (
               <div className="ph-collab-choice-grid ph-stagger-3">
-                <Tooltip content="新建项目并立即播种协作房间" title="主持新剧本">
+                <Tooltip content="新建本地项目并开启协作房间" title="主持新剧本">
                   <button className="btn ph-action-card ph-action-card--collab" onClick={() => navigateTo('collab-host-new')}>
                     <span className="ph-action-icon"><IconPlus width={21} height={21} /></span>
                     <span className="ph-action-copy">
                       <span className="ph-action-title">主持新剧本</span>
-                      <span className="ph-action-desc">新建本地项目并启动房间</span>
+                      <span className="ph-action-desc">新建项目并开启协作</span>
                     </span>
                   </button>
                 </Tooltip>
-                <Tooltip content="选择 project.json 或项目目录后主持" title="主持已有剧本">
+                <Tooltip content="选择已有本地项目开启协作" title="主持已有剧本">
                   <button className="btn ph-action-card ph-action-card--collab" onClick={() => navigateTo('collab-host-existing')}>
                     <span className="ph-action-icon"><IconFolder width={21} height={21} /></span>
                     <span className="ph-action-copy">
                       <span className="ph-action-title">主持已有剧本</span>
-                      <span className="ph-action-desc">复用本地项目播种协作</span>
+                      <span className="ph-action-desc">选择已有项目开启协作</span>
                     </span>
                   </button>
                 </Tooltip>
-                <Tooltip content="输入服务器地址并选择本地目录" title="加入房间">
+                <Tooltip content="输入邀请链接或服务地址加入房间" title="加入房间">
                   <button className="btn ph-action-card ph-action-card--collab ph-action-card--featured" onClick={() => navigateTo('collab-join')}>
                     <span className="ph-action-icon"><IconUsers width={21} height={21} /></span>
                     <span className="ph-action-copy">
                       <span className="ph-action-title">加入房间</span>
-                      <span className="ph-action-desc">连接服务器并同步场景剧本</span>
+                      <span className="ph-action-desc">输入链接或地址加入房间</span>
                     </span>
                   </button>
                 </Tooltip>
@@ -1387,7 +1351,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="12345"
                     />
                   </Field>
-                  <Field label="协作密码（选填，任意长度）">
+                  <Field label="协作密码（选填）">
                     <div className="ph-password-input-row">
                       <input
                         className="ph-input"
@@ -1411,13 +1375,13 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                   <div className="ph-field-full">
                     <label className="ph-hint-text ph-checkbox-row">
                       <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
-                      <span>允许其他设备连接（局域网 / 公网）</span>
+                      <span>允许其他设备连接（监听所有网卡；配置公网网卡或端口转发时公网可访问）</span>
                     </label>
                   </div>
                 </div>
                 <div className="ph-footer-row">
                   <div className="ph-hint-text">
-                    <span>{allowNetwork ? '允许其他设备连接' : '仅本机连接'}</span>
+                    <span>{allowNetwork ? '连接范围还受系统防火墙和路由器端口转发规则影响' : '仅本机连接'}</span>
                   </div>
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
@@ -1460,7 +1424,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="12345"
                     />
                   </Field>
-                  <Field label="协作密码（选填，任意长度）">
+                  <Field label="协作密码（选填）">
                     <div className="ph-password-input-row">
                       <input
                         className="ph-input"
@@ -1484,13 +1448,13 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                   <div className="ph-field-full">
                     <label className="ph-hint-text ph-checkbox-row">
                       <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
-                      <span>允许其他设备连接（局域网 / 公网）</span>
+                      <span>允许其他设备连接（监听所有网卡；配置公网网卡或端口转发时公网可访问）</span>
                     </label>
                   </div>
                 </div>
                 <div className="ph-footer-row">
                   <div className="ph-hint-text">
-                    <span>复用原房间及资源</span>
+                    <span>{allowNetwork ? '连接范围还受系统防火墙和路由器端口转发规则影响' : '仅本机连接'}</span>
                   </div>
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
@@ -1525,7 +1489,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                       placeholder="127.0.0.1:12345"
                     />
                   </Field>
-                  <Field label="连接密码（使用完整邀请链接时可留空）">
+                  <Field label="房间密码（选填）">
                     <div className="ph-password-input-row">
                       <input
                         className="ph-input"
