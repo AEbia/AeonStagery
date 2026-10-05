@@ -7,7 +7,7 @@ import { startCollaborationServer, type CollaborationServerOptions } from './ser
 
 function parseArgs(argv: string[]): CollaborationServerOptions {
   const options: CollaborationServerOptions = {
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     port: 12345,
     dataDir: path.resolve('.aeonstagery-collab'),
     accessToken: process.env.AEONSTAGERY_COLLAB_TOKEN,
