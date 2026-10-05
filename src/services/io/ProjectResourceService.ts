@@ -33,7 +33,7 @@ import {
 
 type DirEntry = { name: string; isDirectory: boolean; path: string };
 
-const COLLABORATIVE_MOUNT_ROOT = '.aeonstagery/mounts';
+const COLLABORATIVE_EXTERNAL_DIRECTORY = 'external';
 
 type FileAccessLike = {
   readFile(path: string): Promise<{ data: string; path: string }>;
@@ -715,13 +715,46 @@ export class ProjectResourceService {
     return null;
   }
 
-  toCollaborationReference(reference: string): string {
+  /**
+   * Project mounted resources beneath their standard category root while
+   * retaining the mount id as a separate namespace for collaboration.
+   */
+  toCollaborationReference(reference: string, kind?: ResourceImportKind): string {
     const mounted = this.parseMountedReference(reference);
-    return mounted
-      ? this.resolver.normalizeRelativePath(
-        `${COLLABORATIVE_MOUNT_ROOT}/${mounted.mountId}/${mounted.relativePath}`,
-      )
-      : this.normalizeStoredRelativePath(reference);
+    if (!mounted) return this.normalizeStoredRelativePath(reference);
+
+    const project = this.getCurrentProject();
+    const configuredRoots = (project?.metadata.assetRoots ?? {}) as Record<string, string>;
+    const defaultRoots = DEFAULT_PROJECT_ASSET_ROOTS as unknown as Record<string, string>;
+    const knownRoots = Array.from(new Set([
+      ...Object.values(configuredRoots),
+      ...Object.values(defaultRoots),
+    ].filter((root): root is string => typeof root === 'string' && root.trim().length > 0)));
+    const normalizedMountPath = this.resolver.normalizeRelativePath(mounted.relativePath);
+
+    let assetRoot = kind && kind !== 'generic'
+      ? configuredRoots[kind] ?? defaultRoots[kind] ?? kind
+      : knownRoots.find((root) => normalizedMountPath === root || normalizedMountPath.startsWith(`${root}/`));
+    if (!assetRoot) assetRoot = configuredRoots.project ?? defaultRoots.project ?? 'project';
+    assetRoot = this.resolver.normalizeRelativePath(assetRoot);
+
+    // Asset references can include their category root (figure/model.json) or
+    // be relative to the mounted library root (game/figure/model.json). Strip
+    // only the category prefix so bundle-relative references keep their shape.
+    const configuredRoot = configuredRoots[kind ?? ''] ?? defaultRoots[kind ?? ''];
+    const categoryPrefixes = Array.from(new Set([assetRoot, configuredRoot, kind]
+      .filter((prefix): prefix is string => typeof prefix === 'string' && prefix.length > 0)));
+    const sourceRelativePath = categoryPrefixes.reduce<string | null>((match, prefix) => {
+      const normalizedPrefix = this.resolver.normalizeRelativePath(prefix);
+      if (normalizedMountPath === normalizedPrefix) return '';
+      return normalizedMountPath.startsWith(`${normalizedPrefix}/`)
+        ? normalizedMountPath.slice(normalizedPrefix.length + 1)
+        : match;
+    }, null) ?? normalizedMountPath;
+
+    return this.resolver.normalizeRelativePath(
+      `${assetRoot}/${COLLABORATIVE_EXTERNAL_DIRECTORY}/${mounted.mountId}/${sourceRelativePath}`,
+    );
   }
 
   private async relativeFromExternalLibrary(

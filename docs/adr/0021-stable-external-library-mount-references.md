@@ -28,7 +28,7 @@ The user settings registry owns the local mapping from stable mount id to absolu
 - arbitrary or unregistered absolute paths are rejected for storage;
 - collaboration preparation copies external assets into the active project and converts mounted references to project-relative transfer references before manifest/upload processing; Live2D entrypoints use the existing bundle-closure copy path.
 
-Collaboration projection stores those detached copies under `.aeonstagery/mounts/<mount-id>/...`. Keeping the mount id in the project-relative transfer path prevents assets from different libraries with the same root-relative path from overwriting each other.
+Collaboration projection stores detached copies beneath the matching standard asset root, using `external/<mount-id>/...` as a visible namespace. For example, a mounted `background/room.png` becomes `background/external/<mount-id>/room.png`. Keeping the mount id in the project-relative transfer path prevents assets from different libraries with the same root-relative path from overwriting each other or project-authored files. Live2D bundle-relative paths remain unchanged beneath the namespace.
 
 `SceneAssetService` remains an Adapter at the scene asset Seam. It must not undo storage normalization by restoring the picker absolute path. `SceneStatementCompiler` may inherit a character model reference from `meta.characters`, but it treats the reference as opaque source data. `RuntimeAssetPreparer` and `ProjectResourceService` remain responsible for producing the machine-local runtime URI.
 

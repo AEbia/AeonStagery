@@ -502,7 +502,7 @@ export class SceneAssetService implements SceneAssetHooks {
 
     const result = (async () => {
       const normalized = await this.projectResources.normalizeForStorage(value, kind);
-      const collaborativeReference = this.projectResources.toCollaborationReference(normalized.relativePath);
+      const collaborativeReference = this.projectResources.toCollaborationReference(normalized.relativePath, kind);
       const readPath = await this.projectResources.resolveForRead(normalized.relativePath);
       if (await this.projectResources.classifySource(readPath) === 'insideProject') {
         return collaborativeReference;
