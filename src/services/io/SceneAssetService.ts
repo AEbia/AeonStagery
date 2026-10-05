@@ -10,13 +10,16 @@ import type {
   SceneStatement,
 } from '../../api/types/semantic-scene';
 import type { ResourceImportKind } from '../../api/types/project';
+import { DEFAULT_PROJECT_ASSET_ROOTS } from '../../api/types/project';
 import type { ProjectRelativeAssetPath } from '../../api/types/collaboration';
 import { WmdlConfigRegistry } from '../../engine/WmdlConfigRegistry';
 import { ProjectResourceService } from './ProjectResourceService';
 import { ProjectPathResolver } from './ProjectPathResolver';
 import type { IFileAccess } from './IFileAccess';
 import {
+  browserCollaborativeAssetHashAdapter,
   collectLive2DAssetBundleClosure,
+  hashCollaborativeAssetBundle,
   isLive2DAssetBundleEntrypoint,
 } from '../collaboration/assets';
 import { sceneStatementDefinitionRegistry } from '../semantic-scene/SceneStatementDefinitionRegistry';
@@ -31,6 +34,13 @@ interface RuntimeModelConfigRef {
   readPath: string;
   registerKeys: readonly string[];
 }
+
+interface CollaborativeProjectizationContext {
+  references: Map<string, Promise<string>>;
+  targetHashes: Map<string, string>;
+}
+
+type CollaborativeTargetState = 'missing' | 'matching' | 'conflict';
 
 export interface AssetReferenceTimelineAction {
   readonly _id?: string;
@@ -65,6 +75,73 @@ function joinPortable(baseDir: string, childPath: string): string {
     normalized.push(part);
   }
   return normalized.join('/');
+}
+
+function appendHashToFileName(relativePath: string, hashPrefix: string): string {
+  const normalized = normalizePortablePath(relativePath);
+  const slashIndex = normalized.lastIndexOf('/');
+  const directory = slashIndex < 0 ? '' : normalized.slice(0, slashIndex + 1);
+  const fileName = normalized.slice(slashIndex + 1);
+  const extensionIndex = fileName.lastIndexOf('.');
+  const hasExtension = extensionIndex > 0;
+  const stem = hasExtension ? fileName.slice(0, extensionIndex) : fileName;
+  const extension = hasExtension ? fileName.slice(extensionIndex) : '';
+  return `${directory}${stem}__${hashPrefix}${extension}`;
+}
+
+function normalizeAbsoluteSourcePath(pathValue: string): string {
+  const normalized = pathValue.replace(/\\/g, '/');
+  const drivePrefix = normalized.match(/^[A-Za-z]:/)?.[0] ?? '';
+  const isRooted = normalized.startsWith('/') || !!drivePrefix;
+  const remainder = drivePrefix ? normalized.slice(drivePrefix.length) : normalized;
+  const segments: string[] = [];
+  for (const segment of remainder.split('/')) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.length > 0 && segments[segments.length - 1] !== '..') segments.pop();
+      else if (!isRooted) segments.push(segment);
+      continue;
+    }
+    segments.push(segment);
+  }
+  const prefix = drivePrefix ? `${drivePrefix}/` : (normalized.startsWith('/') ? '/' : '');
+  return `${prefix}${segments.join('/')}`.replace(/\/$/, '') || prefix || '.';
+}
+
+function commonSourceDirectory(sourcePaths: string[]): string {
+  const parentSegments = sourcePaths.map((sourcePath) => {
+    const normalized = normalizeAbsoluteSourcePath(sourcePath);
+    return normalized.split('/').slice(0, -1);
+  });
+  if (parentSegments.length === 0) return '';
+  const common: string[] = [];
+  for (let index = 0; ; index += 1) {
+    const segment = parentSegments[0][index];
+    if (segment === undefined || parentSegments.some((segments) =>
+      segments[index] === undefined || segments[index].toLowerCase() !== segment.toLowerCase())) break;
+    common.push(segment);
+  }
+  return common.join('/');
+}
+
+function relativeSourcePath(sourceRoot: string, sourcePath: string): string {
+  const rootSegments = sourceRoot.split('/').filter(Boolean);
+  const sourceSegments = normalizeAbsoluteSourcePath(sourcePath).split('/').filter(Boolean);
+  const matchesRoot = rootSegments.every((segment, index) =>
+    sourceSegments[index]?.toLowerCase() === segment.toLowerCase());
+  if (!matchesRoot || sourceSegments.length <= rootSegments.length) {
+    throw new Error(`Live2D bundle source escaped its common root: "${sourcePath}"`);
+  }
+  return sourceSegments.slice(rootSegments.length).join('/');
+}
+
+function bundleDirectoryName(entrypointRelativePath: string, hashPrefix: string): string {
+  const fileName = normalizePortablePath(entrypointRelativePath).split('/').pop() ?? 'bundle';
+  const dotIndex = fileName.lastIndexOf('.');
+  const stem = (dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName)
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'bundle';
+  return `${stem}__${hashPrefix}`;
 }
 
 function setNestedRecordValue(
@@ -196,7 +273,10 @@ export class SceneAssetService implements SceneAssetHooks {
     if (!project) return scene;
 
     const cloned = JSON.parse(JSON.stringify(scene)) as T;
-    const projectized = new Map<string, Promise<string>>();
+    const projectized: CollaborativeProjectizationContext = {
+      references: new Map<string, Promise<string>>(),
+      targetHashes: new Map<string, string>(),
+    };
     for (const ref of this.collectAssetRefs(cloned)) {
       const currentValue = ref.get();
       if (!currentValue) continue;
@@ -232,7 +312,10 @@ export class SceneAssetService implements SceneAssetHooks {
   private async projectizeSemanticDocumentAssetReferences(
     cloned: { meta: SceneMeta; statements: SceneStatement[] },
   ): Promise<void> {
-    const projectized = new Map<string, Promise<string>>();
+    const projectized: CollaborativeProjectizationContext = {
+      references: new Map<string, Promise<string>>(),
+      targetHashes: new Map<string, string>(),
+    };
     for (const character of cloned.meta.characters ?? []) {
       if (character.model) {
         character.model = await this.projectizeCollaborativeReference(character.model, 'figure', projectized);
@@ -478,7 +561,7 @@ export class SceneAssetService implements SceneAssetHooks {
 
   private async projectizeSemanticStatementAssetReferences(
     statement: Pick<SceneStatement, 'type' | 'params'>,
-    projectized: Map<string, Promise<string>>,
+    projectized: CollaborativeProjectizationContext,
   ): Promise<void> {
     for (const field of sceneStatementDefinitionRegistry.collectAssetReferences(statement as unknown as SceneStatement)) {
       const key = field.path.replace(/^params\./, '');
@@ -494,10 +577,10 @@ export class SceneAssetService implements SceneAssetHooks {
   private projectizeCollaborativeReference(
     value: string,
     kind: ResourceImportKind,
-    projectized: Map<string, Promise<string>>,
+    projectized: CollaborativeProjectizationContext,
   ): Promise<string> {
     const cacheKey = `${kind}:${value.replace(/\\/g, '/')}`;
-    const existing = projectized.get(cacheKey);
+    const existing = projectized.references.get(cacheKey);
     if (existing) return existing;
 
     const result = (async () => {
@@ -507,19 +590,200 @@ export class SceneAssetService implements SceneAssetHooks {
       if (await this.projectResources.classifySource(readPath) === 'insideProject') {
         return collaborativeReference;
       }
-      const imported = await this.projectResources.importIntoProject(
-        readPath,
-        kind,
-        'copy',
-        collaborativeReference,
-      );
-      if (kind === 'figure' && this.pathResolver.isAbsolutePath(readPath)) {
-        await this.copyLive2DBundleDependencies(readPath, imported.relativePath);
+
+      if (kind === 'figure' && this.pathResolver.isAbsolutePath(readPath)
+        && isLive2DAssetBundleEntrypoint(readPath)) {
+        return this.projectizeCollaborativeLive2DBundle(
+          readPath,
+          collaborativeReference,
+          kind,
+          projectized.targetHashes,
+        );
       }
-      return imported.relativePath;
+
+      const sourceBytes = await this.readAssetBytes(readPath);
+      const sourceHash = await browserCollaborativeAssetHashAdapter.sha256(sourceBytes);
+      return this.projectizeCollaborativeSingleFile(
+        readPath,
+        collaborativeReference,
+        sourceHash,
+        projectized.targetHashes,
+      );
     })();
-    projectized.set(cacheKey, result);
+    projectized.references.set(cacheKey, result);
     return result;
+  }
+
+  private async projectizeCollaborativeSingleFile(
+    sourcePath: string,
+    preferredRelativePath: string,
+    sourceHash: string,
+    stagedHashes: Map<string, string>,
+  ): Promise<string> {
+    const hashHex = sourceHash.slice('sha256:'.length);
+    for (const hashLength of [0, 12, 20, 32, 64]) {
+      const targetRelativePath = hashLength === 0
+        ? preferredRelativePath
+        : appendHashToFileName(preferredRelativePath, hashHex.slice(0, hashLength));
+      const state = await this.collaborativeTargetState(targetRelativePath, sourceHash, stagedHashes);
+      if (state === 'conflict') continue;
+      if (state === 'missing') await this.copyCollaborativeFile(sourcePath, targetRelativePath);
+      stagedHashes.set(this.collaborativeTargetKey(targetRelativePath), sourceHash);
+      return targetRelativePath;
+    }
+    throw new Error(`Could not choose a unique project path for collaborative asset "${preferredRelativePath}"`);
+  }
+
+  private async projectizeCollaborativeLive2DBundle(
+    sourceEntrypointPath: string,
+    preferredEntrypointPath: string,
+    kind: ResourceImportKind,
+    stagedHashes: Map<string, string>,
+  ): Promise<string> {
+    const entries = await this.collectLive2DBundleEntries(sourceEntrypointPath, preferredEntrypointPath);
+    const sourceFiles = await Promise.all(entries.map(async (entry) => ({
+      entry,
+      bytes: await this.readAssetBytes(entry.sourcePath),
+    })));
+    const bundleHash = await hashCollaborativeAssetBundle(sourceFiles.map(({ entry, bytes }) => ({
+      relativePath: entry.projectRelativePath,
+      bytes,
+    })), browserCollaborativeAssetHashAdapter);
+    const fileHashes = await Promise.all(sourceFiles.map(({ bytes }) =>
+      browserCollaborativeAssetHashAdapter.sha256(bytes)));
+    const directFiles = entries.map((entry, index) => ({
+      sourcePath: entry.sourcePath,
+      relativePath: entry.projectRelativePath,
+      contentHash: fileHashes[index],
+    }));
+
+    if (await this.tryMaterializeCollaborativeFiles(directFiles, stagedHashes)) {
+      return directFiles[0].relativePath;
+    }
+
+    const sourceRoot = commonSourceDirectory(entries.map((entry) => entry.sourcePath));
+    const assetRoot = this.collaborativeAssetRoot(kind);
+    const sourceRelativePaths = entries.map((entry) => relativeSourcePath(sourceRoot, entry.sourcePath));
+    for (const hashLength of [12, 20, 32, 64]) {
+      const directory = `${assetRoot}/${bundleDirectoryName(preferredEntrypointPath, bundleHash.slice('sha256:'.length, 'sha256:'.length + hashLength))}`;
+      const relocatedFiles = entries.map((entry, index) => ({
+        sourcePath: entry.sourcePath,
+        relativePath: `${directory}/${sourceRelativePaths[index]}`,
+        contentHash: fileHashes[index],
+      }));
+      if (await this.tryMaterializeCollaborativeFiles(relocatedFiles, stagedHashes)) {
+        return relocatedFiles[0].relativePath;
+      }
+    }
+    throw new Error(`Could not choose a unique project directory for Live2D bundle "${preferredEntrypointPath}"`);
+  }
+
+  private async tryMaterializeCollaborativeFiles(
+    files: Array<{ sourcePath: string; relativePath: string; contentHash: string }>,
+    stagedHashes: Map<string, string>,
+  ): Promise<boolean> {
+    const states = await Promise.all(files.map((file) =>
+      this.collaborativeTargetState(file.relativePath, file.contentHash, stagedHashes)));
+    if (states.some((state) => state === 'conflict')) return false;
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      if (states[index] === 'missing') {
+        await this.copyCollaborativeFile(file.sourcePath, file.relativePath);
+      }
+      stagedHashes.set(this.collaborativeTargetKey(file.relativePath), file.contentHash);
+    }
+    return true;
+  }
+
+  private async collaborativeTargetState(
+    relativePath: string,
+    sourceHash: string,
+    stagedHashes: Map<string, string>,
+  ): Promise<CollaborativeTargetState> {
+    const key = this.collaborativeTargetKey(relativePath);
+    const stagedHash = stagedHashes.get(key);
+    if (stagedHash) return stagedHash === sourceHash ? 'matching' : 'conflict';
+
+    const targetPath = await this.projectResources.resolveForProjectWrite(relativePath);
+    if (this.fileAccess.stat) {
+      const stat = await this.fileAccess.stat(targetPath);
+      if (!stat) return 'missing';
+      if (!stat.isFile || stat.isSymbolicLink) return 'conflict';
+    } else if (!(await this.fileAccess.exists(targetPath))) {
+      return 'missing';
+    }
+
+    const existingBytes = await this.readAssetBytes(targetPath, true);
+    if (!existingBytes) return 'conflict';
+    const existingHash = await browserCollaborativeAssetHashAdapter.sha256(existingBytes);
+    if (existingHash !== sourceHash) return 'conflict';
+    this.projectResources.invalidateReadResolution(relativePath);
+    return 'matching';
+  }
+
+  private async readAssetBytes(path: string): Promise<Uint8Array>;
+  private async readAssetBytes(path: string, allowUnreadable: true): Promise<Uint8Array | null>;
+  private async readAssetBytes(path: string, allowUnreadable = false): Promise<Uint8Array | null> {
+    if (this.fileAccess.readBinaryFile) {
+      try {
+        const result = await this.fileAccess.readBinaryFile(path);
+        if (result?.data !== undefined) return new Uint8Array(result.data);
+      } catch {
+        // Fall through to the text reader, which also supports simple test and
+        // browser adapters that expose binary reads as an optional port.
+      }
+    }
+    try {
+      const result = await this.fileAccess.readFile(path);
+      if (typeof result?.data === 'string') return new TextEncoder().encode(result.data);
+    } catch {
+      if (!allowUnreadable) throw new Error(`Could not read collaborative asset bytes from "${path}"`);
+    }
+    if (allowUnreadable) return null;
+    throw new Error(`Could not read collaborative asset bytes from "${path}"`);
+  }
+
+  private async copyCollaborativeFile(sourcePath: string, targetRelativePath: string): Promise<void> {
+    const targetPath = await this.projectResources.resolveForProjectWrite(targetRelativePath);
+    await this.fileAccess.ensureDir(await this.fileAccess.dirname(targetPath));
+    await this.fileAccess.copyFile(sourcePath, targetPath);
+    this.projectResources.invalidateReadResolution(targetRelativePath);
+  }
+
+  private collaborativeTargetKey(relativePath: string): string {
+    return normalizePortablePath(relativePath).toLowerCase();
+  }
+
+  private collaborativeAssetRoot(kind: ResourceImportKind): string {
+    const project = this.projectResources.getCurrentProject();
+    const configuredRoots = (project?.metadata.assetRoots ?? {}) as Record<string, string>;
+    const defaultRoots = DEFAULT_PROJECT_ASSET_ROOTS as unknown as Record<string, string>;
+    return normalizePortablePath(configuredRoots[kind] ?? defaultRoots[kind] ?? kind);
+  }
+
+  private async collectLive2DBundleEntries(
+    sourceEntrypointPath: string,
+    projectEntrypointRelativePath: string,
+  ): Promise<Array<{ sourcePath: string; projectRelativePath: ProjectRelativeAssetPath }>> {
+    return collectLive2DAssetBundleClosure({
+      sourcePath: sourceEntrypointPath.replace(/\\/g, '/'),
+      projectRelativePath: normalizePortablePath(projectEntrypointRelativePath) as ProjectRelativeAssetPath,
+    }, {
+      readText: async (sourcePath) => {
+        const { data } = await this.fileAccess.readFile(sourcePath);
+        return data;
+      },
+      dirname: (sourcePath) => this.fileAccess.dirname(sourcePath),
+      joinSource: async (baseDir, childPath) => (await this.fileAccess.join(baseDir, childPath)).replace(/\\/g, '/'),
+      joinProjectRelative: (baseDir, childPath) => joinPortable(baseDir, childPath) as ProjectRelativeAssetPath,
+      normalizeSourcePath: (sourcePath) => sourcePath.replace(/\\/g, '/').toLowerCase(),
+      validateReference: (ref) => {
+        if (this.pathResolver.isUrlLike(ref) || this.pathResolver.isAbsolutePath(ref)) {
+          throw new Error(`Live2D bundle references must be relative for project import: "${ref}"`);
+        }
+      },
+    });
   }
 
   private async copyLive2DBundleDependencies(

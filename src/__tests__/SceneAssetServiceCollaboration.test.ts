@@ -15,7 +15,10 @@ function createFileAccess(): Record<keyof IFileAccess, any> {
   return {
     readAsset: vi.fn(),
     readFile: vi.fn(),
-    readBinaryFile: vi.fn(),
+    readBinaryFile: vi.fn(async (pathValue: string) => ({
+      data: new TextEncoder().encode(pathValue).buffer as ArrayBuffer,
+      path: pathValue,
+    })),
     showOpenDialog: vi.fn(),
     showSaveDialog: vi.fn(),
     writeFile: vi.fn(),
@@ -293,20 +296,20 @@ describe('SceneAssetService collaborative asset preparation', () => {
     });
 
     expect(projectized.meta.characters?.[0].model)
-      .toBe('figure/external/webgal-sv/anon/model.json');
+      .toBe('figure/anon/model.json');
     expect(projectized.statements[0].params).toMatchObject({
-      model: 'figure/external/webgal-sv/anon/model.json',
+      model: 'figure/anon/model.json',
     });
     expect(projectized.statements[1].params).toMatchObject({
-      voice: 'vocal/external/webgal-sv/hello.wav',
+      voice: 'vocal/hello.wav',
     });
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/anon/model.json',
-      'D:/projects/demo/figure/external/webgal-sv/anon/model.json',
+      'D:/projects/demo/figure/anon/model.json',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/vocal/hello.wav',
-      'D:/projects/demo/vocal/external/webgal-sv/hello.wav',
+      'D:/projects/demo/vocal/hello.wav',
     );
   });
 
@@ -359,24 +362,24 @@ describe('SceneAssetService collaborative asset preparation', () => {
     });
 
     expect(projectized.meta.characters?.[0].model)
-      .toBe('figure/external/webgal-sv/anon/casual-2023/main/model.json');
+      .toBe('figure/anon/casual-2023/main/model.json');
     expect(projectized.statements[0].params).toMatchObject({
-      model: 'figure/external/webgal-sv/anon/casual-2023/main/model.json',
+      model: 'figure/anon/casual-2023/main/model.json',
     });
     expect(projectized.statements[1].params).toMatchObject({
-      voice: 'vocal/external/webgal-sv/hello.wav',
+      voice: 'vocal/hello.wav',
     });
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/anon/casual-2023/main/model.json',
-      'D:/projects/demo/figure/external/webgal-sv/anon/casual-2023/main/model.json',
+      'D:/projects/demo/figure/anon/casual-2023/main/model.json',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/anon/casual-2023/main/../../.mtn_exp/expressions/__base__/anon/angry01.exp.json',
-      'D:/projects/demo/figure/external/webgal-sv/anon/.mtn_exp/expressions/__base__/anon/angry01.exp.json',
+      'D:/projects/demo/figure/anon/.mtn_exp/expressions/__base__/anon/angry01.exp.json',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/vocal/hello.wav',
-      'D:/projects/demo/vocal/external/webgal-sv/hello.wav',
+      'D:/projects/demo/vocal/hello.wav',
     );
   });
 
@@ -495,26 +498,26 @@ describe('SceneAssetService collaborative asset preparation', () => {
     const prepared = await service.prepareCollaborativeAssetReferences(scene);
 
     expect(prepared.meta.characters?.[0].model)
-      .toBe('figure/external/shared-library/rana/model.json');
+      .toBe('figure/rana/model.json');
     expect(prepared.timeline[0].params.model)
-      .toBe('figure/external/shared-library/rana/model.json');
+      .toBe('figure/rana/model.json');
     expect(prepared.timeline[1].params.image)
-      .toBe('background/external/shared-library/livehouse.png');
+      .toBe('background/livehouse.png');
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/rana/model.json',
-      'D:/projects/demo/figure/external/shared-library/rana/model.json',
+      'D:/projects/demo/figure/rana/model.json',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/rana/rana.moc3',
-      'D:/projects/demo/figure/external/shared-library/rana/rana.moc3',
+      'D:/projects/demo/figure/rana/rana.moc3',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/figure/rana/textures/rana.00.png',
-      'D:/projects/demo/figure/external/shared-library/rana/textures/rana.00.png',
+      'D:/projects/demo/figure/rana/textures/rana.00.png',
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       'E:/Library/background/livehouse.png',
-      'D:/projects/demo/background/external/shared-library/livehouse.png',
+      'D:/projects/demo/background/livehouse.png',
     );
   });
 
