@@ -63,10 +63,34 @@ export function installCubismPixiModelRuntime(model: any): any {
   manager.groups.idle = '__aeon_manual_idle__';
   core.getParameterIds = () => Array.from({ length: core.getParameterCount() }, (_, i) => parameterId(core.getParameterId(i)));
   core.getParameterValues = () => core._parameterValues ?? core.getModel().parameters.values;
+  // Newer Core versions moved render orders from Drawables to Model and
+  // include offscreen objects after the drawable entries. The vendor's
+  // drawable-only renderer still requires contiguous drawable ranks.
+  core.getDrawableRenderOrders = () => {
+    const raw = core.getModel();
+    if (raw.drawables.renderOrders) return raw.drawables.renderOrders;
+    const orders: Int32Array = raw.getRenderOrders();
+    const count: number = raw.drawables.count;
+    if (orders.length === count) return orders;
+    const indices = Array.from({ length: count }, (_, i) => i)
+      .sort((a, b) => orders[a] - orders[b]);
+    const ranks = new Int32Array(count);
+    indices.forEach((index, rank) => { ranks[index] = rank; });
+    return ranks;
+  };
   Object.defineProperties(internal, {
     parameterValues: { configurable: true, get: () => core.getParameterValues() },
     partOpacities: { configurable: true, get: () => core._partOpacities ?? core.getModel().parts.opacities },
   });
+
+  // Drawing may follow another model load before the next simulation tick.
+  const originalRenderLive2D = model.renderLive2D?.bind(model);
+  if (originalRenderLive2D) {
+    model.renderLive2D = (renderer: any) => {
+      refreshCubismCoreViews(core);
+      originalRenderLive2D(renderer);
+    };
+  }
 
   const writeParameter = (id: string, value: number) => {
     for (let index = 0; index < core.getParameterCount(); index++) {

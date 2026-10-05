@@ -4,6 +4,32 @@ import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { refreshCubismCoreViews } from '../engine/CubismPixiModel';
 
 describe('Cubism Pixi runtime controls', () => {
+  it('preserves the legacy Core drawable render orders', () => {
+    const { core } = createCubismModelFixture();
+    const orders = new Int32Array([2, 0, 1]);
+    vi.spyOn(core, 'getModel').mockReturnValue({ drawables: { count: 3, renderOrders: orders } } as any);
+    expect((core as any).getDrawableRenderOrders()).toBe(orders);
+  });
+  it('reads current model-level render orders after a Core view is replaced', () => {
+    const { core } = createCubismModelFixture();
+    const raw = {
+      drawables: { count: 3 }, renderOrders: new Int32Array([2, 0, 1]),
+      getRenderOrders() { return this.renderOrders; },
+    };
+    vi.spyOn(core, 'getModel').mockReturnValue(raw as any);
+    expect((core as any).getDrawableRenderOrders()).toBe(raw.renderOrders);
+    raw.renderOrders = new Int32Array([0, 2, 1]);
+    expect((core as any).getDrawableRenderOrders()).toBe(raw.renderOrders);
+  });
+  it('removes offscreen rank gaps while preserving drawable order', () => {
+    const { core } = createCubismModelFixture();
+    const orders = new Int32Array([4, 0, 2, 1, 3]);
+    vi.spyOn(core, 'getModel').mockReturnValue({
+      drawables: { count: 3 }, getRenderOrders: () => orders,
+    } as any);
+    expect(Array.from((core as any).getDrawableRenderOrders())).toEqual([2, 0, 1]);
+    expect(Array.from(orders)).toEqual([4, 0, 2, 1, 3]);
+  });
   it('computes geometry before render and applies mouth injection after expressions without saving it', () => {
     const { model, internal, core, drawn, saved } = createCubismModelFixture();
     internal.on('expressionUpdate', () => core.setParameterValueByIndex(3, 0.2));

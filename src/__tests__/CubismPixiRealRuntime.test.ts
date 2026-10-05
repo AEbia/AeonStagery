@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import * as PIXI from 'pixi.js';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
 import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
 
@@ -57,6 +58,45 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     expect(model.internalModel.motionManager.expressionManager.definitions.length).toBeGreaterThan(0);
     expect(Array.from(model.internalModel.parameterValues).every(Number.isFinite)).toBe(true);
     expect(model.deltaTime).toBe(0);
+  });
+  it('sorts native drawables with the Cubism 5 Core render-order API', async () => {
+    const model = await createModel();
+    model.update(16);
+    const core = model.internalModel.coreModel;
+    const nativeRenderer = model.internalModel.renderer;
+    // Keep the real SDK sorting and visibility logic; only replace GPU work.
+    const clippingManager = nativeRenderer._clippingManager;
+    const mesh = vi.spyOn(nativeRenderer, 'drawMeshWebGL').mockImplementation(() => {});
+    const preDraw = vi.spyOn(nativeRenderer, 'preDraw').mockImplementation(() => {});
+    const saveProfile = vi.spyOn(nativeRenderer, 'saveProfile').mockImplementation(() => {});
+    const restoreProfile = vi.spyOn(nativeRenderer, 'restoreProfile').mockImplementation(() => {});
+    const renderer: any = Object.create(PIXI.WebGLRenderer.prototype);
+    Object.assign(renderer, {
+      gl: { getParameter: () => null, cullFace() {} }, view: { resolution: 1 },
+      geometry: { resetState() {} }, shader: { resetState() {} }, texture: { resetState() {} }, state: { resetState() {} },
+      globalUniforms: { globalUniformData: { projectionMatrix: new PIXI.Matrix(), worldTransformMatrix: new PIXI.Matrix(), worldColor: 0xffffffff } },
+      renderTarget: { viewport: { x: 0, y: 0, width: 1920, height: 1080 }, renderTarget: { isRoot: false } },
+    });
+    nativeRenderer._clippingManager = null;
+    nativeRenderer.gl = renderer.gl;
+    model.gl = renderer.gl;
+    try {
+      model.renderLive2D(renderer);
+      const raw = core.getModel();
+      const orders = raw.drawables.renderOrders ?? raw.getRenderOrders();
+      const expected = Array.from({ length: core.getDrawableCount() }, (_, i) => i)
+        .sort((a, b) => orders[a] - orders[b])
+        .filter((i) => core.getDrawableDynamicFlagIsVisible(i));
+      expect(mesh.mock.calls.map((call) => call[1])).toEqual(expected);
+      expect(expected.length).toBeGreaterThan(0);
+    } finally {
+      nativeRenderer.gl = null;
+      nativeRenderer._clippingManager = clippingManager;
+      mesh.mockRestore();
+      preDraw.mockRestore();
+      saveProfile.mockRestore();
+      restoreProfile.mockRestore();
+    }
   });
   it('seeks native motion curves and fade weights to the same pose as sequential playback', async () => {
     const model = await createModel();
