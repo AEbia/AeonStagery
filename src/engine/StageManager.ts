@@ -26,6 +26,7 @@ import { customAnimHost } from './CustomAnimHost';
 import { eventBus } from '../api/events';
 // The bridge registers one native pipe that accepts both runtime entries.
 import { ensureLive2DRenderPipe } from './Live2DEngineBridge';
+import { installPixiFilterResolutionGuard } from './PixiFilterResolutionGuard';
 import type { StagePreviewResolution } from '../api/interfaces/IStageAdapter';
 
 const STAGE_WIDTH = 1920;
@@ -116,6 +117,7 @@ class StageManager {
         useBackBuffer: true, // Required by Pixi's advanced blend-mode filters.
         preference: 'webgl', // Live2D render pipe and Cubism runtimes are WebGL-based.
       });
+      installPixiFilterResolutionGuard(this.app.renderer);
     } catch (err) {
       console.error('[StageManager] Failed to create PIXI.Application:', err);
       throw err;
