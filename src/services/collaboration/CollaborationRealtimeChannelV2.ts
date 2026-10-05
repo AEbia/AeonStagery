@@ -16,8 +16,7 @@ import {
   parseCollaborationLeaseServerMessageV2,
 } from './CollaborationLeaseProtocol';
 import {
-  toCollaborationWebSocketUrl,
-  getCollaborationWebSocketProtocols,
+  prepareCollaborationWebSocketConnection,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
 
@@ -26,6 +25,7 @@ export interface CollaborationRealtimeChannelV2Options {
   identity?: CollaborationIdentity;
   ydoc: Y.Doc;
   webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
+  fetchImpl: typeof fetch;
   applyServerState: () => Promise<void>;
   replaceWithServerState: () => Promise<void>;
   onStateChanged: () => void;
@@ -74,6 +74,7 @@ export class CollaborationRealtimeChannelV2 {
   private realtimeWritable = false;
   private hasOpenedRealtime = false;
   private realtimeGeneration = 0;
+  private connectionPromise: Promise<void> | null = null;
 
   constructor(private readonly options: CollaborationRealtimeChannelV2Options) {}
 
@@ -104,16 +105,48 @@ export class CollaborationRealtimeChannelV2 {
     this.sendLeaseRequest({ type: 'lease:release', requestId, target });
   }
 
-  connect(): void {
-    if (this.socket) return;
+  /**
+   * Dispatches a realtime connection attempt.
+   *
+   * The returned promise settles once the attempt has been dispatched — the
+   * credential handshake finished and the socket was handed to the transport —
+   * or once it failed. Failures are reported through
+   * {@link CollaborationRealtimeChannelV2Options.onServerError} and never by
+   * rejecting, so callers can await it without attaching error handling.
+   * Concurrent calls join the in-flight attempt instead of opening a second socket.
+   */
+  connect(): Promise<void> {
+    if (this.connectionPromise) return this.connectionPromise;
+    if (this.socket) return Promise.resolve();
 
     this.setRealtimeWritable(false);
     const generation = ++this.realtimeGeneration;
     const needsResyncBeforeCommit = this.hasOpenedRealtime;
-    const socket = this.options.webSocketFactory(toCollaborationWebSocketUrl(
+    const attempt = prepareCollaborationWebSocketConnection(
       this.options.endpoint,
       this.options.identity,
-    ), getCollaborationWebSocketProtocols(this.options.endpoint));
+      this.options.fetchImpl,
+    ).then(({ url, protocols }) => {
+      if (this.realtimeGeneration !== generation) return;
+      this.openSocket(url, protocols, generation, needsResyncBeforeCommit);
+    }).catch((error: unknown) => {
+      if (this.realtimeGeneration !== generation) return;
+      this.setRealtimeWritable(false);
+      this.options.onServerError(error instanceof Error ? error : new Error(String(error)));
+    }).finally(() => {
+      if (this.connectionPromise === attempt) this.connectionPromise = null;
+    });
+    this.connectionPromise = attempt;
+    return attempt;
+  }
+
+  private openSocket(
+    url: string,
+    protocols: string[] | undefined,
+    generation: number,
+    needsResyncBeforeCommit: boolean,
+  ): void {
+    const socket = this.options.webSocketFactory(url, protocols);
     socket.binaryType = 'arraybuffer';
     socket.onopen = async () => {
       try {
@@ -193,6 +226,7 @@ export class CollaborationRealtimeChannelV2 {
     this.socket = null;
     this.setRealtimeWritable(false);
     this.realtimeGeneration++;
+    this.connectionPromise = null;
   }
 
   private detachUpdateHandler(): void {

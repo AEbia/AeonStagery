@@ -19,6 +19,7 @@ import {
   getCollaborationAccessToken,
   withCollaborationAccessToken,
   authorizeCollaborationFetch,
+  collaborationAuthorizationHeaders,
   toCollaborationWebSocketUrl,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
@@ -96,6 +97,7 @@ export class CollaborationClientV3 {
   readonly identity?: CollaborationIdentity;
   readonly ydoc: Y.Doc;
   private readonly fetchImpl: typeof fetch;
+  private readonly rawFetchImpl: typeof fetch;
   private readonly useXhrUpload: boolean;
   private readonly accessToken?: string;
   private readonly webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
@@ -116,8 +118,9 @@ export class CollaborationClientV3 {
     if (!fetchImpl) {
       throw new Error('fetch is not available; provide fetchImpl');
     }
+    this.rawFetchImpl = options.fetchImpl ?? fetchImpl.bind(globalThis);
     this.useXhrUpload = options.fetchImpl === undefined && typeof XMLHttpRequest !== 'undefined';
-    this.fetchImpl = authorizeCollaborationFetch(options.fetchImpl ?? fetchImpl.bind(globalThis), this.accessToken);
+    this.fetchImpl = authorizeCollaborationFetch(this.rawFetchImpl, this.accessToken, this.endpoint);
     this.webSocketFactory = options.webSocketFactory ?? ((url, protocols) => {
       if (typeof WebSocket === 'undefined') {
         throw new Error('WebSocket is not available; provide webSocketFactory');
@@ -129,6 +132,7 @@ export class CollaborationClientV3 {
       identity: this.identity,
       ydoc: this.ydoc,
       webSocketFactory: this.webSocketFactory,
+      fetchImpl: this.rawFetchImpl,
       applyServerState: async () => {
         await this.applyServerYjsState('join');
       },
@@ -357,7 +361,19 @@ export class CollaborationClientV3 {
 
       xhr.open('PUT', url);
       xhr.setRequestHeader('content-type', 'application/octet-stream');
-      if (this.accessToken) xhr.setRequestHeader('authorization', `Bearer ${this.accessToken}`);
+      void collaborationAuthorizationHeaders(
+        this.endpoint,
+        this.accessToken,
+        'PUT',
+        `${new URL(url).pathname}${new URL(url).search}`,
+        this.rawFetchImpl,
+      ).then((authHeaders) => {
+        if (settled) return;
+        for (const [name, value] of Object.entries(authHeaders)) xhr.setRequestHeader(name, value);
+        xhr.send(toArrayBuffer(bytes));
+      }).catch((error: unknown) => {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      });
       xhr.upload.onprogress = (event): void => {
         options.onProgress?.({
           loadedBytes: event.loaded,
@@ -382,7 +398,6 @@ export class CollaborationClientV3 {
         options.signal.addEventListener('abort', abort, { once: true });
       }
       options.onProgress?.({ loadedBytes: 0, totalBytes });
-      xhr.send(toArrayBuffer(bytes));
     });
   }
 
@@ -434,12 +449,17 @@ export class CollaborationClientV3 {
     return bytes;
   }
 
-  connectRealtime(): void {
-    this.realtimeChannel.connect();
+  /**
+   * Opens the realtime channel. Resolves once the connection attempt has been
+   * dispatched or has failed; failures are reported through {@link subscribeErrors}.
+   */
+  connectRealtime(): Promise<void> {
+    return this.realtimeChannel.connect();
   }
 
-  reconnectRealtime(): void {
-    this.realtimeChannel.reconnectNow();
+  /** Discards the current socket and reconnects; see {@link connectRealtime}. */
+  reconnectRealtime(): Promise<void> {
+    return this.realtimeChannel.reconnectNow();
   }
 
   rejectRemoteState(error: Error): void {

@@ -20,7 +20,14 @@ export interface CollaborativeClientPortV2 {
   subscribeErrors?(listener: (error: Error) => void): () => void;
   subscribePresence?(listener: (message: CollaborationPresenceServerMessageV2) => void): () => void;
   updatePresence?(patch: CollaborationPresencePatchV2): void;
-  connectRealtime?(): Promise<void> | void;
+  /**
+   * Opens the realtime channel. Resolves once the connection attempt has been
+   * dispatched or has failed — never by rejecting, so callers can await it
+   * without attaching error handling. Errors surface through
+   * {@link subscribeErrors}, and {@link isRealtimeConnected} is meaningful for
+   * the attempt's initial outcome once this promise settles.
+   */
+  connectRealtime?(): Promise<void>;
   isRealtimeConnected?(): boolean;
   dispose?(): void;
 }

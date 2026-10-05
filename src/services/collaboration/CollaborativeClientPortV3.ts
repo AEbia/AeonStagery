@@ -36,8 +36,16 @@ export interface CollaborativeClientPortV3 {
   acquireLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
   renewLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
   releaseLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
-  connectRealtime?(): Promise<void> | void;
-  reconnectRealtime?(): Promise<void> | void;
+  /**
+   * Opens the realtime channel. Resolves once the connection attempt has been
+   * dispatched or has failed — never by rejecting, so callers can await it
+   * without attaching error handling. Errors surface through
+   * {@link subscribeErrors}, and {@link isRealtimeConnected} is meaningful for
+   * the attempt's initial outcome once this promise settles.
+   */
+  connectRealtime?(): Promise<void>;
+  /** Discards the current socket and starts a fresh attempt; see {@link connectRealtime}. */
+  reconnectRealtime?(): Promise<void>;
   rejectRemoteState?(error: Error): void;
   isRealtimeConnected?(): boolean;
   dispose?(): void;
