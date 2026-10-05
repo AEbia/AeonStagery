@@ -51,7 +51,6 @@ import {
 import {
   reducePresenceMessage,
 } from '../services/collaboration/CollaborationPresence';
-import { deriveCollaborationResourceUx } from '../services/collaboration/CollaborationResourceUxModel';
 import { deriveCollaborationStatusUx } from '../services/collaboration/CollaborationStatusUxModel';
 import { useEditorSelection } from './store/storeHooks';
 import { showToast } from './Toast';
@@ -290,6 +289,7 @@ export function useSemanticCollaborationSession({
   const selectedActionIdsRef = useRef<SelectedActionIdCollection>(selectedActionIds);
   const selfRef = useRef<CollaborationIdentity | null>(null);
   const forceResourceRefreshRef = useRef(false);
+  const resourceRefreshRef = useRef<{ verified: boolean; errorReported: boolean } | null>(null);
   const remoteTargetScenePathRef = useRef<string | undefined>(undefined);
   const lastPublishedPlayheadRef = useRef<{ time: number; sentAt: number } | null>(null);
 
@@ -330,13 +330,11 @@ export function useSemanticCollaborationSession({
       itemPlans,
     });
     setAssetHandshake(nextHandshake);
+    if (resourceRefreshRef.current && direction === 'local') {
+      if (handshakeStatus === 'verified') resourceRefreshRef.current.verified = true;
+    }
     if (proposal && handshakeStatus === 'verified') {
       setLastResourceAgreementProposal(proposal);
-      const ux = deriveCollaborationResourceUx(
-        nextHandshake,
-        { proposal },
-      );
-      showToast(ux.riskSummary.hasOnlyReuse ? '协作资源已校验，无需额外同步' : ux.headline, 'success');
     }
   }, []);
 
@@ -435,10 +433,10 @@ export function useSemanticCollaborationSession({
     const fileAccess = contextValue.services.fileAccess;
     const projectResources = contextValue.services.projectResources;
     const rawDocument = contextValue.stores.document.getCurrentSceneDocumentSnapshot();
-    if (!cleanEndpoint) { showToast('请输入协作服务器 IP 和端口', 'warning'); return false; }
+    if (!cleanEndpoint) { showToast('请输入协作服务器地址和端口', 'warning'); return false; }
     if (!project) { showToast('请先创建或打开一个项目', 'warning'); return false; }
     if (!fileAccess || !projectResources || !rawDocument) {
-      showToast('当前运行环境缺少语义场景或协作素材能力', 'error');
+      showToast('无法开始协作：请先加载场景，并确认当前版本支持协作资源同步', 'error');
       return false;
     }
 
@@ -543,6 +541,14 @@ export function useSemanticCollaborationSession({
     const orchestrator = new CollaborativeSessionOrchestratorV3(admissionGate);
     const collaborationProjectId = project.metadata.projectId;
     const roomId = `${collaborationProjectId}:main`;
+    let starting = true;
+    let announcedReady = false;
+    const startup: { status: CollaborationConnectionStatus; failure?: { error: unknown } } = { status: 'connecting' };
+    const announceReady = () => {
+      if (announcedReady) return;
+      announcedReady = true;
+      showToast(mode === 'host' ? '已开始主持协作房间' : '已加入协作房间', 'success');
+    };
     try {
       const layer = await orchestrator.start({
         endpoint: normalizeCollaborationEndpoint(cleanEndpoint),
@@ -610,33 +616,45 @@ export function useSemanticCollaborationSession({
             const committedPaths = await serverSceneAgreement.commitAcceptedServerDocument(document);
             if (committedPaths) return;
           } catch (error) {
-            throw new Error(`协作保存错误: ${formatError(error)}`);
+            throw new Error(`保存协作场景的本地副本失败：${formatError(error)}`);
           }
           if (contextValue.services.sceneFile.saveCurrentSceneDocument) {
             const result = await contextValue.services.sceneFile.saveCurrentSceneDocument(document as any, targetPath);
             if (!result.success) {
-              throw new Error(`协作保存错误: ${'error' in result ? result.error : '未知错误'}`);
+              throw new Error(`保存协作场景的本地副本失败：${'error' in result ? result.error : '未知错误'}`);
             }
             return;
           }
           try {
             await fileAccess.writeFile(targetPath, JSON.stringify(document, null, 2));
           } catch (error) {
-            throw new Error(`协作保存错误: ${formatError(error)}`);
+            throw new Error(`保存协作场景的本地副本失败：${formatError(error)}`);
           }
         },
         onStatusChange: (nextStatus) => {
+          startup.status = nextStatus;
           onStatusChange(nextStatus);
-          if (nextStatus === 'connected') setLastError(null);
+          if (nextStatus === 'connected') {
+            setLastError(null);
+            if (!starting) announceReady();
+          }
         },
         onSynchronizedState: () => contextValue.stores.editor._setSaveStatus('idle'),
         onError: (error) => {
           const message = formatError(error);
           setLastError(message);
-          showToast(`协作同步失败: ${message}`, 'error');
+          // Startup errors also reach the catch below. Report that operation once.
+          if (starting) {
+            startup.failure = { error };
+            return;
+          }
+          const refreshing = resourceRefreshRef.current;
+          if (refreshing) refreshing.errorReported = true;
+          showToast(`${refreshing ? '协作资源校验失败' : '协作同步失败'}：${message}`, 'error');
         },
       });
       layerRef.current = layer;
+      starting = false;
       const normalizedEndpoint = normalizeCollaborationEndpoint(cleanEndpoint);
       const inviteUrl = computedToken ? withCollaborationAccessToken(normalizedEndpoint, computedToken) : undefined;
       setSessionCredentials({
@@ -645,7 +663,13 @@ export function useSemanticCollaborationSession({
         inviteUrls: inviteUrl ? [inviteUrl] : [],
         serverAddress: normalizedEndpoint,
       });
-      showToast('已连接语义协作房间', 'success');
+      if (startup.failure) {
+        showToast(`协作连接或场景同步未完成：${formatError(startup.failure.error)}`, 'error');
+      } else if (startup.status === 'connected') {
+        announceReady();
+      } else if (startup.status === 'offline') {
+        showToast('实时连接已断开；请重试连接后继续协作编辑', 'warning');
+      }
       return true;
     } catch (error) {
       const message = formatError(error);
@@ -667,21 +691,33 @@ export function useSemanticCollaborationSession({
       onSelfChange(null);
       onPeersChange([]);
       onStatusChange('error');
-      showToast(`协作连接失败: ${message}`, 'error');
+      showToast(`连接协作房间失败：${message}`, 'error');
       return false;
     }
   }, [collaborationServerStatus, contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
 
   const refreshCollaborativeResources = useCallback(async () => {
-    if (!layerRef.current || status !== 'connected') return;
+    if (!layerRef.current || status !== 'connected' || resourceRefreshRef.current) return;
+    const refresh = { verified: false, errorReported: false };
+    resourceRefreshRef.current = refresh;
     forceResourceRefreshRef.current = true;
     setIsRefreshingResources(true);
     try {
       await layerRef.current.publishCurrentSceneNow(true);
-      showToast('已请求重新校验协作资源', 'success');
+      // The publish queue can resolve after reporting an error or skipping work.
+      if (!refresh.errorReported) {
+        showToast(
+          refresh.verified
+            ? '协作资源校验已完成'
+            : '本次未执行资源校验，请等待场景同步完成后重试',
+          refresh.verified ? 'success' : 'info',
+        );
+      }
     } catch (error) {
       setLastError(formatError(error));
+      if (!refresh.errorReported) showToast(`协作资源校验失败：${formatError(error)}`, 'error');
     } finally {
+      resourceRefreshRef.current = null;
       forceResourceRefreshRef.current = false;
       setIsRefreshingResources(false);
     }

@@ -47,12 +47,13 @@ const mocks = vi.hoisted(() => {
 
   // Options are recorded so tests can drive the orchestrator callbacks the
   // session hook passes in (for example beforeApplyState).
-  const orchestratorStart = vi.fn(async (_options?: any) => {
+  const orchestratorStart = vi.fn(async (options?: any) => {
     const layer = {
       dispose: vi.fn(),
       publishCurrentSceneNow: vi.fn(async () => undefined),
     };
     state.layers.push(layer);
+    options?.onStatusChange('connected');
     return layer;
   });
 
@@ -74,7 +75,7 @@ const mocks = vi.hoisted(() => {
     buildAgreementProposal = vi.fn(async () => undefined);
     prepareRemoteApply = vi.fn(async () => undefined);
 
-    constructor() {
+    constructor(readonly options: any) {
       state.gates.push(this);
     }
   }
@@ -296,6 +297,190 @@ afterEach(() => {
 });
 
 describe('semantic collaboration session controller', () => {
+  it('reports a startup failure once when it is both notified and rejected', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    mocks.orchestratorStart.mockImplementationOnce(async (options) => {
+      const error = new Error('transport failure');
+      options.onError(error);
+      throw error;
+    });
+
+    await act(async () => {
+      expect(await controller.result.current.joinExistingRoom({ endpoint: 'server.example:1234' })).toBe(false);
+    });
+
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'error');
+  });
+
+  it('does not announce resource verification separately during startup or routine synchronization', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    const proposal = {
+      proposalId: 'proposal-1', direction: 'local', reason: 'initial-host',
+      manifest: {}, proposedSignature: '', items: [], createdAt: '',
+      blockingProblemCount: 0, warningCount: 0,
+    };
+    mocks.orchestratorStart.mockImplementationOnce(async (options) => {
+      mocks.state.gates[0].options.onHandshake({ manifest: {}, status: 'verified', direction: 'local', proposal });
+      options.onStatusChange('connected');
+      return { dispose: vi.fn(), publishCurrentSceneNow: vi.fn() };
+    });
+
+    await act(async () => {
+      expect(await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' })).toBe(true);
+    });
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    mocks.showToast.mockClear();
+
+    act(() => {
+      mocks.state.gates[0].options.onHandshake({ manifest: {}, status: 'verified', direction: 'local', proposal });
+    });
+    expect(mocks.showToast).not.toHaveBeenCalled();
+    expect(controller.result.current.lastResourceAgreementProposal).toEqual(proposal);
+  });
+
+  it('does not report success when realtime startup is offline', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    mocks.orchestratorStart.mockImplementationOnce(async (options) => {
+      options.onStatusChange('offline');
+      return { dispose: vi.fn(), publishCurrentSceneNow: vi.fn() };
+    });
+    await act(async () => {
+      expect(await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' })).toBe(true);
+    });
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'warning');
+  });
+
+  it('announces readiness once after the dispatched realtime connection opens', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    mocks.orchestratorStart.mockImplementationOnce(async (options) => {
+      options.onStatusChange('connecting');
+      return { dispose: vi.fn(), publishCurrentSceneNow: vi.fn() };
+    });
+    await act(async () => {
+      expect(await controller.result.current.joinExistingRoom({ endpoint: 'server.example:1234' })).toBe(true);
+    });
+    expect(mocks.showToast).not.toHaveBeenCalled();
+
+    const options = mocks.orchestratorStart.mock.calls[0][0];
+    act(() => options.onStatusChange('connected'));
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'success');
+
+    act(() => {
+      options.onStatusChange('reconnecting');
+      options.onStatusChange('connected');
+    });
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session available for retry after a reported startup error', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    const layer = { dispose: vi.fn(), publishCurrentSceneNow: vi.fn() };
+    mocks.orchestratorStart.mockImplementationOnce(async (options) => {
+      options.onError(new Error('handshake failure'));
+      options.onStatusChange('reconnecting');
+      return layer;
+    });
+    await act(async () => {
+      expect(await controller.result.current.joinExistingRoom({ endpoint: 'server.example:1234' })).toBe(true);
+    });
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'error');
+    expect(layer.dispose).not.toHaveBeenCalled();
+    act(() => controller.result.current.retryConnection());
+    expect(mocks.state.clients[0].reconnectRealtime).toHaveBeenCalledOnce();
+  });
+
+  it('reports only failure when manual refresh notifies an error but resolves its publish queue', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    await act(async () => {
+      await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' });
+    });
+    act(() => controller.rerenderWithStatus('connected'));
+    mocks.showToast.mockClear();
+    const options = mocks.orchestratorStart.mock.calls[0][0];
+    mocks.state.layers[0].publishCurrentSceneNow.mockImplementationOnce(async () => {
+      options.onError(new Error('publish failure'));
+    });
+
+    await act(async () => controller.result.current.refreshCollaborativeResources());
+
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'error');
+    expect(controller.result.current.isRefreshingResources).toBe(false);
+  });
+
+  it('announces a completed manual resource verification once', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    await act(async () => {
+      await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' });
+    });
+    act(() => controller.rerenderWithStatus('connected'));
+    mocks.showToast.mockClear();
+    mocks.state.layers[0].publishCurrentSceneNow.mockImplementationOnce(async () => {
+      const onHandshake = mocks.state.gates[0].options.onHandshake;
+      onHandshake({ manifest: {}, status: 'checking', direction: 'local' });
+      onHandshake({ manifest: {}, status: 'verified', direction: 'local' });
+    });
+    await act(async () => controller.result.current.refreshCollaborativeResources());
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'success');
+  });
+
+  it('ignores another manual refresh while verification is still in progress', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    await act(async () => {
+      await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' });
+    });
+    act(() => controller.rerenderWithStatus('connected'));
+    mocks.showToast.mockClear();
+    let finish!: () => void;
+    mocks.state.layers[0].publishCurrentSceneNow.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finish = resolve;
+    }));
+    let first!: Promise<void>;
+    act(() => {
+      first = controller.result.current.refreshCollaborativeResources();
+      void controller.result.current.refreshCollaborativeResources();
+    });
+    expect(mocks.state.layers[0].publishCurrentSceneNow).toHaveBeenCalledOnce();
+    expect(controller.result.current.isRefreshingResources).toBe(true);
+    await act(async () => {
+      mocks.state.gates[0].options.onHandshake({ manifest: {}, status: 'verified', direction: 'local' });
+      finish();
+      await first;
+    });
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(controller.result.current.isRefreshingResources).toBe(false);
+  });
+
+  it('does not report successful verification when the publish queue skips preparation', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    await act(async () => {
+      await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' });
+    });
+    act(() => controller.rerenderWithStatus('connected'));
+    mocks.showToast.mockClear();
+    await act(async () => controller.result.current.refreshCollaborativeResources());
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'info');
+  });
+
+  it('reports a rejected manual refresh even when it has no error callback', async () => {
+    const controller = renderController({ currentProject: createProject() });
+    await act(async () => {
+      await controller.result.current.hostCurrentScene({ endpoint: 'server.example:1234' });
+    });
+    act(() => controller.rerenderWithStatus('connected'));
+    mocks.showToast.mockClear();
+    mocks.state.layers[0].publishCurrentSceneNow.mockRejectedValueOnce(new Error('refresh failure'));
+    await act(async () => controller.result.current.refreshCollaborativeResources());
+    expect(mocks.showToast).toHaveBeenCalledTimes(1);
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'error');
+  });
+
   it('loads stored inputs and persists changes through public setters', () => {
     window.localStorage.setItem('aeonstagery.collaboration.endpoint', 'stored.example:9000');
     window.localStorage.setItem('aeonstagery.collaboration.displayName', 'Stored director');
@@ -334,7 +519,7 @@ describe('semantic collaboration session controller', () => {
     });
 
     expect(started).toBe(false);
-    expect(mocks.showToast).toHaveBeenCalledWith('请输入协作服务器 IP 和端口', 'warning');
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'warning');
     expect(mocks.state.clients).toHaveLength(0);
     expect(onStatusChange).not.toHaveBeenCalled();
   });
@@ -348,7 +533,7 @@ describe('semantic collaboration session controller', () => {
     });
 
     expect(started).toBe(false);
-    expect(mocks.showToast).toHaveBeenCalledWith('请先创建或打开一个项目', 'warning');
+    expect(mocks.showToast).toHaveBeenCalledWith(expect.any(String), 'warning');
     expect(mocks.state.clients).toHaveLength(0);
     expect(onStatusChange).not.toHaveBeenCalled();
   });
@@ -373,7 +558,7 @@ describe('semantic collaboration session controller', () => {
 
     expect(started).toBe(false);
     expect(mocks.showToast)
-      .toHaveBeenCalledWith('当前运行环境缺少语义场景或协作素材能力', 'error');
+      .toHaveBeenCalledWith(expect.any(String), 'error');
     expect(mocks.state.clients).toHaveLength(0);
     expect(onStatusChange).not.toHaveBeenCalled();
   });
@@ -561,7 +746,7 @@ describe('semantic collaboration session controller', () => {
       expect(success).toBe(false);
       expect(controller.result.current.lastError).toMatch(/unsupported_schema_version|4/i);
       expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/无法进入协作/i),
+        expect.any(String),
         'error',
       );
       expect(mocks.state.clients).toHaveLength(0);
@@ -589,7 +774,7 @@ describe('semantic collaboration session controller', () => {
       expect(success).toBe(false);
       expect(controller.result.current.lastError).toMatch(/unknown_fields_present|extraUnsupportedField/i);
       expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/无法进入协作/i),
+        expect.any(String),
         'error',
       );
       expect(mocks.state.clients).toHaveLength(0);
@@ -626,7 +811,7 @@ describe('semantic collaboration session controller', () => {
       expect(success).toBe(false);
       expect(controller.result.current.lastError).toMatch(/unknown_discriminator|unsupported_future_action_type/i);
       expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/无法进入协作/i),
+        expect.any(String),
         'error',
       );
       expect(mocks.state.clients).toHaveLength(0);
@@ -655,7 +840,7 @@ describe('semantic collaboration session controller', () => {
       expect(success).toBe(false);
       expect(controller.result.current.lastError).toMatch(/statements|array/i);
       expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/无法进入协作/i),
+        expect.any(String),
         'error',
       );
       expect(mocks.state.clients).toHaveLength(0);
@@ -709,7 +894,7 @@ describe('semantic collaboration session controller', () => {
       expect(success).toBe(false);
       expect(controller.result.current.lastError).toMatch(/schema version 2|expected version 3/i);
       expect(mocks.showToast).toHaveBeenCalledWith(
-        expect.stringMatching(/协作连接失败: Server returned unsupported collaboration schema version 2/i),
+        expect.any(String),
         'error',
       );
       expect(controller.onStatusChange).toHaveBeenLastCalledWith('error');

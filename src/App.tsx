@@ -752,7 +752,7 @@ function AppContent({
     return false;
   }, [contextValue.services.sceneFile]);
 
-  const showProjectWorkflowResult = useCallback((result: any, mode: 'create' | 'open' | 'recent') => {
+  const showProjectWorkflowResult = useCallback((result: any, mode: 'create' | 'open' | 'recent', notifySuccess = true) => {
     if (!result.success) {
       if (result.outcome === 'project_create_failed') {
         showToast(`创建项目失败: ${result.error}`, 'error');
@@ -770,7 +770,7 @@ function AppContent({
     }
 
     const verb = mode === 'create' ? '已创建项目并加载默认场景' : '已打开项目并加载默认场景';
-    showToast(`${verb}: ${result.project.metadata.name}`, 'success');
+    if (notifySuccess) showToast(`${verb}: ${result.project.metadata.name}`, 'success');
     if (result.issues && result.issues.length > 0) {
       const errors = result.issues.filter((i: any) => i.severity === 'error');
       const warnings = result.issues.filter((i: any) => i.severity === 'warning');
@@ -1033,7 +1033,7 @@ function AppContent({
     }
     if (current.status?.hasState) {
       setCollaborationServerStatus(current.status);
-      showToast('协作房间已保存在本机服务器，可再次主持连接。', 'warning');
+      showToast('协作房间仍保留在本机服务器，可重新连接。', 'warning');
       return;
     }
     const result = await window.aeonStageryAPI.collaborationServer.stop().catch((error: unknown) => ({
@@ -1042,10 +1042,10 @@ function AppContent({
     }));
     if (result.success) {
       setCollaborationServerStatus(null);
-      showToast('主持未完成，已停止刚启动的本机协作服务器；房间未创建。', 'warning');
+      showToast('未能进入协作，刚启动的本机协作服务器已停止。', 'warning');
       return;
     }
-    showToast(`主持未完成，房间未创建；但本机服务器停止失败: ${result.error || '未知错误'}`, 'error');
+    showToast(`未能进入协作，且本机协作服务器停止失败：${result.error || '未知错误'}`, 'error');
   }, []);
 
   const handleHostNewCollaboration = useCallback(async ({
@@ -1065,7 +1065,7 @@ function AppContent({
   }) => {
     setIsCollaborationJoinHomeLocked(true);
     const workflowResult = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({ name, rootPath });
-    showProjectWorkflowResult(workflowResult, 'create');
+    showProjectWorkflowResult(workflowResult, 'create', false);
     if (!workflowResult.success || !workflowResult.project) {
       setIsCollaborationJoinHomeLocked(false);
       return;
@@ -1092,7 +1092,6 @@ function AppContent({
       if (ok) {
         roomCreated = true;
         setCollaborationServerStatus({ ...serverStatus, hasState: true });
-        showToast('已主持新剧本协作房间', 'success');
       } else {
         if (stopServerOnFailure) {
           stopServerOnFailure = false;
@@ -1142,7 +1141,7 @@ function AppContent({
     }
 
     const workflowResult = await contextValue.services.projectOpenWorkflow.openProjectAndLoadDefaultScene(result.filePaths[0]);
-    showProjectWorkflowResult(workflowResult, 'open');
+    showProjectWorkflowResult(workflowResult, 'open', false);
     if (!workflowResult.success || !workflowResult.project) {
       setIsCollaborationJoinHomeLocked(false);
       return;
@@ -1169,7 +1168,6 @@ function AppContent({
       if (ok) {
         roomCreated = true;
         setCollaborationServerStatus({ ...serverStatus, hasState: true });
-        showToast('已主持已有剧本协作房间', 'success');
       } else {
         if (stopServerOnFailure) {
           stopServerOnFailure = false;
@@ -1220,13 +1218,13 @@ function AppContent({
       }
 
       if (!workflowResult.scenePath) {
-        showToast('协作项目缺少本地主剧本路径', 'error');
+        showToast('协作目录未能准备好本地场景文件，请重新选择目录后重试', 'error');
         return;
       }
 
       const loadResult = await contextValue.services.sceneFile.loadFromPath(workflowResult.scenePath);
       if (!loadResult.success) {
-        showToast(`加载本地主剧本失败: ${'error' in loadResult ? loadResult.error : '未知错误'}`, 'error');
+        showToast(`加载协作目录中的本地场景失败：${'error' in loadResult ? loadResult.error : '未知错误'}`, 'error');
         return;
       }
 
@@ -1253,7 +1251,6 @@ function AppContent({
       });
       if (!ok) return;
       roomCreated = true;
-      showToast('已加入服务器协作房间', 'success');
     } finally {
       releaseCollaborationJoinHomeLockAfterRoomCreated(
         roomCreated,
