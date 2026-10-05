@@ -16,6 +16,9 @@ import {
 } from './CollaborationRealtimeChannelV3';
 import {
   normalizeCollaborationEndpoint,
+  getCollaborationAccessToken,
+  withCollaborationAccessToken,
+  authorizeCollaborationFetch,
   toCollaborationWebSocketUrl,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
@@ -55,7 +58,7 @@ export type CollaborationServerErrorListenerV3 = (error: Error) => void;
 export interface CollaborationClientV3Options {
   endpoint: string;
   fetchImpl?: typeof fetch;
-  webSocketFactory?: (url: string) => CollaborationWebSocketLike;
+  webSocketFactory?: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
   ydoc?: Y.Doc;
   identity?: CollaborationIdentity;
 }
@@ -94,7 +97,8 @@ export class CollaborationClientV3 {
   readonly ydoc: Y.Doc;
   private readonly fetchImpl: typeof fetch;
   private readonly useXhrUpload: boolean;
-  private readonly webSocketFactory: (url: string) => CollaborationWebSocketLike;
+  private readonly accessToken?: string;
+  private readonly webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
   private readonly listeners = new Set<CollaborationStateListenerV3>();
   private readonly presenceListeners = new Set<CollaborationPresenceListenerV3>();
   private readonly leaseListeners = new Set<CollaborationLeaseListenerV3>();
@@ -105,6 +109,7 @@ export class CollaborationClientV3 {
 
   constructor(options: CollaborationClientV3Options) {
     this.endpoint = normalizeCollaborationEndpoint(options.endpoint);
+    this.accessToken = getCollaborationAccessToken(options.endpoint);
     this.identity = options.identity;
     this.ydoc = options.ydoc ?? new Y.Doc();
     const fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -112,15 +117,15 @@ export class CollaborationClientV3 {
       throw new Error('fetch is not available; provide fetchImpl');
     }
     this.useXhrUpload = options.fetchImpl === undefined && typeof XMLHttpRequest !== 'undefined';
-    this.fetchImpl = options.fetchImpl ?? fetchImpl.bind(globalThis);
-    this.webSocketFactory = options.webSocketFactory ?? ((url) => {
+    this.fetchImpl = authorizeCollaborationFetch(options.fetchImpl ?? fetchImpl.bind(globalThis), this.accessToken);
+    this.webSocketFactory = options.webSocketFactory ?? ((url, protocols) => {
       if (typeof WebSocket === 'undefined') {
         throw new Error('WebSocket is not available; provide webSocketFactory');
       }
-      return new WebSocket(url) as CollaborationWebSocketLike;
+      return new WebSocket(url, protocols) as CollaborationWebSocketLike;
     });
     this.realtimeChannel = new CollaborationRealtimeChannelV3({
-      endpoint: this.endpoint,
+      endpoint: withCollaborationAccessToken(this.endpoint, this.accessToken),
       identity: this.identity,
       ydoc: this.ydoc,
       webSocketFactory: this.webSocketFactory,
@@ -352,6 +357,7 @@ export class CollaborationClientV3 {
 
       xhr.open('PUT', url);
       xhr.setRequestHeader('content-type', 'application/octet-stream');
+      if (this.accessToken) xhr.setRequestHeader('authorization', `Bearer ${this.accessToken}`);
       xhr.upload.onprogress = (event): void => {
         options.onProgress?.({
           loadedBytes: event.loaded,
@@ -553,6 +559,9 @@ export class CollaborationClientV3 {
         + 'Check that the tunnel forwards plain HTTP traffic to the host collaboration port.',
         error,
       );
+    }
+    if (response.status === 401) {
+      throw new Error('协作密码或访问凭证缺失或失效，请向主持人确认密码或获取新的邀请链接。');
     }
     if (!response.ok) {
       const message = `Failed to ${operation} collaboration room: HTTP ${response.status}`;

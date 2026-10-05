@@ -17,6 +17,7 @@ import {
 } from './CollaborationLeaseProtocol';
 import {
   toCollaborationWebSocketUrl,
+  getCollaborationWebSocketProtocols,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
 
@@ -24,7 +25,7 @@ export interface CollaborationRealtimeChannelV2Options {
   endpoint: string;
   identity?: CollaborationIdentity;
   ydoc: Y.Doc;
-  webSocketFactory: (url: string) => CollaborationWebSocketLike;
+  webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
   applyServerState: () => Promise<void>;
   replaceWithServerState: () => Promise<void>;
   onStateChanged: () => void;
@@ -112,7 +113,7 @@ export class CollaborationRealtimeChannelV2 {
     const socket = this.options.webSocketFactory(toCollaborationWebSocketUrl(
       this.options.endpoint,
       this.options.identity,
-    ));
+    ), getCollaborationWebSocketProtocols(this.options.endpoint));
     socket.binaryType = 'arraybuffer';
     socket.onopen = async () => {
       try {
