@@ -161,9 +161,8 @@ void main(void) {
   vec2 objectUV = clamp(vTextureCoord * uInputSize.xy / max(uOutputFrame.zw, vec2(1.0)), 0.0, 1.0);
   vec3 topColor = mix(topLeftColor, topRightColor, objectUV.x);
   vec3 bottomColor = mix(bottomLeftColor, bottomRightColor, objectUV.x);
-  // WebGL's interpolated vTextureCoord.y is 0 at the visual bottom, so
-  // object-space Y must blend from bottomColor toward topColor.
-  vec3 gradientColor = mix(bottomColor, topColor, objectUV.y);
+  // Pixi filter UVs follow the model's top-down local coordinates: 0 is top, 1 is bottom.
+  vec3 gradientColor = mix(topColor, bottomColor, objectUV.y);
   vec3 environmentColor = mix(color, gradientColor, gradientMix);
   float strength = clamp(alpha, 0.0, 1.0);
   vec3 graded = mix(base, applyBlendMode(base, environmentColor, blendMode), strength);
