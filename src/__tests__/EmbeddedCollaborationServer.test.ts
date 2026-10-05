@@ -1,3 +1,4 @@
+import { authenticatedFetch } from './helpers/collaborationAuth';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +31,7 @@ describe('embedded collaboration server', () => {
   it('keeps an active room on repeat start and restores its state after stop', async () => {
     const input = { userDataPath, projectId: 'project-one', host: '127.0.0.1', port: 0 };
     const { status: first } = await manager.start(input);
-    const seed = await fetch(`${first.localUrl}/seed`, {
+    const seed = await authenticatedFetch(first, `${first.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -51,13 +52,13 @@ describe('embedded collaboration server', () => {
     expect(reused.status.port).toBe(first.port);
     expect(reused.status.dataDir).toBe(first.dataDir);
     expect(reused.status.hasState).toBe(true);
-    expect((await fetch(`${first.localUrl}/health`)).ok).toBe(true);
+    expect((await authenticatedFetch(first, `${first.localUrl}/health`)).ok).toBe(true);
 
     await manager.stop();
     const { status: restored } = await manager.start(input);
     expect(restored.dataDir).toBe(first.dataDir);
     expect(restored.hasState).toBe(true);
-    expect((await (await fetch(`${restored.localUrl}/state`)).json()).collaborationProjectId).toBe('project-one');
+    expect((await (await authenticatedFetch(restored, `${restored.localUrl}/state`)).json()).collaborationProjectId).toBe('project-one');
   });
 
   it('coalesces simultaneous starts for one project', async () => {
@@ -81,7 +82,7 @@ describe('embedded collaboration server', () => {
       host: '127.0.0.1',
       port: 0,
     });
-    const seed = (projectId: string) => fetch(`${status.localUrl}/seed`, {
+    const seed = (projectId: string) => authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -106,7 +107,7 @@ describe('embedded collaboration server', () => {
     const dataDir = await resolveProjectCollaborationSessionDataDir(userDataPath, 'project-one');
     const oldServer = await startCollaborationServer({ host: '127.0.0.1', port: 0, dataDir });
     try {
-      const response = await fetch(`${oldServer.getStatus().localUrl}/seed`, {
+      const response = await authenticatedFetch(oldServer.getStatus(), `${oldServer.getStatus().localUrl}/seed`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -140,7 +141,7 @@ describe('embedded collaboration server', () => {
       host: '127.0.0.1',
       port: 0,
     });
-    const seedResponse = await fetch(`${status.localUrl}/seed`, {
+    const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -157,12 +158,12 @@ describe('embedded collaboration server', () => {
     expect(seedResponse.status).toBe(201);
 
     const doc = new Y.Doc();
-    const response = await fetch(`${status.localUrl}/yjs-state`);
+    const response = await authenticatedFetch(status, `${status.localUrl}/yjs-state`);
     Y.applyUpdate(doc, new Uint8Array(await response.arrayBuffer()));
     const stateVector = Y.encodeStateVector(doc);
     doc.getMap('collaborativeScene').set('collaborationProjectId', 'project-two');
 
-    const socket = new WebSocket(`${status.localUrl.replace(/^http/, 'ws')}/sync?clientId=identity-test&displayName=Test`);
+    const socket = new WebSocket(`${status.localUrl.replace(/^http/, 'ws')}/sync?clientId=identity-test&displayName=Test`, ['aeonstagery-collaboration', `aeonstagery-auth.${status.accessToken}`]);
     try {
       await new Promise<void>((resolve, reject) => {
         socket.once('open', resolve);
@@ -180,7 +181,7 @@ describe('embedded collaboration server', () => {
       });
       socket.send(Buffer.from(Y.encodeStateAsUpdate(doc, stateVector)));
       await expect(errorMessage).resolves.toMatch(/project-one.*project-two/);
-      const state = await (await fetch(`${status.localUrl}/state`)).json();
+      const state = await (await authenticatedFetch(status, `${status.localUrl}/state`)).json();
       expect(state.collaborationProjectId).toBe('project-one');
     } finally {
       socket.terminate();
@@ -192,7 +193,7 @@ describe('embedded collaboration server', () => {
     const oldDir = path.join(getCollaborationSessionsRoot(userDataPath), 'Old-2026-09-29T12-00-00');
     const oldServer = await startCollaborationServer({ host: '127.0.0.1', port: 0, dataDir: oldDir });
     try {
-      const response = await fetch(`${oldServer.getStatus().localUrl}/seed`, {
+      const response = await authenticatedFetch(oldServer.getStatus(), `${oldServer.getStatus().localUrl}/seed`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
