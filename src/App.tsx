@@ -1,4 +1,4 @@
-import { withCollaborationAccessToken } from './services/collaboration/CollaborationTransport';
+import { isMatchingCollaborationServerHost, withCollaborationAccessToken } from './services/collaboration/CollaborationTransport';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { isSettingsDialogTab } from './ui/settingsNavigation';
 import { eventBus } from './api/events';
@@ -302,6 +302,7 @@ function AppContent({
     onPeersChange: setCollaborationPeers,
     onPresencePublisherChange: setCollaborationPresencePublisher,
     onLeaseGateChange: setCustomMotionEditLeaseGate,
+    collaborationServerStatus,
   });
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
@@ -1086,6 +1087,7 @@ function AppContent({
         displayName,
         password: password || serverStatus.connectionPassword,
         project: workflowResult.project,
+        isServerHost: true,
       });
       if (ok) {
         roomCreated = true;
@@ -1162,6 +1164,7 @@ function AppContent({
         displayName,
         password: password || serverStatus.connectionPassword,
         project: workflowResult.project,
+        isServerHost: true,
       });
       if (ok) {
         roomCreated = true;
@@ -1227,11 +1230,26 @@ function AppContent({
         return;
       }
 
+      let currentServerStatus = collaborationServerStatus;
+      if (!currentServerStatus && window.aeonStageryAPI?.collaborationServer?.getStatus) {
+        try {
+          const res = await window.aeonStageryAPI.collaborationServer.getStatus();
+          if (res?.success && res.status) {
+            currentServerStatus = res.status;
+            setCollaborationServerStatus(res.status);
+          }
+        } catch {
+          // ignore error fetching server status
+        }
+      }
+      const isServerHost = isMatchingCollaborationServerHost(endpoint, currentServerStatus);
+
       const ok = await collaborationController.joinExistingRoom({
         endpoint,
         password,
         displayName,
         project: workflowResult.project,
+        isServerHost,
       });
       if (!ok) return;
       roomCreated = true;
@@ -1242,7 +1260,7 @@ function AppContent({
         setIsCollaborationJoinHomeLocked,
       );
     }
-  }, [collaborationController, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile]);
+  }, [collaborationController, collaborationServerStatus, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile]);
 
   const handleStopCollaborationServer = useCallback(async () => {
     const result = await window.aeonStageryAPI.collaborationServer.stop();

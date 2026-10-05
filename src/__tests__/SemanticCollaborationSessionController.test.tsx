@@ -45,7 +45,9 @@ const mocks = vi.hoisted(() => {
     });
   }
 
-  const orchestratorStart = vi.fn(async () => {
+  // Options are recorded so tests can drive the orchestrator callbacks the
+  // session hook passes in (for example beforeApplyState).
+  const orchestratorStart = vi.fn(async (_options?: any) => {
     const layer = {
       dispose: vi.fn(),
       publishCurrentSceneNow: vi.fn(async () => undefined),
@@ -92,8 +94,10 @@ const mocks = vi.hoisted(() => {
     complete = vi.fn();
     request = vi.fn(async () => undefined);
     commitAcceptedServerDocument = vi.fn(async () => undefined);
+    options: any;
 
-    constructor() {
+    constructor(options?: any) {
+      this.options = options;
       state.serverSceneAgreements.push(this);
     }
   }
@@ -242,6 +246,7 @@ function renderController(input: {
   playback?: PlaybackHarness;
   context?: BootstrapContext;
   onLeaseGateChange?: (gate: unknown) => void;
+  collaborationServerStatus?: any;
 } = {}) {
   const playback = input.playback ?? createPlaybackHarness();
   const context = input.context ?? createContext(playback);
@@ -258,6 +263,7 @@ function renderController(input: {
     currentProject: input.currentProject ?? null,
     status,
     peers: [] as CollaborationPresencePeerV2[],
+    collaborationServerStatus: input.collaborationServerStatus,
     ...callbacks,
   }));
   return {
@@ -280,6 +286,7 @@ beforeEach(() => {
   mocks.state.presenceUnsubscribes.length = 0;
   mocks.state.resourceAgreements.length = 0;
   mocks.state.serverSceneAgreements.length = 0;
+  mocks.orchestratorStart.mockClear();
   mocks.showToast.mockReset();
 });
 
@@ -706,6 +713,149 @@ describe('semantic collaboration session controller', () => {
         'error',
       );
       expect(controller.onStatusChange).toHaveBeenLastCalledWith('error');
+    });
+  });
+
+  describe('skip server scene agreement dialog for server host', () => {
+    it('passes skipDialog: true and suppresses agreement dialog when joining as server host explicitly', async () => {
+      const controller = renderController({ currentProject: createProject() });
+
+      let success = false;
+      await act(async () => {
+        success = await controller.result.current.joinExistingRoom({
+          endpoint: 'server.example:1234',
+          isServerHost: true,
+        });
+      });
+
+      expect(success).toBe(true);
+      const orchestratorOptions = mocks.orchestratorStart.mock.calls[0]?.[0];
+      expect(orchestratorOptions).toBeDefined();
+
+      const serverSceneAgreement = mocks.state.serverSceneAgreements[0];
+      expect(serverSceneAgreement).toBeDefined();
+
+      // Trigger beforeApplyState
+      const mockState = {
+        schemaVersion: 3,
+        sceneSchemaVersion: 5,
+        collaborationProjectId: 'proj-1',
+        roomId: 'proj-1:main',
+        sceneId: 'main',
+        statementsById: {},
+        statementOrder: [],
+      };
+      await orchestratorOptions.beforeApplyState(mockState, {
+        requireServerSceneAgreement: true,
+        prepareAssets: true,
+      });
+
+      expect(serverSceneAgreement.request).toHaveBeenCalledWith(
+        mockState,
+        expect.objectContaining({
+          skipDialog: true,
+        }),
+      );
+      // Dialog state in controller remains null (no popup shown)
+      expect(controller.result.current.serverSceneAgreement).toBeNull();
+    });
+
+    it('automatically recognizes matching local collaboration server status and skips dialog', async () => {
+      const controller = renderController({
+        currentProject: createProject(),
+        collaborationServerStatus: {
+          running: true,
+          port: 12345,
+          localUrl: 'http://127.0.0.1:12345',
+          lanUrls: ['http://192.168.1.100:12345'],
+          host: '0.0.0.0',
+        },
+      });
+
+      let success = false;
+      await act(async () => {
+        success = await controller.result.current.joinExistingRoom({
+          endpoint: '127.0.0.1:12345',
+        });
+      });
+
+      expect(success).toBe(true);
+      const orchestratorOptions = mocks.orchestratorStart.mock.calls[0]?.[0];
+      const serverSceneAgreement = mocks.state.serverSceneAgreements[0];
+
+      const mockState = {
+        schemaVersion: 3,
+        sceneSchemaVersion: 5,
+        collaborationProjectId: 'proj-1',
+        roomId: 'proj-1:main',
+        sceneId: 'main',
+        statementsById: {},
+        statementOrder: [],
+      };
+      await orchestratorOptions.beforeApplyState(mockState, {
+        requireServerSceneAgreement: true,
+        prepareAssets: true,
+      });
+
+      expect(serverSceneAgreement.request).toHaveBeenCalledWith(
+        mockState,
+        expect.objectContaining({
+          skipDialog: true,
+        }),
+      );
+      expect(controller.result.current.serverSceneAgreement).toBeNull();
+    });
+
+    it('does not skip dialog when joining a non-host server', async () => {
+      const controller = renderController({
+        currentProject: createProject(),
+        collaborationServerStatus: {
+          running: true,
+          port: 12345,
+          localUrl: 'http://127.0.0.1:12345',
+          lanUrls: ['http://192.168.1.100:12345'],
+          host: '0.0.0.0',
+        },
+      });
+
+      let success = false;
+      await act(async () => {
+        success = await controller.result.current.joinExistingRoom({
+          endpoint: '192.168.1.200:12345', // Different machine IP
+        });
+      });
+
+      expect(success).toBe(true);
+      const orchestratorOptions = mocks.orchestratorStart.mock.calls[0]?.[0];
+      const serverSceneAgreement = mocks.state.serverSceneAgreements[0];
+
+      const mockState = {
+        schemaVersion: 3,
+        sceneSchemaVersion: 5,
+        collaborationProjectId: 'proj-1',
+        roomId: 'proj-1:main',
+        sceneId: 'main',
+        statementsById: {},
+        statementOrder: [],
+      };
+      await orchestratorOptions.beforeApplyState(mockState, {
+        requireServerSceneAgreement: true,
+        prepareAssets: true,
+      });
+
+      expect(serverSceneAgreement.request).toHaveBeenCalledWith(
+        mockState,
+        expect.objectContaining({
+          skipDialog: false,
+        }),
+      );
+      // When presenter.show is triggered on non-host, controller receives the dialog state
+      act(() => {
+        serverSceneAgreement.options.presenter.show({
+          targetScenePath: '/test/main.scene.json',
+        });
+      });
+      expect(controller.result.current.serverSceneAgreement).not.toBeNull();
     });
   });
 });

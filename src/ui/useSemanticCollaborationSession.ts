@@ -1,6 +1,7 @@
 import {
   collaborationEndpointWithPassword,
   getCollaborationAccessToken,
+  isMatchingCollaborationServerHost,
   normalizeCollaborationEndpoint,
   withCollaborationAccessToken,
 } from '../services/collaboration/CollaborationTransport';
@@ -10,6 +11,7 @@ import type {
   CollaborationIdentity,
   CollaborationPresencePatchV2,
   CollaborationPresencePeerV2,
+  CollaborationServerStatus,
   CollaborativeAssetManifest,
 } from '../api/types/collaboration';
 import type { ProjectState } from '../api/types/project';
@@ -68,6 +70,8 @@ export interface CollaborationStartOptions {
   password?: string;
   displayName?: string;
   project?: ProjectState | null;
+  isServerHost?: boolean;
+  skipServerSceneAgreement?: boolean;
 }
 
 export interface ResourceAgreementDialogState {
@@ -252,6 +256,7 @@ export function useSemanticCollaborationSession({
   onPeersChange,
   onPresencePublisherChange,
   onLeaseGateChange,
+  collaborationServerStatus,
 }: {
   contextValue: BootstrapContext;
   currentProject: ProjectState | null;
@@ -262,6 +267,7 @@ export function useSemanticCollaborationSession({
   onPeersChange: (peers: CollaborationPresencePeerV2[]) => void;
   onPresencePublisherChange?: (publisher: ((patch?: Partial<CollaborationPresencePatchV2>) => void) | null) => void;
   onLeaseGateChange?: (gate: CustomMotionEditLeaseGate | null) => void;
+  collaborationServerStatus?: CollaborationServerStatus | null;
 }): SemanticCollaborationSessionController {
   const [endpoint, setEndpoint] = useState(() => readStoredInput('aeonstagery.collaboration.endpoint', '127.0.0.1:12345'));
   const [displayName, setDisplayName] = useState(() => readStoredInput('aeonstagery.collaboration.displayName', '导演'));
@@ -457,6 +463,12 @@ export function useSemanticCollaborationSession({
     if (options.displayName !== undefined) setDisplayName(options.displayName);
     setLastError(null);
 
+    const isServerHost = Boolean(
+      options.isServerHost ||
+      (collaborationServerStatus && isMatchingCollaborationServerHost(cleanEndpoint, collaborationServerStatus))
+    );
+    const skipServerSceneAgreement = Boolean(options.skipServerSceneAgreement || isServerHost);
+
     const client = new CollaborationClientV3({ endpoint: cleanEndpoint, identity: self });
     const leaseClient = client as unknown as {
       subscribeLease?: unknown;
@@ -473,13 +485,17 @@ export function useSemanticCollaborationSession({
     leaseGateRef.current = leaseGate;
     onLeaseGateChange?.(leaseGate);
     const resourceAgreement = new CollaborativeResourceAgreementAdapter({
-      show: (request) => setResourceAgreement(request),
+      show: (request) => {
+        if (!skipServerSceneAgreement) setResourceAgreement(request);
+      },
       clear: () => setResourceAgreement(null),
     });
     resourceAgreementRef.current = resourceAgreement;
     const serverSceneAgreement = new CollaborativeServerSceneAgreementAdapterV3({
       presenter: {
-        show: (request) => setServerSceneAgreement(request),
+        show: (request) => {
+          if (!skipServerSceneAgreement) setServerSceneAgreement(request);
+        },
         clear: () => setServerSceneAgreement(null),
       },
       safetyPaths: new CollaborativeServerSceneSafetyPathAdapterV3({
@@ -510,7 +526,12 @@ export function useSemanticCollaborationSession({
       },
       uploader: new CollaborativeAssetUploader({ fileAccess, projectResources, client }),
       downloader: new CollaborativeAssetDownloader({ fileAccess, projectResources, client }),
-      confirmAgreement: async (request) => resourceAgreement.request(request),
+      confirmAgreement: async (request) => {
+        // The host owns the server scene, so its asset agreement is accepted
+        // without a dialog; the gate discards the confirmation result.
+        if (skipServerSceneAgreement) return;
+        return resourceAgreement.request(request);
+      },
       onHandshake: (event) => showAssetHandshake(event.manifest, event.status, event.direction, event.error, event.proposal, event.transfer),
     });
     gateRef.current = gate;
@@ -565,6 +586,7 @@ export function useSemanticCollaborationSession({
             await serverSceneAgreement.request(state, {
               assetAgreementProposal: acceptedJoinProposal,
               blockingIssues: collectBlockingAssetIssues(acceptedJoinProposal),
+              skipDialog: skipServerSceneAgreement,
             });
           }
 
@@ -648,7 +670,7 @@ export function useSemanticCollaborationSession({
       showToast(`协作连接失败: ${message}`, 'error');
       return false;
     }
-  }, [contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
+  }, [collaborationServerStatus, contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
 
   const refreshCollaborativeResources = useCallback(async () => {
     if (!layerRef.current || status !== 'connected') return;
@@ -677,7 +699,9 @@ export function useSemanticCollaborationSession({
     const client = clientRef.current;
     if (!client) return;
     setLastError(null);
-    client.reconnectRealtime();
+    // Fire-and-forget: the attempt reports progress through the connection and
+    // error subscriptions this hook already holds.
+    void client.reconnectRealtime();
   }, []);
 
   useEffect(() => () => {
