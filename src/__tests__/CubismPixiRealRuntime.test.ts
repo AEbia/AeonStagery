@@ -13,10 +13,14 @@ let engine: any;
 function buffer(file: string): ArrayBuffer {
   return new Uint8Array(fs.readFileSync(file)).buffer;
 }
-async function createModel() {
+async function createModel(eyeBlinkParameters?: string[]) {
   const root = path.dirname(entry!);
   const json = JSON.parse(fs.readFileSync(entry!, 'utf8'));
   json.url = 'file://' + entry;
+  if (eyeBlinkParameters) {
+    json.Groups = (json.Groups ?? []).filter((group: any) => group.Name !== 'EyeBlink');
+    json.Groups.push({ Target: 'Parameter', Name: 'EyeBlink', Ids: eyeBlinkParameters });
+  }
   // Model sounds are owned by the app, independently of resource motions.
   for (const defs of Object.values(json.FileReferences.Motions ?? {}) as any[]) {
     for (const definition of defs) delete definition.Sound;
@@ -37,6 +41,29 @@ async function createModel() {
   installCubismPixiModelRuntime(model);
   models.push(model);
   return model;
+}
+
+function addProbeExpression(model: any) {
+  const manager = model.internalModel.motionManager.expressionManager;
+  const definition = { Name: 'probe', File: 'probe.exp3.json' };
+  const data = new TextEncoder().encode(JSON.stringify({
+    FadeInTime: 1, FadeOutTime: 1,
+    Parameters: [{ Id: 'ParamAngleX', Value: 20, Blend: 'Overwrite' }],
+  })).buffer;
+  manager.definitions.push(definition);
+  manager.expressions.push(manager.createExpression(data, definition));
+}
+
+function addProbeMotion(model: any) {
+  const manager = model.internalModel.motionManager;
+  const definition = { File: 'probe.motion3.json' };
+  manager.definitions.probe = [definition];
+  const data = new TextEncoder().encode(JSON.stringify({
+    Version: 3,
+    Meta: { Duration: 10, Fps: 30, Loop: false, CurveCount: 1, TotalSegmentCount: 1, TotalPointCount: 2, UserDataCount: 0, TotalUserDataSize: 0 },
+    Curves: [{ Target: 'Parameter', Id: 'ParamAngleY', Segments: [0, 0, 0, 10, 10] }],
+  })).buffer;
+  manager.motionGroups.probe = [manager.createMotion(data, 'probe', definition)];
 }
 
 describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core and modern engine', () => {
@@ -131,6 +158,25 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     model.update(16);
     expect(model.internalModel.parameterValues[index]).toBeCloseTo(25);
   });
+  it.each([0, 0.25, 0.75])('holds a seeked motion fade pose at %ss while paused and continues on playback', async (offset) => {
+    const model = await createModel();
+    addProbeMotion(model);
+    model.internalModel.physics = undefined;
+    const baseline = model.captureRuntimeSnapshot('haru');
+    const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamAngleY');
+    await model.restoreAtSceneTime({
+      id: 'haru', targetSceneTime: offset, idleSnapshot: baseline,
+      motion: { key: 'probe', offset, sceneTime: offset, fadeInSeconds: 1 },
+    });
+    const pausedPose = model.internalModel.parameterValues[index];
+    expect(pausedPose).toBeCloseTo(offset * (0.5 - 0.5 * Math.cos(Math.PI * offset)), 5);
+    for (let i = 0; i < 120; i++) model.update(0);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(pausedPose, 5);
+    model.update(100);
+    const resumedTime = offset + 0.1;
+    const resumedWeight = 0.5 - 0.5 * Math.cos(Math.PI * resumedTime);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(pausedPose + (resumedTime - pausedPose) * resumedWeight, 5);
+  });
   it('reapplies an expression after reset and survives a second loaded model', async () => {
     const model = await createModel();
     await model.setExpressionForSeek('F01', 1);
@@ -144,5 +190,101 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     model.update(16);
     const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamMouthOpenY');
     expect(model.internalModel.parameterValues[index]).toBeCloseTo(0.85);
+  });
+  it.each([false, true])('restores expression fade independently of resource motion (motion=%s)', async (withMotion) => {
+    const model = await createModel();
+    addProbeExpression(model);
+    if (withMotion) addProbeMotion(model);
+    const baseline = model.captureRuntimeSnapshot('haru');
+    const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamAngleX');
+    for (const elapsedSeconds of [0, 0.25, 1]) {
+      await model.restoreAtSceneTime({
+        id: 'haru', targetSceneTime: 5, idleSnapshot: baseline,
+        motion: withMotion ? { key: 'probe', offset: 5, sceneTime: 5 } : null,
+        expression: { key: 'probe', elapsedSeconds },
+      });
+      const weight = 0.5 - 0.5 * Math.cos(elapsedSeconds * Math.PI);
+      expect(model.internalModel.parameterValues[index]).toBeCloseTo(20 * weight, 4);
+      model.update(100);
+      const continuedWeight = 0.5 - 0.5 * Math.cos(Math.min(1, elapsedSeconds + 0.1) * Math.PI);
+      expect(model.internalModel.parameterValues[index]).toBeCloseTo(20 * continuedWeight, 4);
+    }
+    model.update(250);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(20, 4);
+  });
+  it('fully latches an expression without timing metadata and releases it on an explicit reset', async () => {
+    const model = await createModel();
+    addProbeExpression(model);
+    const baseline = model.captureRuntimeSnapshot('haru');
+    const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamAngleX');
+    await model.restoreAtSceneTime({ id: 'haru', targetSceneTime: 5, idleSnapshot: baseline, expression: { key: 'probe' } });
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(20);
+    const snapshot = model.captureRuntimeSnapshot('haru');
+    await model.restoreAtSceneTime({ id: 'haru', targetSceneTime: 0, idleSnapshot: baseline, snapshot, expression: { key: null } });
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(baseline.params[index]);
+    expect(model.captureRuntimeSnapshot('haru').expression.key).toBeNull();
+  });
+  it('applies a configured EyeBlink group before native geometry evaluation', async () => {
+    const model = await createModel(['ParamEyeLSmile', 'ParamEyeLSmile']);
+    const core = model.internalModel.coreModel;
+    const index = core.getParameterIds().indexOf('ParamEyeLSmile');
+    core.setParameterValueByIndex(index, 1);
+    core.saveParameters();
+    model.setBlink(true, 1000, 0.75, 0);
+    model.update(0);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(0.5);
+    model.setBlink(false, 1000, 0.75, 0);
+    model.update(0);
+    expect(model.internalModel.parameterValues[index]).toBe(1);
+  });
+  it('composes Pixi model, parent and render-group opacity at the native draw boundary', async () => {
+    const model = await createModel();
+    model.update(16);
+    const stage = new PIXI.Container({ isRenderGroup: true });
+    const parent = new PIXI.Container();
+    stage.addChild(parent);
+    parent.addChild(model);
+    const nativeRenderer = model.internalModel.renderer;
+    let drawnAlpha = -1;
+    model.internalModel.draw = () => { drawnAlpha = nativeRenderer.getModelColor().a; };
+    const renderer: any = Object.create(PIXI.WebGLRenderer.prototype);
+    Object.assign(renderer, {
+      gl: {}, view: { resolution: 1 },
+      geometry: { resetState() {} }, shader: { resetState() {} }, texture: { resetState() {} }, state: { resetState() {} },
+      globalUniforms: { globalUniformData: { projectionMatrix: new PIXI.Matrix(), worldTransformMatrix: new PIXI.Matrix(), worldColor: 0xffffffff } },
+      renderTarget: { viewport: { x: 0, y: 0, width: 1920, height: 1080 }, renderTarget: { isRoot: false } },
+    });
+    model.gl = renderer.gl;
+    try {
+      stage.alpha = 0.5;
+      parent.alpha = 0.5;
+      model.alpha = 0.25;
+      PIXI.updateRenderGroupTransforms(stage.renderGroup!, true);
+      renderer.globalUniforms.globalUniformData.worldColor = stage.renderGroup!.worldColorAlpha;
+      model.renderLive2D(renderer);
+      expect(drawnAlpha).toBeCloseTo(0.25 * 0.5 * (127 / 255), 5);
+      expect(nativeRenderer.getModelColor().a).toBe(1);
+      stage.alpha = parent.alpha = model.alpha = 1;
+      parent.filters = [new PIXI.AlphaFilter({ alpha: 0.25 })];
+      PIXI.updateRenderGroupTransforms(stage.renderGroup!, true);
+      renderer.globalUniforms.globalUniformData.worldColor = stage.renderGroup!.worldColorAlpha;
+      model.renderLive2D(renderer);
+      // Timeline fades already use AlphaFilter; native drawing must stay opaque here.
+      expect(drawnAlpha).toBe(1);
+
+      model.alpha = 0.25;
+      PIXI.updateRenderGroupTransforms(stage.renderGroup!, true);
+      parent.removeChild(model);
+      model.enableRenderGroup();
+      PIXI.updateRenderGroupTransforms(model.renderGroup, true);
+      renderer.globalUniforms.globalUniformData.worldColor = model.renderGroup.worldColorAlpha;
+      model.renderLive2D(renderer);
+      // Rendering the model itself to a bake target puts its alpha in the root uniform.
+      expect(drawnAlpha).toBeCloseTo(63 / 255, 5);
+    } finally {
+      parent.filters?.forEach((filter) => filter.destroy());
+      model.parent?.removeChild(model);
+      stage.destroy({ children: true });
+    }
   });
 });

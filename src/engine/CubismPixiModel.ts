@@ -54,6 +54,22 @@ export function installCubismPixiModelRuntime(model: any): any {
   const sourceCurveFadeIns = new WeakMap<object, number[]>();
   let renderedParameters: Float32Array | null = null;
   let bakeTexture: PIXI.RenderTexture | null = null;
+  let motionUpdateTime: number | null = null;
+  let motionUpdated = false;
+  const originalUpdateMotions = internal.updateMotions.bind(internal);
+  internal.updateMotions = (target: any, now: number) => {
+    if (motionUpdateTime === now) {
+      // The SDK saves the blended motion pose as the next frame's baseline.
+      // Blending it again at the same timestamp would finish a paused fade.
+      // Keep stage hooks running so parameter edits can still be displayed.
+      internal.emit('beforeMotionUpdate');
+      internal.emit('afterMotionUpdate');
+      return motionUpdated;
+    }
+    motionUpdateTime = now;
+    motionUpdated = originalUpdateMotions(target, now);
+    return motionUpdated;
+  };
   // The timeline owns idle playback and blink; never let the vendor choose
   // random idle motions or run a second, nondeterministic eye-blink channel.
   internal.eyeBlink = undefined;
@@ -82,13 +98,30 @@ export function installCubismPixiModelRuntime(model: any): any {
     parameterValues: { configurable: true, get: () => core.getParameterValues() },
     partOpacities: { configurable: true, get: () => core._partOpacities ?? core.getModel().parts.opacities },
   });
+  const configuredBlinkIds = internal.settings.getEyeBlinkParameters?.() ?? [];
+  const blinkIds = new Set<string>(configuredBlinkIds.length
+    ? configuredBlinkIds.map(parameterId)
+    : ['ParamEyeLOpen', 'ParamEyeROpen', 'PARAM_EYE_L_OPEN', 'PARAM_EYE_R_OPEN']);
+  const blinkIndices = Array.from({ length: core.getParameterCount() }, (_, index) => index)
+    .filter((index) => blinkIds.has(parameterId(core.getParameterId(index))));
 
-  // Drawing may follow another model load before the next simulation tick.
+  // Native GL drawing bypasses Pixi's color uniforms. Apply the current pass's
+  // opacity here, including its render-group root, without accumulating fades
+  // in the SDK color or multiplying the timeline's AlphaFilter a second time.
   const originalRenderLive2D = model.renderLive2D?.bind(model);
   if (originalRenderLive2D) {
     model.renderLive2D = (renderer: any) => {
       refreshCubismCoreViews(core);
-      originalRenderLive2D(renderer);
+      const color = internal.renderer.getModelColor();
+      const worldColor = renderer.globalUniforms.globalUniformData.worldColor ?? 0xffffffff;
+      const worldAlpha = (worldColor >>> 24) / 255;
+      const groupAlpha = model.renderGroup ? 1 : model.groupAlpha;
+      internal.renderer.setModelColor(color.r, color.g, color.b, color.a * groupAlpha * worldAlpha);
+      try {
+        originalRenderLive2D(renderer);
+      } finally {
+        internal.renderer.setModelColor(color.r, color.g, color.b, color.a);
+      }
     };
   }
 
@@ -108,11 +141,8 @@ export function installCubismPixiModelRuntime(model: any): any {
   const beforeCoreUpdate = () => {
     const multiplier = evaluateBlinkMultiplier(sceneTime, blink);
     if (blink.enabled) {
-      for (let index = 0; index < core.getParameterCount(); index++) {
-        const id = parameterId(core.getParameterId(index));
-        if (id === 'ParamEyeLOpen' || id === 'ParamEyeROpen') {
-          core.setParameterValueByIndex(index, core.getParameterValueByIndex(index) * multiplier);
-        }
+      for (const index of blinkIndices) {
+        core.setParameterValueByIndex(index, core.getParameterValueByIndex(index) * multiplier);
       }
     }
     for (const [id, value] of Object.entries(model._characterEntry?.injectedParams ?? {})) {
@@ -148,6 +178,7 @@ export function installCubismPixiModelRuntime(model: any): any {
     return motion?._motionData?.duration ?? motion?.getDuration?.() ?? 0;
   };
   model.stopAllMotions = () => {
+    motionUpdateTime = null;
     manager.stopAllMotions();
     manager.playing = false;
     for (const parallel of internal.parallelMotionManager ?? []) parallel.stopAllMotions?.();
@@ -206,10 +237,15 @@ export function installCubismPixiModelRuntime(model: any): any {
     if (disposed || epoch !== expressionEpoch) return;
     if (elapsedSeconds !== undefined) {
       const now = model.elapsedTime / 1000;
+      // A legacy state without a start timestamp requests the final latch.
+      // Keep queue timestamps finite so subsequent playback remains valid.
+      const elapsed = Number.isFinite(elapsedSeconds)
+        ? Math.max(0, elapsedSeconds)
+        : Math.max(0, expression.getFadeInTime());
       for (const entry of queueEntries(expressionManager.queueManager)) {
         entry._motion.setupMotionQueueEntry(entry, now);
-        entry.setStartTime(now - Math.max(0, elapsedSeconds));
-        entry.setFadeInStartTime(now - Math.max(0, elapsedSeconds));
+        entry.setStartTime(now - elapsed);
+        entry.setFadeInStartTime(now - elapsed);
       }
     }
   };
@@ -235,6 +271,7 @@ export function installCubismPixiModelRuntime(model: any): any {
     return captured;
   };
   model.applyRuntimeSnapshot = (snapshot: Pick<ModelSnapshot, 'params' | 'opacities'>) => {
+    motionUpdateTime = null;
     refreshCubismCoreViews(core);
     if (snapshot.params) core.getParameterValues().set(snapshot.params.subarray(0, core.getParameterCount()));
     if (snapshot.opacities) internal.partOpacities.set(snapshot.opacities.subarray(0, internal.partOpacities.length));
@@ -247,7 +284,10 @@ export function installCubismPixiModelRuntime(model: any): any {
     const baseline = input.handoffSnapshot ?? input.idleSnapshot ?? input.snapshot;
     if (baseline) model.applyRuntimeSnapshot(baseline);
     const started = !input.motion || await model.startMotion(input.motion.key, 0, input.motion.priority ?? 3, input.motion.offset, input.motion.fadeInSeconds);
-    await setExpression(input.expression?.key ?? input.snapshot?.expression?.key ?? null, input.motion?.offset ?? 0);
+    const key = input.expression !== undefined
+      ? input.expression?.key ?? null
+      : input.snapshot?.expression?.key ?? null;
+    await setExpression(key, input.expression?.elapsedSeconds ?? Number.POSITIVE_INFINITY);
     model.update(0);
     return {
       status: started ? 'restored' : 'fallback',

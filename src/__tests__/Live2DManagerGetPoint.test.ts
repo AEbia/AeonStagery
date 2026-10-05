@@ -517,6 +517,34 @@ describe('Live2DManager.getPoint', () => {
     expect(cubism2ClockMs).toBeCloseTo(1_016.666, 6);
   });
 
+  it('freezes Cubism 3+ motion time while paused and still applies parameter edits', async () => {
+    const { default: Live2DManager } = await import('../engine/Live2DManager');
+    const runtimeAdapter = await import('../engine/Live2DRuntimeAdapter');
+    const manager = new Live2DManager();
+    const controls = mockControls();
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+      id: 'untitled-pixi-live2d-engine-cubism', getControls: () => controls,
+    }));
+    const model = { internalModel: { coreModel: {} } };
+    (manager as any).characters = new Map([['haru', {
+      id: 'haru', model,
+      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism', runtimeFamily: 'cubism3-plus', supported: true },
+      injectedParams: { ParamMouthOpenY: 0.8 }, config: {}, motionEpoch: 0,
+    }]]);
+    manager.setAutoUpdate(false);
+    await manager.updateAll(16);
+    expect(controls.advanceFrame).not.toHaveBeenCalled();
+    expect(controls.setInjectedParameter).toHaveBeenCalledWith(model, 'ParamMouthOpenY', 0.8);
+    expect(controls.syncInputParameters).toHaveBeenCalledWith(model);
+
+    await manager.updateAll(16, true);
+    expect(controls.advanceFrame).toHaveBeenCalledWith(model, 16);
+    vi.mocked(controls.advanceFrame).mockClear();
+    manager.setAutoUpdate(true);
+    await manager.updateAll(16);
+    expect(controls.advanceFrame).toHaveBeenCalledWith(model, 16);
+  });
+
   it('skips ordinary ticker updates while the global UtSystem lock is active but allows force updates', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');

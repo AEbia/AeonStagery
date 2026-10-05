@@ -49,6 +49,31 @@ describe('Cubism Pixi runtime controls', () => {
     expect(saved()[4]).toBeCloseTo(12);
     expect(model.internalModel.partOpacities[0]).toBeCloseTo(0.6);
   });
+  it('blends motions once per timestamp while preserving stage hooks and snapshot restores', () => {
+    const { model, internal, core, motionManager, drawn } = createCubismModelFixture();
+    motionManager.update.mockImplementation(() => {
+      const current = core.getParameterValueByIndex(4);
+      core.setParameterValueByIndex(4, current + (10 - current) * 0.25);
+      return true;
+    });
+    const stage = vi.fn();
+    internal.on('afterMotionUpdate', stage);
+    model.update(16);
+    expect(drawn()[4]).toBe(2.5);
+    for (let i = 0; i < 120; i++) model.update(0);
+    expect(drawn()[4]).toBe(2.5);
+    expect(motionManager.update).toHaveBeenCalledOnce();
+    expect(stage).toHaveBeenCalledTimes(121);
+
+    model.applyRuntimeSnapshot({ params: new Float32Array([1, 1, 0, 0, 6]) });
+    model.update(0);
+    expect(drawn()[4]).toBe(7);
+    model.stopAllMotions();
+    model.update(0);
+    expect(motionManager.update).toHaveBeenCalledTimes(3);
+    model.update(16);
+    expect(motionManager.update).toHaveBeenCalledTimes(4);
+  });
   it('returns native parameter names, expression names and runtime identity through the existing handle', () => {
     const { model } = createCubismModelFixture();
     const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
@@ -78,6 +103,29 @@ describe('Cubism Pixi runtime controls', () => {
     model.update(100);
     expect(drawn()[2]).not.toBe(first);
     expect(drawn()[2]).toBeGreaterThan(0.5);
+  });
+  it('blinks only the configured parameters and deduplicates EyeBlink group ids', () => {
+    const { model, core, drawn } = createCubismModelFixture(
+      ['ParamEyeLOpen', 'CustomEyeOpen'], ['CustomEyeOpen', 'CustomEyeOpen'],
+    );
+    core.setParameterValueByIndex(1, 1);
+    core.saveParameters();
+    model.setBlink(true, 1000, 0.75, 0);
+    model.update(0);
+    expect(drawn()[0]).toBe(1);
+    expect(drawn()[1]).toBeCloseTo(0.5);
+    model.setBlink(false, 1000, 0.75, 0);
+    model.update(0);
+    expect(drawn()[1]).toBe(1);
+  });
+  it('falls back to legacy eye parameter names when no EyeBlink group is configured', () => {
+    const { model, core, drawn } = createCubismModelFixture(['PARAM_EYE_L_OPEN', 'PARAM_EYE_R_OPEN']);
+    core.setParameterValueByIndex(0, 1);
+    core.setParameterValueByIndex(1, 1);
+    core.saveParameters();
+    model.setBlink(true, 1000, 0.8, 0);
+    model.update(0);
+    expect(Array.from(drawn())).toEqual([0, 0]);
   });
   it('cancels an expression load when a newer expression reset takes ownership', async () => {
     const { model, expressionManager } = createCubismModelFixture();

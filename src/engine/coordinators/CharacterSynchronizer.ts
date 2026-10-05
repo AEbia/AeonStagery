@@ -2,6 +2,7 @@ import type { SnapshotStore } from '../SnapshotStore';
 import type { ProxyRegistry } from './ProxyRegistry';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import type { ModelSnapshot } from '../Live2DConfig';
+import type { Live2DSeekExpressionState } from '../Live2DRuntimeAdapter';
 import { resolveLookAtFocus } from '../lookAtFocus';
 import { seekProfiler } from '../SeekProfiler';
 import { motionCurveCache, type CachedResourceMotion, type MotionCurveCacheSource } from '../live2d/motionCurveCache';
@@ -58,6 +59,16 @@ interface CharSyncInput {
   fps?: number;
 }
 
+function resolveSeekExpression(expression: DesiredCharState['expression'], sceneTime: number): Live2DSeekExpressionState {
+  const startTime = expression?.time;
+  return {
+    key: expression?.key ?? null,
+    elapsedSeconds: typeof startTime === 'number' && Number.isFinite(startTime)
+      ? Math.max(0, sceneTime - startTime)
+      : Number.POSITIVE_INFINITY,
+  };
+}
+
 function snapshotBelongsToLifecycle(
   snapshotTime: number,
   modelSnapshot: ModelSnapshot | undefined,
@@ -96,7 +107,7 @@ interface Live2DMuscle {
     handoffSnapshot?: any;
     targetSceneTime: number;
     motion?: { key: string; priority?: number; offset: number; sceneTime: number; fadeInSeconds?: number } | null;
-    expression?: { key: string | null } | null;
+    expression?: Live2DSeekExpressionState | null;
     isScrubbing?: boolean;
     preserveMotionForPlayback?: boolean;
   }): Promise<any>;
@@ -289,7 +300,7 @@ export class CharacterSynchronizer {
       handoffSnapshot?: any;
       targetSceneTime: number;
       motion?: { key: string; priority?: number; offset: number; sceneTime: number } | null;
-      expression?: { key: string | null } | null;
+      expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
     }>();
@@ -322,7 +333,7 @@ export class CharacterSynchronizer {
         handoffSnapshot: nativeMotionHandoffSnapshots.get(id) ?? null,
         targetSceneTime: time,
         motion,
-        expression: { key: state.expression?.key ?? null },
+        expression: resolveSeekExpression(state.expression, time),
         isScrubbing,
         preserveMotionForPlayback: !isScrubbing,
       });
@@ -399,7 +410,7 @@ export class CharacterSynchronizer {
                 ? { fadeInSeconds: previousMotion.output.fadeInSeconds }
                 : {}),
             },
-            expression: { key: previous.expression?.key ?? null },
+            expression: resolveSeekExpression(previous.expression, motionStartTime),
             isScrubbing: true,
           });
           if (shouldCancel()) return;

@@ -33,6 +33,7 @@ import { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
 import { getUnsupportedLive2DRuntimeMessage } from './Live2DRuntimeResolver';
 import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
+import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import {
   resolveRimLightStateAtTime,
 } from './RimLightResolver';
@@ -2367,7 +2368,7 @@ class Live2DManager {
       handoffSnapshot?: ModelSnapshot | null;
       targetSceneTime: number;
       motion?: { key: string; priority?: number; offset: number; sceneTime: number; fadeInSeconds?: number } | null;
-      expression?: { key: string | null } | null;
+      expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
     },
@@ -2690,7 +2691,11 @@ class Live2DManager {
           // The 0ms seek flush must not advance model time; and when a seek
           // boundary snapshot was just re-applied above, the step must come
           // after it so the handoff pose survives into the rendered frame.
-          if (shouldStepModels) {
+          // Native motion fades blend against the saved pose on every update;
+          // even the legacy pause throttle would accumulate their fade weight.
+          const freezeNativeMotion = !this._shouldUpdate && !forceStep
+            && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
+          if (shouldStepModels && !freezeNativeMotion) {
             getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
           }
 

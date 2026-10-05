@@ -2,7 +2,10 @@ import { EventEmitter } from 'node:events';
 import { vi } from 'vitest';
 import { installCubismPixiModelRuntime } from '../../engine/CubismPixiModel';
 
-export function createCubismModelFixture(ids = ['ParamEyeLOpen', 'ParamEyeROpen', 'ParamBreath', 'ParamMouthOpenY', 'ParamAngleX']) {
+export function createCubismModelFixture(
+  ids = ['ParamEyeLOpen', 'ParamEyeROpen', 'ParamBreath', 'ParamMouthOpenY', 'ParamAngleX'],
+  eyeBlinkParameters: string[] = [],
+) {
   const values = new Float32Array(ids.map((id) => id.includes('Eye') ? 1 : 0));
   let saved = values.slice();
   let drawn = values.slice();
@@ -29,14 +32,24 @@ export function createCubismModelFixture(ids = ['ParamEyeLOpen', 'ParamEyeROpen'
   const motionManager: any = {
     groups: {}, state: {}, definitions: {}, motionGroups: {}, expressionManager,
     stopAllMotions: vi.fn(),
+    update: vi.fn(() => false),
     loadMotion: vi.fn(async () => null),
   };
   const internal: any = new EventEmitter();
   Object.assign(internal, {
-    coreModel: core, motionManager, settings: { motions: {}, expressions: [{ Name: 'smile', File: 'smile.exp3.json' }] },
+    coreModel: core, motionManager, settings: {
+      motions: {}, expressions: [{ Name: 'smile', File: 'smile.exp3.json' }],
+      getEyeBlinkParameters: () => eyeBlinkParameters,
+    },
     updateNaturalMovements: vi.fn(),
-    update: vi.fn((dt: number, now: number) => {
+    updateMotions: vi.fn((target: any, now: number) => {
+      internal.emit('beforeMotionUpdate');
+      const updated = motionManager.update(target, now);
       internal.emit('afterMotionUpdate');
+      return updated;
+    }),
+    update: vi.fn((dt: number, now: number) => {
+      internal.updateMotions(core, now);
       core.saveParameters();
       internal.emit('expressionUpdate');
       internal.updateNaturalMovements(dt, now);

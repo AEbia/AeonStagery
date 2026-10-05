@@ -57,6 +57,8 @@ export interface Live2DSeekMotionState {
 
 export interface Live2DSeekExpressionState {
   key: string | null;
+  /** Time since this expression began; absent or +Infinity means fully latched. */
+  elapsedSeconds?: number;
 }
 
 export type Live2DSeekRestoreTier = 'native' | 'snapshot-forward' | 'visual-freeze' | 'unsupported';
