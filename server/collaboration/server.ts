@@ -1,7 +1,23 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import os from 'node:os';
+import {
+  COLLABORATION_LIMITS,
+  CollaborationRequestError,
+  createCollaborationAccessToken,
+  createCollaborationPassword,
+  createCollaborationPasswordSalt,
+  deriveCollaborationPasswordToken,
+  collaborationAssetUploadMemoryReservationBytes,
+  isCollaborationRequestAuthorized,
+  parseCollaborationRequestUrl,
+  readCollaborationBody,
+  reserveCollaborationAssetUploadMemory,
+} from './security';
+import { withCollaborationAccessToken } from '../../src/services/collaboration/CollaborationTransport';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
+  assertCollaborativeSceneStateV2,
+  assertCollaborativeSceneStateV3,
   COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
   type CollaborativeSceneStateV2,
@@ -36,6 +52,9 @@ export interface CollaborationServerOptions {
   dataDir: string;
   schemaVersion?: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3;
   expectedProjectId?: string;
+  accessToken?: string;
+  password?: string;
+  allowedOrigins?: string[];
 }
 
 export interface CollaborationServerStatus {
@@ -44,6 +63,9 @@ export interface CollaborationServerStatus {
   port: number;
   dataDir: string;
   localUrl: string;
+  accessToken: string;
+  connectionPassword?: string;
+  inviteUrls: string[];
   lanUrls: string[];
   assetRoot: string;
   hasState: boolean;
@@ -58,7 +80,8 @@ export interface RunningCollaborationServer {
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body);
   response.writeHead(status, {
-    ...corsHeaders(),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(json),
   });
@@ -67,27 +90,16 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
 
 function sendBinary(response: ServerResponse, status: number, body: Uint8Array): void {
   response.writeHead(status, {
-    ...corsHeaders(),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
     'content-type': 'application/octet-stream',
     'content-length': body.byteLength,
   });
-  response.end(Buffer.from(body));
-}
-
-function corsHeaders(): Record<string, string> {
-  return {
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, POST, PUT, OPTIONS',
-    'access-control-allow-headers': 'content-type',
-  };
-}
-
-function sendCorsPreflight(response: ServerResponse): void {
-  response.writeHead(204, corsHeaders());
-  response.end();
+  response.end(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
 }
 
 function httpStatusForError(error: unknown): number {
+  if (error instanceof CollaborationRequestError) return error.status;
   if (error instanceof CollaborativeAssetAvailabilityError) return 422;
   if (error instanceof CollaborationProjectMismatchError) return 409;
   const message = error instanceof Error ? error.message : String(error);
@@ -95,19 +107,16 @@ function httpStatusForError(error: unknown): number {
 }
 
 async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const body = await readCollaborationBody(request, COLLABORATION_LIMITS.jsonBytes);
+  try {
+    const parsed: unknown = JSON.parse(body.toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Expected an object');
+    }
+    return parsed as T;
+  } catch {
+    throw new CollaborationRequestError(400, 'Invalid JSON request body');
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
-}
-
-async function readBinaryBody(request: IncomingMessage): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return new Uint8Array(Buffer.concat(chunks));
 }
 
 function getAssetPath(pathname: string): string | null {
@@ -115,7 +124,11 @@ function getAssetPath(pathname: string): string | null {
   if (!pathname.startsWith(prefix)) return null;
   const encoded = pathname.slice(prefix.length);
   if (!encoded) return null;
-  return decodeURIComponent(encoded);
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    throw new CollaborationRequestError(400, 'Invalid asset URL encoding');
+  }
 }
 
 function getLanUrls(port: number, host: string): string[] {
@@ -134,13 +147,27 @@ function getLanUrls(port: number, host: string): string[] {
 }
 
 export async function startCollaborationServer(options: CollaborationServerOptions): Promise<RunningCollaborationServer> {
-  if (!Number.isFinite(options.port) || options.port < 0) {
+  if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535) {
     throw new Error(`Invalid port: ${options.port}`);
   }
   if (options.expectedProjectId !== undefined && !options.expectedProjectId.trim()) {
     throw new Error('Expected project ID must not be empty');
   }
 
+  if (options.password !== undefined && options.accessToken !== undefined) {
+    throw new Error('Configure either a collaboration password or an access token');
+  }
+  const connectionPassword = options.accessToken !== undefined ? undefined
+    : options.password || createCollaborationPassword();
+  const passwordSalt = createCollaborationPasswordSalt();
+  const accessToken = connectionPassword !== undefined
+    ? deriveCollaborationPasswordToken(connectionPassword, passwordSalt)
+    : createCollaborationAccessToken(options.accessToken);
+  const allowedOrigins = new Set(options.allowedOrigins ?? ['null', 'http://localhost:5173', 'http://127.0.0.1:5173']);
+  if (options.schemaVersion !== undefined && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2
+    && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
+    throw new Error('Unsupported collaboration schema version');
+  }
   const persistence = new CollaborationPersistence(options.dataDir);
   const assets = new CollaborationAssetStore(options.dataDir);
   const schemaVersion = options.schemaVersion ?? COLLABORATION_SCHEMA_VERSION_V3;
@@ -160,21 +187,56 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     }
   }
 
+  let activeRequests = 0;
   const server = http.createServer(async (request, response) => {
+    response.setHeader('cache-control', 'no-store');
+    const origin = request.headers.origin;
+    if (origin && allowedOrigins.has(origin)) {
+      response.setHeader('access-control-allow-origin', origin);
+      response.setHeader('vary', 'Origin');
+      response.setHeader('access-control-allow-methods', 'GET, POST, PUT, OPTIONS');
+      response.setHeader('access-control-allow-headers', 'content-type, authorization');
+    }
+    if (activeRequests >= COLLABORATION_LIMITS.httpRequests) {
+      response.setHeader('connection', 'close');
+      sendJson(response, 503, { error: 'Collaboration server is busy' });
+      return;
+    }
+    activeRequests++;
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      activeRequests--;
+    };
+    response.once('finish', release);
+    response.once('close', release);
     try {
-      const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+      const url = parseCollaborationRequestUrl(request.url);
+      if (origin && !allowedOrigins.has(origin)) {
+        throw new CollaborationRequestError(403, 'Collaboration origin is not allowed');
+      }
 
       if (request.method === 'OPTIONS') {
-        sendCorsPreflight(response);
+        response.writeHead(204);
+        response.end();
         return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/auth/salt') {
+        sendJson(response, 200, { salt: passwordSalt });
+        return;
+      }
+
+      if (!isCollaborationRequestAuthorized(request, accessToken)) {
+        response.setHeader('www-authenticate', 'Bearer');
+        throw new CollaborationRequestError(401, 'Collaboration access token is required');
       }
 
       if (request.method === 'GET' && url.pathname === '/health') {
         sendJson(response, 200, {
           ok: true,
           hasState: room.hasState(),
-          dataDir: options.dataDir,
-          assetRoot: assets.rootDir,
           schemaVersion,
         });
         return;
@@ -207,7 +269,22 @@ export async function startCollaborationServer(options: CollaborationServerOptio
 
       const assetPath = getAssetPath(url.pathname);
       if (assetPath && request.method === 'PUT') {
-        await assets.writeAsset(assetPath, await readBinaryBody(request));
+        const contentLength = request.headers['content-length'];
+        if (contentLength !== undefined && Number(contentLength) > COLLABORATION_LIMITS.assetBytes) {
+          throw new CollaborationRequestError(413, 'Request body exceeds collaboration limit');
+        }
+        const releaseUploadMemory = reserveCollaborationAssetUploadMemory(
+          collaborationAssetUploadMemoryReservationBytes(contentLength),
+        );
+        if (!releaseUploadMemory) {
+          throw new CollaborationRequestError(503, 'Collaboration upload memory budget is full');
+        }
+        try {
+          const body = await readCollaborationBody(request, COLLABORATION_LIMITS.assetBytes);
+          await assets.writeAsset(assetPath, body);
+        } finally {
+          releaseUploadMemory();
+        }
         sendJson(response, 201, { ok: true, path: assetPath });
         return;
       }
@@ -225,16 +302,20 @@ export async function startCollaborationServer(options: CollaborationServerOptio
         if (room instanceof SingleRoomCollaborationRoomV3) {
           const state = await readJsonBody<CollaborativeSceneStateV3>(request);
           if (state.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
-            throw new Error(`Collaboration room v3 expected schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
+            throw new CollaborationRequestError(400, `Collaboration room v3 expected schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
           }
+          try { assertCollaborativeSceneStateV3(state); }
+          catch { throw new CollaborationRequestError(400, 'Invalid collaboration state'); }
           assertCollaborationProjectId(state.collaborationProjectId, options.expectedProjectId);
           await validateCollaborativeAssetAvailabilityV3(state, assets);
           await room.seed(state);
         } else {
           const state = await readJsonBody<CollaborativeSceneStateV2>(request);
           if (state.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2) {
-            throw new Error(`Collaboration room v2 expected schema version ${COLLABORATION_SCHEMA_VERSION_V2}`);
+            throw new CollaborationRequestError(400, `Collaboration room v2 expected schema version ${COLLABORATION_SCHEMA_VERSION_V2}`);
           }
+          try { assertCollaborativeSceneStateV2(state); }
+          catch { throw new CollaborationRequestError(400, 'Invalid collaboration state'); }
           assertCollaborationProjectId(state.collaborationProjectId, options.expectedProjectId);
           await validateCollaborativeAssetAvailabilityV2(state, assets);
           await room.seed(state);
@@ -244,13 +325,25 @@ export async function startCollaborationServer(options: CollaborationServerOptio
       }
 
       sendJson(response, 404, { error: 'Not found' });
-    } catch (error: any) {
-      const message = error?.message || String(error);
-      sendJson(response, httpStatusForError(error), { error: message });
+    } catch (error) {
+      if (response.destroyed || response.writableEnded) return;
+      const status = httpStatusForError(error);
+      const message = status === 500 ? 'Internal collaboration server error'
+        : error instanceof Error ? error.message : 'Invalid collaboration request';
+      response.setHeader('connection', 'close');
+      sendJson(response, status, { error: message });
     }
   });
 
-  const wss = new WebSocketServer({ noServer: true });
+  server.requestTimeout = COLLABORATION_LIMITS.requestTimeoutMs;
+  server.headersTimeout = 10_000;
+  server.maxConnections = 128;
+  const wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: COLLABORATION_LIMITS.websocketBytes,
+    perMessageDeflate: false,
+    handleProtocols: (protocols) => protocols.has('aeonstagery-collaboration') ? 'aeonstagery-collaboration' : false,
+  });
   const clients = new Set<WebSocket>();
   const syncSocketAdapter = new CollaborationSyncSocketAdapterV2({
     clients,
@@ -267,14 +360,26 @@ export async function startCollaborationServer(options: CollaborationServerOptio
   });
 
   server.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-    if (url.pathname !== '/sync') {
-      socket.destroy();
-      return;
+    socket.on('error', () => socket.destroy());
+    try {
+      const url = parseCollaborationRequestUrl(request.url);
+      if (url.pathname !== '/sync') throw new CollaborationRequestError(404, 'Not found');
+      if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) {
+        throw new CollaborationRequestError(403, 'Origin not allowed');
+      }
+      if (!isCollaborationRequestAuthorized(request, accessToken, true)) {
+        throw new CollaborationRequestError(401, 'Unauthorized');
+      }
+      if (wss.clients.size >= COLLABORATION_LIMITS.clients) {
+        throw new CollaborationRequestError(503, 'Too many clients');
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } catch (error) {
+      const code = error instanceof CollaborationRequestError ? error.status : 400;
+      socket.end(`HTTP/1.1 ${code} ${http.STATUS_CODES[code]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     }
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -297,6 +402,11 @@ export async function startCollaborationServer(options: CollaborationServerOptio
       dataDir: options.dataDir,
       localUrl: `http://127.0.0.1:${actualPort}`,
       lanUrls: getLanUrls(actualPort, options.host),
+      accessToken,
+      connectionPassword,
+      inviteUrls: (getLanUrls(actualPort, options.host).length > 0
+        ? getLanUrls(actualPort, options.host)
+        : [`http://127.0.0.1:${actualPort}`]).map((url) => withCollaborationAccessToken(url, accessToken)),
       assetRoot: assets.rootDir,
       hasState: room.hasState(),
       schemaVersion,
@@ -304,12 +414,14 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     stop: async () => {
       if (!running) return;
       running = false;
-      for (const client of clients) {
-        client.close();
+      for (const client of wss.clients) {
+        client.terminate();
       }
+      syncSocketAdapter.dispose();
       await new Promise<void>((resolve) => {
         wss.close(() => resolve());
       });
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) reject(error);

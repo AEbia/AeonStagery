@@ -1,3 +1,4 @@
+import { authenticatedFetch } from './helpers/collaborationAuth';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -95,13 +96,13 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
     expect(status.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V3);
 
     const health = await readJson<{ schemaVersion: number; hasState: boolean }>(
-      await fetch(`${status.localUrl}/health`),
+      await authenticatedFetch(status, `${status.localUrl}/health`),
     );
     expect(health.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V3);
     expect(health.hasState).toBe(false);
 
     // Seed with v3 state
-    const seedResponse = await fetch(`${status.localUrl}/seed`, {
+    const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(makeStateV3()),
@@ -109,20 +110,20 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
     expect(seedResponse.status).toBe(201);
 
     // /state returns CollaborativeSceneStateV3
-    const state = await readJson<CollaborativeSceneStateV3>(await fetch(`${status.localUrl}/state`));
+    const state = await readJson<CollaborativeSceneStateV3>(await authenticatedFetch(status, `${status.localUrl}/state`));
     expect(state.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V3);
     expect(state.sceneSchemaVersion).toBe(SCENE_SCHEMA_VERSION_V5);
     expect(state.statementOrder).toEqual(['line_1']);
 
     // /snapshot returns canonical SceneDocumentV5
     const snapshot = await readJson<SceneDocumentV5>(
-      await fetch(`${status.localUrl}/snapshot`),
+      await authenticatedFetch(status, `${status.localUrl}/snapshot`),
     );
     expect(snapshot.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V5);
     expect(snapshot.statements.map((statement) => statement.id)).toEqual(['line_1']);
 
     // /yjs-state returns binary
-    const yjsResponse = await fetch(`${status.localUrl}/yjs-state`);
+    const yjsResponse = await authenticatedFetch(status, `${status.localUrl}/yjs-state`);
     expect(yjsResponse.status).toBe(200);
     const bytes = new Uint8Array(await yjsResponse.arrayBuffer());
     expect(bytes.byteLength).toBeGreaterThan(0);
@@ -137,13 +138,13 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
     });
 
     const status = server.getStatus();
-    const seedResponse = await fetch(`${status.localUrl}/seed`, {
+    const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(makeStateV2()),
     });
 
-    expect(seedResponse.status).toBe(500);
+    expect(seedResponse.status).toBe(400);
     const body = await readJson<{ error: string }>(seedResponse);
     expect(body.error).toContain(`schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
     expect(server.getStatus().hasState).toBe(false);
@@ -157,7 +158,7 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
       dataDir: tempDir,
       schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
     });
-    const v2SeedResponse = await fetch(`${v2Server.getStatus().localUrl}/seed`, {
+    const v2SeedResponse = await authenticatedFetch(v2Server.getStatus(), `${v2Server.getStatus().localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(makeStateV2()),
@@ -181,7 +182,7 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
       schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
     });
     const snapshot = await readJson<HistoricalSceneDocumentV4>(
-      await fetch(`${v2AdminServer.getStatus().localUrl}/snapshot`),
+      await authenticatedFetch(v2AdminServer.getStatus(), `${v2AdminServer.getStatus().localUrl}/snapshot`),
     );
     expect(snapshot.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V4);
     expect(snapshot.sceneId).toBe('scene_v2');
