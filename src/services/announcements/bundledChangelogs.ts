@@ -5,6 +5,22 @@ import type { ChangelogItem } from './announcementTypes';
  */
 export const BUNDLED_CHANGELOGS: readonly ChangelogItem[] = [
   {
+    id: '0.8.2-beta',
+    type: 'release',
+    version: '0.8.2-beta',
+    title: 'AeonStagery 0.8.2-beta',
+    date: '2026-10-07',
+    summary: '应用内版本更新日志、国内源与 GitHub 多源更新及安全的差分下载',
+    content: `## 新功能
+
+### 版本更新
+- **应用内更新日志**：更新后可查看新版本说明，也可在应用内浏览历史版本日志，并设置是否在更新后自动显示。
+
+### 稳定更新
+- **国内源与 GitHub 多源更新**：支持从国内 OSS 或 GitHub 获取更新；遇到网络问题时可自动切换可用渠道。
+- **差分下载校验**：更新前后校验安装包摘要与 Windows 签名，并校验差分下载所需文件。`,
+  },
+  {
     id: '0.8.1-beta',
     type: 'release',
     version: '0.8.1-beta',
