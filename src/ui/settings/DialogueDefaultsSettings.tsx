@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { DEFAULT_PROJECT_TEMPLATE_CONFIGURATION } from '../../api/types/project';
 import { useOptionalApp } from '../context/AppContext';
 import { FormSelect } from '../FormSelect';
@@ -13,14 +13,15 @@ export function DialogueDefaultsSettings() {
     workspace ? () => workspace.getCurrentProject() : () => null,
     () => null,
   );
-  const revision = useSyncExternalStore(
+  // Subscribe to catalog changes so the summaries are refreshed after updates.
+  useSyncExternalStore(
     catalog ? (listener) => catalog.subscribe(listener) : () => () => {},
     catalog ? () => catalog.getRevision() : () => 0,
     () => 0,
   );
-  const summaries = useMemo(() => catalog?.getSummaries() ?? [], [catalog, revision]);
+  const summaries = catalog?.getSummaries() ?? [];
   const templates = project?.metadata.templates ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION;
-  const styles = useMemo(() => buildAvailableDialogueStyles(summaries, templates.enabledTemplateIds), [summaries, templates.enabledTemplateIds]);
+  const styles = buildAvailableDialogueStyles(summaries, templates.enabledTemplateIds);
   const resolved = resolveTemplateDefaultValue('dialogueStyleId', summaries, templates.enabledTemplateIds, templates.defaults, 'glass');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
