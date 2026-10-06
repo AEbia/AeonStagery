@@ -5,23 +5,24 @@ export const CUBISM2_CONFIG: Live2DRuntimeItemConfig = {
   family: 'cubism2',
   title: 'Cubism 2.1 核心运行时',
   fileName: 'live2d.min.js',
-  description: '用于加载与渲染 Cubism 2.1 格式模型（*.moc, *.model.json）。',
-  targetRelativePath: '.local/live2d/live2d.min.js',
-  downloadUrl: 'https://raw.githubusercontent.com/dylanNew/live2d/master/js/live2d.min.js',
-  downloadMirrorUrl: 'https://github.com/dylanNew/live2d',
-  officialSiteUrl: 'https://www.live2d.com/',
-  guideText: '可从开源镜像或官方历史 SDK 中获取 live2d.min.js。',
+  description: '用于加载与播放 Cubism 2.1 模型（*.moc, *.model.json）。',
+  targetRelativePath: 'live2d-runtime/live2d.min.js',
+  downloadUrl: 'https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js',
+  downloadMirrorUrl: 'https://raw.githubusercontent.com/dylanNew/live2d/master/webgl/Live2D/lib/live2d.min.js',
+  officialSiteUrl: 'https://github.com/dylanNew/live2d',
+  guideText: '点击下载 live2d.min.js 脚本并放入运行时目录。',
 };
 
 export const CUBISM3_PLUS_CONFIG: Live2DRuntimeItemConfig = {
   family: 'cubism3Plus',
   title: 'Cubism 3/4/5 核心运行时',
   fileName: 'live2dcubismcore.min.js',
-  description: '用于加载与渲染 Cubism 3 / 4 / 5 格式模型（*.moc3, *.model3.json）。',
-  targetRelativePath: '.local/live2d/live2dcubismcore.min.js',
+  description: '用于加载与播放 Cubism 3 / 4 / 5 模型（*.moc3, *.model3.json）。',
+  targetRelativePath: 'live2d-runtime/live2dcubismcore.min.js',
   downloadUrl: 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
+  downloadMirrorUrl: 'https://www.live2d.com/sdk/download/web/',
   officialSiteUrl: 'https://www.live2d.com/sdk/download/web/',
-  guideText: '可从 Live2D 官网下载 Cubism SDK for Web 解压提取 Core/live2dcubismcore.min.js，或通过官方示例直链下载。',
+  guideText: '点击下载官方 live2dcubismcore.min.js 核心脚本并放入运行时目录。',
 };
 
 function hasWindowLive2D(): boolean {
@@ -39,27 +40,27 @@ function hasWindowCubismCore(): boolean {
 export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusReport> {
   const electronApi = typeof window !== 'undefined' ? window.aeonStageryAPI?.live2dRuntime : undefined;
 
+  let report: Live2DRuntimeStatusReport | null = null;
   if (electronApi?.getStatus) {
     try {
-      const report = await electronApi.getStatus();
-      if (report) return report;
+      report = await electronApi.getStatus();
     } catch (err) {
       console.warn('[live2dRuntimeDetection] Electron getStatus query failed, falling back to browser probe:', err);
     }
   }
 
-  // Fallback to in-page probe (pure browser dev, Vitest, or older preload)
+  // Wait for in-page runtime bootstrap to settle
   await waitForLive2DRuntimeBootstrap();
 
-  let cubism2 = hasWindowLive2D();
-  let cubism3Plus = hasWindowCubismCore();
+  const windowLive2D = hasWindowLive2D();
+  const windowCubismCore = hasWindowCubismCore();
 
   const bootstrapDetail = typeof window !== 'undefined'
     ? (window as unknown as { __aeonLive2DRuntimeBootstrap?: { detail?: { cubism2Loaded?: boolean; cubismCoreLoaded?: boolean } } }).__aeonLive2DRuntimeBootstrap?.detail
     : undefined;
 
-  if (!cubism2 && bootstrapDetail?.cubism2Loaded) cubism2 = true;
-  if (!cubism3Plus && bootstrapDetail?.cubismCoreLoaded) cubism3Plus = true;
+  let cubism2 = (report?.cubism2 ?? false) || windowLive2D || (bootstrapDetail?.cubism2Loaded ?? false);
+  let cubism3Plus = (report?.cubism3Plus ?? false) || windowCubismCore || (bootstrapDetail?.cubismCoreLoaded ?? false);
 
   // In browser dev mode, check if the static files are served in public/
   if (typeof window !== 'undefined' && typeof window.fetch === 'function' && (!cubism2 || !cubism3Plus)) {
@@ -81,10 +82,11 @@ export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusRe
     cubism2,
     cubism3Plus,
     missingAny: !cubism2 || !cubism3Plus,
-    isDev: true,
-    paths: {
+    isDev: report?.isDev ?? true,
+    paths: report?.paths ?? {
       localDir: '.local/live2d',
       seedRoot: 'public',
+      runtimeRoot: 'live2d-runtime',
     },
   };
 }

@@ -14,7 +14,6 @@ import {
   IconRefresh,
   IconSave,
   IconSettings,
-  IconSparkles,
   IconSun,
   IconTarget,
   IconVolume2,
@@ -1596,10 +1595,6 @@ function AppContent({
               <button className="top-bar__menu-item" onClick={() => void eventBus.emit('ui:openSettings')} role="menuitem">
                 <IconSettings width={15} height={15} />
                 全局设置
-              </button>
-              <button className="top-bar__menu-item" onClick={() => setShowLive2DRuntimeDialog(true)} role="menuitem" title="配置 Live2D 运行时与查看状态">
-                <IconSparkles width={15} height={15} />
-                Live2D 运行时
               </button>
               <button className="top-bar__menu-item" onClick={() => void handleRestartApp()} disabled={showProjectHome} role="menuitem">
                 <IconRefresh width={15} height={15} />

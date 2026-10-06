@@ -2530,7 +2530,7 @@ app.whenReady().then(() => {
       isDev,
     );
   });
-  ipcMain.handle('runtime:openLive2DDirectory', async (_event, type: 'local' | 'runtime' = 'local') => {
+  ipcMain.handle('runtime:openLive2DDirectory', async (_event, type: 'runtime' | 'local' = 'runtime') => {
     const dir = (type === 'local' && isDev)
       ? getLive2DLocalDir()
       : getLive2DRuntimeRoot();

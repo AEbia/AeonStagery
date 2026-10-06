@@ -1,3 +1,4 @@
+/* ─── Live2D Runtime Setup Dialog ────────────────────────────── */
 .live2d-runtime-dialog {
   position: fixed;
   inset: 0;
@@ -5,30 +6,30 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(6px);
-  padding: 24px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  padding: 20px;
 }
 
 .live2d-runtime-dialog__surface {
-  background: var(--bg-surface, #1e1e24);
-  border: 1px solid var(--border-subtle, #33333e);
-  border-radius: var(--radius-lg, 12px);
-  width: 720px;
+  background: var(--bg-surface, #1d1f2a);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-xl, 16px);
+  width: 680px;
   max-width: 95vw;
-  max-height: 90vh;
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow-modal, 0 16px 40px rgba(0, 0, 0, 0.55));
-  color: var(--text-primary, #f0f0f5);
+  box-shadow: var(--shadow-lg, 0 20px 48px rgba(0, 0, 0, 0.5));
+  color: var(--text-primary, #f1eee9);
   overflow: hidden;
-  animation: live2dDialogFadeIn 0.2s ease-out;
+  animation: live2dDialogFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes live2dDialogFadeIn {
   from {
     opacity: 0;
-    transform: scale(0.96);
+    transform: scale(0.97);
   }
   to {
     opacity: 1;
@@ -40,54 +41,45 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--border-subtle, #33333e);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
 }
 
-.live2d-runtime-dialog__header-left {
+.live2d-runtime-dialog__header-text {
   display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.live2d-runtime-dialog__header-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .live2d-runtime-dialog__title {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 600;
+  color: var(--text-primary, #f1eee9);
   letter-spacing: -0.01em;
 }
 
 .live2d-runtime-dialog__subtitle {
-  font-size: 12px;
-  color: var(--text-secondary, #9a9ab0);
-  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-secondary, #aaa4b4);
+  line-height: 1.4;
 }
 
 .live2d-runtime-dialog__close {
-  color: var(--text-secondary, #9a9ab0);
+  color: var(--text-muted, #706b7a);
   background: transparent;
   border: none;
   cursor: pointer;
   padding: 6px;
-  border-radius: 6px;
-  transition: all 0.15s ease;
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast, 0.15s ease);
 }
 
 .live2d-runtime-dialog__close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary, #f0f0f5);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary, #f1eee9);
 }
 
 .live2d-runtime-dialog__body {
@@ -98,217 +90,254 @@
   gap: 16px;
 }
 
-.live2d-runtime-dialog__notice {
-  font-size: 13px;
-  line-height: 1.55;
-  color: #e2e8f0;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  padding: 12px 16px;
+/* ─── Guidance Steps ─── */
+.live2d-runtime-steps {
+  background: var(--bg-secondary, rgba(24, 25, 34, 0.6));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-md, 8px);
-}
-
-.live2d-runtime-dialog__notice-highlight {
-  font-weight: 600;
-  color: #fbbf24;
-}
-
-.live2d-runtime-dialog__cards {
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
-.live2d-runtime-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-subtle, #33333e);
+.live2d-runtime-steps__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary, #f1eee9);
+}
+
+.live2d-runtime-steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #aaa4b4);
+  line-height: 1.5;
+}
+
+.live2d-runtime-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.live2d-runtime-step-item__num {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary, #f1eee9);
+  background: var(--bg-elevated, #252735);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full, 9999px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.live2d-runtime-step-item__text {
+  flex: 1;
+}
+
+.live2d-runtime-step-item__text strong {
+  color: var(--text-primary, #f1eee9);
+}
+
+/* ─── Target Folder Highlight Bar ─── */
+.live2d-target-folder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-elevated, #252735);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-md, 8px);
-  padding: 16px;
+  padding: 10px 14px;
+}
+
+.live2d-target-folder-bar__info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.live2d-target-folder-bar__label {
+  font-size: 11px;
+  color: var(--text-muted, #706b7a);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.live2d-target-folder-bar__path {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary, #f1eee9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live2d-target-folder-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ─── Runtime Version Cards ─── */
+.live2d-runtime-cards {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  transition: border-color 0.2s ease;
+}
+
+.live2d-runtime-card {
+  background: var(--bg-secondary, rgba(24, 25, 34, 0.6));
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 8px);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color var(--transition-fast, 0.15s ease);
 }
 
 .live2d-runtime-card--missing {
-  border-color: rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.03);
+  border-left: 3px solid var(--error, #ef4444);
 }
 
 .live2d-runtime-card--ready {
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.03);
+  border-left: 3px solid var(--success, #34d399);
 }
 
-.live2d-runtime-card__header {
+.live2d-runtime-card__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.live2d-runtime-card__title-wrap {
+.live2d-runtime-card__title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .live2d-runtime-card__title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
+  color: var(--text-primary, #f1eee9);
 }
 
-.live2d-runtime-card__file {
+.live2d-runtime-card__filename {
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  color: #93c5fd;
-  background: rgba(59, 130, 246, 0.12);
-  padding: 2px 6px;
-  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted, #706b7a);
+  background: var(--bg-elevated, #252735);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 2px);
 }
 
-.live2d-runtime-card__badge {
+.live2d-status-pill {
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 9999px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 9999px);
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.live2d-runtime-card__badge--missing {
-  background: rgba(239, 68, 68, 0.2);
+.live2d-status-pill--missing {
+  background: rgba(239, 68, 68, 0.12);
   color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
-.live2d-runtime-card__badge--ready {
-  background: rgba(16, 185, 129, 0.2);
+.live2d-status-pill--ready {
+  background: rgba(52, 211, 153, 0.12);
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  border: 1px solid rgba(52, 211, 153, 0.3);
 }
 
 .live2d-runtime-card__desc {
   font-size: 12px;
-  color: var(--text-secondary, #9a9ab0);
+  color: var(--text-secondary, #aaa4b4);
   line-height: 1.45;
-}
-
-.live2d-runtime-card__path-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-
-.live2d-runtime-card__path-label {
-  font-size: 11px;
-  color: var(--text-secondary, #9a9ab0);
-  white-space: nowrap;
-}
-
-.live2d-runtime-card__path-value {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  color: #cbd5e1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: all;
 }
 
 .live2d-runtime-card__actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
-  margin-top: 2px;
 }
 
-.live2d-runtime-action-btn {
+/* ─── Compact Controls / Buttons ─── */
+.live2d-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   font-weight: 500;
   padding: 6px 12px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-primary, #f0f0f5);
+  border-radius: var(--radius-button, 8px);
+  background: var(--bg-elevated, #252735);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary, #f1eee9);
   cursor: pointer;
   text-decoration: none;
-  transition: all 0.15s ease;
+  transition: all var(--transition-fast, 0.15s ease);
 }
 
-.live2d-runtime-action-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
+.live2d-btn:hover {
+  background: var(--bg-hover, #2b2d3d);
+  border-color: var(--border-highlight, rgba(255, 255, 255, 0.2));
   color: #ffffff;
 }
 
-.live2d-runtime-action-btn--primary {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.4);
-  color: #a5b4fc;
-}
-
-.live2d-runtime-action-btn--primary:hover {
-  background: rgba(99, 102, 241, 0.35);
-  color: #e0e7ff;
-}
-
-.live2d-runtime-dialog__instructions {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--border-subtle, #33333e);
-  border-radius: var(--radius-md, 8px);
-  padding: 14px 16px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-secondary, #9a9ab0);
-}
-
-.live2d-runtime-dialog__instructions-title {
-  font-size: 13px;
+.live2d-btn--primary {
+  background: var(--accent-primary, #d88c7a);
+  border-color: var(--accent-primary, #d88c7a);
+  color: #11131a;
   font-weight: 600;
-  color: var(--text-primary, #f0f0f5);
-  margin-bottom: 6px;
 }
 
-.live2d-runtime-dialog__instructions-list {
-  margin: 0;
-  padding-left: 20px;
+.live2d-btn--primary:hover {
+  background: var(--accent-hover, #efac98);
+  border-color: var(--accent-hover, #efac98);
+  color: #11131a;
 }
 
-.live2d-runtime-dialog__instructions-list li {
-  margin-bottom: 4px;
+.live2d-btn--ghost {
+  background: transparent;
+  border-color: var(--border-subtle, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary, #aaa4b4);
 }
 
-.live2d-runtime-dialog__code {
-  font-family: var(--font-mono, monospace);
-  background: rgba(0, 0, 0, 0.4);
-  color: #cbd5e1;
-  padding: 1px 5px;
-  border-radius: 4px;
+.live2d-btn--ghost:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary, #f1eee9);
 }
 
+/* ─── Footer ─── */
 .live2d-runtime-dialog__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  border-top: 1px solid var(--border-subtle, #33333e);
-  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+  background: var(--bg-secondary, rgba(24, 25, 34, 0.4));
 }
 
 .live2d-runtime-dialog__footer-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .live2d-runtime-dialog__footer-right {
@@ -318,10 +347,10 @@
 }
 
 .live2d-spin {
-  animation: live2dSpinAnim 1s linear infinite;
+  animation: live2dSpin 1s linear infinite;
 }
 
-@keyframes live2dSpinAnim {
+@keyframes live2dSpin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }

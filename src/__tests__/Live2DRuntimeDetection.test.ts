@@ -22,11 +22,11 @@ describe('Live2DRuntimeDetection', () => {
 
   it('provides valid metadata configs for both Cubism runtime families', () => {
     expect(CUBISM2_CONFIG.fileName).toBe('live2d.min.js');
-    expect(CUBISM2_CONFIG.targetRelativePath).toContain('.local/live2d');
+    expect(CUBISM2_CONFIG.targetRelativePath).toContain('live2d-runtime');
     expect(CUBISM2_CONFIG.downloadUrl).toContain('live2d.min.js');
 
     expect(CUBISM3_PLUS_CONFIG.fileName).toBe('live2dcubismcore.min.js');
-    expect(CUBISM3_PLUS_CONFIG.targetRelativePath).toContain('.local/live2d');
+    expect(CUBISM3_PLUS_CONFIG.targetRelativePath).toContain('live2d-runtime');
     expect(CUBISM3_PLUS_CONFIG.downloadUrl).toContain('live2dcubismcore.min.js');
   });
 

@@ -53,8 +53,8 @@ describe('Live2DRuntimeMissingDialog', () => {
       />,
     );
 
-    expect(screen.getByText('Live2D Cubism 运行时配置引导')).toBeInTheDocument();
-    expect(screen.getByText(/不随附任何 Live2D Inc. 专有运行时核心代码/)).toBeInTheDocument();
+    expect(screen.getByText('Live2D 运行时配置引导')).toBeInTheDocument();
+    expect(screen.getByText(/受官方版权许可限制，本软件不随附 Live2D 运行时/)).toBeInTheDocument();
     expect(screen.getByText('Cubism 2.1 核心运行时')).toBeInTheDocument();
     expect(screen.getByText('Cubism 3/4/5 核心运行时')).toBeInTheDocument();
     expect(screen.getAllByText('live2d.min.js').length).toBeGreaterThanOrEqual(1);
@@ -112,7 +112,7 @@ describe('Live2DRuntimeMissingDialog', () => {
 
     const readyBadges = screen.getAllByText('已就绪');
     expect(readyBadges.length).toBe(2);
-    expect(screen.getByText('完成并进入')).toBeInTheDocument();
+    expect(screen.getByText('配置完成，进入')).toBeInTheDocument();
   });
 
   it('calls onClose when close icon or dismiss button is clicked', () => {
@@ -173,7 +173,7 @@ describe('Live2DRuntimeMissingDialog', () => {
     });
   });
 
-  it('copies path and sync command to clipboard when copy buttons are clicked', async () => {
+  it('copies path to clipboard when copy path button is clicked', async () => {
     render(
       <Live2DRuntimeMissingDialog
         isOpen={true}
@@ -182,14 +182,8 @@ describe('Live2DRuntimeMissingDialog', () => {
       />,
     );
 
-    const copyButtons = screen.getAllByTitle('复制路径');
-    expect(copyButtons.length).toBeGreaterThanOrEqual(1);
-
-    fireEvent.click(copyButtons[0]);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('.local/live2d/live2d.min.js');
-
-    const copyCmdBtn = screen.getByTitle('复制同步命令');
-    fireEvent.click(copyCmdBtn);
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('npm run sync:live2d-runtime');
+    const copyBtn = screen.getByTitle('复制目录路径');
+    fireEvent.click(copyBtn);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('userData/live2d-runtime');
   });
 });

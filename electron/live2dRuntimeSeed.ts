@@ -105,12 +105,8 @@ export function inspectLive2DRuntimeStatus(
   const targetCubism2 = fs.existsSync(path.join(targetRoot, 'live2d.min.js'));
   const targetCubism3Plus = hasCubism3PlusRuntime(targetRoot);
 
-  const cubism2 = isDev
-    ? (seed.cubism2 || localCubism2)
-    : targetCubism2;
-  const cubism3Plus = isDev
-    ? (seed.cubism3Plus || localCubism3Plus)
-    : targetCubism3Plus;
+  const cubism2 = targetCubism2 || seed.cubism2 || localCubism2;
+  const cubism3Plus = targetCubism3Plus || seed.cubism3Plus || localCubism3Plus;
 
   return {
     cubism2,
