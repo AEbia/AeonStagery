@@ -865,6 +865,7 @@ export function bootstrap(options?: {
     editorSaveStatusPort,
     semanticDocumentCoordinator,
     sceneMigrationExperience,
+    () => semanticAuthoring.clearHistory(),
   );
 
   const projectWorkspace = new ProjectWorkspaceService(

@@ -63,7 +63,20 @@ export class SceneFileService implements ISceneFileService {
     private saveStatus: EditorSaveStatusPort,
     private semanticCoordinator?: SemanticDocumentCoordinator,
     private migration?: SceneMigrationExperience,
+    private onDocumentReplaced?: () => void,
   ) {}
+
+  private async applyReplacementDocument(
+    document: CurrentSceneDocument,
+    path: string,
+  ) {
+    if (!this.semanticCoordinator) {
+      throw new Error('Semantic scene pipeline is not configured');
+    }
+    const bundle = await this.semanticCoordinator.applyDocument(document, path);
+    this.onDocumentReplaced?.();
+    return bundle;
+  }
 
   /**
    * Open a document through the compatibility adapter without touching disk
@@ -127,7 +140,7 @@ export class SceneFileService implements ISceneFileService {
         return { success: false, path, cancelled: true };
       }
       this.compatibleSession = outcome.session;
-      await this.semanticCoordinator.applyDocument(outcome.session.projection, path);
+      await this.applyReplacementDocument(outcome.session.projection, path);
       return {
         success: true,
         path,
@@ -246,7 +259,7 @@ export class SceneFileService implements ISceneFileService {
       const raw = JSON.parse(rawJson);
       const outcome = await this.openSessionFromRaw(raw);
       this.compatibleSession = outcome.session;
-      const bundle = await this.semanticCoordinator.applyDocument(outcome.session.projection, path);
+      const bundle = await this.applyReplacementDocument(outcome.session.projection, path);
       return { success: true, path, document: bundle.source };
     } catch (err: any) {
       return { success: false, path, error: err.message || String(err) };

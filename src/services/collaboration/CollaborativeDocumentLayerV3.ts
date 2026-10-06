@@ -39,6 +39,7 @@ export interface CollaborativeDocumentLayerV3Options {
   onStatusChange?: (status: CollaborationConnectionStatus) => void;
   onError?: (error: unknown) => void;
   onSynchronizedState?: () => void;
+  onInitialDocumentApplied?: () => void;
   allowSeed?: boolean;
   prepareSeedState?: (
     document: SceneDocumentV5,
@@ -76,6 +77,7 @@ export class CollaborativeDocumentLayerV3 {
         options.onError?.(error);
       },
       onSynchronizedState: options.onSynchronizedState,
+      onInitialDocumentApplied: options.onInitialDocumentApplied,
     });
   }
 

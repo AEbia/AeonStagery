@@ -640,6 +640,7 @@ export function useSemanticCollaborationSession({
           }
         },
         onSynchronizedState: () => contextValue.stores.editor._setSaveStatus('idle'),
+        onInitialDocumentApplied: () => contextValue.services.semanticAuthoring.clearHistory(),
         onError: (error) => {
           const message = formatError(error);
           setLastError(message);

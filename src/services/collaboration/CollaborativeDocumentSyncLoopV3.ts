@@ -22,6 +22,7 @@ export interface CollaborativeDocumentSyncLoopV3Options {
   notifyError: (error: unknown) => void;
   onRemoteStateRejected?: (error: CollaborationRemoteStateRejectedError) => void;
   onSynchronizedState?: () => void;
+  onInitialDocumentApplied?: () => void;
 }
 
 export class CollaborativeDocumentSyncLoopV3 {
@@ -34,6 +35,7 @@ export class CollaborativeDocumentSyncLoopV3 {
   private lastRemoteState: CollaborativeSceneStateV3 | null = null;
   private lastRemoteStateSignature = '';
   private lastPublishedDocument = '';
+  private initialDocumentApplied = false;
 
   constructor(private readonly options: CollaborativeDocumentSyncLoopV3Options) {}
 
@@ -122,6 +124,11 @@ export class CollaborativeDocumentSyncLoopV3 {
       const applyOptions = {
         ...options,
         requireServerSceneAgreement: options.requireServerSceneAgreement ?? this.lastRemoteState === null,
+        onDocumentApplied: () => {
+          if (this.initialDocumentApplied) return;
+          this.initialDocumentApplied = true;
+          this.options.onInitialDocumentApplied?.();
+        },
       };
       const document = await this.options.remoteApplyPipeline.applyWithPreparation(
         filtered,
