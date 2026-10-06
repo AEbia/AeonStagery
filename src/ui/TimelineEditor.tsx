@@ -105,10 +105,6 @@ export function TimelineEditor({
   const semanticAuthoring = useSemanticAuthoringService();
   const app = useApp();
   const editorStore = app.stores.editor;
-  const dialoguePresentation = app.services?.projectWorkspace
-    ?.getCurrentProject()?.metadata.templates?.dialoguePresentation;
-  const dialogueTemplate = app.services?.projectWorkspace
-    ?.getCurrentProject()?.metadata.templates?.dialogueTemplate;
   const collaborationStatus = useCollaborationStatus();
   const collaborationStatusUx = useMemo(() => deriveCollaborationStatusUx({ status: collaborationStatus }), [collaborationStatus]);
   const offlineEditMessage = collaborationStatusUx.offlineEditMessage ?? '共享编辑已暂停；请重新加入后才能编辑。';
@@ -377,7 +373,7 @@ export function TimelineEditor({
       origin: 'timeline-editor',
       kind: 'insert-statement',
       anchorTime: roundedTime,
-      statement: defaultDialogueStatementDraft(semanticDocument, dialoguePresentation, dialogueTemplate),
+      statement: defaultDialogueStatementDraft(semanticDocument),
     });
     const nextSelected = selectCompiledActionsForStatements(
       documentStore.getCompiledSceneSnapshot(),
@@ -386,7 +382,7 @@ export function TimelineEditor({
     if (Object.keys(nextSelected).length > 0) {
       setSelectedIds(nextSelected);
     }
-  }, [blockOfflineEdit, dialoguePresentation, dialogueTemplate, documentStore, semanticAuthoring, semanticDocument, setSelectedIds]);
+  }, [blockOfflineEdit, documentStore, semanticAuthoring, semanticDocument, setSelectedIds]);
 
   const addAction = useCallback(() => addActionAt(playbackAdapter.getCurrentTime()), [addActionAt, playbackAdapter]);
 

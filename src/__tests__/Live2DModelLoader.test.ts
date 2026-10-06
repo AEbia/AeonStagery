@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Live2DModelLoader } from '../engine/Live2DModelLoader';
-import * as sdk from '../engine/OfficialCubismWebSdk';
+import * as sdk from '../engine/CubismPixiSdk';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
@@ -205,7 +205,7 @@ describe('Live2DModelLoader', () => {
   });
 
   it('probes Cubism 3 plus model entries without routing them through Cubism 2', async () => {
-    vi.spyOn(sdk, 'getOfficialCubismSdkStatus').mockReturnValue({
+    vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: false,
       initialized: false,
       message: '官方 Cubism Web SDK Core 脚本缺失或未加载（/live2dcubismcore.min.js）。',
@@ -235,13 +235,13 @@ describe('Live2DModelLoader', () => {
     expect(probe.exists).toBe(true);
     expect(probe.runtime).toEqual(expect.objectContaining({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: false,
     }));
   });
 
   it('probes WMDL children before choosing a runtime', async () => {
-    vi.spyOn(sdk, 'getOfficialCubismSdkStatus').mockReturnValue({
+    vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: true,
       initialized: false,
       message: null,
@@ -286,7 +286,7 @@ describe('Live2DModelLoader', () => {
   });
 
   it('preloads Cubism 3 plus models through the official adapter instead of the Cubism 2 create path', async () => {
-    vi.spyOn(sdk, 'getOfficialCubismSdkStatus').mockReturnValue({
+    vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: true,
       initialized: false,
       message: null,
@@ -298,7 +298,7 @@ describe('Live2DModelLoader', () => {
       internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } },
     }));
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: async () => {},
       isReady: () => true,

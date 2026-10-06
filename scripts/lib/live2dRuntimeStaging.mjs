@@ -4,11 +4,9 @@
  * The repository never commits Live2D runtime code. Proprietary runtime files
  * are staged from local sources into git-ignored paths so that:
  *
- *   - `none`   — an externally distributed build contains no Live2D runtime at
- *                all (the official Cubism Web framework is replaced by a
- *                fallback stub that fails with an explicit message);
+ *   - `none`   — an externally distributed build contains no Live2D Core files;
  *   - `verify` — an internal-only verification build contains both the
- *                Cubism 2.1 core and the official Cubism Web (3/4/5) SDK;
+ *                Cubism 2.1 and Cubism 3/4/5 Core scripts;
  *   - `auto`   — development/test: stage whatever the machine provides, never
  *                fail, always leave the module graph resolvable.
  *
@@ -23,20 +21,10 @@ export const RUNTIME_MODES = ['auto', 'none', 'verify'];
 export const CUBISM2_CORE_FILE = 'live2d.min.js';
 export const CUBISM_WEB_CORE_FILE = 'live2dcubismcore.min.js';
 export const CUBISM_WEB_VENDOR_DIR = path.join('vendor', 'cubism-web');
-export const CUBISM_WEB_SHADER_PROBE = path.join(
-  CUBISM_WEB_VENDOR_DIR,
-  'Shaders',
-  'WebGL',
-  'vertshadersrc.vert',
-);
 export const MANIFEST_RELATIVE_PATH = path.join('.generated', 'live2d-runtime-manifest.json');
 
-export const FALLBACK_MARKER = 'Official Cubism Web framework is unavailable because CUBISM_WEB_SDK_DIR is not configured.';
-
 const cubism2SourceEnvVar = 'LIVE2D_CUBISM2_CORE';
-const cubismWebSourceEnvVar = 'CUBISM_WEB_SDK_DIR';
 const cubism2DefaultRelative = path.join('.local', 'live2d', CUBISM2_CORE_FILE);
-const cubismWebDefaultRelative = path.join('.local', 'cubism-web-sdk');
 
 // ─── small fs helpers (Windows file-watcher tolerant) ────────────────────────
 
@@ -71,11 +59,6 @@ function ensureDir(targetPath) {
   fs.mkdirSync(targetPath, { recursive: true });
 }
 
-function copyDir(source, target) {
-  ensureDir(path.dirname(target));
-  fs.cpSync(source, target, { recursive: true, force: true });
-}
-
 function copyFile(source, target) {
   ensureDir(path.dirname(target));
   fs.copyFileSync(source, target);
@@ -88,24 +71,6 @@ function writeFile(target, content) {
 
 export function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
-}
-
-function listFilesRecursive(root) {
-  const files = [];
-  if (!fs.existsSync(root)) return files;
-  const stack = [root];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-      } else if (entry.isFile()) {
-        files.push(fullPath);
-      }
-    }
-  }
-  return files.sort();
 }
 
 // ─── source discovery ───────────────────────────────────────────────────────
@@ -137,52 +102,33 @@ function resolveCubism2CoreSource(projectRoot, env) {
   };
 }
 
-function resolveCubismWebSdkSource(projectRoot, env) {
-  const configured = typeof env[cubismWebSourceEnvVar] === 'string' ? env[cubismWebSourceEnvVar].trim() : '';
+function resolveCubismCoreSource(projectRoot, env) {
+  const configured = typeof env.LIVE2D_CUBISM_CORE === 'string' ? env.LIVE2D_CUBISM_CORE.trim() : '';
+  const sdk = typeof env.CUBISM_WEB_SDK_DIR === 'string' ? env.CUBISM_WEB_SDK_DIR.trim() : '';
   const candidates = [];
-  if (configured) candidates.push(path.resolve(configured));
-  candidates.push(path.join(projectRoot, cubismWebDefaultRelative));
-
-  for (const candidate of candidates) {
-    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isDirectory()) continue;
-    const frameworkSrc = path.join(candidate, 'Framework', 'src');
-    const frameworkShaders = path.join(candidate, 'Framework', 'Shaders');
-    const coreScript = path.join(candidate, 'Core', CUBISM_WEB_CORE_FILE);
-    const coreTypes = path.join(candidate, 'Core', 'live2dcubismcore.d.ts');
-    const missing = [frameworkSrc, frameworkShaders, coreScript, coreTypes].filter(
-      (required) => !fs.existsSync(required),
-    );
-    if (missing.length === 0) {
-      return { root: candidate, frameworkSrc, frameworkShaders, coreScript, coreTypes };
-    }
-    return {
-      missing: `${cubismWebSourceEnvVar} (${candidate}) is not a Cubism SDK for Web checkout; missing: ${missing.join(', ')}`,
-    };
+  if (configured) {
+    const resolved = path.resolve(configured);
+    candidates.push(fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+      ? path.join(resolved, CUBISM_WEB_CORE_FILE) : resolved);
   }
-
-  return {
-    missing: configured
-      ? `${cubismWebSourceEnvVar} (${configured}) is not a readable directory`
-      : `no Cubism SDK for Web checkout found (set ${cubismWebSourceEnvVar} or place ${cubismWebDefaultRelative})`,
-  };
+  if (sdk) candidates.push(path.join(path.resolve(sdk), 'Core', CUBISM_WEB_CORE_FILE));
+  candidates.push(path.join(projectRoot, '.local', 'live2d', CUBISM_WEB_CORE_FILE));
+  // Preserve old developer setups, while requiring only their Core script.
+  candidates.push(path.join(projectRoot, '.local', 'cubism-web-sdk', 'Core', CUBISM_WEB_CORE_FILE));
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return { file: candidate };
+  }
+  return { missing: `no readable ${CUBISM_WEB_CORE_FILE} found (set LIVE2D_CUBISM_CORE or place .local/live2d/${CUBISM_WEB_CORE_FILE})` };
 }
 
 export function resolveRuntimeSources(projectRoot, env = process.env) {
   const cubism2 = resolveCubism2CoreSource(projectRoot, env);
-  const cubismWeb = resolveCubismWebSdkSource(projectRoot, env);
+  const cubismCore = resolveCubismCoreSource(projectRoot, env);
   return {
     cubism2Core: cubism2.file ?? null,
     cubism2Problem: cubism2.missing ?? null,
-    cubismWebSdk: cubismWeb.root ?? null,
-    cubismWebProblem: cubismWeb.missing ?? null,
-    cubismWebPaths: cubismWeb.root
-      ? {
-          frameworkSrc: cubismWeb.frameworkSrc,
-          frameworkShaders: cubismWeb.frameworkShaders,
-          coreScript: cubismWeb.coreScript,
-          coreTypes: cubismWeb.coreTypes,
-        }
-      : null,
+    cubismWebCore: cubismCore.file ?? null,
+    cubismWebProblem: cubismCore.missing ?? null,
   };
 }
 
@@ -212,147 +158,9 @@ export function stageCubism2Core(projectRoot, sourceFile) {
   copyFile(sourceFile, stagedPaths(projectRoot).cubism2Core);
 }
 
-// ─── fallback (no SDK) stub for the `@cubism/*` alias ────────────────────────
-
-const fallbackModuleHeader = `// Auto-generated fallback shim when CUBISM_WEB_SDK_DIR is unavailable.
-// @ts-nocheck
-function createUnavailableError() {
-  return new Error('${FALLBACK_MARKER}');
-}
-`;
-
-const fallbackFrameworkModuleSource = `${fallbackModuleHeader}
-export class Option {
-  logFunction = undefined;
-  loggingLevel = undefined;
-}
-
-export const CubismFramework = {
-  startUp() {
-    throw createUnavailableError();
-  },
-  initialize() {
-    throw createUnavailableError();
-  },
-};
-`;
-
-const fallbackModelSettingSource = `${fallbackModuleHeader}
-export class CubismModelSettingJson {
-  constructor() {
-    throw createUnavailableError();
-  }
-}
-`;
-
-const fallbackModelSettingInterfaceSource = `${fallbackModuleHeader}
-export class ICubismModelSetting {}
-`;
-
-const fallbackUserModelSource = `${fallbackModuleHeader}
-export class CubismUserModel {
-  _motionManager: any = null;
-  _expressionManager: any = null;
-  _physics: any = null;
-  _pose: any = null;
-  loadModel(): any { throw createUnavailableError(); }
-  getModel(): any { return null; }
-  getModelMatrix(): any { return null; }
-  createRenderer(): any { throw createUnavailableError(); }
-  getRenderer(): any { return null; }
-  loadMotion(): any { throw createUnavailableError(); }
-  loadExpression(): any { throw createUnavailableError(); }
-  loadPhysics(): any { throw createUnavailableError(); }
-  loadPose(): any { throw createUnavailableError(); }
-  release(): void {}
-}
-`;
-
-const fallbackMatrixSource = `${fallbackModuleHeader}
-export class CubismMatrix44 {
-  loadIdentity(): void {}
-  multiplyByMatrix(): void {}
-}
-`;
-
-const fallbackCoreTypesSource = `export {};
-
-declare global {
-  interface Window {
-    Live2DCubismCore?: {
-      Version?: {
-        csmGetVersion?: () => number;
-      };
-      Logging?: {
-        csmSetLogFunction?: (fn: ((message: string) => void) | null) => void;
-        csmGetLogFunction?: () => ((message: string) => void) | null;
-      };
-      Memory?: {
-        initializeAmountOfMemory?: (size: number) => void;
-      };
-    };
-  }
-}
-`;
-
-export function writeFallbackCubismWebSdk(projectRoot) {
-  const generatedRoot = stagedPaths(projectRoot).generatedRoot;
-  const frameworkRoot = path.join(generatedRoot, 'src');
-  writeFile(path.join(frameworkRoot, 'live2dcubismframework.ts'), fallbackFrameworkModuleSource);
-  writeFile(path.join(frameworkRoot, 'cubismmodelsettingjson.ts'), fallbackModelSettingSource);
-  writeFile(path.join(frameworkRoot, 'icubismmodelsetting.ts'), fallbackModelSettingInterfaceSource);
-  writeFile(path.join(frameworkRoot, 'model', 'cubismusermodel.ts'), fallbackUserModelSource);
-  writeFile(path.join(frameworkRoot, 'math', 'cubismmatrix44.ts'), fallbackMatrixSource);
-  writeFile(path.join(generatedRoot, 'live2dcubismcore.d.ts'), fallbackCoreTypesSource);
-}
-
-// ─── official SDK staging (ported from the pre-OSS sync script) ──────────────
-
-function prependTsNoCheck(targetRoot) {
-  if (!fs.existsSync(targetRoot)) return;
-  const stack = [targetRoot];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-      if (!entry.isFile() || !fullPath.endsWith('.ts')) continue;
-      const content = fs.readFileSync(fullPath, 'utf8');
-      if (content.startsWith('// @ts-nocheck')) continue;
-      fs.writeFileSync(fullPath, `// @ts-nocheck\n${content}`, 'utf8');
-    }
-  }
-}
-
-function patchCubismFrameworkRuntimeIssues(targetRoot) {
-  if (!fs.existsSync(targetRoot)) return;
-
-  const rendererPath = path.join(targetRoot, 'src', 'rendering', 'cubismrenderer_webgl.ts');
-  if (!fs.existsSync(rendererPath)) return;
-
-  const content = fs.readFileSync(rendererPath, 'utf8');
-  const patched = content.replace(
-    /vertex:\s*\(WebGLBuffer = null\),\s*[\r\n]+\s*uv:\s*\(WebGLBuffer = null\),\s*[\r\n]+\s*index:\s*\(WebGLBuffer = null\)/m,
-    'vertex: null,\n      uv: null,\n      index: null',
-  );
-
-  if (patched !== content) {
-    fs.writeFileSync(rendererPath, patched, 'utf8');
-  }
-}
-
-export function stageCubismWebSdk(projectRoot, paths) {
-  const staged = stagedPaths(projectRoot);
-  copyDir(paths.frameworkSrc, path.join(staged.generatedRoot, 'src'));
-  copyDir(paths.frameworkShaders, path.join(staged.generatedRoot, 'Shaders'));
-  copyDir(paths.frameworkShaders, path.join(staged.cubismWebVendor, 'Shaders'));
-  copyFile(paths.coreScript, staged.cubismWebCore);
-  copyFile(paths.coreTypes, path.join(staged.generatedRoot, 'live2dcubismcore.d.ts'));
-  prependTsNoCheck(path.join(staged.generatedRoot, 'src'));
-  patchCubismFrameworkRuntimeIssues(staged.generatedRoot);
+/** Framework and shaders are bundled by untitled-pixi-live2d-engine/cubism. */
+export function stageCubismCore(projectRoot, sourceFile) {
+  copyFile(sourceFile, stagedPaths(projectRoot).cubismWebCore);
 }
 
 // ─── manifest ───────────────────────────────────────────────────────────────
@@ -367,21 +175,16 @@ function buildManifest(projectRoot, mode, stagedCubism2, stagedCubismWeb, source
   }
   if (stagedCubismWeb) {
     files.push({ path: 'public/live2dcubismcore.min.js', sha256: hashOf(paths.cubismWebCore) });
-    for (const filePath of listFilesRecursive(paths.cubismWebVendor)) {
-      files.push({
-        path: path.relative(projectRoot, filePath).split(path.sep).join('/'),
-        sha256: hashOf(filePath),
-      });
-    }
+
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     mode,
     generatedAt: new Date().toISOString(),
     sources: {
       cubism2: sources.cubism2Core ?? null,
-      cubism3Plus: sources.cubismWebSdk ?? null,
+      cubism3Plus: sources.cubismWebCore ?? null,
     },
     sourceFingerprint,
     families: {
@@ -393,21 +196,14 @@ function buildManifest(projectRoot, mode, stagedCubism2, stagedCubismWeb, source
 }
 
 /**
- * Cheap freshness key for the configured sources: the two files that decide
- * whether a re-stage is necessary (the Cubism 2.1 core and the framework entry
- * plus core script of the Cubism SDK for Web checkout).
+ * Cheap freshness key for the configured sources: the two Core files that decide
+ * whether a re-stage is necessary.
  */
 export function computeSourceFingerprint(projectRoot, env = process.env) {
   const sources = resolveRuntimeSources(projectRoot, env);
-  const cubism3PlusEntry = sources.cubismWebPaths
-    ? path.join(sources.cubismWebPaths.frameworkSrc, 'live2dcubismframework.ts')
-    : null;
   return {
     cubism2: sources.cubism2Core ? sha256File(sources.cubism2Core) : null,
-    cubism3Plus:
-      sources.cubismWebPaths && fs.existsSync(cubism3PlusEntry)
-        ? `${sha256File(cubism3PlusEntry)}:${sha256File(sources.cubismWebPaths.coreScript)}`
-        : null,
+    cubism3Plus: sources.cubismWebCore ? sha256File(sources.cubismWebCore) : null,
   };
 }
 
@@ -419,10 +215,10 @@ export function computeSourceFingerprint(projectRoot, env = process.env) {
 export function isStagingUpToDate(projectRoot, mode, env = process.env) {
   if (!RUNTIME_MODES.includes(mode)) return false;
   const manifest = readRuntimeManifest(projectRoot);
-  if (!manifest || manifest.mode !== mode) return false;
+  if (!manifest || manifest.schemaVersion !== 2 || manifest.mode !== mode) return false;
 
   const paths = stagedPaths(projectRoot);
-  if (!fs.existsSync(path.join(paths.generatedRoot, 'src', 'live2dcubismframework.ts'))) return false;
+  if (fs.existsSync(paths.generatedRoot) || fs.existsSync(paths.cubismWebVendor)) return false;
 
   if (mode === 'none') {
     return manifest.families.cubism2 === false
@@ -481,7 +277,7 @@ export function applyRuntimeMode({
   // `none` must ignore the developer's environment entirely: a release build
   // may never pick up Live2D runtime code from an ambient variable.
   const sources = mode === 'none'
-    ? { cubism2Core: null, cubism2Problem: null, cubismWebSdk: null, cubismWebProblem: null, cubismWebPaths: null }
+    ? { cubism2Core: null, cubism2Problem: null, cubismWebCore: null, cubismWebProblem: null }
     : resolveRuntimeSources(projectRoot, env);
   const sourceFingerprint = mode === 'none'
     ? { cubism2: null, cubism3Plus: null }
@@ -490,8 +286,7 @@ export function applyRuntimeMode({
   clearStagedRuntime(projectRoot);
 
   if (mode === 'none') {
-    writeFallbackCubismWebSdk(projectRoot);
-    log('[live2d-runtime] mode=none: no Live2D runtime staged; Cubism Web framework replaced by fallback stub.');
+    log('[live2d-runtime] mode=none: no Live2D Core scripts staged.');
     const manifest = buildManifest(projectRoot, mode, false, false, sources, sourceFingerprint);
     writeManifest(projectRoot, manifest);
     return manifest;
@@ -500,12 +295,12 @@ export function applyRuntimeMode({
   if (mode === 'verify' && !sources.cubism2Core) {
     throw new Error(`[live2d-runtime] mode=verify requires ${sources.cubism2Problem}`);
   }
-  if (mode === 'verify' && !sources.cubismWebSdk) {
+  if (mode === 'verify' && !sources.cubismWebCore) {
     throw new Error(`[live2d-runtime] mode=verify requires ${sources.cubismWebProblem}`);
   }
 
   const stagedCubism2 = Boolean(sources.cubism2Core);
-  const stagedCubismWeb = Boolean(sources.cubismWebSdk);
+  const stagedCubismWeb = Boolean(sources.cubismWebCore);
 
   if (stagedCubism2) {
     stageCubism2Core(projectRoot, sources.cubism2Core);
@@ -515,11 +310,10 @@ export function applyRuntimeMode({
   }
 
   if (stagedCubismWeb) {
-    stageCubismWebSdk(projectRoot, sources.cubismWebPaths);
-    log(`[live2d-runtime] staged Cubism Web (3/4/5) SDK from ${sources.cubismWebSdk}`);
+    stageCubismCore(projectRoot, sources.cubismWebCore);
+    log(`[live2d-runtime] staged Cubism 3/4/5 Core from ${sources.cubismWebCore}`);
   } else {
-    writeFallbackCubismWebSdk(projectRoot);
-    log(`[live2d-runtime] Cubism Web framework not staged: ${sources.cubismWebProblem}`);
+    log(`[live2d-runtime] Cubism 3/4/5 Core not staged: ${sources.cubismWebProblem}`);
   }
 
   const manifest = buildManifest(projectRoot, mode, stagedCubism2, stagedCubismWeb, sources, sourceFingerprint);

@@ -93,6 +93,24 @@ describe('ProjectWorkspaceService', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/mygo/i);
   });
 
+  it('restores a selected image style when opening a project that only persisted the style id', async () => {
+    projectResources = new ProjectResourceService(fileAccess as unknown as IFileAccess, new ProjectPathResolver(null), () => [], () => session.getCurrentProject());
+    service = new ProjectWorkspaceService(fileAccess as unknown as IFileAccess, projectResources, session, setProjectRoot, () => [SEMANTIC_BUILTIN_TEMPLATE_PACKAGE]);
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo', {
+      templates: { enabledTemplateIds: ['aeonstagery.default'], defaults: { dialogueStyleId: 'pink-nameplate' } },
+    });
+    if (!created.success) throw new Error(created.error);
+    const metadata = JSON.parse(JSON.stringify(created.project.metadata));
+    delete metadata.templates.dialoguePresentation;
+    metadata.templates.dialogueTemplate = 'glass';
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toMatchObject({ styleId: 'pink-nameplate', renderer: 'image-dialogue-v1' });
+    expect(service.getCurrentProject()?.metadata.templates).toEqual(opened.project.metadata.templates);
+    expect(opened.project.metadata.templates).not.toHaveProperty('dialogueTemplate');
+  });
+
   it('creates a project and default scene file without loading the scene', async () => {
     const result = await service.createProjectAt('D:/projects/demo', 'Demo');
 

@@ -108,8 +108,8 @@ describe('Collaboration Convergence V3', () => {
 
   it('two v3 clients converge on canonical v5 statements, order, companions, tombstones, and collaborative assets', async () => {
     const status = server!.getStatus();
-    const endpoint = status.localUrl;
-    const webSocketFactory = (url: string) => new WebSocket(url) as any;
+    const endpoint = `${status.localUrl}#token=${status.accessToken}`;
+    const webSocketFactory = (url: string, protocols?: string[]) => new WebSocket(url, protocols) as any;
 
     clientA = new CollaborationClientV3({
       endpoint,
@@ -247,11 +247,11 @@ describe('Collaboration Convergence V3', () => {
 
   it('rejects a v2 client attempting to connect to or seed a v3 server', async () => {
     const status = server!.getStatus();
-    const endpoint = status.localUrl;
+    const endpoint = `${status.localUrl}#token=${status.accessToken}`;
     const v2Client = new CollaborationClientV2({
       endpoint,
       fetchImpl: fetch,
-      webSocketFactory: (url) => new WebSocket(url) as any,
+      webSocketFactory: (url, protocols) => new WebSocket(url, protocols) as any,
     });
 
     // Attempting to seed v2 state to v3 server fails

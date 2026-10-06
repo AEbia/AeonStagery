@@ -101,6 +101,8 @@ export class CollaborativeDocumentLayerV2 {
           this.options.onError?.(error);
         }) ?? (() => undefined),
       );
+      // connectRealtime resolves once the attempt has been dispatched, so the
+      // connection status below reflects that attempt rather than racing it.
       await this.options.client.connectRealtime?.();
       this.setStatus(this.options.client.isRealtimeConnected?.() ? 'connected' : 'offline');
     } catch (error) {

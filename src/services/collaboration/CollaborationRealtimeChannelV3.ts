@@ -19,7 +19,7 @@ import {
   parseCollaborationLeaseServerMessageV3,
 } from './CollaborationLeaseProtocol';
 import {
-  toCollaborationWebSocketUrl,
+  prepareCollaborationWebSocketConnection,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
 import { readCollaborativeSchemaVersions } from './CollaborativeYDocStore';
@@ -32,7 +32,8 @@ export interface CollaborationRealtimeChannelV3Options {
   endpoint: string;
   identity?: CollaborationIdentity;
   ydoc: Y.Doc;
-  webSocketFactory: (url: string) => CollaborationWebSocketLike;
+  webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
+  fetchImpl: typeof fetch;
   applyServerState: () => Promise<void>;
   replaceWithServerState: () => Promise<void>;
   onStateChanged: () => void;
@@ -89,6 +90,7 @@ export class CollaborationRealtimeChannelV3 {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectSuppressed = false;
   private disposed = false;
+  private connectionPromise: Promise<void> | null = null;
 
   constructor(private readonly options: CollaborationRealtimeChannelV3Options) {}
 
@@ -119,13 +121,24 @@ export class CollaborationRealtimeChannelV3 {
     this.sendLeaseRequest({ type: 'lease:release', requestId, target });
   }
 
-  connect(): void {
-    if (this.disposed || this.reconnectSuppressed || this.socket) return;
-    this.openSocket(this.hasStartedRealtime);
+  /**
+   * Dispatches a realtime connection attempt.
+   *
+   * The returned promise settles once the attempt has been dispatched — the
+   * credential handshake finished and the socket was handed to the transport —
+   * or once it failed. Failures are reported through
+   * {@link CollaborationRealtimeChannelV3Options.onServerError} and never by
+   * rejecting, so callers can await it without attaching error handling.
+   * Concurrent calls join the in-flight attempt instead of opening a second socket.
+   */
+  connect(): Promise<void> {
+    if (this.disposed || this.reconnectSuppressed || this.socket) return Promise.resolve();
+    return this.openSocket(this.hasStartedRealtime);
   }
 
-  reconnectNow(): void {
-    if (this.disposed) return;
+  /** Discards the current socket and starts a fresh attempt; see {@link connect}. */
+  reconnectNow(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     this.clearRetryTimer();
     this.retryAttempt = 0;
     this.reconnectSuppressed = false;
@@ -133,15 +146,33 @@ export class CollaborationRealtimeChannelV3 {
     this.closeCurrentSocketSilently();
     this.setRealtimeWritable(false);
     this.setRealtimeStatus('reconnecting');
-    this.openSocket(true);
+    return this.openSocket(true);
   }
 
   rejectRemoteState(error: Error): void {
     this.stopForRemoteStateRejection(error, undefined, undefined, false);
   }
 
-  private openSocket(needsResyncBeforeCommit: boolean): void {
-    if (this.disposed || this.reconnectSuppressed || this.socket) return;
+  private openSocket(needsResyncBeforeCommit: boolean): Promise<void> {
+    if (this.connectionPromise) return this.connectionPromise;
+    if (this.disposed || this.reconnectSuppressed || this.socket) return Promise.resolve();
+
+    const attempt = this.dispatchConnection(needsResyncBeforeCommit)
+      // dispatchConnection reports handshake failures itself; this keeps the
+      // never-rejecting contract even if wiring the socket throws afterwards.
+      .catch((error: unknown) => {
+        if (this.disposed || this.reconnectSuppressed) return;
+        this.options.onServerError(asError(error));
+        this.scheduleReconnect();
+      })
+      .finally(() => {
+        if (this.connectionPromise === attempt) this.connectionPromise = null;
+      });
+    this.connectionPromise = attempt;
+    return attempt;
+  }
+
+  private async dispatchConnection(needsResyncBeforeCommit: boolean): Promise<void> {
     const isReconnect = this.hasStartedRealtime;
     this.hasStartedRealtime = true;
     this.setRealtimeWritable(false);
@@ -149,15 +180,20 @@ export class CollaborationRealtimeChannelV3 {
     const generation = ++this.realtimeGeneration;
     let socket: CollaborationWebSocketLike;
     try {
-      socket = this.options.webSocketFactory(toCollaborationWebSocketUrl(
+      const connection = await prepareCollaborationWebSocketConnection(
         this.options.endpoint,
         this.options.identity,
-      ));
+        this.options.fetchImpl,
+      );
+      if (this.realtimeGeneration !== generation) return;
+      if (this.disposed || this.reconnectSuppressed) return;
+      socket = this.options.webSocketFactory(connection.url, connection.protocols);
     } catch (error) {
       const connectionError = asError(error);
-      this.reconnectSuppressed = true;
+      if (this.realtimeGeneration !== generation) return;
       this.options.onServerError(connectionError);
-      this.setRealtimeStatus('error');
+      if (this.disposed || this.reconnectSuppressed) return;
+      this.scheduleReconnect();
       return;
     }
     socket.binaryType = 'arraybuffer';
@@ -313,9 +349,12 @@ export class CollaborationRealtimeChannelV3 {
 
   private closeCurrentSocketSilently(): void {
     const socket = this.socket;
-    if (!socket) return;
     this.socket = null;
+    // Abandon any in-flight attempt: the generation bump below makes its
+    // continuation a no-op, and clearing the promise lets the next attempt start.
+    this.connectionPromise = null;
     this.realtimeGeneration++;
+    if (!socket) return;
     this.detachUpdateHandler();
     socket.onopen = null;
     socket.onmessage = null;

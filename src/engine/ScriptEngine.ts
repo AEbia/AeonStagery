@@ -81,6 +81,7 @@ class ScriptEngine {
   private audioCoordinator = new AudioCoordinator(() => lipSyncEngine.resumeAudioDrivenSyncs());
   private _timeCallbacks = new Set<(time: number) => void>();
   private _pauseCallbacks = new Set<(time: number) => void>();
+  private _playingCallbacks = new Set<(playing: boolean) => void>();
   private _seekCompleteCallbacks = new Set<(time: number) => void>();
   private lastVisualOverlayKey: string | null = null;
   private readonly live2DTransformSync = () => {
@@ -114,6 +115,17 @@ class ScriptEngine {
   onPause(callback: (time: number) => void): () => void {
     this._pauseCallbacks.add(callback);
     return () => this._pauseCallbacks.delete(callback);
+  }
+
+  onPlayingChange(callback: (playing: boolean) => void): () => void {
+    this._playingCallbacks.add(callback);
+    return () => { this._playingCallbacks.delete(callback); };
+  }
+
+  private setPlaying(playing: boolean): void {
+    if (this.playing === playing) return;
+    this.playing = playing;
+    this._playingCallbacks.forEach(callback => callback(playing));
   }
 
   onSeekComplete(callback: (time: number) => void): () => void {
@@ -305,7 +317,7 @@ class ScriptEngine {
     this.masterTimeline = gsap.timeline({
       paused: true,
       onComplete: () => {
-        this.playing = false;
+        this.setPlaying(false);
         const time = this.getCurrentTime();
         this._pauseCallbacks.forEach((cb) => cb(time));
         hookSystem.execute('scene:end', { sceneId: script.sceneId });
@@ -493,7 +505,7 @@ class ScriptEngine {
     if (!this.masterTimeline) return;
 
     // PreBakeDaemon listens for 'scene:play' and auto-suspends all baking
-    this.playing = true; live2DManager.setAutoUpdate(true);
+    this.setPlaying(true); live2DManager.setAutoUpdate(true);
     gsap.ticker.remove(this.live2DTransformSync);
     gsap.ticker.add(this.live2DTransformSync);
     this.masterTimeline.play();
@@ -505,7 +517,7 @@ class ScriptEngine {
   }
 
   pause(): void {
-    this.playing = false; live2DManager.setAutoUpdate(false); live2DManager.pauseAllTweens();
+    this.setPlaying(false); live2DManager.setAutoUpdate(false); live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
     this.masterTimeline?.pause();
     if (typeof (customAnimHost as any).pause === 'function') {
@@ -519,7 +531,7 @@ class ScriptEngine {
   }
 
   private pauseForSeek({ emitLifecycle }: { emitLifecycle: boolean }): void {
-    this.playing = false;
+    this.setPlaying(false);
     live2DManager.setAutoUpdate(false);
     live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
@@ -812,7 +824,7 @@ class ScriptEngine {
       if (wasPlaying || this.playing) {
         this.play();
       } else {
-        this.playing = false;
+        this.setPlaying(false);
         // 核心修复：响应用户的“全暂停”诉求。拖拽/Seek 结束后保持 Ticker 关闭，
         // 彻底冻结角色画面（包括呼吸眨眼 and 任何遗留动作），实现绝对的单帧定格。
         live2DManager.setAutoUpdate(false);
@@ -1283,7 +1295,7 @@ class ScriptEngine {
   }
 
   private cleanup(full: boolean = true, invalidationTime: number = 0): void {
-    this.masterTimeline?.kill(); this.masterTimeline = null; this.playing = false;
+    this.masterTimeline?.kill(); this.masterTimeline = null; this.setPlaying(false);
     gsap.ticker.remove(this.live2DTransformSync);
     this.lastVisualOverlayKey = null;
     

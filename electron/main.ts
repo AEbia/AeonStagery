@@ -23,6 +23,7 @@ import {
 import { registerGptSovitsHandlers, stopGptSovitsProcess } from './gpt-sovits';
 import { clearAllVoiceSessionsSync, registerVoiceAuthoringHandlers } from './voice-authoring';
 import type { CollaborationServerStatus } from '../server/collaboration/server';
+import { isCollaborationOriginAllowed } from '../server/collaboration/security';
 import { EmbeddedCollaborationServer } from './embeddedCollaborationServer';
 import {
   listCollaborationSessions,
@@ -107,7 +108,13 @@ import { FileSystemProjectAgentJournalPort } from '../src/services/project-agent
 import type { ProjectAgentJournalRecord } from '../src/services/project-agent/ProjectAgentJournal';
 import type { ProjectAgentPauseReason } from '../src/services/project-agent/ProjectAgentTask';
 import { NodeProjectAgentTerminalExecutor } from './projectAgentTerminal';
-import { ensureLive2DRuntimeFiles, type Live2DRuntimeAvailabilityReport } from './live2dRuntimeSeed';
+import {
+  ensureLive2DRuntimeFiles,
+  inspectLive2DRuntimeStatus,
+  syncLocalRuntimeToSeedRoot,
+  type Live2DRuntimeAvailabilityReport,
+  type Live2DRuntimeStatusDetail,
+} from './live2dRuntimeSeed';
 import { handleAssetProtocolRequest } from './assetProtocol';
 
 interface AiProseCredentialMutationResult {
@@ -194,6 +201,10 @@ function getLive2DRuntimeSeedRoot(): string {
 
 function getLive2DRuntimeRoot(): string {
   return path.join(app.getPath('userData'), live2dRuntimeDirectoryName);
+}
+
+function getLive2DLocalDir(): string {
+  return path.join(app.getAppPath(), '.local', 'live2d');
 }
 
 /**
@@ -285,6 +296,13 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.removeMenu();
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https:') || url.startsWith('http:')) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
 
   // Force secure context for file:// and custom schemes
   void loadRenderer(mainWindow);
@@ -2290,15 +2308,20 @@ ipcMain.handle('projectAgent:openWindow', async (event) => {
   return { success: true };
 });
 
-ipcMain.handle('collaborationServer:start', async (_event, input: { projectId: string; host?: string; port?: number }) => {
+ipcMain.handle('collaborationServer:start', async (event, input: { projectId: string; host?: string; port?: number; password?: string }) => {
+  if (!isMainWindowFrameSender(event)) return { success: false, error: 'Unauthorized collaboration server sender.' };
   try {
     if (!input?.projectId || typeof input.projectId !== 'string') {
       throw new Error('A project ID is required to host collaboration');
     }
+    const rendererUrl = mainWindow?.webContents.getURL() ?? '';
+    const rendererOrigin = /^https?:/.test(rendererUrl) ? new URL(rendererUrl).origin : 'null';
     const result = await embeddedCollaborationServer.start({
       userDataPath: app.getPath('userData'),
       projectId: input.projectId,
       host: input.host || '0.0.0.0',
+      password: input.password,
+      allowedOrigins: isCollaborationOriginAllowed(rendererOrigin) ? undefined : ['null', 'file://', rendererOrigin],
       port: Number(input.port ?? 12345),
     });
     return { success: true, ...result };
@@ -2307,7 +2330,8 @@ ipcMain.handle('collaborationServer:start', async (_event, input: { projectId: s
   }
 });
 
-ipcMain.handle('collaborationServer:stop', async () => {
+ipcMain.handle('collaborationServer:stop', async (event) => {
+  if (!isMainWindowFrameSender(event)) return { success: false, error: 'Unauthorized collaboration server sender.' };
   try {
     await embeddedCollaborationServer.stop();
     return { success: true };
@@ -2316,11 +2340,13 @@ ipcMain.handle('collaborationServer:stop', async () => {
   }
 });
 
-ipcMain.handle('collaborationServer:getStatus', async (): Promise<{ success: true; status: CollaborationServerStatus | null }> => {
+ipcMain.handle('collaborationServer:getStatus', async (event): Promise<{ success: boolean; status: CollaborationServerStatus | null; error?: string }> => {
+  if (!isMainWindowFrameSender(event)) return { success: false, status: null, error: 'Unauthorized collaboration server sender.' };
   return { success: true, status: embeddedCollaborationServer.getStatus() };
 });
 
-ipcMain.handle('collaborationServer:listSessions', async () => {
+ipcMain.handle('collaborationServer:listSessions', async (event) => {
+  if (!isMainWindowFrameSender(event)) return { success: false, error: 'Unauthorized collaboration server sender.' };
   try {
     const sessions = await listCollaborationSessions(
       app.getPath('userData'),
@@ -2332,7 +2358,8 @@ ipcMain.handle('collaborationServer:listSessions', async () => {
   }
 });
 
-ipcMain.handle('collaborationServer:clearPreviousSessions', async () => {
+ipcMain.handle('collaborationServer:clearPreviousSessions', async (event) => {
+  if (!isMainWindowFrameSender(event)) return { success: false, error: 'Unauthorized collaboration server sender.' };
   try {
     const result = await embeddedCollaborationServer.clearPreviousSessions(app.getPath('userData'));
     return {
@@ -2483,6 +2510,43 @@ app.whenReady().then(() => {
   ipcMain.handle('runtime:getLive2DAvailability', (): Live2DRuntimeAvailabilityReport => (
     live2DRuntimeAvailability ?? { cubism2: false, cubism3Plus: false }
   ));
+  ipcMain.handle('runtime:getLive2DStatus', (): Live2DRuntimeStatusDetail => {
+    return inspectLive2DRuntimeStatus(
+      getLive2DRuntimeSeedRoot(),
+      getLive2DRuntimeRoot(),
+      getLive2DLocalDir(),
+      isDev,
+    );
+  });
+  ipcMain.handle('runtime:refreshLive2DStatus', (): Live2DRuntimeStatusDetail => {
+    if (isDev) {
+      syncLocalRuntimeToSeedRoot(getLive2DLocalDir(), getLive2DRuntimeSeedRoot());
+    }
+    live2DRuntimeAvailability = ensureLive2DRuntime();
+    return inspectLive2DRuntimeStatus(
+      getLive2DRuntimeSeedRoot(),
+      getLive2DRuntimeRoot(),
+      getLive2DLocalDir(),
+      isDev,
+    );
+  });
+  ipcMain.handle('runtime:openLive2DDirectory', async (_event, type: 'runtime' | 'local' = 'runtime') => {
+    const dir = (type === 'local' && isDev)
+      ? getLive2DLocalDir()
+      : getLive2DRuntimeRoot();
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const error = await shell.openPath(dir);
+    return { success: error === '', path: dir };
+  });
+  ipcMain.handle('app:openExternal', async (_event, url: string) => {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+      return { success: true };
+    }
+    return { success: false };
+  });
   protocol.handle('aeon-runtime', async (request) => {
     const requestPath = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
     const runtimeRoot = path.resolve(getLive2DRuntimeRoot());

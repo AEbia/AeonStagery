@@ -26,3 +26,21 @@ status: accepted
 - 共享素材存储以服务端 collaboration project 为作用域隔离。
 - 第一阶段 UI 可以采用 `ip:port + displayName` 的 direct endpoint join，连接到一个 single-room collaboration server；复杂 room 选择与账号权限后置。
 - 第一阶段服务端以独立 Node 进程或 Electron 主进程托管的 embedded Node 进程启动；Electron renderer 客户端只作为 joiner 连接，不能把 renderer 本身变成房主事实来源。
+
+## Server Access Boundary
+
+当前 single-room 服务默认监听 `0.0.0.0`，允许其他设备连接；主持人可切换为仅本机监听。
+HTTP 数据接口与 WebSocket upgrade 都必须校验房间凭证。远程连接使用按来源限速的一次性
+HMAC 挑战响应，避免传输可重放的长期 bearer 凭证；协作数据仍需通过 TLS 才能抵御网络窃听。
+主持可设置房间密码，留空生成随机密码；邀请链接作为可选快捷连接方式承载相同权限。复杂账号、
+逐成员权限与审计仍后置。
+
+服务端只发布已上传至 collaboration asset store 的共享副本，不挂载整个项目目录或任意
+本地文件。素材读写必须约束路径及符号链接边界，协议入口须限制请求体、连接数量及
+待处理更新，错误与健康响应不得暴露本机目录。
+
+运行配置、认证限速、密码与邀请链接生命周期、明文连接的部署限制见
+[Collaboration server access](../collaboration-security.md)。实现入口为
+[`server/collaboration/security.ts`](../../server/collaboration/security.ts)、
+[`server/collaboration/server.ts`](../../server/collaboration/server.ts) 与
+[`server/collaboration/assets.ts`](../../server/collaboration/assets.ts)。

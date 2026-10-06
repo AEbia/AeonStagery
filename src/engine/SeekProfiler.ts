@@ -8,7 +8,7 @@
  *  - snapshot-restore : SnapshotStore restore + motion-queue prefill
  *  - forward-sim      : legacy Cubism 2 snapshot->target stepping loop
  *  - motion-step      : Cubism 2 motion-offset fast-forward (50ms/16ms SDK steps)
- *  - native-restore   : official-cubism-web `restoreSeekState` loop
+ *  - native-restore   : untitled-pixi-live2d-engine-cubism `restoreSeekState` loop
  *  - state-sync       : timeline/environment/expression/proxy reconciliation
  *
  * `forwardSimulateMs` and `motionStepMs` are deliberately sub-measurements and

@@ -30,7 +30,7 @@ describe('Live2DRuntimeResolver', () => {
 
     expect(runtime).toEqual({
       runtimeFamily: 'cubism3-plus',
-      adapterId: 'official-cubism-web',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: false,
     });
     expect(getUnsupportedLive2DRuntimeMessage('figure/tomori/tomori.model3.json', runtime))

@@ -16,8 +16,7 @@ import { fileURLToPath } from 'node:url';
 import * as asar from '@electron/asar';
 import { readRuntimeManifest, sha256File } from './lib/live2dRuntimeStaging.mjs';
 import {
-  FALLBACK_MARKER,
-  FRAMEWORK_MARKERS,
+  CUBISM_ENGINE_MARKER,
   LIVE2D_PACKAGE_DIR_NAMES,
   RUNTIME_FILE_BASENAMES,
   RUNTIME_RESOURCE_DIR_NAME,
@@ -120,17 +119,9 @@ const asarRuntimeNamedEntries = asarEntriesMatching((entry) => {
 const asarLive2DPackages = asarEntriesMatching((entry) =>
   LIVE2D_PACKAGE_DIR_NAMES.some((name) => entry.startsWith(`node_modules/${name}/`) || entry === `node_modules/${name}`));
 
-const bundledJsEntries = asarEntriesMatching((entry) => entry.endsWith('.js') && entry.startsWith('dist/'));
-const bundledJs = bundledJsEntries
-  .map((entry) => ({ entry, text: readAsarText(entry) }))
-  .filter((item) => item.text !== null);
-
-function entriesContaining(marker) {
-  return bundledJs.filter((item) => item.text.includes(marker)).map((item) => item.entry);
-}
-
-const fallbackEntries = entriesContaining(FALLBACK_MARKER);
-const frameworkEntries = FRAMEWORK_MARKERS.flatMap((marker) => entriesContaining(marker));
+const hasCubismEngine = asarEntriesMatching((entry) => entry.startsWith('dist/') && entry.endsWith('.js'))
+  .some((entry) => readAsarText(entry)?.includes(CUBISM_ENGINE_MARKER));
+if (!hasCubismEngine) failures.push('app.asar renderer does not contain the modern Cubism engine');
 
 const manifest = readRuntimeManifest(projectRoot);
 if (!manifest) {
@@ -152,15 +143,6 @@ if (mode === 'none') {
   for (const entry of asarLive2DPackages) {
     failures.push(`app.asar contains a Live2D-derived node_modules package: ${entry}`);
   }
-  if (fallbackEntries.length === 0) {
-    failures.push('app.asar renderer bundle does not contain the Cubism Web fallback stub');
-  }
-  for (const marker of FRAMEWORK_MARKERS) {
-    const matches = entriesContaining(marker);
-    for (const entry of matches) {
-      failures.push(`app.asar bundles official Cubism Web framework code ("${marker}") in ${entry}`);
-    }
-  }
 } else {
   if (!fs.existsSync(runtimeResourceDir)) {
     failures.push(`resources/${RUNTIME_RESOURCE_DIR_NAME} is missing from the verification package`);
@@ -181,12 +163,6 @@ if (mode === 'none') {
   }
   for (const entry of asarRuntimeNamedEntries) {
     notes.push(`runtime scripts are resolved through aeon-runtime://, not app.asar (found ${entry})`);
-  }
-  if (frameworkEntries.length === 0) {
-    failures.push('app.asar renderer bundle does not contain official Cubism Web framework code');
-  }
-  if (fallbackEntries.length > 0) {
-    failures.push(`app.asar still bundles the fallback stub: ${fallbackEntries.join(', ')}`);
   }
 }
 

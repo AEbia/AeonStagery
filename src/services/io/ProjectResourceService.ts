@@ -33,7 +33,28 @@ import {
 
 type DirEntry = { name: string; isDirectory: boolean; path: string };
 
-const COLLABORATIVE_MOUNT_ROOT = '.aeonstagery/mounts';
+function relativePathBelowCategory(pathValue: string, prefixes: Array<string | undefined>): string {
+  const pathSegments = pathValue.replace(/\\/g, '/').split('/').filter(Boolean);
+  let selected: { index: number; length: number } | null = null;
+
+  for (const prefix of prefixes) {
+    if (!prefix) continue;
+    const prefixSegments = prefix.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (prefixSegments.length === 0 || prefixSegments.length > pathSegments.length) continue;
+    for (let index = 0; index <= pathSegments.length - prefixSegments.length; index += 1) {
+      const matches = prefixSegments.every((segment, offset) =>
+        segment.toLowerCase() === pathSegments[index + offset].toLowerCase());
+      if (!matches) continue;
+      if (!selected || index < selected.index || (index === selected.index && prefixSegments.length > selected.length)) {
+        selected = { index, length: prefixSegments.length };
+      }
+    }
+  }
+
+  if (!selected) return pathSegments.join('/');
+  const belowCategory = pathSegments.slice(selected.index + selected.length).join('/');
+  return belowCategory || pathSegments.join('/');
+}
 
 type FileAccessLike = {
   readFile(path: string): Promise<{ data: string; path: string }>;
@@ -715,13 +736,40 @@ export class ProjectResourceService {
     return null;
   }
 
-  toCollaborationReference(reference: string): string {
+  /** Project mounted resources beneath their standard category root. */
+  toCollaborationReference(reference: string, kind?: ResourceImportKind): string {
     const mounted = this.parseMountedReference(reference);
-    return mounted
-      ? this.resolver.normalizeRelativePath(
-        `${COLLABORATIVE_MOUNT_ROOT}/${mounted.mountId}/${mounted.relativePath}`,
-      )
-      : this.normalizeStoredRelativePath(reference);
+    if (!mounted) return this.normalizeStoredRelativePath(reference);
+
+    const project = this.getCurrentProject();
+    const configuredRoots = (project?.metadata.assetRoots ?? {}) as Record<string, string>;
+    const defaultRoots = DEFAULT_PROJECT_ASSET_ROOTS as unknown as Record<string, string>;
+    const knownRoots = Array.from(new Set([
+      ...Object.values(configuredRoots),
+      ...Object.values(defaultRoots),
+    ].filter((root): root is string => typeof root === 'string' && root.trim().length > 0)));
+    const normalizedMountPath = this.resolver.normalizeRelativePath(mounted.relativePath);
+
+    let assetRoot = kind && kind !== 'generic'
+      ? configuredRoots[kind] ?? defaultRoots[kind] ?? kind
+      : knownRoots.find((root) => normalizedMountPath === root || normalizedMountPath.startsWith(`${root}/`));
+    if (!assetRoot) assetRoot = configuredRoots.project ?? defaultRoots.project ?? 'project';
+    assetRoot = this.resolver.normalizeRelativePath(assetRoot);
+
+    // Libraries commonly contain a wrapper directory such as game/ before
+    // their category roots. Copy only the portion below the matching category
+    // so @mount/game/figure/a.json becomes figure/a.json.
+    const categoryPrefixes = Array.from(new Set([
+      kind,
+      configuredRoots[kind ?? ''],
+      defaultRoots[kind ?? ''],
+      assetRoot,
+    ].filter((prefix): prefix is string => typeof prefix === 'string' && prefix.length > 0)));
+    const sourceRelativePath = relativePathBelowCategory(normalizedMountPath, categoryPrefixes);
+
+    return this.resolver.normalizeRelativePath(
+      `${assetRoot}/${sourceRelativePath}`,
+    );
   }
 
   private async relativeFromExternalLibrary(

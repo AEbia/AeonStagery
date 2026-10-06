@@ -295,7 +295,10 @@ describe('CollaborationClientV2', () => {
     const presenceMessages: unknown[] = [];
     client.subscribePresence((message) => presenceMessages.push(message));
 
-    client.connectRealtime();
+    await client.connectRealtime();
+    // connectRealtime resolves with the socket dispatched, so its handlers are
+    // already attached by the time the server pushes the snapshot.
+    expect(socket.onmessage).toBeTruthy();
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'presence:snapshot',

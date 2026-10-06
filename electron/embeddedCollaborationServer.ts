@@ -15,11 +15,21 @@ export interface EmbeddedCollaborationStartInput {
   projectId: string;
   host: string;
   port: number;
+  password?: string;
+  allowedOrigins?: string[];
 }
 
 export interface EmbeddedCollaborationStartResult {
   status: CollaborationServerStatus;
   reused: boolean;
+}
+
+function areAllowedOriginsEqual(first?: string[], second?: string[]): boolean {
+  if (first === undefined || second === undefined) return first === second;
+  const firstOrigins = [...new Set(first)].sort();
+  const secondOrigins = [...new Set(second)].sort();
+  return firstOrigins.length === secondOrigins.length
+    && firstOrigins.every((origin, index) => origin === secondOrigins[index]);
 }
 
 /** Serializes start/stop IPC calls and retains the current room on repeat starts. */
@@ -42,6 +52,8 @@ export class EmbeddedCollaborationServer {
         && previous?.projectId === projectId
         && previous.host === input.host
         && previous.port === input.port
+        && previous.password === input.password
+        && areAllowedOriginsEqual(previous.allowedOrigins, input.allowedOrigins)
         && path.resolve(previous.userDataPath) === path.resolve(input.userDataPath)
       ) return { status: this.server.getStatus(), reused: true };
 
@@ -56,8 +68,14 @@ export class EmbeddedCollaborationServer {
         port: input.port,
         dataDir,
         expectedProjectId: projectId,
+        password: input.password,
+        allowedOrigins: input.allowedOrigins,
       });
-      this.activeInput = { ...input, projectId };
+      this.activeInput = {
+        ...input,
+        projectId,
+        allowedOrigins: input.allowedOrigins ? [...input.allowedOrigins] : undefined,
+      };
       return { status: this.server.getStatus(), reused: false };
     });
   }

@@ -9,7 +9,11 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ensureLive2DRuntimeFiles } from '../../electron/live2dRuntimeSeed';
+import {
+  ensureLive2DRuntimeFiles,
+  inspectLive2DRuntimeStatus,
+  syncLocalRuntimeToSeedRoot,
+} from '../../electron/live2dRuntimeSeed';
 
 function makeTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -76,7 +80,7 @@ describe('Live2D runtime seed upgrade safety', () => {
     expect(report.cubism2).toBe(true);
   });
 
-  it('merges a partially missing shader tree additively, without touching existing files', () => {
+  it('preserves old user shaders without copying obsolete shader seeds', () => {
     const sourceRoot = makeTempDir('aeon-live2d-shader-seed-');
     const targetRoot = makeTempDir('aeon-live2d-shader-target-');
 
@@ -91,8 +95,7 @@ describe('Live2D runtime seed upgrade safety', () => {
     const report = ensureLive2DRuntimeFiles(sourceRoot, targetRoot, () => {});
 
     expect(fs.readFileSync(shaderProbe(targetRoot), 'utf8')).toBe('user-vert');
-    expect(fs.readFileSync(shaderProbe(targetRoot, 'vendor/cubism-web/Shaders/WebGL/fragshadersrccopy.frag'), 'utf8'))
-      .toBe('seed-frag');
+    expect(fs.existsSync(shaderProbe(targetRoot, 'vendor/cubism-web/Shaders/WebGL/fragshadersrccopy.frag'))).toBe(false);
     expect(report).toEqual({ cubism2: true, cubism3Plus: true });
   });
 
@@ -106,6 +109,51 @@ describe('Live2D runtime seed upgrade safety', () => {
 
     expect(warnings.some((warning) => warning.includes('Cubism 2.1 runtime seed is missing'))).toBe(false);
     // The Cubism Web family is genuinely absent everywhere, so it still warns.
-    expect(warnings.some((warning) => warning.includes('Cubism Web runtime seed'))).toBe(true);
+    expect(warnings.some((warning) => warning.includes('Cubism 3/4/5 runtime seed'))).toBe(true);
+  });
+
+  it('inspectLive2DRuntimeStatus reports only runtimes available under the Electron runtime root', () => {
+    const sourceRoot = makeTempDir('aeon-live2d-dev-source-');
+    const targetRoot = makeTempDir('aeon-live2d-dev-target-');
+    const localDir = makeTempDir('aeon-live2d-dev-local-');
+
+    // Both missing from the directory served to the Electron renderer.
+    const status1 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status1.cubism2).toBe(false);
+    expect(status1.cubism3Plus).toBe(false);
+    expect(status1.missingAny).toBe(true);
+
+    // Staging files are not available until copied to the served runtime root.
+    writeSeedFile(localDir, 'live2d.min.js', 'local-c2');
+    const status2 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status2.cubism2).toBe(false);
+    expect(status2.cubism3Plus).toBe(false);
+    expect(status2.missingAny).toBe(true);
+
+    // Seed files alone are also not sufficient for the Electron protocol.
+    writeSeedFile(sourceRoot, 'live2dcubismcore.min.js', 'source-c3');
+    const status3 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status3.cubism2).toBe(false);
+    expect(status3.cubism3Plus).toBe(false);
+    expect(status3.missingAny).toBe(true);
+
+    writeSeedFile(targetRoot, 'live2d.min.js', 'target-c2');
+    writeSeedFile(targetRoot, 'live2dcubismcore.min.js', 'target-c3');
+    const status4 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status4.cubism2).toBe(true);
+    expect(status4.cubism3Plus).toBe(true);
+    expect(status4.missingAny).toBe(false);
+  });
+
+  it('syncLocalRuntimeToSeedRoot copies staged files from localDir to sourceRoot', () => {
+    const sourceRoot = makeTempDir('aeon-live2d-sync-source-');
+    const localDir = makeTempDir('aeon-live2d-sync-local-');
+    writeSeedFile(localDir, 'live2d.min.js', 'local-c2-content');
+    writeSeedFile(localDir, 'live2dcubismcore.min.js', 'local-c3-content');
+
+    syncLocalRuntimeToSeedRoot(localDir, sourceRoot);
+
+    expect(fs.readFileSync(path.join(sourceRoot, 'live2d.min.js'), 'utf8')).toBe('local-c2-content');
+    expect(fs.readFileSync(path.join(sourceRoot, 'live2dcubismcore.min.js'), 'utf8')).toBe('local-c3-content');
   });
 });

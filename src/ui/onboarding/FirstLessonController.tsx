@@ -9,7 +9,7 @@ import React, {
 import { createPortal } from 'react-dom';
 import type { IProjectOpenWorkflow } from '../../api/interfaces/IProjectOpenWorkflow';
 import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
-import { getOfficialCubismSdkStatus } from '../../engine/OfficialCubismWebSdk';
+import { getCubismPixiSdkStatus } from '../../engine/CubismPixiSdk';
 import {
   evaluateFirstLessonCompletion,
   FirstLessonProgressStore,
@@ -701,7 +701,7 @@ const hasTunedCameraFocusPart = (
 );
 
 const isRuntimeFamilyAvailable = (runtimeFamily: 'cubism2' | 'cubism3-plus') => (
-  runtimeFamily === 'cubism2' || getOfficialCubismSdkStatus().available
+  runtimeFamily === 'cubism2' || getCubismPixiSdkStatus().available
 );
 
 const LessonDialog: React.FC<{

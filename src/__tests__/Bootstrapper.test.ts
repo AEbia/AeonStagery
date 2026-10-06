@@ -4,6 +4,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { bootstrap, createAiProseConfigurationFromSettings, verifyProjectAgentTargetIdentity } from '../engine/Bootstrapper';
+import { subtitleRenderer } from '../engine/SubtitleRenderer';
+import { settingsManager } from '../ui/SettingsStore';
 import { AiProseGlobalConfiguration } from '../services/ai-authoring/AiProseGlobalConfiguration';
 import { AiProseDraftPersistence } from '../services/ai-authoring/AiProseDraftPersistence';
 import type { ProjectState } from '../api/types/project';
@@ -55,7 +57,7 @@ vi.mock('../ui/SettingsStore', () => ({
   settingsProjectWorkflowSettingsPort: { setAssetsPath: vi.fn() },
 }));
 vi.mock('../engine/SubtitleRenderer', () => ({
-  subtitleRenderer: { showDialogue: vi.fn(), hideDialogue: vi.fn(), getCurrentTimeline: vi.fn() },
+  subtitleRenderer: { showDialogue: vi.fn(), hideDialogue: vi.fn(), getCurrentTimeline: vi.fn(), forceUpdate: vi.fn() },
 }));
 vi.mock('gsap', () => ({
   default: { timeline: vi.fn().mockReturnValue({ to: vi.fn(), call: vi.fn(), seek: vi.fn(), time: vi.fn().mockReturnValue(0), duration: vi.fn().mockReturnValue(0), play: vi.fn(), pause: vi.fn(), kill: vi.fn(), getChildren: vi.fn().mockReturnValue([]), timeScale: vi.fn() }), to: vi.fn() },
@@ -63,10 +65,24 @@ vi.mock('gsap', () => ({
 }));
 
 function createScriptEngineMock() {
+  let playing = false;
+  const listeners = new Set<(playing: boolean) => void>();
   return {
-    play: vi.fn(), pause: vi.fn(), seek: vi.fn().mockResolvedValue(undefined),
+    play: vi.fn(() => {
+      playing = true;
+      listeners.forEach(listener => listener(playing));
+    }),
+    pause: vi.fn(() => {
+      playing = false;
+      listeners.forEach(listener => listener(playing));
+    }),
+    seek: vi.fn().mockResolvedValue(undefined),
     setLoopRegion: vi.fn(), setLoopEnabled: vi.fn(), setPlaybackSpeed: vi.fn(),
-    getCurrentTime: vi.fn().mockReturnValue(0), isPlaying: vi.fn().mockReturnValue(false),
+    getCurrentTime: vi.fn().mockReturnValue(0), isPlaying: vi.fn(() => playing),
+    onPlayingChange: vi.fn((callback: (playing: boolean) => void) => {
+      listeners.add(callback);
+      return () => { listeners.delete(callback); };
+    }),
     previewTransform: vi.fn(), getDuration: vi.fn().mockReturnValue(10),
     setSilentMode: vi.fn(), getBasePath: vi.fn().mockReturnValue('.'),
     getMasterTimeline: vi.fn().mockReturnValue(null),
@@ -94,6 +110,19 @@ function bootstrapCtxWithEngine() {
 }
 
 describe('Bootstrapper', () => {
+  it('refreshes the active dialogue when the font size setting changes', () => {
+    vi.mocked(settingsManager.subscribeKey).mockClear();
+    vi.mocked(subtitleRenderer.forceUpdate).mockClear();
+    const ctx = bootstrapCtx();
+    const fontSizeSubscription = vi.mocked(settingsManager.subscribeKey).mock.calls
+      .find(([key]) => key === 'dialogueFontSize');
+
+    expect(fontSizeSubscription).toBeDefined();
+    fontSizeSubscription?.[1]();
+    expect(subtitleRenderer.forceUpdate).toHaveBeenCalledOnce();
+    ctx.dispose();
+  });
+
   it('bootstrap() returns adapters, stores, and dispose', () => {
     const ctx = bootstrapCtx();
     expect(ctx).toBeDefined();
@@ -263,6 +292,28 @@ describe('Bootstrapper', () => {
     const { ctx, engine } = bootstrapCtxWithEngine();
     await ctx.adapters.playback.seek(2.5, false);
     expect(engine.seek).toHaveBeenCalledWith(2.5, false);
+  });
+
+  it('synchronizes playback state when the engine stops outside the adapter', () => {
+    const { ctx, engine } = bootstrapCtxWithEngine();
+    ctx.adapters.playback.play();
+    expect(ctx.stores.playback.playing).toBe(true);
+
+    engine.pause();
+
+    expect(ctx.stores.playback.playing).toBe(false);
+    ctx.dispose();
+  });
+
+  it('removes the engine playback subscription on dispose', () => {
+    const { ctx, engine } = bootstrapCtxWithEngine();
+    ctx.dispose();
+    const listener = vi.fn();
+    ctx.stores.playback.subscribe(listener);
+
+    engine.play();
+
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it('dispose() cleans up without throwing', () => {

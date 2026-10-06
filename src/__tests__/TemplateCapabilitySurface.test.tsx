@@ -37,7 +37,8 @@ describe('template settings panel capability surface', () => {
 
     // Finished capabilities stay reachable.
     expect(screen.getByRole('checkbox', { name: '启用模板 Demo' })).toBeTruthy();
-    expect(screen.getByText('默认对白样式')).toBeTruthy();
+    // Dialogue defaults have a dedicated settings category.
+    expect(screen.queryByText('默认对白样式')).toBeNull();
     expect(screen.getAllByText('初始角色').length).toBeGreaterThan(0);
     expect(screen.getByText('服装模型导入方式')).toBeTruthy();
 

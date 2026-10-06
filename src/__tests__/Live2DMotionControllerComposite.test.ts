@@ -872,14 +872,14 @@ describe('Live2DMotionController composite motion fallback', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       motionEpoch: 4,
       injectedParams: {},
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({ preloadMotion }),
     }) as any);
 
@@ -922,14 +922,14 @@ describe('Live2DMotionController composite motion fallback', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       motionEpoch: 1,
       injectedParams: {},
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({
         getAvailableMotions: () => ['next'],
         preloadMotion,
@@ -971,7 +971,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       motionEpoch: 8,
@@ -979,7 +979,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       injectedParams: {},
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
@@ -1055,7 +1055,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       model: oldModel,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       motionEpoch: 2,
@@ -1071,7 +1071,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       injectedParams: {},
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'official-cubism-web',
+      id: 'untitled-pixi-live2d-engine-cubism',
       getControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
@@ -1118,7 +1118,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       model,
       runtime: {
         runtimeFamily: 'cubism3-plus',
-        adapterId: 'official-cubism-web',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
         supported: true,
       },
       injectedParams: {},
@@ -1133,8 +1133,8 @@ describe('Live2DMotionController composite motion fallback', () => {
       motionStartTime: 3,
       lastOffset: 1,
     };
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(runtimeAdapter.officialCubismWebLive2DAdapter as any);
-    const officialControls = runtimeAdapter.officialCubismWebLive2DAdapter.getControls();
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(runtimeAdapter.cubismPixiLive2DAdapter as any);
+    const officialControls = runtimeAdapter.cubismPixiLive2DAdapter.getControls();
     const clearMotionState = vi.spyOn(officialControls, 'clearMotionState');
     const applySnapshot = vi.spyOn(officialControls, 'applySnapshot');
 

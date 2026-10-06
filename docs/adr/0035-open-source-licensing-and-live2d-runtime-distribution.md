@@ -10,12 +10,14 @@ AeonStagery 以 Apache-2.0 开源发布。这带来两个此前没有约束的�
 
 ### 1. 仓库不提交任何 Live2D 运行时
 
-`live2d.min.js`（Cubism 2.1 core）、`live2dcubismcore.min.js`（Cubism Core for Web）、官方 Cubism Web Framework 源码与其 Shader 全部为 Live2D 自有许可（非 OSI），一律不入库。仓库只保留 MIT 的适配层（`untitled-pixi-live2d-engine` 的 `cubism-legacy`），它在运行期需要用户提供的 core 才能工作。
+`live2d.min.js`（Cubism 2.1 core）、`live2dcubismcore.min.js`（Cubism Core for Web）、官方 Cubism Web Framework 源码与其 Shader 全部为 Live2D 自有许可（非 OSI），一律不入库。仓库只保留 MIT 的适配层（`untitled-pixi-live2d-engine` 的 `cubism-legacy` 与 `cubism` 入口），它在运行期需要用户提供的 core 才能工作。
 
 运行时来源只能是本机路径：
 
 - `LIVE2D_CUBISM2_CORE`：`live2d.min.js` 文件或所在目录；兜底 `.local/live2d/live2d.min.js`；
-- `CUBISM_WEB_SDK_DIR`：Cubism SDK for Web 检出目录；兜底 `.local/cubism-web-sdk`。
+- `LIVE2D_CUBISM_CORE`：`live2dcubismcore.min.js` 文件或所在目录；兜底 `.local/live2d/live2dcubismcore.min.js`；旧 `CUBISM_WEB_SDK_DIR/Core/live2dcubismcore.min.js` 与 `.local/cubism-web-sdk/Core/live2dcubismcore.min.js` 保留为 Core-only 兼容来源。
+
+2026-10-05 调整：3/4/5 使用 npm 引擎的 `cubism` 入口，Framework 与 Shader 随该入口打包，保留相应 Live2D 许可声明；不再从本机 SDK 复制 Framework、类型或 Shader。禁止提交或在默认发布包中携带用户提供的 Core 脚本仍然成立。
 
 `scripts/check-repo-hygiene.mjs` 作为 gate 接入 `npm run check`：按文件名、路径与已知专有 blob 的 SHA256 阻止重新入库。
 
@@ -25,8 +27,8 @@ AeonStagery 以 Apache-2.0 开源发布。这带来两个此前没有约束的�
 
 | 模式 | 用途 | 行为 |
 | --- | --- | --- |
-| `auto` | dev / test / install | 有什么 stage 什么，缺失的族写 fallback stub，永不失败 |
-| `none` | 对外发布 | 清除所有 staged 运行时，**忽略环境变量**，`@cubism/*` 指向 fallback stub |
+| `auto` | dev / test / install | 有什么 Core stage 什么，不生成 SDK stub，缺失不失败 |
+| `none` | 对外发布 | 清除 staged Core 与旧 generated SDK / Shader，**忽略环境变量** |
 | `verify` | 内部验证 | 两个运行时族都必需，缺失即失败 |
 
 每次运行写 `.generated/live2d-runtime-manifest.json`：模式、来源、每个 staged 文件的 SHA256、来源指纹。重复运行以指纹+哈希判断是否已最新，可直接跳过。`postinstall` / `pretest` / `precheck` / `predev` / `prebuild` 都走 `auto`，因此干净克隆即使没有任何 SDK 也能通过 `tsc`、`vitest` 与 `vite build`。
@@ -36,17 +38,17 @@ AeonStagery 以 Apache-2.0 开源发布。这带来两个此前没有约束的�
 `scripts/package.mjs <none|verify>` 是唯一打包入口：staging → build → 源码/产物 gate → electron-builder → 安装包 gate。
 
 - `none`（默认，可对外发布）：`package.json#build` 配置，无 `live2d-runtime` extraResources，`dist` 中也不保留运行时脚本副本（运行期只从 `aeon-runtime://` 读 userData）。
-- `verify`（仅内部验证）：`electron-builder.verify.config.cjs` 追加 `live2d-runtime/**` extraResources，产物文件名带 `-verify`，输出目录固定为 `release/verify`。该产物**禁止公开分发**，因为它内含 Live2D Framework 源码。它与发布包一样沿用 `package.json#build` 的 generic `publish` 源（不再置 `publish: null`），electron-builder 因此照常生成 `resources/app-update.yml`：内部验证机装完即可走同一条 `beta` 更新通道。这并不构成发布——generic provider 下 electron-builder 从不上传，`scripts/package.mjs` 也始终传 `--publish never`。
+- `verify`（仅内部验证）：`electron-builder.verify.config.cjs` 追加 `live2d-runtime/**` extraResources，产物文件名带 `-verify`，输出目录固定为 `release/verify`。该产物**禁止公开分发**，因为它携带用户提供的 Live2D Core 脚本。它与发布包一样沿用 `package.json#build` 的 generic `publish` 源（不再置 `publish: null`），electron-builder 因此照常生成 `resources/app-update.yml`：内部验证机装完即可走同一条 `beta` 更新通道。这并不构成发布——generic provider 下 electron-builder 从不上传，`scripts/package.mjs` 也始终传 `--publish never`。
 
 两种模式使用相同 `appId` 与 `productName`：userData（含已装运行时）必须在两种模式间解析到同一目录，这样"安装新版本不删除已有运行时"才可被直接实测。发布包文件名由 `build.artifactName` 显式固定为 `${productName}-Setup-${version}.${ext}`：electron-builder 在 `latest.yml` 中写的是 URL 安全名（空格替换为 `-`），若不显式命名，磁盘文件名与元数据 url 不一致，`APP_UPDATE_URL` 上的自动更新会 404。验证包在同名规则上追加 `-verify`，并输出到独立的 `release/verify` 目录，因此它为自己生成的 `beta.yml` 永远不会覆盖 `release/beta.yml`，两者永不重名、也不会互相污染更新清单。
 
-`scripts/verify-live2d-runtime.mjs` 断言 staged 源与 `dist` bundle（fallback stub 标记必须出现、framework 标记必须不出现），`scripts/verify-package-contents.mjs` 断言最终 `resources/`、`app.asar` 条目表与其中的渲染器代码。
+`scripts/verify-live2d-runtime.mjs` 断言 staged 源与 `dist` bundle（默认发布模式无外部 Core / Shader 文件，验证模式逐文件核对 Core SHA256；npm 引擎内置 Framework / Shader 允许打包），`scripts/verify-package-contents.mjs` 断言最终 `resources/`、`app.asar` 条目表与其中的渲染器代码。
 
 ### 4. 更新不得删除已有运行时
 
 `userData/live2d-runtime/` 是用户资产，seeding 只增不删：
 
-- `ensureLive2DRuntimeFiles` 只复制缺失文件，绝不覆盖、绝不删除（含 Shader 目录的逐文件合并）；
+- `ensureLive2DRuntimeFiles` 只复制缺失文件，绝不覆盖、绝不删除（旧版用户 Shader 保留，但不再复制新的 Shader）；
 - 打包后不含运行时的版本启动时同样不会删除已有运行时；
 - NSIS 显式 `deleteAppDataOnUninstall: false`；
 - `live2d-runtime` 目录名、`aeon-runtime://` scheme 与 `build.productName` 一旦发布不得改名——改名等于让老用户的运行时"消失"；
@@ -64,7 +66,7 @@ AeonStagery 以 Apache-2.0 开源发布。这带来两个此前没有约束的�
 ## Consequences
 
 - 干净克隆下真实内核用例（Cubism 2.1 / 真实 Framework 特征化测试）会 skip：这是有意的，skip 而非 fail。
-- 发布物中不出现任何 Live2D 运行时；用户在 `userData/live2d-runtime/` 放置运行时后，Cubism 2.1 与 3/4/5 模型均可用。
+- 默认发布物中不出现用户提供的 Live2D Core 脚本；用户在 `userData/live2d-runtime/` 放置运行时后，Cubism 2.1 与 3/4/5 模型均可用。
 - 验证包与发布包共用产品身份，因此两者可互相覆盖安装且共享 userData；验证包靠 `-verify` 文件名与独立的 `release/verify` 输出目录区分。
 - 验证包与发布包解析同一条 `beta` 更新通道，内部验证机可实测真实更新路径。验证包被更新时拉到的自然是 `none` 发布包，已装运行时不受影响：runtime 的权威副本在 `userData/live2d-runtime/`，seeding 只增不删，且 NSIS 更新（`--updated`）不会删除 AppData。
 - 修改分发方式（自动下载运行时、把运行时放进安装目录、改名目录/scheme）必须先有新的 ADR。

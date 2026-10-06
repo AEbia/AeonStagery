@@ -132,6 +132,7 @@ export interface AeonStageryElectronAPI {
     getUserDataPath(): Promise<string>;
     getDefaultProjectsPath(): Promise<string>;
     restart(): Promise<{ success: boolean }>;
+    openExternal?(url: string): Promise<{ success: boolean }>;
   };
   aiProse: {
     complete(request: AiProseLlmRequest): Promise<AiProseLlmResponse>;
@@ -229,7 +230,7 @@ export interface AeonStageryElectronAPI {
     save(kind: 'experimental-features' | 'first-lesson', value: unknown): Promise<{ success: boolean; error?: string }>;
   };
   collaborationServer: {
-    start(options: { projectId: string; host?: string; port?: number }): Promise<{
+    start(options: { projectId: string; host?: string; port?: number; password?: string }): Promise<{
       success: boolean;
       reused?: boolean;
       status?: {
@@ -239,6 +240,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       };
@@ -254,6 +258,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       } | null;
@@ -319,6 +326,9 @@ export interface AeonStageryElectronAPI {
   live2dRuntime?: {
     /** Main-process view of which runtime families were seeded into userData. */
     getAvailability(): Promise<{ cubism2: boolean; cubism3Plus: boolean } | null>;
+    getStatus?(): Promise<import('./live2dRuntime').Live2DRuntimeStatusReport | null>;
+    refreshStatus?(): Promise<import('./live2dRuntime').Live2DRuntimeStatusReport | null>;
+    openDirectory?(type?: 'local' | 'runtime'): Promise<{ success: boolean; path?: string }>;
   };
   workspaceTools?: {
     open(): Promise<{ success: boolean }>;

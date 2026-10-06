@@ -4,6 +4,8 @@ import type { IPlaybackAdapter } from '../../api/interfaces';
 interface PlaybackEngine {
   play(): void;
   pause(): void;
+  isPlaying(): boolean;
+  onPlayingChange(callback: (playing: boolean) => void): () => void;
   seek(time: number, forceReconstruct?: boolean): Promise<void>;
   setLoop(start: number, end: number): void;
   setLoopEnabled(v: boolean): void;
@@ -29,19 +31,18 @@ export class PlaybackAdapter implements IPlaybackAdapter {
   constructor(store: PlaybackStore, engine: PlaybackEngine) {
     this.store = store;
     this.engine = engine;
+    this.unsubscribes.push(engine.onPlayingChange(playing => this.syncPlayingState(playing)));
+    this.syncPlayingState(engine.isPlaying());
   }
 
   play(): void {
-    this.store._setPlaying(true);
     this.engine.play();
-    this.startTimeSync();
+    this.syncPlayingState(this.engine.isPlaying());
   }
 
   pause(): void {
-    this.store._setPlaying(false);
     this.engine.pause();
-    this.stopTimeSync();
-    this.dispatchTimeUpdate(this.engine.getCurrentTime());
+    this.syncPlayingState(this.engine.isPlaying());
   }
 
   async seek(time: number, forceReconstruct?: boolean): Promise<void> {
@@ -110,6 +111,18 @@ export class PlaybackAdapter implements IPlaybackAdapter {
       unsub();
     }
     this.unsubscribes = [];
+  }
+
+  private syncPlayingState(playing: boolean): void {
+    this.store._setPlaying(playing);
+    if (playing) {
+      if (!this._timeSyncActive) {
+        this.startTimeSync();
+      }
+    } else {
+      this.stopTimeSync();
+      this.dispatchTimeUpdate(this.engine.getCurrentTime());
+    }
   }
 
   private startTimeSync(): void {

@@ -1,27 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@cubism/model/cubismusermodel', () => ({
-  CubismUserModel: class {
-    release(): void {}
-  },
-}));
-vi.mock('@cubism/cubismmodelsettingjson', () => ({
-  CubismModelSettingJson: class {
-    getModelFileName(): string { return 'model.moc3'; }
-    getLayoutMap(): boolean { return false; }
-  },
-}));
-vi.mock('@cubism/math/cubismmatrix44', () => ({
-  CubismMatrix44: class {
-    loadIdentity(): void {}
-    multiplyByMatrix(): void {}
-  },
-}));
-
 import { applyBehaviorFixes, applyParameterOverride } from '../engine/Live2DModelSetup';
 import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
 import { computeSceneStateAtTime } from '../engine/RuntimeSceneState';
-import { OfficialCubismUserModel } from '../engine/OfficialCubismWebModel';
+import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
 import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
 
@@ -120,8 +102,9 @@ describe('Blink diagnostics and regression', () => {
 
       expect(char?.blink).toBeNull();
 
-      const officialModel = new OfficialCubismUserModel() as any;
-      expect(officialModel.blinkControl.enabled).toBe(false);
+      const { model, drawn } = createCubismModelFixture();
+      model.update(800);
+      expect(drawn()[0]).toBe(1);
     });
 
     it('activates and deactivates blinking strictly according to authored blink statements', () => {
@@ -160,24 +143,12 @@ describe('Blink diagnostics and regression', () => {
       expect(afterBlink?.blink).toEqual({ enabled: false, intervalMs: 4000, startTime: 3.0 });
     });
 
-    it('OfficialCubismUserModel falls back to discover ParamEyeLOpen when model setting has no EyeBlink group', () => {
-      const model = new OfficialCubismUserModel() as any;
-      const coreModel = {
-        getParameterCount: () => 2,
-        getParameterId: (i: number) => (i === 0 ? 'ParamEyeLOpen' : 'ParamEyeROpen'),
-      };
-      model.getModel = () => coreModel;
-
-      const dummySetting = {
-        getEyeBlinkParameterCount: () => 0,
-        getEyeBlinkParameterId: () => null,
-        getLipSyncParameterCount: () => 0,
-        getLipSyncParameterId: () => null,
-      };
-
-      model.collectEffectIds(dummySetting);
-
-      expect(model.eyeBlinkParameterIds).toEqual(['ParamEyeLOpen', 'ParamEyeROpen']);
+    it('discovers blink parameters without an EyeBlink group in model settings', () => {
+      const { model, drawn } = createCubismModelFixture();
+      model.setBlink(true, 1000, 0.8, 0);
+      model.update(0);
+      expect(drawn()[0]).toBeCloseTo(0);
+      expect(drawn()[1]).toBeCloseTo(0);
     });
   });
 

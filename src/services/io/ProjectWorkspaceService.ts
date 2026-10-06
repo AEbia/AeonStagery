@@ -258,9 +258,25 @@ export class ProjectWorkspaceService {
 
   async openProjectAt(projectPathOrRoot: string): Promise<ProjectResult> {
     try {
-      const project = await this.projectResources.loadProject(projectPathOrRoot);
+      let project = await this.projectResources.loadProject(projectPathOrRoot);
       this.session.setCurrentProject(project);
       this.setProjectRoot(project.rootPath);
+
+      // Older projects can persist the selected style id without its renderer
+      // snapshot. Restore it before authoring reads the project defaults.
+      const templates = project.metadata.templates;
+      if (templates) {
+        const view = createTemplatePackageView(this.getTemplatePackages(), { enabledTemplateIds: templates.enabledTemplateIds });
+        const styleId = templates.defaults?.dialogueStyleId ?? view.defaults.dialogueStyleId;
+        const style = view.dialogueStyles.find((candidate) => candidate.id === styleId);
+        const needsSnapshot = style?.renderer === 'image-dialogue-v1'
+          ? !templates.dialoguePresentation || templates.dialoguePresentation.styleId !== styleId
+          : style && (templates.dialoguePresentation || templates.dialogueTemplate !== style.renderer);
+        if (needsSnapshot) {
+          project = { ...project, metadata: { ...project.metadata, templates: await this.materializeDialoguePresentation(templates) } };
+          this.session.setCurrentProject(project);
+        }
+      }
 
       const sceneEntry = project.metadata.scenes.find((scene) => scene.id === project.metadata.defaultSceneId)
         ?? project.metadata.scenes[0];

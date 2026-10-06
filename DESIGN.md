@@ -24,17 +24,6 @@ colors:
   warm-coral: "#d88c7a"
   cool-stage-slate: "#8fa7c7"
   warm-coral-hover: "#efac98"
-  pink-brown-canvas: "#f6ece6"
-  pink-brown-secondary-surface: "rgba(255, 250, 247, 0.88)"
-  pink-brown-tertiary: "#efe1da"
-  pink-brown-surface: "rgba(255, 252, 249, 0.94)"
-  pink-brown-elevated: "#fff7f2"
-  pink-brown-text: "#3f2d29"
-  pink-brown-text-secondary: "#7b625a"
-  pink-brown-text-muted: "#a5867a"
-  powdered-rosewood: "#cea493"
-  blush-light: "#ffdade"
-  powdered-rosewood-hover: "#b88d7d"
   on-accent: "#ffffff"
   semantic-success: "#34d399"
   semantic-warning: "#f59e0b"
@@ -120,12 +109,6 @@ components:
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "6px 14px"
-  button-primary-pink-brown:
-    backgroundColor: "{colors.powdered-rosewood}"
-    textColor: "{colors.on-accent}"
-    typography: "{typography.body}"
-    rounded: "{rounded.md}"
-    padding: "6px 14px"
   button-icon:
     backgroundColor: "transparent"
     textColor: "{colors.light-text-muted}"
@@ -172,7 +155,7 @@ components:
 
 AeonStagery 的界面像一张为个人创作者准备的电影制作控制台：舞台是视觉中心，时间轴、检查器、播放控制与状态反馈围绕它形成稳定的工作场景。界面保持专业工具应有的信息密度，但不追求冰冷的工程感；柔和表面、温暖主题色和短促反馈让长时间创作更专注。
 
-这套系统以“温暖、专注、创作者友好”为整体语气。组件紧凑、清晰并略带触感，依靠色调分层、细边框、轻微位移和有限阴影表达状态。Light、Dark 与粉棕 Pink 是平等主题，共享同一套语义角色和交互结构，而不是三套互不相干的视觉身份。
+这套系统以“温暖、专注、创作者友好”为整体语气。组件紧凑、清晰并略带触感，依靠色调分层、细边框、轻微位移和有限阴影表达状态。Light 与 Dark 是平等主题，共享同一套语义角色和交互结构，而不是两套互不相干的视觉身份。
 
 **Key Characteristics:**
 
@@ -184,19 +167,17 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 
 ## Colors
 
-三套主题保持相同的背景、表面、文字与强调色角色：Light 使用冷静靛蓝，Dark 使用暖光珊瑚，Pink 使用低饱和粉棕木色；Pink 不应被解释为糖果粉或高甜度少女色。
+两套主题保持相同的背景、表面、文字与强调色角色：Light 使用冷静靛蓝，Dark 使用暖光珊瑚。
 
 ### Primary
 
 - **导演靛蓝** (`director-indigo`): Light 主题的主操作、焦点和选中状态，清晰但不铺满界面。
 - **暖光珊瑚** (`warm-coral`): Dark 主题的主操作与焦点，给深色工作台加入温度。
-- **粉棕木色** (`powdered-rosewood`): Pink 主题的主操作与强调，保持粉棕、陶土与木质之间的克制感。
 
 ### Secondary
 
 - **协作靛蓝** (`partner-indigo`): Light 主题的次强调、渐变和并列操作。
 - **冷场灰蓝** (`cool-stage-slate`): Dark 主题的次强调，与暖珊瑚形成冷暖分工。
-- **浅腮红** (`blush-light`): Pink 主题的柔和次强调，只作为粉棕体系中的亮部，不主导大面积表面。
 
 ### Tertiary
 
@@ -207,12 +188,11 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 
 - **Light 冷白工作台** (`light-canvas`, `light-secondary-surface`, `light-tertiary`, `light-surface`, `light-elevated`): 以轻微冷灰差异区分画布、半透明固定栏、三级背景、表面和抬升层。
 - **Dark 深墨工作台** (`dark-canvas`, `dark-secondary-surface`, `dark-tertiary`, `dark-surface`, `dark-elevated`): 以蓝紫倾向的近黑层次托住暖色强调。
-- **Pink 粉棕纸面** (`pink-brown-canvas`, `pink-brown-secondary-surface`, `pink-brown-tertiary`, `pink-brown-surface`, `pink-brown-elevated`): 以米白、粉棕和浅陶色形成温暖但不甜腻的工作背景。
-- **主题文字对** (`light-text`, `dark-text`, `pink-brown-text`): 保持主要信息高对比；Muted 令牌只用于辅助信息、元数据和未激活状态。
+- **主题文字对** (`light-text`, `dark-text`): 保持主要信息高对比；Muted 令牌只用于辅助信息、元数据和未激活状态。
 
 ### Named Rules
 
-**The Three Theme Rule.** Light、Dark 与 Pink 共享相同语义层级；新增组件必须通过现有 CSS 变量适配三套主题，不能把某套主题的字面颜色写死为系统默认。
+**The Dual Theme Rule.** Light 与 Dark 共享相同语义层级；新增组件必须通过现有 CSS 变量适配两套主题，不能把某套主题的字面颜色写死为系统默认。
 
 **The Semantic Rail Rule.** 轨道类别色用于定位和分组，优先出现在窄边、标记与小面积块色中；不要把整块工作区染成类别色。
 
@@ -353,7 +333,7 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 ### Do:
 
-- **Do** 通过 `--bg-*`、`--text-*`、`--accent-*`、`--border-*` 和 `--shadow-*` 变量实现所有三套主题。
+- **Do** 通过 `--bg-*`、`--text-*`、`--accent-*`、`--border-*` 和 `--shadow-*` 变量实现 Light 与 Dark 两套主题。
 - **Do** 保持舞台、检查器和时间轴之间清晰、可调整的工作区关系。
 - **Do** 将轨道类别色限制在左边轨、标记、小面积块色和相关反馈中。
 - **Do** 为时间码、坐标、路径和连续变化数值使用等宽字体或表格数字。
@@ -361,7 +341,6 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 ### Don't:
 
-- **Don't** 把 Pink 主题做成高饱和糖果粉；它的核心是低饱和粉棕、米白和浅陶色。
 - **Don't** 用大面积主题色、辉光或类别色淹没黑色舞台和中性工作表面。
 - **Don't** 把所有容器做成悬浮卡片或胶囊；页面区段与固定工作面板保持结构化、低装饰。
 - **Don't** 用装饰性动效干扰拖动、播放、定位和连续编辑；所有动效都必须支持 reduced-motion 与低性能降级。

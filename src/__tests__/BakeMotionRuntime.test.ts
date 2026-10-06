@@ -226,11 +226,11 @@ describe('BakeMotionRuntime.applyIntent', () => {
     const { cache } = makeCache();
     const model = { startMotion: vi.fn(async () => true) };
     const host = makeHost({
-      getModel: () => ({ model, runtimeFamily: 'cubism3-plus', adapterId: 'official-cubism-web' }),
+      getModel: () => ({ model, runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism' }),
     });
     const runtime = new BakeMotionRuntime(host, cache as any);
     await runtime.prepare([{
-      charId: 'soyo', adapterId: 'official-cubism-web',
+      charId: 'soyo', adapterId: 'untitled-pixi-live2d-engine-cubism',
       modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad',
     }]);
 

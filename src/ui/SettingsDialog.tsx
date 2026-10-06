@@ -9,6 +9,7 @@ import {
   IconVolume2,
   IconCheck,
   IconRefresh,
+  IconDialogue,
 } from './icons';
 import { InfoTip } from './Tooltip';
 import {
@@ -17,6 +18,7 @@ import {
   settingsManager,
   DEFAULT_SETTINGS,
   DIALOGUE_TEXT_SPEED_SECONDS_RANGE,
+  DIALOGUE_FONT_SIZE_RANGE,
   DEFAULT_DIALOGUE_DURATION_SECONDS_RANGE,
 } from './SettingsStore';
 import { ShortcutSettingsPanel } from './shortcuts/ShortcutSettingsPanel';
@@ -44,6 +46,7 @@ import type {
 import { SETTINGS_CATEGORIES, findSettingsCategories, type SettingsDialogTab } from './settingsNavigation';
 import { formatAeonStageryVersionLabel } from '../services/product/ProductInfo';
 import './settingsNavigation.css';
+import { DialogueDefaultsSettings } from './settings/DialogueDefaultsSettings';
 import { getAiProseProviderIdentity } from '../services/ai-authoring/AiProseGlobalConfiguration';
 
 interface SettingsDialogProps {
@@ -292,7 +295,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
 
   const tabs = findSettingsCategories(searchQuery);
   const activeCategory = SETTINGS_CATEGORIES.find(category => category.id === activeTab)!;
-  const categoryIcons = { settings: IconSettings, activity: IconActivity, sparkles: IconSparkles, volume: IconVolume2, folder: IconFolder, info: IconInfo };
+  const categoryIcons = { settings: IconSettings, activity: IconActivity, sparkles: IconSparkles, volume: IconVolume2, folder: IconFolder, info: IconInfo, dialogue: IconDialogue };
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     const matches = findSettingsCategories(query);
@@ -430,6 +433,11 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   control={<Toggle label="低性能模式" active={settings.lowPerformance} onChange={(value) => setSetting('lowPerformance', value)} />}
                 />
                 <SettingItem
+                  title="Live2D 运行时启动提醒"
+                  description="缺少 Live2D 核心文件时，在启动时显示配置引导；关闭引导中的“不再提醒”后，可在这里重新开启。"
+                  control={<Toggle label="启动时提醒" active={settings.showLive2DRuntimeSetupOnStartup} onChange={(value) => setSetting('showLive2DRuntimeSetupOnStartup', value)} />}
+                />
+                <SettingItem
                   title="工作区布局"
                   description="轨道编辑优先模式下底部轨道获得完整宽度；剧本动作优先模式下右侧动作检查器具有纵向优先高度。"
                   control={(
@@ -488,22 +496,41 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                     description="控制工作区整体混音输出音量，影响预览与实时播放监听。"
                     control={<Slider label="主音量" min={0} max={1} step={0.01} value={settings.masterVolume} onChange={(value: number) => setSetting('masterVolume', value)} percent />}
                   />
-                  <SettingItem
-                    title="对白音量"
-                    description="控制角色配音轨道的监听音量。"
-                    control={<Slider label="对白音量" min={0} max={1} step={0.01} value={settings.voiceVolume} onChange={(value: number) => setSetting('voiceVolume', value)} percent />}
-                  />
+
                   <SettingItem
                     title="背景音乐"
                     description="控制 BGM 与环境声轨道的监听音量。"
                     control={<Slider label="背景音乐" min={0} max={1} step={0.01} value={settings.bgmVolume} onChange={(value: number) => setSetting('bgmVolume', value)} percent />}
                   />
                 </Section>
-
-                <Section title="对白">
+              </div>
+            )}
+            {activeTab === 'dialogue' && (
+              <div className="settings-dialog__stack settings-dialog__stack--loose">
+                <Section title="默认对白样式">
+                  <DialogueDefaultsSettings />
+                </Section>
+                <Section title="对白监听">
+                  <SettingItem
+                    title="对白音量"
+                    description="控制角色配音轨道的监听音量。"
+                    control={<Slider label="对白音量" min={0} max={1} step={0.01} value={settings.voiceVolume} onChange={(value: number) => setSetting('voiceVolume', value)} percent />}
+                  />
+                </Section>
+                <Section title="文字与动画">
+                  <SettingItem
+                    title="对白字体大小"
+                    description="仅调整舞台对白正文的字号（像素），说话人字号保持各样式的设定。正文按文本框可用宽度自动换行，行距随字号调整。"
+                    control={<Slider label="对白字体大小" min={DIALOGUE_FONT_SIZE_RANGE.min} max={DIALOGUE_FONT_SIZE_RANGE.max} step={DIALOGUE_FONT_SIZE_RANGE.step} value={settings.dialogueFontSize} onChange={(value) => setSetting('dialogueFontSize', value)} suffix=" 像素" />}
+                  />
+                  <SettingItem
+                    title="文本框入场动画"
+                    description="控制文本框的淡入与上滑效果；文字仍按所选字幕样式展现。所有对白共用此开关。"
+                    control={<Toggle label="文本框入场动画" active={settings.dialogueEntranceAnimation} onChange={(value) => setSetting('dialogueEntranceAnimation', value)} />}
+                  />
                   <SettingItem
                     title="对白文本速度"
-                    description="控制未包含配音时对白文字以打字机效果逐字展现的时间（秒/字）。数值越小打字速度越快。"
+                    description="控制打字机字幕逐字展现的时间（秒/字）。数值越小打字速度越快。"
                     control={(
                       <Slider
                         label="对白文本速度"
@@ -532,7 +559,6 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                     )}
                   />
                 </Section>
-
               </div>
             )}
             {activeTab === 'voice' && (

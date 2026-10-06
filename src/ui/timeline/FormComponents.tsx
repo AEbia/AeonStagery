@@ -215,6 +215,8 @@ export interface InlineNumericInputProps {
   step?: string;
   min?: string;
   max?: string;
+  /** Default X/Y bounds to [0, 1] when min/max are omitted. */
+  inferNormalizedBounds?: boolean;
   popoverMin?: string;
   popoverMax?: string;
   style?: React.CSSProperties;
@@ -238,13 +240,13 @@ function getTickInterval(span: number): number {
   return nice * magnitude;
 }
 
-export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", min, max, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
+export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
   const safeValue = value ?? 0;
   const [localValue, setLocalValue] = useState(safeValue.toString());
   const [isEditing, setIsEditing] = useState(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
 
-  const isNormalizedAxis = dragLabel === 'X' || dragLabel === 'Y';
+  const isNormalizedAxis = inferNormalizedBounds && (dragLabel === 'X' || dragLabel === 'Y');
   const resolvedMin = min ?? (isNormalizedAxis ? '0' : undefined);
   const resolvedMax = max ?? (isNormalizedAxis ? '1' : undefined);
 
@@ -1505,24 +1507,24 @@ export const TransitionSelect = React.memo(({ value, onChange }: { value: string
 ));
 
 const DIALOGUE_STYLE_OPTIONS = [
-  { value: 'typewriter', label: '打字机 (Typewriter)' },
-  { value: 'fadeIn', label: '淡入 (Fade In)' },
-  { value: 'cinematic', label: '电影式 (Cinematic)' },
-  { value: 'instant', label: '即时 (Instant)' }
+  { value: 'typewriter', label: '打字机' },
+  { value: 'fadeIn', label: '淡入' },
+  { value: 'cinematic', label: '电影式' },
+  { value: 'instant', label: '即时' }
 ];
 
 export const DialogueStyleSelect = React.memo(({ value, onChange }: { value: string; onChange: (val: string) => void }) => (
-  <SelectInput label="字幕样式 (Style)" value={value} onChange={onChange} options={DIALOGUE_STYLE_OPTIONS} />
+  <SelectInput label="字幕样式" value={value} onChange={onChange} options={DIALOGUE_STYLE_OPTIONS} />
 ));
 
 const LIPSYNC_OPTIONS = [
-  { value: 'text', label: '文本驱动 (Text)' },
-  { value: 'audio', label: '音频驱动 (Audio)' },
-  { value: 'none', label: '无 (None)' }
+  { value: 'text', label: '文本驱动' },
+  { value: 'audio', label: '音频驱动' },
+  { value: 'none', label: '无' }
 ];
 
 export const LipSyncSelect = React.memo(({ value, onChange }: { value: string; onChange: (val: string) => void }) => (
-  <SelectInput label="口型同步 (Lip Sync)" value={value} onChange={onChange} options={LIPSYNC_OPTIONS} />
+  <SelectInput label="口型同步" value={value} onChange={onChange} options={LIPSYNC_OPTIONS} />
 ));
 
 const EXIT_ANIM_OPTIONS = [
@@ -1542,7 +1544,7 @@ export const ExitAnimationSelect = React.memo(({ value, onChange }: { value: str
 
 const ENTER_ANIM_OPTIONS = [
   { value: 'none', label: '无 (立即出现)' },
-  { value: 'fadeIn', label: '淡入 (Fade In)' },
+  { value: 'fadeIn', label: '淡入' },
   { value: 'slideFromLeft', label: '左滑入 (Slide Left)' },
   { value: 'slideFromRight', label: '右滑入 (Slide Right)' },
   { value: 'slideFromBottom', label: '底部滑入 (Slide Bottom)' },
@@ -1555,19 +1557,19 @@ export const EnterAnimationSelect = React.memo(({ value, onChange }: { value: st
 ));
 
 const DIALOGUE_POS_OPTIONS = [
-  { value: 'bottom', label: '底部 (Bottom)' },
-  { value: 'top', label: '顶部 (Top)' },
-  { value: 'center', label: '中间 (Center)' }
+  { value: 'bottom', label: '底部' },
+  { value: 'top', label: '顶部' },
+  { value: 'center', label: '中间' }
 ];
 
 export const DialoguePositionSelect = React.memo(({ value, onChange }: { value: string; onChange: (val: string) => void }) => (
-  <SelectInput label="字幕位置 (Position)" value={value} onChange={onChange} options={DIALOGUE_POS_OPTIONS} />
+  <SelectInput label="字幕位置" value={value} onChange={onChange} options={DIALOGUE_POS_OPTIONS} />
 ));
 
 const DIALOGUE_TEMPLATE_OPTIONS = [
-  { value: 'glass', label: '玻璃 (Premium Glass)' },
-  { value: 'minimal', label: '极简 (Minimalist)' },
-  { value: 'classic', label: '经典 (Classic VN)' }
+  { value: 'glass', label: '玻璃' },
+  { value: 'minimal', label: '极简' },
+  { value: 'classic', label: '经典' }
 ];
 
 export const DialogueTemplateSelect = React.memo(({

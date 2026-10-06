@@ -10,7 +10,7 @@ import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
  * ADR-0029 stage separation：口型在独立效果通道运行，自定义 Motion 只在
  * Motion 求值阶段工作；嘴巴参数的胜负由通道所有权决定，而不是执行时序。
  * 本文件在 Live2DManager.updateAll 层面组合整条管线，验证：
- *   A. legacy 路径（无 emitter seam 的 runtime，如 official-cubism-web）——
+ *   A. legacy 路径（无 emitter seam 的 runtime，如 untitled-pixi-live2d-engine-cubism）——
  *      口型活动期间 Motion 的嘴巴轨道被跳过，口型值存活；
  *   B. legacy 路径——口型结束后 Motion 重新接管嘴巴（stage handoff）；
  *   C. Motion 舞台路径——安装阶段口型已在活动，舞台不写嘴巴；

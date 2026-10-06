@@ -205,9 +205,9 @@ describe('SettingsDialog GPT-SoVITS settings', () => {
     expect(probeCapabilities).toHaveBeenCalledOnce();
   });
 
-  it('shows and persists dialogue timing controls from the audio tab', async () => {
+  it('shows and persists dialogue timing controls from the dialogue tab', async () => {
     renderSettingsDialog();
-    fireEvent.click(screen.getByRole('tab', { name: '音频与对白' }));
+    fireEvent.click(screen.getByRole('tab', { name: '对白' }));
 
     const speedSlider = screen.getByRole('slider', { name: '对白文本速度' }) as HTMLInputElement;
     const durationSlider = screen.getByRole('slider', { name: '默认对白时长' }) as HTMLInputElement;

@@ -3,7 +3,7 @@
  *
  * Optimized for high performance:
  * 1. TextMetrics caching to reduce CPU load.
- * 2. Mask-based reveal for typewriter effect (zero texture uploads during animation).
+ * 2. Mask-based reveal for built-in boxes; fixed-line text reveal for image boxes.
  * 3. Pluggable Template system.
  */
 
@@ -19,15 +19,6 @@ import type { PreparedAssetRef, PreparedCompiledScene, PreparedRuntimeValue } fr
 const STAGE_WIDTH = 1920;
 const STAGE_HEIGHT = 1080;
 
-// ── Patch PIXI to support Zero-Width Space for CJK wrapping ──
-const _TextMetrics = PIXI.CanvasTextMetrics as any;
-if (_TextMetrics && _TextMetrics.isBreakingSpace) {
-  const originalIsBreakingSpace = _TextMetrics.isBreakingSpace;
-  _TextMetrics.isBreakingSpace = (char: string) => {
-    return char === '\u200B' || originalIsBreakingSpace(char);
-  };
-}
-
 // Performance: TextMetrics Cache
 const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
 
@@ -36,7 +27,9 @@ class SubtitleRenderer {
   private currentTimeline: gsap.core.Timeline | null = null;
   private currentTemplateId: string = 'glass';
   // 彻底解决 Seek 重复创建时间轴/容器导致的打字机消失、画面卡死 Bug
-  private dialogueCache = new Map<string, { container: PIXI.Container; timeline: gsap.core.Timeline }>();
+  private dialogueCache = new Map<string, { container: PIXI.Container; timeline: gsap.core.Timeline; config: DialogueConfig; fontSize: number }>();
+  private activeConfig: DialogueConfig | null = null;
+  private activeFontSize = 48;
   /** fontFamily → runtimeUri of dialogue fonts already registered with document.fonts. */
   private readonly loadedDialogueFonts = new Map<string, string>();
 
@@ -75,28 +68,19 @@ class SubtitleRenderer {
       templateId,
       presentation ? JSON.stringify(presentation) : '',
       speedKey,
+      settingsManager.get('dialogueEntranceAnimation') !== false,
+      this.getDialogueFontSize(),
     ].join('_');
     return config._id ? `${config._id}_${textHash}` : textHash;
   }
 
-  /**
-   * Processes text for proper CJK/Mixed wrapping without breaking English words.
-   */
-  private processText(text: string): string {
-    if (!text) return '';
-    const cjkRange = '\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\u3000-\u303f\uff00-\uffef';
-    const cjkRegex = new RegExp(`([${cjkRange}])`, 'g');
-    const boundaryRegex1 = new RegExp(`([a-zA-Z0-9])([${cjkRange}])`, 'g');
-    const boundaryRegex2 = new RegExp(`([${cjkRange}])([a-zA-Z0-9])`, 'g');
-
-    return text
-      .replace(boundaryRegex1, '$1\u200B$2')
-      .replace(boundaryRegex2, '$1\u200B$2')
-      .replace(cjkRegex, '$1\u200B');
+  private getDialogueFontSize(): number {
+    const size = settingsManager.get('dialogueFontSize');
+    return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 48;
   }
 
   private getCachedMetrics(text: string, style: PIXI.TextStyle): PIXI.CanvasTextMetrics {
-    const key = `${text}|${style.fontSize}|${style.wordWrapWidth}|${style.lineHeight}`;
+    const key = `${text}|${style.styleKey}`;
     if (metricsCache.has(key)) return metricsCache.get(key)!;
     const metrics = PIXI.CanvasTextMetrics.measureText(text, style);
     metricsCache.set(key, metrics);
@@ -114,7 +98,7 @@ class SubtitleRenderer {
       style = 'typewriter',
       duration = 3,
       textColor = '#FFFFFF',
-      fontSize = 44,
+      fontSize = this.getDialogueFontSize() - 4,
       template: configTemplate,
     } = config;
 
@@ -143,7 +127,8 @@ class SubtitleRenderer {
       return this.dialogueCache.get(cacheKey)!.timeline;
     }
 
-    const text = this.processText(rawText);
+    const text = rawText;
+    const globalFontSize = this.getDialogueFontSize();
     const container = new PIXI.Container();
 
     const template = config.presentation?.renderer === 'image-dialogue-v1'
@@ -161,7 +146,9 @@ class SubtitleRenderer {
       dropShadow: { color: '#000000', alpha: 0.3, blur: 4, distance: 3 },
       wordWrap: true,
       wordWrapWidth: STAGE_WIDTH - 360,
-      breakWords: false,
+      // Pixi's tokenizer does not call the legacy isBreakingSpace override.
+      // Break oversized tokens directly, including Chinese without spaces.
+      breakWords: true,
       lineHeight: Math.round((fontSize + 4) * 1.4),
       letterSpacing: 0.5,
       padding: PADDING,
@@ -173,11 +160,21 @@ class SubtitleRenderer {
     }
 
     if (config.presentation?.renderer === 'image-dialogue-v1') {
-      textStyle.wordWrapWidth = config.presentation.text.maxWidth;
+      const presentation = config.presentation;
+      const originalFontSize = Number(textStyle.fontSize);
+      textStyle.fontSize = fontSize + 4;
+      textStyle.lineHeight = Math.round(textStyle.lineHeight * Number(textStyle.fontSize) / originalFontSize);
+      const inset = Math.max(0, presentation.text.x - presentation.textbox.x);
+      textStyle.wordWrapWidth = Math.max(1, Math.min(
+        presentation.text.maxWidth,
+        presentation.textbox.x + presentation.textbox.width - presentation.text.x - inset,
+        STAGE_WIDTH - presentation.text.x - PADDING,
+      ));
     } else if (templateId === 'glass') textStyle.wordWrapWidth = STAGE_WIDTH - 360;
     else if (templateId === 'minimal') textStyle.wordWrapWidth = STAGE_WIDTH - 400;
 
     const metrics = this.getCachedMetrics(text, textStyle);
+    // Local body-text preferences must not change the template's speaker font.
     const layout = template.render(container, config, metrics);
 
     // ── 2. Main Text ──
@@ -203,6 +200,8 @@ class SubtitleRenderer {
 
         this.dialogueContainer = container;
         this.currentTimeline = tl;
+        this.activeConfig = config;
+        this.activeFontSize = globalFontSize;
         const layer = stageManager.getLayer('subtitle');
         if (layer && !layer.destroyed) {
           if (container.parent !== layer) {
@@ -227,15 +226,19 @@ class SubtitleRenderer {
       for (const cb of syncCallbacks) cb();
     });
 
+    const animateEntrance = settingsManager.get('dialogueEntranceAnimation') !== false;
+    const textStart = animateEntrance ? 0.2 : 0;
     const entranceProxy = { alpha: 0, y: 40 };
     const syncEntrance = () => {
       if (!container.destroyed) {
-        container.alpha = entranceProxy.alpha;
-        container.y = entranceProxy.y;
+        const enabled = settingsManager.get('dialogueEntranceAnimation') !== false;
+        container.alpha = enabled ? entranceProxy.alpha : 1;
+        container.y = enabled ? entranceProxy.y : 0;
       }
     };
     syncCallbacks.push(syncEntrance);
 
+    syncEntrance();
     // Alpha fade in quickly
     tl.to(entranceProxy, {
       alpha: 1, duration: 0.2, ease: 'power2.out',
@@ -247,11 +250,60 @@ class SubtitleRenderer {
       y: 0, duration: 0.45, ease: 'back.out(1.4)',
       onUpdate: syncEntrance,
     }, 0);
-    // Typewriter logic
-    if (style === 'typewriter') {
-      const charCount = text.length;
+    // Image dialogue reveals text itself so sprite/stencil batching cannot
+    // expose the unrevealed suffix. Wrap and alignment use the full metrics.
+    if (style === 'typewriter' && config.presentation?.renderer === 'image-dialogue-v1') {
+      dialogueText.mask = null;
+      container.removeChild(textMask);
+      textMask.destroy();
+      const lineStyle = textStyle.clone();
+      const align = lineStyle.align;
+      lineStyle.wordWrap = false;
+      lineStyle.align = 'left';
+      const lineHeight = (lineStyle.lineHeight || metrics.lineHeight) + lineStyle.leading;
+      const lineTexts = metrics.lines.map((_, index) => {
+        const lineText = index === 0 ? dialogueText : new PIXI.Text({ text: '', style: lineStyle });
+        lineText.style = lineStyle;
+        lineText.text = '';
+        lineText.resolution = 2;
+        const alignmentOffset = metrics.maxLineWidth - metrics.lineWidths[index];
+        lineText.x = layout.textX + (align === 'center' ? alignmentOffset / 2 : align === 'right' ? alignmentOffset : 0);
+        lineText.y = layout.textY + index * lineHeight;
+        if (index > 0) container.addChild(lineText);
+        return lineText;
+      });
+      const steps: { lineIndex: number; end: number }[] = [];
+      metrics.lines.forEach((line, lineIndex) => {
+        let end = 0;
+        for (const character of line) {
+          end += character.length;
+          if (character !== '\u200B') steps.push({ lineIndex, end });
+        }
+      });
+      const reveal = { count: 0 };
+      let lastCount = -1;
+      const syncText = () => {
+        const count = Math.max(0, Math.min(steps.length, Math.floor(reveal.count)));
+        if (count === lastCount || container.destroyed) return;
+        lastCount = count;
+        const current = count > 0 ? steps[count - 1] : undefined;
+        lineTexts.forEach((lineText, index) => {
+          const visible = count === steps.length || (current && index < current.lineIndex)
+            ? metrics.lines[index]
+            : current && index === current.lineIndex ? metrics.lines[index].slice(0, current.end) : '';
+          if (lineText.text !== visible) lineText.text = visible;
+        });
+      };
+      syncCallbacks.push(syncText);
+      syncText();
+      tl.to(reveal, {
+        count: steps.length,
+        duration: Math.max(0, Math.min(duration - textStart, steps.length * dialogueTextSpeed)),
+        ease: 'none',
+        onUpdate: syncText,
+      }, textStart);
+    } else if (style === 'typewriter') {
       const revealProxy = { charIndex: 0 };
-      const totalTypeTime = Math.min(duration - 0.5, charCount * dialogueTextSpeed);
 
       const lineCharWidths: number[][] = [];
       const canvas = document.createElement('canvas');
@@ -283,7 +335,8 @@ class SubtitleRenderer {
         }
       });
 
-      const LINE_HEIGHT = textStyle.lineHeight || fontSize * 1.4;
+      const totalTypeTime = Math.max(0, Math.min(duration - textStart, animSteps.length * dialogueTextSpeed));
+      const LINE_HEIGHT = textStyle.lineHeight || Number(textStyle.fontSize) * 1.4;
       const updateMask = () => {
         if (textMask.destroyed) return; // Container destroyed during seek
         const stepIdx = Math.floor(revealProxy.charIndex);
@@ -321,7 +374,7 @@ class SubtitleRenderer {
         duration: totalTypeTime,
         ease: 'none',
         onUpdate: updateMask
-      }, 0.2);
+      }, textStart);
     } else {
       textMask.beginFill(0xFFFFFF).drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).endFill();
       if (style === 'fadeIn') {
@@ -332,7 +385,7 @@ class SubtitleRenderer {
         };
         syncCallbacks.push(syncFade);
 
-        tl.to(fadeProxy, { alpha: 1, duration: 0.6, ease: 'power2.out', onUpdate: syncFade }, 0.2);
+        tl.to(fadeProxy, { alpha: 1, duration: 0.6, ease: 'power2.out', onUpdate: syncFade }, textStart);
       } else if (style === 'cinematic') {
         dialogueText.alpha = 0;
         const originalY = dialogueText.y;
@@ -343,12 +396,12 @@ class SubtitleRenderer {
         };
         syncCallbacks.push(syncCinematic);
 
-        tl.to(cinProxy, { alpha: 1, y: originalY, duration: 0.8, ease: 'power2.out', onUpdate: syncCinematic }, 0.2);
+        tl.to(cinProxy, { alpha: 1, y: originalY, duration: 0.8, ease: 'power2.out', onUpdate: syncCinematic }, textStart);
       }
     }
 
     tl.to({}, { duration: 0.001 }, duration);
-    this.dialogueCache.set(cacheKey, { container, timeline: tl });
+    this.dialogueCache.set(cacheKey, { container, timeline: tl, config, fontSize: globalFontSize });
     return tl;
   }
 
@@ -371,6 +424,20 @@ class SubtitleRenderer {
     }
     if (!cached) return;
 
+    if (cached.fontSize !== this.getDialogueFontSize()) {
+      // Keep the scheduled position and parent when changing a local font
+      // preference; the full resolved config preserves speaker/template data.
+      const parent = cached.timeline.parent;
+      const start = cached.timeline.startTime();
+      const paused = cached.timeline.paused();
+      const resolvedConfig = cached.config;
+      const replacement = this.showDialogue(resolvedConfig);
+      if (parent) parent.add(replacement, start);
+      replacement.paused(parent ? paused : true);
+      this.ensureDialogueOnStage(resolvedConfig, offset);
+      return;
+    }
+
     const { container, timeline } = cached;
     if (container.destroyed) return;
 
@@ -382,6 +449,8 @@ class SubtitleRenderer {
 
     this.dialogueContainer = container;
     this.currentTimeline = timeline;
+    this.activeConfig = cached.config;
+    this.activeFontSize = cached.fontSize;
 
     const layer = stageManager.getLayer('subtitle');
     if (layer && !layer.destroyed) {
@@ -410,6 +479,7 @@ class SubtitleRenderer {
     // The timeline belongs to the ScriptEngine's masterTimeline.
     // Killing it here permanently breaks scrubbing and typewriter interpolation.
     this.currentTimeline = null;
+    this.activeConfig = null;
 
     if (animated) {
       const container = this.dialogueContainer;
@@ -452,6 +522,7 @@ class SubtitleRenderer {
     // Just clear the reference — don't kill the timeline here.
     // Killing sibling timelines mid-seek corrupts GSAP's render queue.
     this.currentTimeline = null;
+    this.activeConfig = null;
     if (this.dialogueContainer) {
       if (this.dialogueContainer.parent) {
         this.dialogueContainer.parent.removeChild(this.dialogueContainer);
@@ -465,12 +536,11 @@ class SubtitleRenderer {
     const layer = stageManager.getLayer('subtitle');
     const subtitleText = new PIXI.Text({ text, style: {
       fontFamily: "'Outfit', 'Inter', 'Noto Sans SC', sans-serif",
-      fontSize: 48, fill: '#FFFFFF', align: 'center', stroke: { color: '#000000', width: 6 },
+      fontSize: this.getDialogueFontSize(), fill: '#FFFFFF', align: 'center', stroke: { color: '#000000', width: 6 },
       dropShadow: { color: '#000000', alpha: 0.5, blur: 8, distance: 4 },
-      wordWrap: true, wordWrapWidth: STAGE_WIDTH - 200, breakWords: false,
+      wordWrap: true, wordWrapWidth: STAGE_WIDTH - 200, breakWords: true,
     } });
 
-    subtitleText.text = this.processText(text);
     subtitleText.anchor.set(0.5);
     subtitleText.x = STAGE_WIDTH / 2;
     subtitleText.y = STAGE_HEIGHT - 150;
@@ -561,6 +631,9 @@ class SubtitleRenderer {
   }
 
   public forceUpdate(): void {
+    if (this.activeConfig && this.currentTimeline && this.activeFontSize !== this.getDialogueFontSize()) {
+      this.ensureDialogueOnStage(this.activeConfig, this.currentTimeline.time());
+    }
     if (this.currentTimeline) {
       const onUpdate = this.currentTimeline.eventCallback('onUpdate');
       if (typeof onUpdate === 'function') {

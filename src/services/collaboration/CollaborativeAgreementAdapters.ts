@@ -105,6 +105,7 @@ export interface CollaborativeServerSceneAgreementRequestV2 {
 export interface CollaborativeServerSceneAgreementOptionsV2 {
   assetAgreementProposal?: CollaborationAssetAgreementProposal;
   blockingIssues?: string[];
+  skipDialog?: boolean;
 }
 
 export interface CollaborativeServerSceneSafetyPathOptionsV2 {
@@ -224,6 +225,20 @@ export class CollaborativeServerSceneAgreementAdapterV2 {
     const serverDocument = materializeCollaborativeSceneDocumentV4(serverState);
     const paths = await this.safetyPaths.create(serverState);
 
+    if (options.skipDialog) {
+      if ((options.blockingIssues ?? []).length > 0) {
+        throw new Error('资源约定包含阻塞问题，无法覆写本地主剧本');
+      }
+      this.acceptedPaths = await this.safetyPaths.captureLocalDocument(
+        this.getLocalDocument(),
+        paths,
+      );
+      this.committedAcceptedServerScene = false;
+      this.onAcceptedTargetScenePath?.(paths.targetScenePath);
+      this.accepted = true;
+      return;
+    }
+
     await new Promise<void>((resolve, reject) => {
       this.pending = (confirmed) => {
         this.pending = null;
@@ -302,6 +317,7 @@ export interface CollaborativeServerSceneAgreementRequestV3 {
 export interface CollaborativeServerSceneAgreementOptionsV3 {
   assetAgreementProposal?: CollaborationAssetAgreementProposal;
   blockingIssues?: string[];
+  skipDialog?: boolean;
 }
 
 export interface CollaborativeServerSceneSafetyPathOptionsV3 {
@@ -418,6 +434,20 @@ export class CollaborativeServerSceneAgreementAdapterV3 {
     this.cancelPending();
     const serverDocument = materializeCollaborativeSceneDocumentV5(serverState);
     const paths = await this.safetyPaths.create(serverState);
+
+    if (options.skipDialog) {
+      if ((options.blockingIssues ?? []).length > 0) {
+        throw new Error('资源约定包含阻塞问题，无法覆写本地主剧本');
+      }
+      this.acceptedPaths = await this.safetyPaths.captureLocalDocument(
+        this.getLocalDocument(),
+        paths,
+      );
+      this.committedAcceptedServerScene = false;
+      this.onAcceptedTargetScenePath?.(paths.targetScenePath);
+      this.accepted = true;
+      return;
+    }
 
     await new Promise<void>((resolve, reject) => {
       this.pending = (confirmed) => {

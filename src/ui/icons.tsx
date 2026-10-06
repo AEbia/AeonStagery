@@ -111,6 +111,14 @@ export const IconMessageCircle = (props: IconProps) => (
   <IconBase {...props}><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></IconBase>
 );
 
+export const IconDialogue = (props: IconProps) => (
+  <IconBase {...props}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <path d="M8 9h8" />
+    <path d="M8 13h6" />
+  </IconBase>
+);
+
 export const IconCamera = (props: IconProps) => (
   <IconBase {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></IconBase>
 );
@@ -192,6 +200,22 @@ export const IconCheck = (props: IconProps) => (
 
 export const IconCopy = (props: IconProps) => (
   <IconBase {...props}><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></IconBase>
+);
+
+export const IconEye = (props: IconProps) => (
+  <IconBase {...props}>
+    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </IconBase>
+);
+
+export const IconEyeOff = (props: IconProps) => (
+  <IconBase {...props}>
+    <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <line x1="2" x2="22" y1="2" y2="22" />
+  </IconBase>
 );
 
 export const IconX = (props: IconProps) => (
