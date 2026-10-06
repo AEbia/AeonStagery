@@ -1,17 +1,6 @@
-import type { ChangelogItem } from './announcementTypes';
+# AeonStagery 0.8.1-beta 更新日志
 
-/**
- * In-app changelog for the current release line.
- */
-export const BUNDLED_CHANGELOGS: readonly ChangelogItem[] = [
-  {
-    id: '0.8.1-beta',
-    type: 'release',
-    version: '0.8.1-beta',
-    title: 'AeonStagery 0.8.1-beta',
-    date: '2026-10-06',
-    summary: 'Cubism 3/4/5 Pixi 渲染迁移、协同鉴权加固、自适应字幕排版与多项修复',
-    content: `## 新功能
+## 新功能
 
 ### Live2D
 - **Cubism 3/4/5 采用 Pixi 引擎渲染**：渲染管线统一接入 PixiJS 引擎，适配 Cubism Core 的 render-order 接口，兼容高版本 Core 的 Cubism 5 模型。
@@ -35,6 +24,4 @@ export const BUNDLED_CHANGELOGS: readonly ChangelogItem[] = [
 - **图像对白模板**：修复图像对白模板在时间轴回放时样式未正确生效的问题。
 - **协同服务网络安全**：独立协同服务端默认仅监听本地回环地址（127.0.0.1）；Electron IPC 增加调用来源校验。
 - **协同异常处理**：修复本地资产缺失时的处理逻辑；收敛协同会话错误提示，避免重复弹窗。
-- **文档替换撤销历史**：在打开新场景或协同全量替换文档时清空撤销历史，避免回退到已失效的旧文档状态。`,
-  },
-];
+- **文档替换撤销历史**：在打开新场景或协同全量替换文档时清空撤销历史，避免回退到已失效的旧文档状态。
