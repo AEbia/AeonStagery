@@ -106,10 +106,15 @@ describe('Live2DRuntimeDetection', () => {
     expect(status.missingAny).toBe(true);
   });
 
-  it('detects runtime if fetch HEAD returns ok in browser dev', async () => {
+  it('detects runtime if fetch returns non-html js script in browser dev', async () => {
     (globalThis as any).window = {
       fetch: vi.fn().mockImplementation((url: string) => {
-        if (url === '/live2d.min.js') return Promise.resolve({ ok: true });
+        if (url === '/live2d.min.js') {
+          return Promise.resolve({
+            ok: true,
+            headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/javascript' : null) },
+          });
+        }
         return Promise.resolve({ ok: false });
       }),
     };
@@ -118,6 +123,54 @@ describe('Live2DRuntimeDetection', () => {
     expect(status.cubism2).toBe(true);
     expect(status.cubism3Plus).toBe(false);
     expect(status.missingAny).toBe(true);
+  });
+
+  it('rejects HTML SPA fallback from fetch in browser dev', async () => {
+    (globalThis as any).window = {
+      fetch: vi.fn().mockImplementation((url: string) => {
+        if (url === '/live2d.min.js') {
+          return Promise.resolve({
+            ok: true,
+            headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null) },
+          });
+        }
+        return Promise.resolve({ ok: false });
+      }),
+    };
+
+    const status = await detectLive2DRuntimeStatus();
+    expect(status.cubism2).toBe(false);
+    expect(status.cubism3Plus).toBe(false);
+    expect(status.missingAny).toBe(true);
+  });
+
+  it('does not invoke browser fetch when Electron API report is present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const mockReport = {
+      cubism2: false,
+      cubism3Plus: true,
+      missingAny: true,
+      isDev: true,
+      paths: {
+        localDir: '',
+        seedRoot: '',
+        runtimeRoot: '',
+      },
+    };
+
+    (globalThis as any).window = {
+      fetch: fetchMock,
+      aeonStageryAPI: {
+        live2dRuntime: {
+          getStatus: vi.fn().mockResolvedValue(mockReport),
+        },
+      },
+    };
+
+    const status = await detectLive2DRuntimeStatus();
+    expect(status.cubism2).toBe(false);
+    expect(status.missingAny).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('refreshLive2DRuntimeStatus calls electron refreshStatus when available', async () => {

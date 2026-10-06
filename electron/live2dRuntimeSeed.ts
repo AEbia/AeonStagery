@@ -8,6 +8,7 @@ export interface Live2DRuntimeAvailabilityReport {
 
 const RUNTIME_SCRIPT_FILES = ['live2d.min.js', 'live2dcubismcore.min.js'] as const;
 function hasCubism3PlusRuntime(root: string): boolean {
+  if (!root) return false;
   return fs.existsSync(path.join(root, 'live2dcubismcore.min.js'));
 }
 
@@ -16,6 +17,9 @@ function hasCubism3PlusRuntime(root: string): boolean {
  * only the core script to be usable.
  */
 export function inspectLive2DRuntimeSeed(sourceRoot: string): Live2DRuntimeAvailabilityReport {
+  if (!sourceRoot) {
+    return { cubism2: false, cubism3Plus: false };
+  }
   return {
     cubism2: fs.existsSync(path.join(sourceRoot, 'live2d.min.js')),
     cubism3Plus: hasCubism3PlusRuntime(sourceRoot),
@@ -99,10 +103,10 @@ export function inspectLive2DRuntimeStatus(
   isDev: boolean,
 ): Live2DRuntimeStatusDetail {
   const seed = inspectLive2DRuntimeSeed(sourceRoot);
-  const localCubism2 = fs.existsSync(path.join(localDir, 'live2d.min.js'));
+  const localCubism2 = Boolean(localDir) && fs.existsSync(path.join(localDir, 'live2d.min.js'));
   const localCubism3Plus = hasCubism3PlusRuntime(localDir);
 
-  const targetCubism2 = fs.existsSync(path.join(targetRoot, 'live2d.min.js'));
+  const targetCubism2 = Boolean(targetRoot) && fs.existsSync(path.join(targetRoot, 'live2d.min.js'));
   const targetCubism3Plus = hasCubism3PlusRuntime(targetRoot);
 
   const cubism2 = targetCubism2 || seed.cubism2 || localCubism2;

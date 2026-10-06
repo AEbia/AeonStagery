@@ -49,8 +49,11 @@ export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusRe
     }
   }
 
-  // Wait for in-page runtime bootstrap to settle
-  await waitForLive2DRuntimeBootstrap();
+  // Wait for in-page runtime bootstrap to settle (capped by timeout)
+  await Promise.race([
+    waitForLive2DRuntimeBootstrap(),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
+  ]);
 
   const windowLive2D = hasWindowLive2D();
   const windowCubismCore = hasWindowCubismCore();
@@ -62,16 +65,19 @@ export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusRe
   let cubism2 = (report?.cubism2 ?? false) || windowLive2D || (bootstrapDetail?.cubism2Loaded ?? false);
   let cubism3Plus = (report?.cubism3Plus ?? false) || windowCubismCore || (bootstrapDetail?.cubismCoreLoaded ?? false);
 
-  // In browser dev mode, check if the static files are served in public/
-  if (typeof window !== 'undefined' && typeof window.fetch === 'function' && (!cubism2 || !cubism3Plus)) {
+  // In standalone browser dev mode (when Electron API is absent), check static assets
+  // BUT reject HTML SPA fallbacks (e.g. Vite returning index.html with 200 for 404s).
+  if (!report && typeof window !== 'undefined' && typeof window.fetch === 'function' && (!cubism2 || !cubism3Plus)) {
     try {
       if (!cubism2) {
-        const head2 = await window.fetch('/live2d.min.js', { method: 'HEAD' }).catch(() => null);
-        if (head2 && head2.ok) cubism2 = true;
+        const res2 = await window.fetch('/live2d.min.js').catch(() => null);
+        const ct2 = res2?.headers?.get?.('content-type') || '';
+        if (res2 && res2.ok && !ct2.includes('text/html')) cubism2 = true;
       }
       if (!cubism3Plus) {
-        const head3 = await window.fetch('/live2dcubismcore.min.js', { method: 'HEAD' }).catch(() => null);
-        if (head3 && head3.ok) cubism3Plus = true;
+        const res3 = await window.fetch('/live2dcubismcore.min.js').catch(() => null);
+        const ct3 = res3?.headers?.get?.('content-type') || '';
+        if (res3 && res3.ok && !ct3.includes('text/html')) cubism3Plus = true;
       }
     } catch {
       // Ignore network errors in test environments

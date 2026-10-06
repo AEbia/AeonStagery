@@ -275,6 +275,9 @@ function AppContent({
     void detectLive2DRuntimeStatus().then((report) => {
       if (!mounted) return;
       setLive2DRuntimeReport(report);
+      console.info(
+        `[Live2D] Startup runtime status: cubism2=${report.cubism2}, cubism3Plus=${report.cubism3Plus}, missingAny=${report.missingAny}`,
+      );
       if (report.missingAny) {
         setShowLive2DRuntimeDialog(true);
       }
