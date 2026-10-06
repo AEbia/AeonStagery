@@ -14,6 +14,7 @@ import {
   IconRefresh,
   IconSave,
   IconSettings,
+  IconSparkles,
   IconSun,
   IconTarget,
   IconVolume2,
@@ -56,6 +57,9 @@ import { FirstLessonController } from './ui/onboarding/FirstLessonController';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
 import { TemplatePerformanceProfileEditor } from './ui/templates/TemplatePerformanceProfileEditor';
 import { WebGalRegenerateDialog } from './ui/WebGalRegenerateDialog';
+import { Live2DRuntimeMissingDialog } from './ui/live2d/Live2DRuntimeMissingDialog';
+import { detectLive2DRuntimeStatus } from './services/live2d/live2dRuntimeDetection';
+import type { Live2DRuntimeStatusReport } from './api/types/live2dRuntime';
 import type { WebGalImportInput } from './services/import/webgal';
 import type { ProjectState, ProjectTemplateConfiguration } from './api/types/project';
 import { AUTHORING_SCHEMA_VERSION } from './api/types/authoring';
@@ -263,6 +267,29 @@ function AppContent({
   const [defaultProjectLocation, setDefaultProjectLocation] = useState('');
   const [collaborationServerStatus, setCollaborationServerStatus] = useState<CollaborationServerStatus | null>(null);
   const [isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked] = useState(false);
+
+  const [showLive2DRuntimeDialog, setShowLive2DRuntimeDialog] = useState(false);
+  const [live2DRuntimeReport, setLive2DRuntimeReport] = useState<Live2DRuntimeStatusReport | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    void detectLive2DRuntimeStatus().then((report) => {
+      if (!mounted) return;
+      setLive2DRuntimeReport(report);
+      if (report.missingAny) {
+        setShowLive2DRuntimeDialog(true);
+      }
+    }).catch((err) => {
+      console.warn('[Live2D] Failed to detect runtime status on startup:', err);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    return eventBus.on('ui:openLive2DRuntimeDialog', () => {
+      setShowLive2DRuntimeDialog(true);
+    });
+  }, []);
 
   useEffect(() => {
     const serverApi = window.aeonStageryAPI?.collaborationServer;
@@ -1570,6 +1597,10 @@ function AppContent({
                 <IconSettings width={15} height={15} />
                 全局设置
               </button>
+              <button className="top-bar__menu-item" onClick={() => setShowLive2DRuntimeDialog(true)} role="menuitem" title="配置 Live2D 运行时与查看状态">
+                <IconSparkles width={15} height={15} />
+                Live2D 运行时
+              </button>
               <button className="top-bar__menu-item" onClick={() => void handleRestartApp()} disabled={showProjectHome} role="menuitem">
                 <IconRefresh width={15} height={15} />
                 重新启动
@@ -1810,6 +1841,14 @@ function AppContent({
           request={sceneMigrationDialog.request}
           onConfirm={sceneMigrationDialog.confirm}
           onCancel={sceneMigrationDialog.cancel}
+        />
+      )}
+
+      {showLive2DRuntimeDialog && (
+        <Live2DRuntimeMissingDialog
+          isOpen={showLive2DRuntimeDialog}
+          onClose={() => setShowLive2DRuntimeDialog(false)}
+          report={live2DRuntimeReport}
         />
       )}
 

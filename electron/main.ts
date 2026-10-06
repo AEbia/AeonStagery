@@ -108,7 +108,13 @@ import { FileSystemProjectAgentJournalPort } from '../src/services/project-agent
 import type { ProjectAgentJournalRecord } from '../src/services/project-agent/ProjectAgentJournal';
 import type { ProjectAgentPauseReason } from '../src/services/project-agent/ProjectAgentTask';
 import { NodeProjectAgentTerminalExecutor } from './projectAgentTerminal';
-import { ensureLive2DRuntimeFiles, type Live2DRuntimeAvailabilityReport } from './live2dRuntimeSeed';
+import {
+  ensureLive2DRuntimeFiles,
+  inspectLive2DRuntimeStatus,
+  syncLocalRuntimeToSeedRoot,
+  type Live2DRuntimeAvailabilityReport,
+  type Live2DRuntimeStatusDetail,
+} from './live2dRuntimeSeed';
 import { handleAssetProtocolRequest } from './assetProtocol';
 
 interface AiProseCredentialMutationResult {
@@ -195,6 +201,10 @@ function getLive2DRuntimeSeedRoot(): string {
 
 function getLive2DRuntimeRoot(): string {
   return path.join(app.getPath('userData'), live2dRuntimeDirectoryName);
+}
+
+function getLive2DLocalDir(): string {
+  return path.join(app.getAppPath(), '.local', 'live2d');
 }
 
 /**
@@ -286,6 +296,13 @@ function createWindow() {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.removeMenu();
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https:') || url.startsWith('http:')) {
+      void shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
 
   // Force secure context for file:// and custom schemes
   void loadRenderer(mainWindow);
@@ -2493,6 +2510,43 @@ app.whenReady().then(() => {
   ipcMain.handle('runtime:getLive2DAvailability', (): Live2DRuntimeAvailabilityReport => (
     live2DRuntimeAvailability ?? { cubism2: false, cubism3Plus: false }
   ));
+  ipcMain.handle('runtime:getLive2DStatus', (): Live2DRuntimeStatusDetail => {
+    return inspectLive2DRuntimeStatus(
+      getLive2DRuntimeSeedRoot(),
+      getLive2DRuntimeRoot(),
+      getLive2DLocalDir(),
+      isDev,
+    );
+  });
+  ipcMain.handle('runtime:refreshLive2DStatus', (): Live2DRuntimeStatusDetail => {
+    if (isDev) {
+      syncLocalRuntimeToSeedRoot(getLive2DLocalDir(), getLive2DRuntimeSeedRoot());
+    }
+    live2DRuntimeAvailability = ensureLive2DRuntime();
+    return inspectLive2DRuntimeStatus(
+      getLive2DRuntimeSeedRoot(),
+      getLive2DRuntimeRoot(),
+      getLive2DLocalDir(),
+      isDev,
+    );
+  });
+  ipcMain.handle('runtime:openLive2DDirectory', async (_event, type: 'local' | 'runtime' = 'local') => {
+    const dir = (type === 'local' && isDev)
+      ? getLive2DLocalDir()
+      : getLive2DRuntimeRoot();
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    await shell.openPath(dir);
+    return { success: true, path: dir };
+  });
+  ipcMain.handle('app:openExternal', async (_event, url: string) => {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+      return { success: true };
+    }
+    return { success: false };
+  });
   protocol.handle('aeon-runtime', async (request) => {
     const requestPath = decodeURIComponent(new URL(request.url).pathname).replace(/^\/+/, '');
     const runtimeRoot = path.resolve(getLive2DRuntimeRoot());

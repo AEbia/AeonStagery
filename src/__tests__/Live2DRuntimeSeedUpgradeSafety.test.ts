@@ -9,7 +9,11 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ensureLive2DRuntimeFiles } from '../../electron/live2dRuntimeSeed';
+import {
+  ensureLive2DRuntimeFiles,
+  inspectLive2DRuntimeStatus,
+  syncLocalRuntimeToSeedRoot,
+} from '../../electron/live2dRuntimeSeed';
 
 function makeTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -107,4 +111,43 @@ describe('Live2D runtime seed upgrade safety', () => {
     // The Cubism Web family is genuinely absent everywhere, so it still warns.
     expect(warnings.some((warning) => warning.includes('Cubism 3/4/5 runtime seed'))).toBe(true);
   });
+
+  it('inspectLive2DRuntimeStatus detects missing runtimes in dev mode', () => {
+    const sourceRoot = makeTempDir('aeon-live2d-dev-source-');
+    const targetRoot = makeTempDir('aeon-live2d-dev-target-');
+    const localDir = makeTempDir('aeon-live2d-dev-local-');
+
+    // Both missing in repo
+    const status1 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status1.cubism2).toBe(false);
+    expect(status1.cubism3Plus).toBe(false);
+    expect(status1.missingAny).toBe(true);
+
+    // Cubism 2 added to localDir
+    writeSeedFile(localDir, 'live2d.min.js', 'local-c2');
+    const status2 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status2.cubism2).toBe(true);
+    expect(status2.cubism3Plus).toBe(false);
+    expect(status2.missingAny).toBe(true);
+
+    // Cubism 3 added to sourceRoot
+    writeSeedFile(sourceRoot, 'live2dcubismcore.min.js', 'source-c3');
+    const status3 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status3.cubism2).toBe(true);
+    expect(status3.cubism3Plus).toBe(true);
+    expect(status3.missingAny).toBe(false);
+  });
+
+  it('syncLocalRuntimeToSeedRoot copies staged files from localDir to sourceRoot', () => {
+    const sourceRoot = makeTempDir('aeon-live2d-sync-source-');
+    const localDir = makeTempDir('aeon-live2d-sync-local-');
+    writeSeedFile(localDir, 'live2d.min.js', 'local-c2-content');
+    writeSeedFile(localDir, 'live2dcubismcore.min.js', 'local-c3-content');
+
+    syncLocalRuntimeToSeedRoot(localDir, sourceRoot);
+
+    expect(fs.readFileSync(path.join(sourceRoot, 'live2d.min.js'), 'utf8')).toBe('local-c2-content');
+    expect(fs.readFileSync(path.join(sourceRoot, 'live2dcubismcore.min.js'), 'utf8')).toBe('local-c3-content');
+  });
 });
+
