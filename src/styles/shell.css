@@ -211,6 +211,19 @@ h1, h2, h3, h4, h5, h6 {
 
 .top-bar__more > summary {
   list-style: none;
+  position: relative;
+}
+
+.top-bar__unread-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-circle);
+  background: var(--error);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  pointer-events: none;
 }
 
 .top-bar__more > summary::-webkit-details-marker {
