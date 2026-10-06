@@ -58,6 +58,7 @@ export interface AppSettings {
   lastReadChangelogId?: string;
   readAnnouncementIds?: string[];
   autoShowChangelogOnUpdate?: boolean;
+  showLive2DRuntimeSetupOnStartup: boolean;
   preBakeEnabled: boolean;
   bakePrecision: number;
   preBakeHotRadius: number;
@@ -118,6 +119,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastReadChangelogId: undefined,
   readAnnouncementIds: [],
   autoShowChangelogOnUpdate: true,
+  showLive2DRuntimeSetupOnStartup: true,
   preBakeEnabled: true,
   bakePrecision: 0.1,
   preBakeHotRadius: 5,
@@ -325,6 +327,9 @@ class SettingsManager {
           autoShowChangelogOnUpdate: typeof restSettings.autoShowChangelogOnUpdate === 'boolean'
             ? restSettings.autoShowChangelogOnUpdate
             : true,
+          showLive2DRuntimeSetupOnStartup: typeof restSettings.showLive2DRuntimeSetupOnStartup === 'boolean'
+            ? restSettings.showLive2DRuntimeSetupOnStartup
+            : DEFAULT_SETTINGS.showLive2DRuntimeSetupOnStartup,
         };
         this.save();
       }

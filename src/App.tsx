@@ -269,6 +269,7 @@ function AppContent({
 
   const [showLive2DRuntimeDialog, setShowLive2DRuntimeDialog] = useState(false);
   const [live2DRuntimeReport, setLive2DRuntimeReport] = useState<Live2DRuntimeStatusReport | null>(null);
+  const showLive2DRuntimeSetupOnStartupRef = useRef(settings.showLive2DRuntimeSetupOnStartup);
 
   useEffect(() => {
     let mounted = true;
@@ -278,7 +279,7 @@ function AppContent({
       console.info(
         `[Live2D] Startup runtime status: cubism2=${report.cubism2}, cubism3Plus=${report.cubism3Plus}, missingAny=${report.missingAny}`,
       );
-      if (report.missingAny) {
+      if (report.missingAny && showLive2DRuntimeSetupOnStartupRef.current) {
         setShowLive2DRuntimeDialog(true);
       }
     }).catch((err) => {
@@ -1846,6 +1847,10 @@ function AppContent({
         <Live2DRuntimeMissingDialog
           isOpen={showLive2DRuntimeDialog}
           onClose={() => setShowLive2DRuntimeDialog(false)}
+          onNeverRemind={() => {
+            setSetting('showLive2DRuntimeSetupOnStartup', false);
+            setShowLive2DRuntimeDialog(false);
+          }}
           report={live2DRuntimeReport}
         />
       )}

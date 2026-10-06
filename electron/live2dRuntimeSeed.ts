@@ -92,9 +92,9 @@ export interface Live2DRuntimeStatusDetail {
 }
 
 /**
- * Inspect runtime availability for the repository development context or packaged app.
- * In development, missingAny is true if the repository (sourceRoot or .local/live2d) is missing
- * either Cubism 2.1 or Cubism 3/4/5 runtime.
+ * Inspect runtime availability for the Electron renderer. Runtime scripts are
+ * served from targetRoot by aeon-runtime://, so seed/local staging files count
+ * only after they have been copied there.
  */
 export function inspectLive2DRuntimeStatus(
   sourceRoot: string,
@@ -102,15 +102,11 @@ export function inspectLive2DRuntimeStatus(
   localDir: string,
   isDev: boolean,
 ): Live2DRuntimeStatusDetail {
-  const seed = inspectLive2DRuntimeSeed(sourceRoot);
-  const localCubism2 = Boolean(localDir) && fs.existsSync(path.join(localDir, 'live2d.min.js'));
-  const localCubism3Plus = hasCubism3PlusRuntime(localDir);
-
   const targetCubism2 = Boolean(targetRoot) && fs.existsSync(path.join(targetRoot, 'live2d.min.js'));
   const targetCubism3Plus = hasCubism3PlusRuntime(targetRoot);
 
-  const cubism2 = targetCubism2 || seed.cubism2 || localCubism2;
-  const cubism3Plus = targetCubism3Plus || seed.cubism3Plus || localCubism3Plus;
+  const cubism2 = targetCubism2;
+  const cubism3Plus = targetCubism3Plus;
 
   return {
     cubism2,
@@ -145,4 +141,3 @@ export function syncLocalRuntimeToSeedRoot(localDir: string, seedRoot: string): 
     }
   }
 }
-

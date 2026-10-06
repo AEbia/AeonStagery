@@ -83,6 +83,45 @@ describe('Live2DRuntimeDetection', () => {
     expect(status.cubism3Plus).toBe(true);
   });
 
+  it('keeps the packaged Electron runtime path instead of public', async () => {
+    const runtimeRoot = 'C:\\Users\\Example\\AppData\\Roaming\\AeonStagery\\live2d-runtime';
+    (globalThis as any).window = {
+      aeonStageryAPI: {
+        live2dRuntime: {
+          getStatus: vi.fn().mockResolvedValue({
+            cubism2: false,
+            cubism3Plus: false,
+            missingAny: true,
+            isDev: false,
+            paths: { localDir: '', runtimeRoot },
+          }),
+        },
+      },
+    };
+
+    const status = await detectLive2DRuntimeStatus();
+    expect(status.isDev).toBe(false);
+    expect(status.paths.runtimeRoot).toBe(runtimeRoot);
+  });
+
+  it.each(['rejected', 'null', 'missing'] as const)('does not use browser assets when the Electron status query is %s', async (failure) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = vi.fn().mockResolvedValue({ ok: true });
+    const getStatus = failure === 'rejected'
+      ? vi.fn().mockRejectedValue(new Error('IPC unavailable'))
+      : vi.fn().mockResolvedValue(null);
+    (globalThis as any).window = {
+      fetch,
+      aeonStageryAPI: failure === 'missing' ? {} : { live2dRuntime: { getStatus } },
+    };
+
+    const status = await detectLive2DRuntimeStatus();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(status.paths.runtimeRoot).toBeUndefined();
+    expect(status.paths.seedRoot).toBeUndefined();
+    expect(status.missingAny).toBe(true);
+  });
+
   it('falls back to window globals when Electron API is absent', async () => {
     (globalThis as any).window = {
       Live2D: {},
@@ -104,6 +143,8 @@ describe('Live2DRuntimeDetection', () => {
     expect(status.cubism2).toBe(false);
     expect(status.cubism3Plus).toBe(false);
     expect(status.missingAny).toBe(true);
+    expect(status.paths.runtimeRoot).toBe('public');
+    expect(status.paths.seedRoot).toBe('public');
   });
 
   it('detects runtime if fetch returns non-html js script in browser dev', async () => {

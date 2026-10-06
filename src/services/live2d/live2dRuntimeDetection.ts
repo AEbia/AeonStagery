@@ -38,14 +38,16 @@ function hasWindowCubismCore(): boolean {
  * Returns true for `missingAny` if EITHER Cubism 2.1 OR Cubism 3/4/5 runtime is absent.
  */
 export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusReport> {
-  const electronApi = typeof window !== 'undefined' ? window.aeonStageryAPI?.live2dRuntime : undefined;
+  const electronBridge = typeof window !== 'undefined' ? window.aeonStageryAPI : undefined;
+  const isElectron = Boolean(electronBridge);
+  const electronApi = electronBridge?.live2dRuntime;
 
   let report: Live2DRuntimeStatusReport | null = null;
   if (electronApi?.getStatus) {
     try {
       report = await electronApi.getStatus();
     } catch (err) {
-      console.warn('[live2dRuntimeDetection] Electron getStatus query failed, falling back to browser probe:', err);
+      console.warn('[live2dRuntimeDetection] Electron getStatus query failed, falling back to loaded runtime globals:', err);
     }
   }
 
@@ -67,7 +69,7 @@ export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusRe
 
   // In standalone browser dev mode (when Electron API is absent), check static assets
   // BUT reject HTML SPA fallbacks (e.g. Vite returning index.html with 200 for 404s).
-  if (!report && typeof window !== 'undefined' && typeof window.fetch === 'function' && (!cubism2 || !cubism3Plus)) {
+  if (!isElectron && typeof window !== 'undefined' && typeof window.fetch === 'function' && (!cubism2 || !cubism3Plus)) {
     try {
       if (!cubism2) {
         const res2 = await window.fetch('/live2d.min.js').catch(() => null);
@@ -89,11 +91,13 @@ export async function detectLive2DRuntimeStatus(): Promise<Live2DRuntimeStatusRe
     cubism3Plus,
     missingAny: !cubism2 || !cubism3Plus,
     isDev: report?.isDev ?? true,
-    paths: report?.paths ?? {
+    // An unavailable Electron report must not point desktop users at browser assets.
+    // Leave the path unknown so the dialog keeps its desktop fallback.
+    paths: report?.paths ?? (isElectron ? { localDir: '' } : {
       localDir: '.local/live2d',
       seedRoot: 'public',
-      runtimeRoot: 'live2d-runtime',
-    },
+      runtimeRoot: 'public',
+    }),
   };
 }
 

@@ -2537,8 +2537,8 @@ app.whenReady().then(() => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    await shell.openPath(dir);
-    return { success: true, path: dir };
+    const error = await shell.openPath(dir);
+    return { success: error === '', path: dir };
   });
   ipcMain.handle('app:openExternal', async (_event, url: string) => {
     if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {

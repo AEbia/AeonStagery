@@ -64,6 +64,31 @@
   line-height: 1.4;
 }
 
+.live2d-runtime-dialog__terms-link {
+  appearance: none;
+  display: inline;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary, #f1eee9);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-primary, #d88c7a);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.live2d-runtime-dialog__terms-link:hover {
+  color: var(--accent-primary, #d88c7a);
+}
+
+.live2d-runtime-dialog__terms-link:focus-visible {
+  outline: 2px solid var(--accent-primary, #d88c7a);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs, 2px);
+}
+
 .live2d-runtime-dialog__close {
   color: var(--text-muted, #706b7a);
   background: transparent;
@@ -207,11 +232,13 @@
 }
 
 .live2d-runtime-card--missing {
-  border-left: 3px solid var(--error, #ef4444);
+  border-color: color-mix(in srgb, var(--error, #ef4444) 30%, var(--border-default, rgba(255, 255, 255, 0.08)));
+  background: color-mix(in srgb, var(--error, #ef4444) 4%, var(--bg-secondary, rgba(24, 25, 34, 0.6)));
 }
 
 .live2d-runtime-card--ready {
-  border-left: 3px solid var(--success, #34d399);
+  border-color: color-mix(in srgb, var(--success, #34d399) 28%, var(--border-default, rgba(255, 255, 255, 0.08)));
+  background: color-mix(in srgb, var(--success, #34d399) 4%, var(--bg-secondary, rgba(24, 25, 34, 0.6)));
 }
 
 .live2d-runtime-card__top {
@@ -311,6 +338,30 @@
   background: var(--accent-hover, #efac98);
   border-color: var(--accent-hover, #efac98);
   color: #11131a;
+}
+
+.live2d-btn--folder {
+  background: color-mix(in srgb, var(--accent-primary, #d88c7a) 11%, var(--bg-elevated, #252735));
+  border-color: color-mix(in srgb, var(--accent-primary, #d88c7a) 38%, var(--border-default, rgba(255, 255, 255, 0.1)));
+  color: var(--text-primary, #f1eee9);
+  font-weight: 600;
+}
+
+.live2d-btn--folder svg {
+  color: var(--accent-primary, #d88c7a);
+}
+
+.live2d-btn--folder:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--accent-primary, #d88c7a) 18%, var(--bg-hover, #2b2d3d));
+  border-color: var(--accent-primary, #d88c7a);
+  color: var(--text-primary, #f1eee9);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-primary, #d88c7a) 16%, transparent);
+}
+
+.live2d-btn--folder:focus-visible {
+  outline: 2px solid var(--accent-primary, #d88c7a);
+  outline-offset: 2px;
 }
 
 .live2d-btn--ghost {

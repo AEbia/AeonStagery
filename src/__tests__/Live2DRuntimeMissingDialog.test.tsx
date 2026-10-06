@@ -8,6 +8,7 @@ import { Live2DRuntimeMissingDialog } from '../ui/live2d/Live2DRuntimeMissingDia
 import type { Live2DRuntimeStatusReport } from '../api/types/live2dRuntime';
 
 describe('Live2DRuntimeMissingDialog', () => {
+  const originalElectronApi = window.aeonStageryAPI;
   const defaultReport: Live2DRuntimeStatusReport = {
     cubism2: false,
     cubism3Plus: true,
@@ -22,6 +23,7 @@ describe('Live2DRuntimeMissingDialog', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    Reflect.deleteProperty(window, 'aeonStageryAPI');
     Object.assign(navigator, {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -30,6 +32,7 @@ describe('Live2DRuntimeMissingDialog', () => {
   });
 
   afterEach(() => {
+    window.aeonStageryAPI = originalElectronApi;
     vi.restoreAllMocks();
   });
 
@@ -54,7 +57,7 @@ describe('Live2DRuntimeMissingDialog', () => {
     );
 
     expect(screen.getByText('Live2D 运行时配置引导')).toBeInTheDocument();
-    expect(screen.getByText(/受官方版权许可限制，本软件不随附 Live2D 运行时/)).toBeInTheDocument();
+    expect(screen.getByText(/本软件不随附 Live2D 运行时/)).toBeInTheDocument();
     expect(screen.getByText('Cubism 2.1 核心运行时')).toBeInTheDocument();
     expect(screen.getByText('Cubism 3/4/5 核心运行时')).toBeInTheDocument();
     expect(screen.getAllByText('live2d.min.js').length).toBeGreaterThanOrEqual(1);
@@ -185,5 +188,93 @@ describe('Live2DRuntimeMissingDialog', () => {
     const copyBtn = screen.getByTitle('复制目录路径');
     fireEvent.click(copyBtn);
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('userData/live2d-runtime');
+  });
+
+  it('guides browser users to public and does not require an unavailable directory button', () => {
+    render(
+      <Live2DRuntimeMissingDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        report={{ ...defaultReport, paths: { localDir: '.local/live2d', runtimeRoot: 'public' } }}
+      />,
+    );
+
+    expect(screen.getByText(/项目根目录下的/)).toHaveTextContent('public');
+    expect(screen.queryByRole('button', { name: '打开运行时目录' })).not.toBeInTheDocument();
+    expect(screen.getByText(/检测到所需运行时后刷新页面/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('复制目录路径'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('public');
+  });
+
+  it('uses public as the browser target before a status report is available', () => {
+    render(<Live2DRuntimeMissingDialog isOpen={true} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByTitle('复制目录路径'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('public');
+  });
+
+  it('keeps the desktop fallback when the Electron status report has no path', () => {
+    window.aeonStageryAPI = {} as NonNullable<Window['aeonStageryAPI']>;
+    render(
+      <Live2DRuntimeMissingDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        report={{ ...defaultReport, paths: { localDir: '' } }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('复制目录路径'));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('%APPDATA%\\AeonStagery\\live2d-runtime');
+    expect(screen.getByRole('button', { name: '打开运行时目录' })).toBeInTheDocument();
+    expect(screen.queryByText(/项目根目录下的/)).not.toBeInTheDocument();
+  });
+
+  it.each(['cubism2', 'cubism3Plus'] as const)('offers a working restart after installing only %s', async (family) => {
+    const restart = vi.fn().mockResolvedValue({ success: true });
+    window.aeonStageryAPI = { app: { restart } } as unknown as NonNullable<Window['aeonStageryAPI']>;
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const initialReport = { ...defaultReport, cubism2: false, cubism3Plus: false };
+    const onRefresh = vi.fn().mockResolvedValue({ ...initialReport, [family]: true });
+    render(
+      <Live2DRuntimeMissingDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        report={initialReport}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('重新检测'));
+    const restartButton = await screen.findByRole('button', { name: '重启应用以加载' });
+    expect(screen.getAllByText('已就绪')).toHaveLength(1);
+    expect(screen.getAllByText('缺失')).toHaveLength(1);
+
+    // A second scan must retain the pending restart for the already discovered file.
+    fireEvent.click(screen.getByText('重新检测'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '重新检测' })).toBeEnabled());
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    fireEvent.click(restartButton);
+    await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers a page refresh after installing one runtime in the browser', async () => {
+    const initialReport = {
+      ...defaultReport,
+      cubism2: false,
+      cubism3Plus: false,
+      paths: { localDir: '.local/live2d', runtimeRoot: 'public' },
+    };
+    render(
+      <Live2DRuntimeMissingDialog
+        isOpen={true}
+        onClose={vi.fn()}
+        report={initialReport}
+        onRefresh={vi.fn().mockResolvedValue({ ...initialReport, cubism2: true })}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('重新检测'));
+    expect(await screen.findByRole('button', { name: '刷新页面以加载' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '稍后刷新' })).toBeInTheDocument();
   });
 });

@@ -112,30 +112,37 @@ describe('Live2D runtime seed upgrade safety', () => {
     expect(warnings.some((warning) => warning.includes('Cubism 3/4/5 runtime seed'))).toBe(true);
   });
 
-  it('inspectLive2DRuntimeStatus detects missing runtimes in dev mode', () => {
+  it('inspectLive2DRuntimeStatus reports only runtimes available under the Electron runtime root', () => {
     const sourceRoot = makeTempDir('aeon-live2d-dev-source-');
     const targetRoot = makeTempDir('aeon-live2d-dev-target-');
     const localDir = makeTempDir('aeon-live2d-dev-local-');
 
-    // Both missing in repo
+    // Both missing from the directory served to the Electron renderer.
     const status1 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
     expect(status1.cubism2).toBe(false);
     expect(status1.cubism3Plus).toBe(false);
     expect(status1.missingAny).toBe(true);
 
-    // Cubism 2 added to localDir
+    // Staging files are not available until copied to the served runtime root.
     writeSeedFile(localDir, 'live2d.min.js', 'local-c2');
     const status2 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
-    expect(status2.cubism2).toBe(true);
+    expect(status2.cubism2).toBe(false);
     expect(status2.cubism3Plus).toBe(false);
     expect(status2.missingAny).toBe(true);
 
-    // Cubism 3 added to sourceRoot
+    // Seed files alone are also not sufficient for the Electron protocol.
     writeSeedFile(sourceRoot, 'live2dcubismcore.min.js', 'source-c3');
     const status3 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
-    expect(status3.cubism2).toBe(true);
-    expect(status3.cubism3Plus).toBe(true);
-    expect(status3.missingAny).toBe(false);
+    expect(status3.cubism2).toBe(false);
+    expect(status3.cubism3Plus).toBe(false);
+    expect(status3.missingAny).toBe(true);
+
+    writeSeedFile(targetRoot, 'live2d.min.js', 'target-c2');
+    writeSeedFile(targetRoot, 'live2dcubismcore.min.js', 'target-c3');
+    const status4 = inspectLive2DRuntimeStatus(sourceRoot, targetRoot, localDir, true);
+    expect(status4.cubism2).toBe(true);
+    expect(status4.cubism3Plus).toBe(true);
+    expect(status4.missingAny).toBe(false);
   });
 
   it('syncLocalRuntimeToSeedRoot copies staged files from localDir to sourceRoot', () => {
@@ -150,4 +157,3 @@ describe('Live2D runtime seed upgrade safety', () => {
     expect(fs.readFileSync(path.join(sourceRoot, 'live2dcubismcore.min.js'), 'utf8')).toBe('local-c3-content');
   });
 });
-

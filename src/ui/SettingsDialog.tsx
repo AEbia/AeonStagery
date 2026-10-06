@@ -430,6 +430,11 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   control={<Toggle label="低性能模式" active={settings.lowPerformance} onChange={(value) => setSetting('lowPerformance', value)} />}
                 />
                 <SettingItem
+                  title="Live2D 运行时启动提醒"
+                  description="缺少 Live2D 核心文件时，在启动时显示配置引导；关闭引导中的“不再提醒”后，可在这里重新开启。"
+                  control={<Toggle label="启动时提醒" active={settings.showLive2DRuntimeSetupOnStartup} onChange={(value) => setSetting('showLive2DRuntimeSetupOnStartup', value)} />}
+                />
+                <SettingItem
                   title="工作区布局"
                   description="轨道编辑优先模式下底部轨道获得完整宽度；剧本动作优先模式下右侧动作检查器具有纵向优先高度。"
                   control={(
