@@ -229,7 +229,7 @@ export interface AeonStageryElectronAPI {
     save(kind: 'experimental-features' | 'first-lesson', value: unknown): Promise<{ success: boolean; error?: string }>;
   };
   collaborationServer: {
-    start(options: { projectId: string; host?: string; port?: number }): Promise<{
+    start(options: { projectId: string; host?: string; port?: number; password?: string }): Promise<{
       success: boolean;
       reused?: boolean;
       status?: {
@@ -239,6 +239,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       };
@@ -254,6 +257,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       } | null;

@@ -199,4 +199,40 @@ describe('CollaborativeDocumentLayerV3', () => {
 
     layer.dispose();
   });
+
+  it('waits for the connect attempt before reading the initial connection status', async () => {
+    let connected = false;
+    const clientStub = {
+      join: vi.fn(async () => makeStateV3()),
+      seed: vi.fn(),
+      getState: vi.fn(() => makeStateV3()),
+      publishState: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+      subscribeErrors: vi.fn(() => () => {}),
+      // Mirror the real client: the attempt settles only after async work
+      // (credential handshake + socket dispatch), not within the same tick.
+      connectRealtime: vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        connected = true;
+      }),
+      isRealtimeConnected: vi.fn(() => connected),
+      dispose: vi.fn(),
+    };
+
+    const layer = new CollaborativeDocumentLayerV3({
+      client: clientStub as any,
+      collaborationProjectId: 'proj_v3',
+      roomId: 'proj_v3:main',
+      getSceneDocument: () => makeDocV5(),
+      applyDocument: async () => {},
+    });
+
+    await layer.connect();
+
+    expect(clientStub.connectRealtime).toHaveBeenCalled();
+    // Reading the status before settling would report 'offline'.
+    expect(layer.getStatus()).toBe('connected');
+
+    layer.dispose();
+  });
 });

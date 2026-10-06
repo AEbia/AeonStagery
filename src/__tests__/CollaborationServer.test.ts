@@ -1,3 +1,4 @@
+import { authenticatedFetch } from './helpers/collaborationAuth';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,24 +75,24 @@ describe('startCollaborationServer', () => {
     expect(status.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V2);
 
     const health = await readJson<{ schemaVersion: number; hasState: boolean }>(
-      await fetch(`${status.localUrl}/health`),
+      await authenticatedFetch(status, `${status.localUrl}/health`),
     );
     expect(health.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V2);
     expect(health.hasState).toBe(false);
 
-    const seedResponse = await fetch(`${status.localUrl}/seed`, {
+    const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(makeStateV2()),
     });
     expect(seedResponse.status).toBe(201);
 
-    const state = await readJson<CollaborativeSceneStateV2>(await fetch(`${status.localUrl}/state`));
+    const state = await readJson<CollaborativeSceneStateV2>(await authenticatedFetch(status, `${status.localUrl}/state`));
     expect(state.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V2);
     expect(state.statementOrder).toEqual(['line_1']);
 
     const snapshot = await readJson<{ schemaVersion: number; statements: Array<{ id: string }> }>(
-      await fetch(`${status.localUrl}/snapshot`),
+      await authenticatedFetch(status, `${status.localUrl}/snapshot`),
     );
     expect(snapshot.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V4);
     expect(snapshot.statements.map((statement) => statement.id)).toEqual(['line_1']);
@@ -106,13 +107,13 @@ describe('startCollaborationServer', () => {
     });
 
     const status = server.getStatus();
-    const seedResponse = await fetch(`${status.localUrl}/seed`, {
+    const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(makeLegacyStatePayload()),
     });
 
-    expect(seedResponse.status).toBe(500);
+    expect(seedResponse.status).toBe(400);
     const body = await readJson<{ error: string }>(seedResponse);
     expect(body.error).toContain(`schema version ${COLLABORATION_SCHEMA_VERSION_V2}`);
     expect(server.getStatus().hasState).toBe(false);

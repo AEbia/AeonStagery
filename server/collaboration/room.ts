@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { COLLABORATION_LIMITS, CollaborationRequestError } from './security';
 import {
   COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
@@ -108,7 +109,15 @@ export class SingleRoomCollaborationRoomV2 {
         throw new Error('Collaboration room already has persisted state');
       }
 
-      writeCollaborativeStateV2ToYDoc(this.doc, state, 'seed');
+      const nextDoc = new Y.Doc();
+      try {
+        writeCollaborativeStateV2ToYDoc(nextDoc, state, 'seed');
+        const update = Y.encodeStateAsUpdate(nextDoc);
+        if (update.byteLength > COLLABORATION_LIMITS.websocketBytes) {
+          throw new CollaborationRequestError(413, 'Collaboration room state exceeds limit');
+        }
+        Y.applyUpdate(this.doc, update, 'seed');
+      } finally { nextDoc.destroy(); }
       await this.flush();
     });
   }
@@ -120,9 +129,19 @@ export class SingleRoomCollaborationRoomV2 {
       try {
         Y.applyUpdate(nextDoc, Y.encodeStateAsUpdate(this.doc));
         Y.applyUpdate(nextDoc, update);
+        if (Y.encodeStateAsUpdate(nextDoc).byteLength > COLLABORATION_LIMITS.websocketBytes) {
+          throw new CollaborationRequestError(413, 'Collaboration room state exceeds limit');
+        }
         const nextState = readCollaborativeStateV2FromYDoc(nextDoc);
         if (!nextState) {
           throw new Error(`Collaboration update did not contain schema version ${COLLABORATION_SCHEMA_VERSION_V2} state`);
+        }
+        const currentState = this.getState();
+        if (currentState && (nextState.collaborationProjectId !== currentState.collaborationProjectId
+          || nextState.roomId !== currentState.roomId || nextState.sceneId !== currentState.sceneId)) {
+          throw new CollaborationProjectMismatchError(
+            `Collaboration room identity is immutable: expected project "${currentState.collaborationProjectId}", got "${nextState.collaborationProjectId}"`,
+          );
         }
         if (validateState) await validateState(nextState);
         else validateCollaborativeSceneCodecV2(nextState);
@@ -217,7 +236,15 @@ export class SingleRoomCollaborationRoomV3 {
         throw new Error('Collaboration room already has persisted state');
       }
 
-      writeCollaborativeStateV3ToYDoc(this.doc, state, 'seed');
+      const nextDoc = new Y.Doc();
+      try {
+        writeCollaborativeStateV3ToYDoc(nextDoc, state, 'seed');
+        const update = Y.encodeStateAsUpdate(nextDoc);
+        if (update.byteLength > COLLABORATION_LIMITS.websocketBytes) {
+          throw new CollaborationRequestError(413, 'Collaboration room state exceeds limit');
+        }
+        Y.applyUpdate(this.doc, update, 'seed');
+      } finally { nextDoc.destroy(); }
       await this.flush();
     });
   }
@@ -229,9 +256,19 @@ export class SingleRoomCollaborationRoomV3 {
       try {
         Y.applyUpdate(nextDoc, Y.encodeStateAsUpdate(this.doc));
         Y.applyUpdate(nextDoc, update);
+        if (Y.encodeStateAsUpdate(nextDoc).byteLength > COLLABORATION_LIMITS.websocketBytes) {
+          throw new CollaborationRequestError(413, 'Collaboration room state exceeds limit');
+        }
         const nextState = readCollaborativeStateV3FromYDoc(nextDoc);
         if (!nextState) {
           throw new Error(`Collaboration update did not contain schema version ${COLLABORATION_SCHEMA_VERSION_V3} state`);
+        }
+        const currentState = this.getState();
+        if (currentState && (nextState.collaborationProjectId !== currentState.collaborationProjectId
+          || nextState.roomId !== currentState.roomId || nextState.sceneId !== currentState.sceneId)) {
+          throw new CollaborationProjectMismatchError(
+            `Collaboration room identity is immutable: expected project "${currentState.collaborationProjectId}", got "${nextState.collaborationProjectId}"`,
+          );
         }
         if (validateState) await validateState(nextState);
         else validateCollaborativeSceneCodecV3(nextState);

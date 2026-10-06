@@ -120,4 +120,103 @@ describe('CollaborativeServerSceneAgreementAdapterV3', () => {
     expect(parsedTarget.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V5);
     expect(parsedTarget.statements[0].id).toBe('line_1');
   });
+
+  it('skips dialog when skipDialog is true, directly backing up and accepting server scene', async () => {
+    const presenter = {
+      show: vi.fn(),
+      clear: vi.fn(),
+    };
+
+    const files = new Map<string, string>();
+    const fileAccess = {
+      dirname: (p: string) => p.substring(0, p.lastIndexOf('/')),
+      basename: (p: string) => p.substring(p.lastIndexOf('/') + 1),
+      ensureDir: vi.fn(),
+      exists: vi.fn((p: string) => files.has(p)),
+      copyFile: vi.fn((src: string, dest: string) => {
+        files.set(dest, files.get(src) || '');
+      }),
+      writeFile: vi.fn((p: string, data: string) => {
+        files.set(p, data);
+      }),
+    };
+
+    const projectResources = {
+      resolveForProjectWrite: (rel: string) => `/project/${rel}`,
+    };
+
+    const localDoc = makeDocV5();
+    files.set('/project/project/main.scene.json', JSON.stringify(localDoc));
+
+    const safetyPaths = new CollaborativeServerSceneSafetyPathAdapterV3({
+      fileAccess,
+      projectResources,
+      targetSceneRelativePath: 'project/main.scene.json',
+      now: () => new Date('2026-08-18T12:00:00Z'),
+    });
+
+    let acceptedPath: string | undefined;
+    const adapter = new CollaborativeServerSceneAgreementAdapterV3({
+      presenter,
+      safetyPaths,
+      getLocalDocument: () => localDoc,
+      onAcceptedTargetScenePath: (path) => {
+        acceptedPath = path;
+      },
+    });
+
+    const serverState = makeStateV3();
+    await adapter.request(serverState, { skipDialog: true });
+
+    expect(presenter.show).not.toHaveBeenCalled();
+    expect(adapter.hasAcceptedServerScene).toBe(true);
+    expect(acceptedPath).toBe('/project/project/main.scene.json');
+
+    // Verify backup was made
+    const backupTarget = files.get('/project/.aeonstagery/backups/2026-08-18T12-00-00-000Z/main.scene.json');
+    expect(backupTarget).toBeDefined();
+
+    // Verify commit still works
+    const serverDoc = makeDocV5();
+    serverDoc.statements[0].id = 'committed_from_host';
+    await adapter.commitAcceptedServerDocument(serverDoc);
+    const updatedTarget = files.get('/project/project/main.scene.json');
+    expect(JSON.parse(updatedTarget!).statements[0].id).toBe('committed_from_host');
+  });
+
+  it('throws error when skipDialog is true but blocking issues exist', async () => {
+    const presenter = {
+      show: vi.fn(),
+      clear: vi.fn(),
+    };
+    const files = new Map<string, string>();
+    const fileAccess = {
+      dirname: (p: string) => p.substring(0, p.lastIndexOf('/')),
+      basename: (p: string) => p.substring(p.lastIndexOf('/') + 1),
+      ensureDir: vi.fn(),
+      exists: vi.fn((p: string) => files.has(p)),
+      copyFile: vi.fn(),
+      writeFile: vi.fn(),
+    };
+    const projectResources = {
+      resolveForProjectWrite: (rel: string) => `/project/${rel}`,
+    };
+    const safetyPaths = new CollaborativeServerSceneSafetyPathAdapterV3({
+      fileAccess,
+      projectResources,
+      targetSceneRelativePath: 'project/main.scene.json',
+    });
+    const adapter = new CollaborativeServerSceneAgreementAdapterV3({
+      presenter,
+      safetyPaths,
+      getLocalDocument: () => makeDocV5(),
+    });
+
+    await expect(
+      adapter.request(makeStateV3(), { skipDialog: true, blockingIssues: ['Conflict detected'] }),
+    ).rejects.toThrow(/资源约定包含阻塞问题/);
+
+    expect(presenter.show).not.toHaveBeenCalled();
+    expect(adapter.hasAcceptedServerScene).toBe(false);
+  });
 });

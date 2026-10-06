@@ -28,4 +28,53 @@ describe('CollaborationAssetStore', () => {
 
     expect(() => store.resolveAssetPath('../outside.png')).toThrow('Invalid project-relative asset path');
   });
+  it.each(['/etc/passwd', 'C:/outside.txt', 'background/file:stream', 'background/../outside.txt', 'NUL.png', 'background/file.'])('rejects unsafe path %s', (input) => {
+    const store = new CollaborationAssetStore(tempDir);
+    expect(() => store.resolveAssetPath(input)).toThrow('Invalid project-relative asset path');
+  });
+
+  it('blocks directory symlinks for reads, existence checks, and writes', async () => {
+    const store = new CollaborationAssetStore(tempDir);
+    await store.ensure();
+    const outside = path.join(tempDir, 'private');
+    await fs.mkdir(outside);
+    await fs.writeFile(path.join(outside, 'secret.txt'), 'private');
+    await fs.symlink(outside, path.join(store.rootDir, 'redirect'), 'junction');
+    expect(await store.hasAsset('redirect/secret.txt')).toBe(false);
+    await expect(store.readAsset('redirect/secret.txt')).rejects.toThrow();
+    await expect(store.writeAsset('redirect/secret.txt', new Uint8Array([1]))).rejects.toThrow();
+    expect(await fs.readFile(path.join(outside, 'secret.txt'), 'utf8')).toBe('private');
+  });
+
+  it('rejects file symlink reads and replaces the link without modifying its target', async () => {
+    const store = new CollaborationAssetStore(tempDir);
+    await store.ensure();
+    const outside = path.join(tempDir, 'secret.txt');
+    await fs.writeFile(outside, 'private');
+    await fs.symlink(outside, path.join(store.rootDir, 'redirect.txt'));
+    await expect(store.readAsset('redirect.txt')).rejects.toThrow();
+    expect(await store.hasAsset('redirect.txt')).toBe(false);
+    await store.writeAsset('redirect.txt', new TextEncoder().encode('shared'));
+    expect(await fs.readFile(outside, 'utf8')).toBe('private');
+    expect(await store.readAsset('redirect.txt')).toEqual(Buffer.from('shared'));
+  });
+
+  it('rejects a symlink asset root', async () => {
+    const outside = path.join(tempDir, 'private');
+    await fs.mkdir(outside);
+    const store = new CollaborationAssetStore(tempDir);
+    await fs.symlink(outside, store.rootDir, 'junction');
+    await expect(store.ensure()).rejects.toThrow();
+  });
+
+  it('does not expose hardlinked local files', async () => {
+    const store = new CollaborationAssetStore(tempDir);
+    await store.ensure();
+    const outside = path.join(tempDir, 'secret.txt');
+    await fs.writeFile(outside, 'private');
+    await fs.link(outside, path.join(store.rootDir, 'redirect.txt'));
+    expect(await store.hasAsset('redirect.txt')).toBe(false);
+    await expect(store.readAsset('redirect.txt')).rejects.toThrow();
+  });
+
 });
