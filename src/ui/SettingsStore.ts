@@ -70,6 +70,8 @@ export interface AppSettings {
   snapshotMaxCount: number;
   typewriterSpeed: number;
   dialogueTextSpeed: number;
+  dialogueFontSize: number;
+  dialogueEntranceAnimation: boolean;
   defaultDialogueDurationSeconds: number;
   scriptReadingSpeed: number;
   aiProse: {
@@ -131,6 +133,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   snapshotMaxCount: 5000,
   typewriterSpeed: 0.025,
   dialogueTextSpeed: 0.025,
+  dialogueFontSize: 48,
+  dialogueEntranceAnimation: true,
   defaultDialogueDurationSeconds: DEFAULT_DIALOGUE_DURATION_SECONDS,
   scriptReadingSpeed: DEFAULT_SCRIPT_READING_SPEED,
   aiProse: {
@@ -283,6 +287,8 @@ class SettingsManager {
           dialogueTextSpeed: restSettings.dialogueTextSpeed === undefined
             ? normalizeDialogueTextSpeed(restSettings.typewriterSpeed)
             : normalizeDialogueTextSpeed(restSettings.dialogueTextSpeed),
+          dialogueEntranceAnimation: restSettings.dialogueEntranceAnimation !== false,
+          dialogueFontSize: normalizeDialogueFontSize(restSettings.dialogueFontSize),
           defaultDialogueDurationSeconds: normalizeDefaultDialogueDurationSeconds(
             restSettings.defaultDialogueDurationSeconds,
           ),
@@ -378,8 +384,12 @@ class SettingsManager {
 
   private normalizeValue<K extends keyof AppSettings>(key: K, value: AppSettings[K]): AppSettings[K] {
     switch (key) {
+      case 'dialogueEntranceAnimation':
+        return (value !== false) as AppSettings[K];
       case 'dialogueTextSpeed':
         return normalizeDialogueTextSpeed(value) as AppSettings[K];
+      case 'dialogueFontSize':
+        return normalizeDialogueFontSize(value) as AppSettings[K];
       case 'theme':
         return normalizeTheme(value) as AppSettings[K];
       case 'defaultDialogueDurationSeconds':
@@ -531,6 +541,12 @@ export const DIALOGUE_TEXT_SPEED_SECONDS_RANGE = {
   max: 0.2,
   step: 0.005,
 } as const;
+
+export const DIALOGUE_FONT_SIZE_RANGE = { min: 20, max: 96, step: 1 } as const;
+
+export function normalizeDialogueFontSize(value: unknown): number {
+  return normalizeNumberInRange(value, DIALOGUE_FONT_SIZE_RANGE.min, DIALOGUE_FONT_SIZE_RANGE.max, DEFAULT_SETTINGS.dialogueFontSize);
+}
 
 export function normalizeDialogueTextSpeed(value: unknown): number {
   return normalizeNumberInRange(

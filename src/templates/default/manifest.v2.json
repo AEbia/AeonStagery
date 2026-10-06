@@ -100,9 +100,9 @@
     }
   ],
   "dialogueStyles": [
-    { "id": "glass", "name": "Premium Glass", "renderer": "glass" },
-    { "id": "minimal", "name": "Minimal", "renderer": "minimal" },
-    { "id": "classic", "name": "Classic", "renderer": "classic" },
+    { "id": "glass", "name": "玻璃", "renderer": "glass" },
+    { "id": "minimal", "name": "极简", "renderer": "minimal" },
+    { "id": "classic", "name": "经典", "renderer": "classic" },
     {
       "id": "pink-nameplate",
       "name": "粉色名牌",

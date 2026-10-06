@@ -253,7 +253,7 @@ export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
       }),
     }),
     field('voice', '语音文件'),
-    field('style', '动画风格'),
+    field('style', '字幕样式'),
     field('textColor', '文本颜色'),
     field('lipSync', '口型同步'),
   ],

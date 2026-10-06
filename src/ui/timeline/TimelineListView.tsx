@@ -6,7 +6,6 @@ import {
   useIsCollaborationUndoDisabled,
   useCollaborationStatus,
   useCollaborationPresence,
-  useProjectWorkspaceService,
   useOptionalApp,
 } from '../context/AppContext';
 import {
@@ -137,9 +136,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const documentStore = useDocumentStore();
   const { document: sceneDocument } = useSemanticDocument();
   const semanticAuthoring = useSemanticAuthoringService();
-  const projectWorkspace = useProjectWorkspaceService();
-  const dialoguePresentation = projectWorkspace?.getCurrentProject()?.metadata.templates?.dialoguePresentation;
-  const dialogueTemplate = projectWorkspace?.getCurrentProject()?.metadata.templates?.dialogueTemplate;
   const collaborationUndoDisabled = useIsCollaborationUndoDisabled();
   const { peers: collaborationPeers } = useCollaborationPresence();
   const { settings, setSetting } = useSettings();
@@ -399,8 +395,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
           correlationPrefix: 'timeline_list_gap_insert',
           lifecycleEndCorrelationPrefix: 'timeline_list_gap_lifecycle_end',
           lifecycleTargetBindingCorrelationPrefix: 'timeline_list_gap_lifecycle_target_binding',
-          dialoguePresentation,
-          dialogueTemplate,
           beforeStatementId,
         });
         if (result.kind === 'warning') {
@@ -465,7 +459,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     } finally {
       gapInsertPendingRef.current = false;
     }
-  }, [activeGapMenu, blockOfflineAuthoring, dialoguePresentation, dialogueTemplate, documentStore, handleSelect, props.availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems]);
+  }, [activeGapMenu, blockOfflineAuthoring, documentStore, handleSelect, props.availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems]);
 
   const handlePasteAtGap = useCallback(async (time: number) => {
     const editorStore = app?.stores?.editor;

@@ -32,6 +32,7 @@ import {
   PlaybackStoreDurationSink,
   ScriptEngineSemanticRuntimeAdapter,
 } from './ScriptEngineSemanticRuntimeAdapter';
+import { subtitleRenderer } from './SubtitleRenderer';
 import { hookSystem } from '../api/hooks';
 import { eventBus } from '../api/events';
 import {
@@ -298,6 +299,9 @@ export function bootstrap(options?: {
   const getScriptEngine = options?.getScriptEngine ?? (() => defaultScriptEngine);
   const getLightingSystem = options?.getLightingSystem ?? (() => defaultLightingSystem);
   const getLive2DManager = options?.getLive2DManager ?? (() => live2DManager);
+  const disposeDialogueFontSize = settingsManager.subscribeKey('dialogueFontSize', () => {
+    subtitleRenderer.forceUpdate();
+  });
 
   // 1. Stores — reuse existing or create new
   const documentStore = options?.stores?.document ?? new DocumentStore();
@@ -1138,6 +1142,7 @@ export function bootstrap(options?: {
       ...(projectAgent ? { projectAgent } : {}),
     },
     dispose: () => {
+      disposeDialogueFontSize();
       playbackAdapter.dispose();
       disposeProjectAgentSupplementRelay();
       disposeProjectAgentStartRelay();

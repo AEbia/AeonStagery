@@ -33,25 +33,30 @@ export const ImageDialogueTemplate: DialogueTemplate = {
 
   render(container, config, metrics) {
     const presentation = requireImagePresentation(config);
-    const textboxHeight = presentation.textbox.height
-      ?? Math.max(
-        presentation.textbox.minHeight ?? 1,
-        presentation.text.y - presentation.textbox.y + metrics.height,
-      );
-    const textbox = createImagePanel(presentation.textbox, textboxHeight);
+    const topInset = Math.max(0, presentation.text.y - presentation.textbox.y);
+    const baseHeight = presentation.textbox.height ?? presentation.textbox.minHeight ?? 1;
+    const textboxHeight = Math.max(baseHeight, topInset + metrics.height + topInset);
+    // Expand upward around the authored bottom edge so additional lines stay
+    // on stage, and keep the nameplate attached to the textbox.
+    const expansionOffset = presentation.textbox.height === undefined ? 0 : baseHeight - textboxHeight;
+    const offsetY = Math.min(0, 1080 - presentation.textbox.y - textboxHeight, expansionOffset);
+    const textbox = createImagePanel({ ...presentation.textbox, y: presentation.textbox.y + offsetY }, textboxHeight);
     container.addChild(textbox);
 
     if (config.speaker && presentation.namebox) {
-      renderNamebox(container, config, presentation);
+      renderNamebox(container, config, {
+        ...presentation,
+        namebox: { ...presentation.namebox, y: presentation.namebox.y + offsetY },
+      });
     }
 
     return {
       textX: presentation.text.x,
-      textY: presentation.text.y,
+      textY: presentation.text.y + offsetY,
       textWidth: presentation.text.maxWidth,
-      textHeight: Math.max(1, textboxHeight - (presentation.text.y - presentation.textbox.y)),
+      textHeight: Math.max(1, textboxHeight - topInset * 2),
       boxHeight: textboxHeight,
-      boxY: presentation.textbox.y,
+      boxY: presentation.textbox.y + offsetY,
     };
   },
 };
