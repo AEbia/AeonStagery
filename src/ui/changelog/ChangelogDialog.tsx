@@ -33,8 +33,16 @@ export const ChangelogDialog: React.FC<ChangelogDialogProps> = ({
   initialItemId,
   changelogService = defaultChangelogService,
 }) => {
-  const dialogRef = useModalDialog(onClose, isOpen);
   const { settings, setSetting } = useSettings();
+  const handleClose = useCallback(() => {
+    const latestRelease = changelogService.getLatestRelease();
+    if (latestRelease?.version && settings.lastReadChangelogId !== latestRelease.version) {
+      setSetting('lastReadChangelogId', latestRelease.version);
+    }
+    onClose();
+  }, [changelogService, onClose, setSetting, settings.lastReadChangelogId]);
+
+  const dialogRef = useModalDialog(handleClose, isOpen);
   const [selectedTab, setSelectedTab] = useState<TabCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [copied, setCopied] = useState(false);
@@ -55,9 +63,19 @@ export const ChangelogDialog: React.FC<ChangelogDialogProps> = ({
     if (initialItemId && changelogService.getItemById(initialItemId)) {
       return initialItemId;
     }
+    const latestRelease = changelogService.getLatestRelease();
+    if (latestRelease && changelogService.isItemUnread(latestRelease, settings.lastReadChangelogId, readAnnouncementIds)) {
+      return latestRelease.id;
+    }
     const all = changelogService.getItems();
     return all[0]?.id || '';
   });
+
+  useEffect(() => {
+    if (initialItemId && changelogService.getItemById(initialItemId)) {
+      setSelectedId(initialItemId);
+    }
+  }, [initialItemId, changelogService]);
 
   // Ensure valid selection when filter / search changes
   useEffect(() => {
@@ -115,7 +133,7 @@ export const ChangelogDialog: React.FC<ChangelogDialogProps> = ({
     <div
       className="changelog-dialog-overlay"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) handleClose();
       }}
       role="presentation"
     >
@@ -144,7 +162,7 @@ export const ChangelogDialog: React.FC<ChangelogDialogProps> = ({
             </div>
             <button
               className="changelog-close-btn"
-              onClick={onClose}
+              onClick={handleClose}
               title="关闭 (Esc)"
               aria-label="关闭更新日志"
             >
@@ -336,7 +354,7 @@ export const ChangelogDialog: React.FC<ChangelogDialogProps> = ({
             <button className="btn btn--secondary btn--sm" onClick={handleMarkAllRead}>
               全部标为已读
             </button>
-            <button className="btn btn--primary btn--sm" onClick={onClose}>
+            <button className="btn btn--primary btn--sm" onClick={handleClose}>
               我知道了
             </button>
           </div>
