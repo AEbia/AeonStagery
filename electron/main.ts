@@ -13,13 +13,18 @@ import {
 } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { autoUpdater, type UpdateInfo, type UpdateCheckResult } from 'electron-updater';
+import { autoUpdater, NsisUpdater } from 'electron-updater';
 import { registerFFmpegHandlers } from './ffmpeg-export';
 import { toUpdateCheckOutcome } from './updaterCheckResult';
 import {
   enforceDifferentialOnlyDownload,
   type DifferentialDownloadCapableUpdater,
 } from './updaterDownloadPolicy';
+import { enforceVerifiedInstallerCache, type VerifiedCacheCapableUpdater } from './updaterDownloadCache';
+import { createUpdateFeedOptions } from './updaterFeed';
+import { GitHubReleaseProvider } from './githubReleaseProvider';
+import { UpdateCoordinator } from './updateCoordinator';
+import type { UpdateSource } from '../src/api/types/updater';
 import { registerGptSovitsHandlers, stopGptSovitsProcess } from './gpt-sovits';
 import { clearAllVoiceSessionsSync, registerVoiceAuthoringHandlers } from './voice-authoring';
 import type { CollaborationServerStatus } from '../server/collaboration/server';
@@ -125,7 +130,7 @@ interface AiProseCredentialMutationResult {
 let mainWindow: BrowserWindow | null = null;
 let workspaceToolsWindow: BrowserWindow | null = null;
 let agentWindow: BrowserWindow | null = null;
-let updateCheckInFlight: Promise<UpdateCheckResult | null> | null = null;
+let updateCoordinator: UpdateCoordinator | null = null;
 const embeddedCollaborationServer = new EmbeddedCollaborationServer();
 let projectAgentTaskCoordinator: ProjectAgentTaskCoordinator | null = null;
 const projectAgentTerminalExecutor = new NodeProjectAgentTerminalExecutor();
@@ -146,6 +151,18 @@ function hasBundledUpdateConfig(): boolean {
     return fs.existsSync(bundledUpdateConfigPath);
   } catch {
     return false;
+  }
+}
+
+function getUpdateFeedBaseUrl(): string | undefined {
+  if (updateFeedUrlOverride) return updateFeedUrlOverride;
+  try {
+    const config = fs.readFileSync(bundledUpdateConfigPath, 'utf8');
+    const provider = /^provider:\s*['"]?([^'"\r\n]+?)['"]?\s*$/m.exec(config)?.[1]?.trim();
+    const url = /^url:\s*['"]?([^'"\r\n]+?)['"]?\s*$/m.exec(config)?.[1]?.trim();
+    return provider === 'generic' && url ? url : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -730,67 +747,52 @@ function setupAutoUpdater() {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.disableDifferentialDownload = false;
+  autoUpdater.disableWebInstaller = true;
   autoUpdater.logger = console;
   if (updateFeedUrlOverride) {
-    // Explicit override wins; otherwise electron-updater reads the bundled app-update.yml.
-    autoUpdater.setFeedURL({ provider: 'generic', url: updateFeedUrlOverride });
+    autoUpdater.setFeedURL(createUpdateFeedOptions(updateFeedUrlOverride, app.getVersion()));
   }
 
-  const differentialOnlyGuardInstalled = enforceDifferentialOnlyDownload(
+  const differentialGuardInstalled = enforceDifferentialOnlyDownload(
     autoUpdater as unknown as DifferentialDownloadCapableUpdater,
   );
-  if (!differentialOnlyGuardInstalled) {
-    console.error(
-      '[Updater] electron-updater no longer exposes differentialDownloadInstaller; the full-download fallback cannot be blocked.',
-    );
+  const cacheGuardInstalled = enforceVerifiedInstallerCache(
+    autoUpdater as unknown as VerifiedCacheCapableUpdater,
+  );
+  const guardInstalled = differentialGuardInstalled && cacheGuardInstalled;
+  if (!guardInstalled) {
+    console.error('[Updater] Verified differential download hooks are unavailable; OSS downloads are disabled.');
   }
 
-  autoUpdater.on('checking-for-update', () => {
-    sendUpdateStatus('updater:status', { state: 'checking' });
-  });
-
-  autoUpdater.on('update-available', (info: UpdateInfo) => {
-    sendUpdateStatus('updater:status', {
-      state: 'available',
-      version: info.version,
-      releaseDate: info.releaseDate,
-      notes: info.releaseNotes ?? null,
-    });
-  });
-
-  autoUpdater.on('update-not-available', (info: UpdateInfo) => {
-    sendUpdateStatus('updater:status', {
-      state: 'not-available',
-      version: info.version,
-      releaseDate: info.releaseDate,
-    });
-  });
-
-  autoUpdater.on('download-progress', (progress) => {
-    sendUpdateStatus('updater:status', {
-      state: 'downloading',
-      percent: progress.percent,
-      bytesPerSecond: progress.bytesPerSecond,
-      transferred: progress.transferred,
-      total: progress.total,
-    });
-  });
-
-  autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
-    sendUpdateStatus('updater:status', {
-      state: 'downloaded',
-      version: info.version,
-      releaseDate: info.releaseDate,
-      notes: info.releaseNotes ?? null,
-    });
-  });
-
-  autoUpdater.on('error', (error) => {
-    sendUpdateStatus('updater:status', {
-      state: 'error',
-      message: error instanceof Error ? error.message : String(error),
-    });
-  });
+  // The custom provider reads GitHub releases instead of requiring beta.yml.
+  // GitHub blockmaps are preferred; missing maps are borrowed from the same
+  // version on the configured generic feed.
+  const fallbackBlockMapBaseUrl = getUpdateFeedBaseUrl();
+  const githubUpdater = process.platform === 'win32'
+    ? new NsisUpdater({ provider: 'custom', updateProvider: GitHubReleaseProvider, fallbackBlockMapBaseUrl })
+    : undefined;
+  const githubDifferentialGuardInstalled = githubUpdater
+    ? enforceDifferentialOnlyDownload(githubUpdater as unknown as DifferentialDownloadCapableUpdater)
+    : false;
+  const githubCacheGuardInstalled = githubUpdater
+    ? enforceVerifiedInstallerCache(githubUpdater as unknown as VerifiedCacheCapableUpdater)
+    : false;
+  if (githubUpdater) {
+    githubUpdater.autoDownload = false;
+    githubUpdater.autoInstallOnAppQuit = false;
+    githubUpdater.disableDifferentialDownload = false;
+    githubUpdater.disableWebInstaller = true;
+    githubUpdater.logger = console;
+    if (!githubDifferentialGuardInstalled || !githubCacheGuardInstalled) {
+      console.error('[Updater] Verified differential download hooks are unavailable; GitHub downloads are disabled.');
+    }
+  }
+  updateCoordinator = new UpdateCoordinator(
+    { oss: guardInstalled ? autoUpdater : undefined,
+      github: githubDifferentialGuardInstalled && githubCacheGuardInstalled ? githubUpdater : undefined },
+    (status) => sendUpdateStatus('updater:status', { ...status }),
+  );
 }
 
 // ─── IPC Handlers ──────────────────────────────────────────────
@@ -2396,65 +2398,43 @@ ipcMain.handle('path:isAbsolute', async (_event, targetPath: string) => {
 
 ipcMain.handle('updater:getState', async () => {
   return {
-    enabled: isUpdateSourceConfigured,
+    enabled: Boolean(updateCoordinator?.sources.length),
     feedUrlConfigured: isUpdateSourceConfigured,
     appVersion: app.getVersion(),
     currentVersion: app.getVersion(),
+    sources: updateCoordinator?.sources ?? [],
+    ...(updateCoordinator?.snapshot ?? { state: 'idle', source: 'oss' }),
   };
 });
 
-ipcMain.handle('updater:checkForUpdates', async () => {
-  if (isDev) {
-    return { success: false, error: 'Updater is disabled in development mode.' };
-  }
-  if (!isUpdateSourceConfigured) {
-    return { success: false, error: 'No update source is configured.' };
-  }
-
+ipcMain.handle('updater:checkForUpdates', async (_event, source: unknown = 'oss') => {
+  if (!updateCoordinator) return { success: false, error: '当前环境不支持自动更新。' };
+  if (source !== 'oss' && source !== 'github') return { success: false, error: '未知更新渠道。' };
   try {
-    updateCheckInFlight ??= autoUpdater.checkForUpdates();
-    const result = await updateCheckInFlight;
-    const outcome = toUpdateCheckOutcome(result);
-    console.log(
-      `[Updater] Feed version ${result?.updateInfo?.version ?? 'unknown'} vs installed ${app.getVersion()}; updateAvailable=${outcome.updateAvailable}.`,
-    );
-    return outcome;
-  } catch (error: any) {
-    return { success: false, error: error?.message ?? String(error) };
-  } finally {
-    updateCheckInFlight = null;
+    const outcome = await updateCoordinator.checkForUpdates(source as UpdateSource);
+    return { ...toUpdateCheckOutcome(outcome.result), source: outcome.source };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
 ipcMain.handle('updater:downloadUpdate', async () => {
-  if (isDev) {
-    return { success: false, error: 'Updater is disabled in development mode.' };
-  }
-  if (!isUpdateSourceConfigured) {
-    return { success: false, error: 'No update source is configured.' };
-  }
-
+  if (!updateCoordinator) return { success: false, error: '当前环境不支持自动更新。' };
   try {
-    const result = await autoUpdater.downloadUpdate();
-    return {
-      success: true,
-      files: result ?? [],
-    };
-  } catch (error: any) {
-    return { success: false, error: error?.message ?? String(error) };
+    return { success: true, ...await updateCoordinator.downloadUpdate() };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
 ipcMain.handle('updater:installUpdate', async () => {
-  if (isDev) {
-    return { success: false, error: 'Updater is disabled in development mode.' };
+  if (!updateCoordinator) return { success: false, error: '当前环境不支持自动更新。' };
+  try {
+    updateCoordinator.installUpdate();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
-  if (!isUpdateSourceConfigured) {
-    return { success: false, error: 'No update source is configured.' };
-  }
-
-  autoUpdater.quitAndInstall(false, true);
-  return { success: true };
 });
 
 // ─── Video Export (FFmpeg) ─────────────────────────────────────
