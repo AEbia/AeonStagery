@@ -215,6 +215,8 @@ export interface InlineNumericInputProps {
   step?: string;
   min?: string;
   max?: string;
+  /** Default X/Y bounds to [0, 1] when min/max are omitted. */
+  inferNormalizedBounds?: boolean;
   popoverMin?: string;
   popoverMax?: string;
   style?: React.CSSProperties;
@@ -238,13 +240,13 @@ function getTickInterval(span: number): number {
   return nice * magnitude;
 }
 
-export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", min, max, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
+export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
   const safeValue = value ?? 0;
   const [localValue, setLocalValue] = useState(safeValue.toString());
   const [isEditing, setIsEditing] = useState(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
 
-  const isNormalizedAxis = dragLabel === 'X' || dragLabel === 'Y';
+  const isNormalizedAxis = inferNormalizedBounds && (dragLabel === 'X' || dragLabel === 'Y');
   const resolvedMin = min ?? (isNormalizedAxis ? '0' : undefined);
   const resolvedMax = max ?? (isNormalizedAxis ? '1' : undefined);
 

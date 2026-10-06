@@ -11,12 +11,15 @@ export function resolveCompoundParam(ctx: InspectorParamContext, key: string, ba
     if (key === 'position') {
       const val = ctx.actionParams.position || [0.5, 0.8];
       const zVal = ctx.actionParams.z ?? 0;
+      const positionBounds = ['addCharacter', 'transformCharacter'].includes(ctx.actionType)
+        ? { inferNormalizedBounds: false, popoverMin: '0', popoverMax: '1' }
+        : { min: '0', max: '1' };
       return (
         <div className="inspector-row" key="position_xyz">
           <span className="inspector-label">空间坐标</span>
           <div className="compound-input grid-row">
-            <InlineNumericInput dragLabel="X" step="0.01" min="0" max="1" value={val[0]} onChange={(v, isTransient) => ctx.updateParam(ctx.actionId, 'position', [v, val[1]], isTransient)} />
-            <InlineNumericInput dragLabel="Y" step="0.01" min="0" max="1" value={val[1]} onChange={(v, isTransient) => ctx.updateParam(ctx.actionId, 'position', [val[0], v], isTransient)} />
+            <InlineNumericInput dragLabel="X" step="0.01" {...positionBounds} value={val[0]} onChange={(v, isTransient) => ctx.updateParam(ctx.actionId, 'position', [v, val[1]], isTransient)} />
+            <InlineNumericInput dragLabel="Y" step="0.01" {...positionBounds} value={val[1]} onChange={(v, isTransient) => ctx.updateParam(ctx.actionId, 'position', [val[0], v], isTransient)} />
             <InlineNumericInput dragLabel="Z" step="10" popoverMin="-100" popoverMax="100" value={zVal} onChange={(v, isTransient) => ctx.updateParam(ctx.actionId, 'z', v, isTransient)} />
           </div>
         </div>
