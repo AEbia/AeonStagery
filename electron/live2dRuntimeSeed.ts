@@ -8,6 +8,7 @@ export interface Live2DRuntimeAvailabilityReport {
 
 const RUNTIME_SCRIPT_FILES = ['live2d.min.js', 'live2dcubismcore.min.js'] as const;
 function hasCubism3PlusRuntime(root: string): boolean {
+  if (!root) return false;
   return fs.existsSync(path.join(root, 'live2dcubismcore.min.js'));
 }
 
@@ -16,6 +17,9 @@ function hasCubism3PlusRuntime(root: string): boolean {
  * only the core script to be usable.
  */
 export function inspectLive2DRuntimeSeed(sourceRoot: string): Live2DRuntimeAvailabilityReport {
+  if (!sourceRoot) {
+    return { cubism2: false, cubism3Plus: false };
+  }
   return {
     cubism2: fs.existsSync(path.join(sourceRoot, 'live2d.min.js')),
     cubism3Plus: hasCubism3PlusRuntime(sourceRoot),
@@ -73,4 +77,67 @@ export function ensureLive2DRuntimeFiles(
     cubism2: fs.existsSync(path.join(targetRoot, 'live2d.min.js')),
     cubism3Plus: hasCubism3PlusRuntime(targetRoot),
   };
+}
+
+export interface Live2DRuntimeStatusDetail {
+  cubism2: boolean;
+  cubism3Plus: boolean;
+  missingAny: boolean;
+  isDev: boolean;
+  paths: {
+    localDir: string;
+    seedRoot: string;
+    runtimeRoot: string;
+  };
+}
+
+/**
+ * Inspect runtime availability for the Electron renderer. Runtime scripts are
+ * served from targetRoot by aeon-runtime://, so seed/local staging files count
+ * only after they have been copied there.
+ */
+export function inspectLive2DRuntimeStatus(
+  sourceRoot: string,
+  targetRoot: string,
+  localDir: string,
+  isDev: boolean,
+): Live2DRuntimeStatusDetail {
+  const targetCubism2 = Boolean(targetRoot) && fs.existsSync(path.join(targetRoot, 'live2d.min.js'));
+  const targetCubism3Plus = hasCubism3PlusRuntime(targetRoot);
+
+  const cubism2 = targetCubism2;
+  const cubism3Plus = targetCubism3Plus;
+
+  return {
+    cubism2,
+    cubism3Plus,
+    missingAny: !cubism2 || !cubism3Plus,
+    isDev,
+    paths: {
+      localDir,
+      seedRoot: sourceRoot,
+      runtimeRoot: targetRoot,
+    },
+  };
+}
+
+/**
+ * Sync runtime files placed in `.local/live2d/` into `sourceRoot` (public/)
+ * so that both development web server and Electron protocol can serve them.
+ */
+export function syncLocalRuntimeToSeedRoot(localDir: string, seedRoot: string): void {
+  if (!fs.existsSync(localDir)) return;
+  for (const relativePath of RUNTIME_SCRIPT_FILES) {
+    const src = path.join(localDir, relativePath);
+    if (!fs.existsSync(src)) continue;
+    const dst = path.join(seedRoot, relativePath);
+    if (!fs.existsSync(dst)) {
+      try {
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.copyFileSync(src, dst);
+      } catch (err) {
+        console.warn(`[Live2D] Failed to sync ${relativePath} from ${localDir} to ${seedRoot}:`, err);
+      }
+    }
+  }
 }

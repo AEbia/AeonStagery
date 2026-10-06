@@ -80,6 +80,12 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   live2dRuntime: {
     getAvailability: (): Promise<{ cubism2: boolean; cubism3Plus: boolean } | null> =>
       ipcRenderer.invoke('runtime:getLive2DAvailability'),
+    getStatus: () =>
+      ipcRenderer.invoke('runtime:getLive2DStatus'),
+    refreshStatus: () =>
+      ipcRenderer.invoke('runtime:refreshLive2DStatus'),
+    openDirectory: (type?: 'local' | 'runtime') =>
+      ipcRenderer.invoke('runtime:openLive2DDirectory', type),
   },
 
   // ─── App ───────────────────────────────────────────────
@@ -89,6 +95,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
     getUserDataPath: () => ipcRenderer.invoke('app:getUserDataPath'),
     getDefaultProjectsPath: () => ipcRenderer.invoke('app:getDefaultProjectsPath'),
     restart: () => ipcRenderer.invoke('app:restart'),
+    openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
   },
   crash: {
     record: (report: CrashReport) => ipcRenderer.invoke('crash:record', report),

@@ -56,6 +56,9 @@ import { FirstLessonController } from './ui/onboarding/FirstLessonController';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
 import { TemplatePerformanceProfileEditor } from './ui/templates/TemplatePerformanceProfileEditor';
 import { WebGalRegenerateDialog } from './ui/WebGalRegenerateDialog';
+import { Live2DRuntimeMissingDialog } from './ui/live2d/Live2DRuntimeMissingDialog';
+import { detectLive2DRuntimeStatus } from './services/live2d/live2dRuntimeDetection';
+import type { Live2DRuntimeStatusReport } from './api/types/live2dRuntime';
 import type { WebGalImportInput } from './services/import/webgal';
 import type { ProjectState, ProjectTemplateConfiguration } from './api/types/project';
 import { AUTHORING_SCHEMA_VERSION } from './api/types/authoring';
@@ -263,6 +266,33 @@ function AppContent({
   const [defaultProjectLocation, setDefaultProjectLocation] = useState('');
   const [collaborationServerStatus, setCollaborationServerStatus] = useState<CollaborationServerStatus | null>(null);
   const [isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked] = useState(false);
+
+  const [showLive2DRuntimeDialog, setShowLive2DRuntimeDialog] = useState(false);
+  const [live2DRuntimeReport, setLive2DRuntimeReport] = useState<Live2DRuntimeStatusReport | null>(null);
+  const showLive2DRuntimeSetupOnStartupRef = useRef(settings.showLive2DRuntimeSetupOnStartup);
+
+  useEffect(() => {
+    let mounted = true;
+    void detectLive2DRuntimeStatus().then((report) => {
+      if (!mounted) return;
+      setLive2DRuntimeReport(report);
+      console.info(
+        `[Live2D] Startup runtime status: cubism2=${report.cubism2}, cubism3Plus=${report.cubism3Plus}, missingAny=${report.missingAny}`,
+      );
+      if (report.missingAny && showLive2DRuntimeSetupOnStartupRef.current) {
+        setShowLive2DRuntimeDialog(true);
+      }
+    }).catch((err) => {
+      console.warn('[Live2D] Failed to detect runtime status on startup:', err);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    return eventBus.on('ui:openLive2DRuntimeDialog', () => {
+      setShowLive2DRuntimeDialog(true);
+    });
+  }, []);
 
   useEffect(() => {
     const serverApi = window.aeonStageryAPI?.collaborationServer;
@@ -1810,6 +1840,18 @@ function AppContent({
           request={sceneMigrationDialog.request}
           onConfirm={sceneMigrationDialog.confirm}
           onCancel={sceneMigrationDialog.cancel}
+        />
+      )}
+
+      {showLive2DRuntimeDialog && (
+        <Live2DRuntimeMissingDialog
+          isOpen={showLive2DRuntimeDialog}
+          onClose={() => setShowLive2DRuntimeDialog(false)}
+          onNeverRemind={() => {
+            setSetting('showLive2DRuntimeSetupOnStartup', false);
+            setShowLive2DRuntimeDialog(false);
+          }}
+          report={live2DRuntimeReport}
         />
       )}
 
