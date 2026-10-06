@@ -47,6 +47,7 @@ import { SETTINGS_CATEGORIES, findSettingsCategories, type SettingsDialogTab } f
 import { formatAeonStageryVersionLabel } from '../services/product/ProductInfo';
 import './settingsNavigation.css';
 import { DialogueDefaultsSettings } from './settings/DialogueDefaultsSettings';
+import { UpdateSettingsPanel } from './settings/UpdateSettingsPanel';
 import { getAiProseProviderIdentity } from '../services/ai-authoring/AiProseGlobalConfiguration';
 
 interface SettingsDialogProps {
@@ -79,11 +80,6 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
   );
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
-  const [updateState, setUpdateState] = useState<{ state: string;[key: string]: any }>({ state: 'idle' });
-  const [updateMessage, setUpdateMessage] = useState('');
-  const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
-  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
-  const [updateResult, setUpdateResult] = useState<{ version?: string | null; releaseDate?: string | null; notes?: unknown } | null>(null);
   const [voiceGeneration, setVoiceGeneration] = useState<ProjectVoiceGenerationConfiguration>(() =>
     getProjectVoiceGenerationConfiguration(currentProject),
   );
@@ -101,88 +97,9 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
   }, [initialTab, isOpen]);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    let mounted = true;
-
-    void window.aeonStageryAPI.updater.getState().then((state) => {
-      if (!mounted) return;
-      setUpdateState((prev) => ({ ...prev, ...state, state: 'idle' }));
-    });
-
-    unsubscribe = window.aeonStageryAPI.updater.onStatus((status) => {
-      setUpdateState((prev) => ({ ...prev, ...status }));
-      if (status.state === 'checking') {
-        setIsCheckingForUpdates(true);
-        setUpdateMessage('正在检查更新…');
-      } else if (status.state === 'available') {
-        setIsCheckingForUpdates(false);
-        setIsDownloadingUpdate(false);
-        setUpdateResult(status);
-        setUpdateMessage(`发现新版本 ${status.version}`);
-      } else if (status.state === 'not-available') {
-        setIsCheckingForUpdates(false);
-        setIsDownloadingUpdate(false);
-        setUpdateMessage('当前已经是最新版本。');
-      } else if (status.state === 'downloading') {
-        setIsCheckingForUpdates(false);
-        setIsDownloadingUpdate(true);
-        setUpdateMessage(`正在下载更新 ${Math.round(status.percent ?? 0)}%`);
-      } else if (status.state === 'downloaded') {
-        setIsCheckingForUpdates(false);
-        setIsDownloadingUpdate(false);
-        setUpdateResult(status);
-        setUpdateMessage(`更新已下载完成：${status.version}`);
-      } else if (status.state === 'error') {
-        setIsCheckingForUpdates(false);
-        setIsDownloadingUpdate(false);
-        setUpdateMessage(status.message || '更新检查失败');
-      }
-    });
-
-    return () => {
-      mounted = false;
-      unsubscribe?.();
-    };
-  }, []);
-
-  useEffect(() => {
     const nextConfig = getProjectVoiceGenerationConfiguration(currentProject);
     setVoiceGeneration(nextConfig);
   }, [currentProject]);
-
-  const handleCheckUpdates = async () => {
-    setIsCheckingForUpdates(true);
-    setUpdateMessage('正在检查更新…');
-    const result = await window.aeonStageryAPI.updater.checkForUpdates();
-    if (!result.success) {
-      setIsCheckingForUpdates(false);
-      setUpdateMessage(result.error || '检查更新失败');
-      return;
-    }
-    if (result.updateAvailable) {
-      setUpdateResult(result);
-      setUpdateMessage(`发现新版本 ${result.version}`);
-    } else {
-      setUpdateMessage('当前已经是最新版本。');
-    }
-    setIsCheckingForUpdates(false);
-  };
-
-  const handleDownloadUpdate = async () => {
-    setIsDownloadingUpdate(true);
-    setUpdateMessage('开始下载更新…');
-    const result = await window.aeonStageryAPI.updater.downloadUpdate();
-    setIsDownloadingUpdate(false);
-    if (!result.success) {
-      setUpdateMessage(result.error || '下载更新失败');
-      return;
-    }
-    setUpdateMessage('更新下载完成，可以立即重启安装。');
-  };
-
-  const handleInstallUpdate = async () => {
-    await window.aeonStageryAPI.updater.installUpdate();
-  };
 
   const refreshCollaborationSessions = async () => {
     const api = window.aeonStageryAPI?.collaborationServer;
@@ -851,43 +768,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   <InfoCard label="Theme" value={settings.theme} />
                   <InfoCard label="Defaults" value="Portable Projects" />
                 </div>
-                <div className="settings-dialog__card settings-dialog__about-update">
-                  <div className="settings-dialog__field-label">
-                    增量更新
-                    <InfoTip
-                      content={updateState.enabled
-                        ? '已启用增量更新：仅允许差分下载。无法构建差分包时会中止更新并提示，不会回退到全量安装包。'
-                        : '当前未配置更新源。打包时需在 package.json 的 build.publish 中配置对象存储更新目录，也可用 APP_UPDATE_URL 环境变量覆盖。'}
-                    />
-                  </div>
-                  <div role="status" aria-live="polite" className="settings-dialog__update-status">
-                    {updateMessage || '尚未检查更新'}
-                  </div>
-                  <div className="settings-dialog__actions">
-                    <button className="btn" onClick={handleCheckUpdates} disabled={isCheckingForUpdates || isDownloadingUpdate}>
-                      {isCheckingForUpdates ? '检查中…' : '检查更新'}
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={handleDownloadUpdate}
-                      disabled={!updateResult?.version || isDownloadingUpdate || !updateState.enabled}
-                    >
-                      {isDownloadingUpdate ? '下载中…' : '下载更新'}
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={handleInstallUpdate}
-                      disabled={updateState.state !== 'downloaded'}
-                    >
-                      立即重启安装
-                    </button>
-                  </div>
-                  {updateResult?.releaseDate && (
-                    <div className="settings-dialog__update-date">
-                      发布日期：{new Date(updateResult.releaseDate).toLocaleString()}
-                    </div>
-                  )}
-                </div>
+                <UpdateSettingsPanel />
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
                   <button
                     className="btn settings-dialog__reset-button"
