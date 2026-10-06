@@ -45,6 +45,37 @@ function gateErrors(errors: readonly string[]): (document: CurrentSceneDocument)
 }
 
 describe('SemanticAuthoringApplicationService.commitExactVersion (ADR0023)', () => {
+  it('clears undo and redo history and notifies history subscribers', async () => {
+    const { store, coordinator, authoring } = makeServices();
+    await coordinator.applyDocument(makeDocument(), 'project/main.scene.json');
+    await authoring.replaceDocument({
+      ...makeDocument(),
+      statements: [
+        {
+          id: 'dlg_1',
+          time: 0,
+          type: 'dialogue',
+          params: { speakerId: 'tomori', text: 'Updated', durationSeconds: 2 },
+        },
+      ],
+    });
+    expect(authoring.canUndo).toBe(true);
+
+    expect(await authoring.undo()).toBe(true);
+    expect(authoring.canRedo).toBe(true);
+
+    const listener = vi.fn();
+    authoring.subscribeHistory(listener);
+    authoring.clearHistory();
+
+    expect(authoring.canUndo).toBe(false);
+    expect(authoring.canRedo).toBe(false);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(await authoring.undo()).toBe(false);
+    expect(await authoring.redo()).toBe(false);
+    expect((store.getCurrentSceneDocumentSnapshot()?.statements[0]?.params as { text?: string })?.text).toBe('First');
+  });
+
   it('commits a candidate only when the current version exactly matches, recording history', async () => {
     const { store, coordinator, authoring } = makeServices();
     await coordinator.applyDocument(makeDocument(), 'project/main.scene.json');
