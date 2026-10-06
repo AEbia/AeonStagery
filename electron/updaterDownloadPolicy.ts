@@ -1,3 +1,7 @@
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Logger } from 'electron-updater';
+
 /**
  * electron-updater's NSIS flow tries a differential (blockmap) download first and, when that
  * is impossible, silently falls back to downloading the whole installer. The only signal for
@@ -15,6 +19,8 @@ export const DIFFERENTIAL_ONLY_REQUIRED_MESSAGE = [
 
 export interface DifferentialDownloadCapableUpdater {
   differentialDownloadInstaller?: (...args: unknown[]) => Promise<boolean>;
+  getOrCreateDownloadHelper?: () => Promise<{ cacheDir: string }>;
+  logger?: Logger | null;
 }
 
 /**
@@ -29,17 +35,44 @@ export function enforceDifferentialOnlyDownload(
   message: string = DIFFERENTIAL_ONLY_REQUIRED_MESSAGE,
 ): boolean {
   const differentialDownloadInstaller = updater.differentialDownloadInstaller;
-  if (typeof differentialDownloadInstaller !== 'function') {
+  if (typeof differentialDownloadInstaller !== 'function'
+    || typeof updater.getOrCreateDownloadHelper !== 'function') {
     return false;
   }
 
   const runDifferentialDownload = differentialDownloadInstaller.bind(updater);
   updater.differentialDownloadInstaller = async (...args: unknown[]) => {
-    const shouldFallBackToFullDownload = await runDifferentialDownload(...args);
-    if (shouldFallBackToFullDownload) {
-      throw new Error(message);
+    const helper = await updater.getOrCreateDownloadHelper!();
+    // NSIS replaces installer.exe during installation, but updater promotes a
+    // blockmap as soon as it downloads an update. Neither manual installs nor
+    // uninstalled pending updates keep these two cache files paired. Fetch the
+    // old map by installed version every time we actually need a differential.
+    await rm(join(helper.cacheDir, 'current.blockmap'), { force: true });
+
+    // The dependency swallows the original error when it requests a full
+    // download. Retain that logged cause so network failover can distinguish
+    // connection failures from missing maps and checksum failures.
+    const logger = updater.logger;
+    let failure: Error | undefined;
+    if (logger) {
+      updater.logger = {
+        info: logger.info.bind(logger), warn: logger.warn.bind(logger),
+        ...(logger.debug ? { debug: logger.debug.bind(logger) } : {}),
+        error: (value: unknown) => {
+          if (typeof value === 'string' && value.startsWith('Cannot download differentially, fallback to full download:')) {
+            failure = new Error(value);
+          }
+          logger.error(value);
+        },
+      };
     }
-    return false;
+    try {
+      const shouldFallBackToFullDownload = await runDifferentialDownload(...args);
+      if (shouldFallBackToFullDownload) throw new Error(message, { cause: failure });
+      return false;
+    } finally {
+      if (logger) updater.logger = logger;
+    }
   };
 
   return true;

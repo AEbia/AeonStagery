@@ -289,7 +289,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   // ─── Updates ──────────────────────────────────────────
   updater: {
     getState: () => ipcRenderer.invoke('updater:getState'),
-    checkForUpdates: () => ipcRenderer.invoke('updater:checkForUpdates'),
+    checkForUpdates: (source?: 'oss' | 'github') => ipcRenderer.invoke('updater:checkForUpdates', source),
     downloadUpdate: () => ipcRenderer.invoke('updater:downloadUpdate'),
     installUpdate: () => ipcRenderer.invoke('updater:installUpdate'),
     onStatus: (callback: (status: any) => void) => {

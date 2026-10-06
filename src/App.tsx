@@ -5,6 +5,7 @@ import { eventBus } from './api/events';
 import {
   IconAgent,
   IconAiProse,
+  IconBell,
   IconCrosshair,
   IconFilm,
   IconFolder,
@@ -20,6 +21,7 @@ import {
   IconZoomIn,
   IconZoomOut,
 } from './ui/icons';
+import { defaultChangelogService } from './services/announcements/ChangelogService';
 import {
   useGizmosVisible,
   useEditorState,
@@ -165,6 +167,7 @@ const LazyAgentGenerator = React.lazy(() => import('./ui/AgentGeneratorPanel'));
 const PlaybackControls = React.lazy(() => import('./ui/PlaybackControls'));
 const BakeProgressOverlay = React.lazy(() => import('./ui/BakeProgressOverlay'));
 const SettingsDialog = React.lazy(() => import('./ui/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const ChangelogDialog = React.lazy(() => import('./ui/changelog/ChangelogDialog').then(m => ({ default: m.ChangelogDialog })));
 const VoiceWorkbench = React.lazy(() => import('./ui/voice/VoiceWorkbench').then(m => ({ default: m.VoiceWorkbench })));
 
 export default function App() {
@@ -245,6 +248,15 @@ function AppContent({
   const [isSettingsClosing, setIsSettingsClosing] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsDialogTab>('general');
   const settingsCloseTimerRef = useRef<number | null>(null);
+  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
+  const hasCheckedAutoChangelogRef = useRef(false);
+
+  const hasUnreadChangelog = useMemo(() => {
+    return defaultChangelogService.hasUnread(
+      settings.lastReadChangelogId,
+      settings.readAnnouncementIds,
+    );
+  }, [settings.lastReadChangelogId, settings.readAnnouncementIds]);
   const [isWorkspaceToolsOpen, setIsWorkspaceToolsOpen] = useState(false);
   const [isInspectorDetailVisible, setIsInspectorDetailVisible] = useState(false);
   const [sidePanelView, setSidePanelView] = useState<SidePanelView>(() => (
@@ -291,6 +303,34 @@ function AppContent({
   useEffect(() => {
     return eventBus.on('ui:openLive2DRuntimeDialog', () => {
       setShowLive2DRuntimeDialog(true);
+    });
+  }, []);
+
+  // Auto-prompt changelog on startup after an update
+  useEffect(() => {
+    if (hasCheckedAutoChangelogRef.current) return;
+    hasCheckedAutoChangelogRef.current = true;
+
+    const autoShow = settings.autoShowChangelogOnUpdate ?? true;
+    if (!autoShow) return;
+
+    const latestRelease = defaultChangelogService.getLatestRelease();
+    if (!latestRelease?.version) return;
+
+    const isUnread = defaultChangelogService.isItemUnread(
+      latestRelease,
+      settings.lastReadChangelogId,
+      settings.readAnnouncementIds,
+    );
+
+    if (isUnread) {
+      setIsChangelogOpen(true);
+    }
+  }, [settings.autoShowChangelogOnUpdate, settings.lastReadChangelogId, settings.readAnnouncementIds]);
+
+  useEffect(() => {
+    return eventBus.on('ui:openChangelog', () => {
+      setIsChangelogOpen(true);
     });
   }, []);
 
@@ -1582,6 +1622,7 @@ function AppContent({
           <details className="top-bar__more">
             <summary className="btn btn--icon" title="更多操作" aria-label="更多操作">
               <span aria-hidden="true">•••</span>
+              {hasUnreadChangelog && <span className="top-bar__unread-badge" aria-label="有未读更新" />}
             </summary>
             <div className="top-bar__menu" role="menu">
               <button
@@ -1596,7 +1637,29 @@ function AppContent({
                 {settings.theme === 'light' ? <IconMoon width={15} height={15} /> : <IconSun width={15} height={15} />}
                 切换主题
               </button>
-              <button className="top-bar__menu-item" onClick={() => void eventBus.emit('ui:openSettings')} role="menuitem">
+              <button
+                className="top-bar__menu-item"
+                onClick={(e) => {
+                  const details = (e.currentTarget.closest('details') as HTMLDetailsElement | null);
+                  if (details) details.open = false;
+                  setIsChangelogOpen(true);
+                }}
+                role="menuitem"
+                title="查看更新日志与公告"
+              >
+                <IconBell width={15} height={15} />
+                更新日志
+                {hasUnreadChangelog && <span className="changelog-unread-dot" title="有未读更新" />}
+              </button>
+              <button
+                className="top-bar__menu-item"
+                onClick={(e) => {
+                  const details = (e.currentTarget.closest('details') as HTMLDetailsElement | null);
+                  if (details) details.open = false;
+                  void eventBus.emit('ui:openSettings');
+                }}
+                role="menuitem"
+              >
                 <IconSettings width={15} height={15} />
                 全局设置
               </button>
@@ -1904,6 +1967,15 @@ function AppContent({
           service={contextValue.services.voiceAuthoring}
           onClose={() => setShowVoiceWorkbench(false)}
         />
+      </React.Suspense>
+
+      <React.Suspense fallback={null}>
+        {isChangelogOpen && (
+          <ChangelogDialog
+            isOpen={isChangelogOpen}
+            onClose={() => setIsChangelogOpen(false)}
+          />
+        )}
       </React.Suspense>
 
       <FirstLessonController
