@@ -151,11 +151,13 @@ lines.push('');
 lines.push('## Who is NOT bundled');
 lines.push('');
 lines.push(
-  'Live2D Cubism runtimes (`live2d.min.js`, `live2dcubismcore.min.js`, the official Cubism Web '
-  + 'framework and its shaders) are **never** part of a release build. They are proprietary Live2D '
+  'Live2D Cubism Core scripts (`live2d.min.js`, `live2dcubismcore.min.js`) are **never** '
+  + 'part of a release build. They are proprietary Live2D '
   + 'software and must be obtained and staged locally by the user. Only the internal verification '
   + 'build (`npm run dist:win:verify`) contains them, and that build must never be redistributed.',
 );
+lines.push('');
+lines.push('The Cubism 3/4/5 framework and shaders are bundled through `untitled-pixi-live2d-engine/cubism`; no external SDK checkout is required. Live2D-derived framework code remains subject to Live2D license terms.');
 lines.push('');
 lines.push('## License summary');
 lines.push('');
@@ -220,8 +222,8 @@ lines.push('- JetBrains Mono, Noto Sans SC and Outfit are bundled under the SIL 
 lines.push('');
 lines.push('### Live2D runtimes (user-supplied)');
 lines.push('');
-lines.push('- `live2d.min.js` (Cubism 2.1 core) and `live2dcubismcore.min.js` + the Cubism Web '
-  + 'framework are covered by Live2D Inc. license terms; see '
+lines.push('- `live2d.min.js` (Cubism 2.1 core) and `live2dcubismcore.min.js` (Cubism 3/4/5 Core) '
+  + 'are covered by Live2D Inc. license terms; see '
   + '<https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html> and '
   + '<https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html>.');
 lines.push(`- They are staged locally by the user (see <${RUNTIME_SETUP_URL}>) and are the `

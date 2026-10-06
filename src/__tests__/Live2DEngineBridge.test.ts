@@ -89,14 +89,35 @@ describe.skipIf(!hasRuntimeGlobals)('Live2DEngineBridge', () => {
       __resetLive2DRenderPipeRegistrationForTests();
 
       const mod = await loadLive2DEngineModule();
-      expect(added).toContain(mod.Live2DPlugin);
+      expect(added).toHaveLength(1);
 
       // The registered plugin must accept models produced through the same
       // bridge — i.e. no TypeError from the instanceof branch.
-      const pipe = new mod.Live2DPlugin({ renderPipes: {} });
-      const model = modelLike(mod.Live2DModel);
-      expect(() => pipe.execute(model)).not.toThrow();
+      const pipe = new (added[0] as any)({ renderPipes: {} });
+      const modern = await import('untitled-pixi-live2d-engine/cubism');
+      expect(() => pipe.execute(modelLike(mod.Live2DModel))).not.toThrow();
+      expect(() => pipe.execute(modelLike(modern.Live2DModel))).not.toThrow();
+      const prepare = vi.fn();
+      pipe.execute({ prepare });
+      expect(prepare).toHaveBeenCalledOnce();
     } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('registers the modern pipe when Cubism 2.1 is absent', async () => {
+    const { ensureLive2DRenderPipe, __resetLive2DRenderPipeRegistrationForTests } = await import('../engine/Live2DEngineBridge');
+    const previousLegacy = (window as any).Live2D;
+    delete (window as any).Live2D;
+    const spy = vi.spyOn(PIXI.extensions, 'add').mockImplementation(() => undefined);
+    __resetLive2DRenderPipeRegistrationForTests();
+    try {
+      await ensureLive2DRenderPipe();
+      const modern = await import('untitled-pixi-live2d-engine/cubism');
+      expect(spy).toHaveBeenCalledWith(modern.Live2DPlugin);
+    } finally {
+      (window as any).Live2D = previousLegacy;
+      __resetLive2DRenderPipeRegistrationForTests();
       spy.mockRestore();
     }
   });
@@ -127,7 +148,8 @@ describe.skipIf(!hasRuntimeGlobals)('Live2DEngineBridge', () => {
       expect(spy).not.toHaveBeenCalled();
       release({ cubism2Loaded: true, cubismCoreLoaded: true });
       await registration;
-      expect(spy).toHaveBeenCalledWith((await modelConsumer).Live2DPlugin);
+      expect(spy).toHaveBeenCalledOnce();
+      expect((await modelConsumer).Live2DModel).toBeDefined();
     } finally {
       release({ cubism2Loaded: true, cubismCoreLoaded: true });
       await Promise.all([registration, modelConsumer]);

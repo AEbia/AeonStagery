@@ -16,8 +16,8 @@ import { evaluateCustomMotionRuntime, type CustomMotionHandoffPose } from './cus
  * an emitter without a writable core would silently freeze the motion's
  * parameters AND disable the legacy post-update fallback in updateAll, so such
  * targets are skipped; if no target qualifies, install returns null and the
- * caller keeps the legacy path (e.g. the official-cubism-web runtime, whose
- * internalModel facade has neither emitter nor Cubism 2 core API).
+ * caller keeps the legacy path (e.g. the modern Cubism runtime, whose
+ * coreModel uses the Cubism 3+ parameter API).
  */
 
 export const EYE_BLINK_PARAMETER_IDS: readonly string[] = [

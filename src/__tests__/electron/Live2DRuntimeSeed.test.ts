@@ -23,7 +23,7 @@ describe('live2dRuntimeSeed', () => {
     expect(() => ensureLive2DRuntimeFiles(sourceRoot, targetRoot, (m) => warnings.push(m))).not.toThrow();
     expect(inspectLive2DRuntimeSeed(sourceRoot)).toEqual({ cubism2: false, cubism3Plus: false });
     expect(warnings.some((w) => w.includes('Cubism 2.1'))).toBe(true);
-    expect(warnings.some((w) => w.includes('CUBISM_WEB_SDK_DIR'))).toBe(true);
+    expect(warnings.some((w) => w.includes('LIVE2D_CUBISM_CORE'))).toBe(true);
     expect(fs.readdirSync(targetRoot)).toEqual([]);
   });
 
@@ -40,19 +40,19 @@ describe('live2dRuntimeSeed', () => {
     expect(fs.existsSync(path.join(targetRoot, 'live2dcubismcore.min.js'))).toBe(false);
   });
 
-  it('does not report Cubism Web as available when its shader bundle is incomplete', () => {
+  it('enables Cubism 3/4/5 with only its Core script', () => {
     const sourceRoot = makeTempDir('aeon-live2d-seed-');
     const targetRoot = makeTempDir('aeon-live2d-target-');
     writeSeedFile(sourceRoot, 'live2dcubismcore.min.js');
 
-    expect(inspectLive2DRuntimeSeed(sourceRoot)).toEqual({ cubism2: false, cubism3Plus: false });
+    expect(inspectLive2DRuntimeSeed(sourceRoot)).toEqual({ cubism2: false, cubism3Plus: true });
     expect(ensureLive2DRuntimeFiles(sourceRoot, targetRoot, () => {})).toEqual({
       cubism2: false,
-      cubism3Plus: false,
+      cubism3Plus: true,
     });
   });
 
-  it('seeds the full Cubism Web family including shaders', () => {
+  it('seeds both Core scripts without obsolete external shaders', () => {
     const sourceRoot = makeTempDir('aeon-live2d-seed-');
     const targetRoot = makeTempDir('aeon-live2d-target-');
     writeSeedFile(sourceRoot, 'live2d.min.js');
@@ -66,7 +66,7 @@ describe('live2dRuntimeSeed', () => {
     });
     expect(
       fs.existsSync(path.join(targetRoot, 'vendor', 'cubism-web', 'Shaders', 'WebGL', 'vertshadersrc.vert')),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('keeps existing target copies untouched (idempotent re-run)', () => {

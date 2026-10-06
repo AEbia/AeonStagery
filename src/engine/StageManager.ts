@@ -24,21 +24,9 @@ import {
 } from './environmentLayerModel';
 import { customAnimHost } from './CustomAnimHost';
 import { eventBus } from '../api/events';
-// Both the render pipe plugin and every Live2D model instance must come from
-// the SAME engine bundle — see Live2DEngineBridge's module comment. Registering
-// the plugin from the engine's MAIN entry while models were built from its
-// cubism-legacy entry made the pipe's `instanceof Live2DModel` check fail, so a
-// model was misread as a prepare pseudo-instruction and the first render frame
-// after a character entered the stage threw
-// `TypeError: instruction.prepare is not a function`.
+// The bridge registers one native pipe that accepts both runtime entries.
 import { ensureLive2DRenderPipe } from './Live2DEngineBridge';
-// Official Cubism Web (Cubism 3+) models draw into their own offscreen canvas
-// and expose it through a sprite; PixiJS 8 dropped the v7 Container render()
-// boundary that used to drive that per-frame refresh. The draw pipe below is
-// the v8 replacement seam and must be registered before the renderer exists
-// (see OfficialCubismWebDrawPipe.ts).
-import { registerOfficialCubismWebDrawPipe } from './OfficialCubismWebDrawPipe';
-import { setOfficialCubismWebPreviewResolution } from './OfficialCubismWebPreview';
+import { installPixiFilterResolutionGuard } from './PixiFilterResolutionGuard';
 import type { StagePreviewResolution } from '../api/interfaces/IStageAdapter';
 
 const STAGE_WIDTH = 1920;
@@ -115,8 +103,7 @@ class StageManager {
 
     try {
       await ensureLive2DRenderPipe();
-      registerOfficialCubismWebDrawPipe();
-      this.previewBaseResolution = resolvePreviewResolution();
+        this.previewBaseResolution = resolvePreviewResolution();
       this.app = new PIXI.Application();
       await this.app.init({
         width: STAGE_WIDTH,
@@ -130,6 +117,7 @@ class StageManager {
         useBackBuffer: true, // Required by Pixi's advanced blend-mode filters.
         preference: 'webgl', // Live2D render pipe and Cubism runtimes are WebGL-based.
       });
+      installPixiFilterResolutionGuard(this.app.renderer);
     } catch (err) {
       console.error('[StageManager] Failed to create PIXI.Application:', err);
       throw err;
@@ -286,7 +274,6 @@ class StageManager {
       ? resolution
       : 1;
     this.previewResolution = nextResolution;
-    setOfficialCubismWebPreviewResolution(nextResolution);
     if (!this.app) return;
 
     const canvas = this.app.canvas;

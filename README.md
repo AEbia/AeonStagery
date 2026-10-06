@@ -71,7 +71,9 @@ Provide runtimes via environment variables or place them in the local `.local/` 
 | Runtime family | Environment variable | Fallback path |
 | :--- | :--- | :--- |
 | Cubism 2.1 core (`live2d.min.js`) | `LIVE2D_CUBISM2_CORE` (file or directory) | `.local/live2d/live2d.min.js` |
-| Cubism Web 3/4/5 (`live2dcubismcore.min.js` + Framework + Shaders) | `CUBISM_WEB_SDK_DIR` (SDK directory) | `.local/cubism-web-sdk` |
+| Cubism 3/4/5 Core (`live2dcubismcore.min.js`) | `LIVE2D_CUBISM_CORE` (file or directory) | `.local/live2d/live2dcubismcore.min.js` |
+
+Cubism 3/4/5 uses `untitled-pixi-live2d-engine/cubism`: only the Core script is supplied externally. No SDK checkout, Framework types, or Shader folder is needed. `CUBISM_WEB_SDK_DIR/Core/live2dcubismcore.min.js` remains a fallback for existing setups. Run `npm run sync:live2d-runtime` after supplying the file. In a packaged app, place it in `userData/live2d-runtime/`; existing user runtime files are preserved across upgrades.
 
 ---
 
@@ -137,7 +139,7 @@ npm run agent:bridge -- serve --endpoint ... --model ...
 
 ### Known Limits
 
-- **Live2D Compatibility**: Targets supported runtime families (Cubism 2.1 and official Cubism Web 3/4/5); does not claim generic support for arbitrary Cubism versions.
+- **Live2D Compatibility**: Targets supported runtime families (Cubism 2.1 and Cubism 3/4/5 via untitled-pixi-live2d-engine); does not claim generic support for arbitrary Cubism versions.
 - **Missing Runtime Handling**: Without configured runtime files, Live2D models fail with an explicit missing-runtime error while the rest of the application remains fully functional.
 
 ---

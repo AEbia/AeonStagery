@@ -86,8 +86,8 @@ demo/
 .playwright-cli/
 # Live2D runtimes are never committed. They are staged locally (see ADR-0035).
 # Local sources default to `.local/live2d/live2d.min.js` and
-# `.local/cubism-web-sdk/`, or whatever LIVE2D_CUBISM2_CORE /
-# CUBISM_WEB_SDK_DIR point at.
+# `.local/live2d/live2dcubismcore.min.js`, or LIVE2D_CUBISM2_CORE /
+# LIVE2D_CUBISM_CORE. CUBISM_WEB_SDK_DIR remains a Core-only fallback.
 public/live2d.min.js
 public/live2dcubismcore.min.js
 public/vendor/cubism-web/

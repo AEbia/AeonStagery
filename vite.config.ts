@@ -54,17 +54,16 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
-      '@cubism': path.resolve(__dirname, '.generated/cubism-web/src'),
       'url': path.resolve(__dirname, 'src/shims/url.ts'),
     },
   },
   optimizeDeps: {
-    // Include the PixiJS 8 Live2D runtime so Vite pre-bundles its legacy entry.
+    // Include the PixiJS 8 Live2D runtime so Vite pre-bundles each runtime entry.
     include: [
       'pixi.js',
       'gsap',
       'untitled-pixi-live2d-engine/cubism-legacy',
-      'eventemitter3',
+      'untitled-pixi-live2d-engine/cubism',
     ],
     esbuildOptions: {
       alias: {
@@ -97,7 +96,7 @@ export default defineConfig({
           // behind its dynamic import; merging it with eagerly imported Pixi
           // makes cold startup execute it before runtime-bootstrap settles.
           if (id.includes('untitled-pixi-live2d-engine')) {
-            return 'live2d-runtime';
+            return id.includes('cubism-legacy') ? 'live2d-legacy-runtime' : 'live2d-cubism-runtime';
           }
           if (
             id.includes('eventemitter3') ||

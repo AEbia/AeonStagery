@@ -13,7 +13,7 @@ import {
   resolveNumericArrayLike,
 } from './Live2DConfig';
 import type { Live2DParameterMetadata } from '../api/types/live2d-parameter-animation';
-import { getOfficialCubismSdkStatus, initOfficialCubismWebSdk } from './OfficialCubismWebSdk';
+import { getCubismPixiSdkStatus, initCubismPixiSdk } from './CubismPixiSdk';
 import { waitForLive2DRuntimeBootstrap } from './Live2DRuntimeAvailability';
 import {
   createLive2DModelHandle,
@@ -37,7 +37,7 @@ import {
   applyRenderHook,
   findMaskSprite,
 } from './Live2DModelSetup';
-import { loadLive2DEngineModule } from './Live2DEngineBridge';
+import { loadCubismEngineModule, loadLive2DEngineModule } from './Live2DEngineBridge';
 
 export interface Live2DModelCreateOptions {
   autoHitTest?: boolean;
@@ -57,6 +57,8 @@ export interface Live2DSeekMotionState {
 
 export interface Live2DSeekExpressionState {
   key: string | null;
+  /** Time since this expression began; absent or +Infinity means fully latched. */
+  elapsedSeconds?: number;
 }
 
 export type Live2DSeekRestoreTier = 'native' | 'snapshot-forward' | 'visual-freeze' | 'unsupported';
@@ -1925,12 +1927,17 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
   }
 }
 
-export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
-  public readonly id = 'official-cubism-web';
+function resolveCubismParameterId(value: any): string | undefined {
+  return normalizeParameterId(value) ?? value?.getString?.()?.s;
+}
+
+export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
+  public readonly id = 'untitled-pixi-live2d-engine-cubism';
   public get supported(): boolean {
-    return getOfficialCubismSdkStatus().available;
+    return getCubismPixiSdkStatus().available;
   }
   private ready = false;
+  private engine: any = null;
   private initPromise: Promise<void> | null = null;
   private readonly controls: Live2DRuntimeModelControls = {
     getCoreModel: (model) => model?.internalModel?.coreModel ?? null,
@@ -1948,7 +1955,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         const rawId = coreModel.getParameterId?.(invalidParamIndex);
         const paramName = typeof rawId === 'string'
           ? rawId
-          : rawId?.getString?.() ?? rawId?.toString?.() ?? `Param_${invalidParamIndex}`;
+          : resolveCubismParameterId(rawId) ?? `Param_${invalidParamIndex}`;
         return `primary param[${invalidParamIndex}] (${paramName})=${params[invalidParamIndex]}`;
       }
 
@@ -1963,7 +1970,10 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
       return null;
     },
     getAvailableMotions: (model) => Object.keys(model?.internalModel?.settings?.motions ?? {}),
-    getAvailableExpressions: (model) => Object.keys(model?.internalModel?.settings?.expressions ?? {}),
+    getAvailableExpressions: (model) => {
+      const definitions = model?.internalModel?.settings?.expressions;
+      return Array.isArray(definitions) ? definitions.map((definition: any) => definition.Name).filter(Boolean) : Object.keys(definitions ?? {});
+    },
     getMotionDuration: (model, motionKey) => model?.getMotionDuration?.(motionKey, 0) ?? 0,
     getMotionDebugState: (model) => {
       const motionManager = model?.internalModel?.motionManager;
@@ -1989,7 +1999,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         index,
         name: typeof paramIds[index] === 'string'
           ? paramIds[index]
-          : paramIds[index]?.getString?.() ?? `Param_${index}`,
+          : resolveCubismParameterId(paramIds[index]) ?? `Param_${index}`,
         value: values[index],
       }));
     },
@@ -2011,7 +2021,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         const rawId = coreModel.getParameterId(index);
         const id = typeof rawId === 'string'
           ? rawId
-          : rawId?.getString?.() ?? rawId?.toString?.() ?? `Param_${index}`;
+          : resolveCubismParameterId(rawId) ?? `Param_${index}`;
         metadata.push({
           id,
           index,
@@ -2051,8 +2061,9 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
     setExpression: (model, expressionName) => {
       model?.setExpression?.(expressionName ?? null);
     },
-    setExpressionForSeek: async (model, expressionName) => {
-      model?.setExpression?.(expressionName ?? null);
+    setExpressionForSeek: async (model, expressionName, elapsedSeconds) => {
+      if (model?.setExpressionForSeek) await model.setExpressionForSeek(expressionName, elapsedSeconds);
+      else model?.setExpression?.(expressionName ?? null);
     },
     setInjectedParameter: (model, paramName, value) => {
       const coreModel = model?.internalModel?.coreModel;
@@ -2065,7 +2076,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         const rawId = coreModel.getParameterId(index);
         const id = typeof rawId === 'string'
           ? rawId
-          : rawId?.getString?.() ?? rawId?.toString?.();
+          : resolveCubismParameterId(rawId);
         if (id === paramName) {
           coreModel.setParameterValueByIndex(index, value);
           model?.syncInputParameters?.();
@@ -2082,13 +2093,17 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         : captureModelSnapshot(id, model, motionStartTime);
       if (!captured) return null;
       captured.runtimeFamily = 'cubism3-plus';
-      captured.adapterId = 'official-cubism-web';
+      captured.adapterId = 'untitled-pixi-live2d-engine-cubism';
       return captured;
     },
     applySnapshot: (model, snapshot) => {
       const internalModel = model?.internalModel;
       const coreModel = internalModel?.coreModel;
       if (!internalModel || !coreModel) return;
+      if (model.applyRuntimeSnapshot) {
+        model.applyRuntimeSnapshot(snapshot);
+        return;
+      }
 
       const targetParams = resolveNumericArrayLike(
         internalModel.parameterValues,
@@ -2125,7 +2140,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         return model.restoreAtSceneTime(input);
       }
 
-      const diagnostics: string[] = ['Official Cubism Web model does not expose restoreAtSceneTime; using bounded fallback.'];
+      const diagnostics: string[] = ['Cubism model does not expose restoreAtSceneTime; using bounded fallback.'];
       if (input.handoffSnapshot) {
         this.controls.applySnapshot(model, input.handoffSnapshot as ModelSnapshot);
       } else if (input.idleSnapshot) {
@@ -2167,7 +2182,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
         return;
       }
       if (renderTexture && typeof renderer?.render === 'function') {
-        renderer.render(model, { renderTexture, clear: true });
+        renderer.render({ container: model, target: renderTexture, clear: true });
         return;
       }
       model?.render?.(renderer);
@@ -2177,7 +2192,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
       model?.update?.(deltaMs);
     },
     advanceMotionOnly: () => {
-      // The official runtime advances motion queues inside its own update pass.
+      // The native runtime advances motion queues inside its own update pass.
     },
     stepBakeFrame: (model, deltaMs, renderer, label, flushCore) => {
       if (deltaMs > 0) model?.update?.(deltaMs);
@@ -2215,7 +2230,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
       };
     },
     restartIdleMotion: async () => {
-      // The official runtime manages idle motions through its own queue.
+      // The timeline explicitly owns motion playback; idle remains stopped here.
     },
     hasMotionGroup: (model, motionKey) => {
       return !!model?.internalModel?.settings?.motions?.[motionKey];
@@ -2258,15 +2273,15 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
       model.alpha = 0;
     },
     prepareModel: (model, options) => {
-      // The official model consumes injected runtime parameters immediately
+      // The model consumes injected runtime parameters immediately
       // before Core.update(); retain the character/bake entry it should read.
       model._characterEntry = options.injectedParamsSource;
     },
     isolateMask: () => {
-      // The official runtime renders through its own canvas; no pixi mask state.
+      // The vendor owns a clipping manager per model.
     },
     installBakeRenderGuards: () => {
-      // The official runtime renders through its own canvas; no GL guards.
+      // The native vendor render pipe owns GL state restoration.
     },
     setBlink: (model, enabled, intervalMs = 4000, sceneTimeSeconds, startTimeSeconds, intervalRangeMs) => {
       if (intervalRangeMs !== undefined) {
@@ -2276,7 +2291,7 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
       }
     },
     applyFocus: () => {
-      // The official runtime facade has no focus controller.
+      // Retain the previous Cubism 3+ focus control contract.
     },
     getFocusControllers: () => [],
     getHeadAnchor: (model) => resolveHeadAnchorFromSettings(model?.internalModel?.settings),
@@ -2287,7 +2302,8 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      await initOfficialCubismWebSdk();
+      await initCubismPixiSdk();
+      this.engine = await loadCubismEngineModule();
       this.ready = true;
     })();
 
@@ -2303,11 +2319,11 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
   }
 
   getModelClass(): any {
-    return null;
+    return this.engine?.Live2DModel ?? null;
   }
 
   getConfig(): any {
-    return null;
+    return this.engine?.config ?? null;
   }
 
   getControls(): Live2DRuntimeModelControls {
@@ -2331,12 +2347,12 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
     });
   }
 
-  async createModel(modelUrl: string): Promise<any> {
+  async createModel(modelUrl: string, options: Live2DModelCreateOptions = {}): Promise<any> {
     if (!this.ready) {
       await this.init();
     }
-    const { OfficialCubismWebModelInstance } = await import('./OfficialCubismWebModel');
-    return OfficialCubismWebModelInstance.create(modelUrl);
+    const { createCubismPixiModel } = await import('./CubismPixiModel');
+    return createCubismPixiModel(modelUrl, options);
   }
 
   getUnsupportedMessage(modelPath: string): string | null {
@@ -2356,15 +2372,15 @@ export class OfficialCubismWebLive2DAdapter implements Live2DRuntimeAdapter {
   }
 
   disposeBakeRenderTexture(): void {
-    // The official runtime renders to its own canvas; nothing to release.
+    // Each native model releases its own bake RenderTexture on disposal.
   }
 }
 
 export const cubism2Live2DAdapter = new Cubism2PixiLive2DAdapter();
-export const officialCubismWebLive2DAdapter = new OfficialCubismWebLive2DAdapter();
+export const cubismPixiLive2DAdapter = new CubismPixiLive2DAdapter();
 
 export function getLive2DRuntimeAdapter(runtime?: Live2DRuntimeDescriptor | null): Live2DRuntimeAdapter {
   const resolvedRuntime = runtime ?? defaultCubism2RuntimeDescriptor;
-  if (resolvedRuntime.adapterId === 'official-cubism-web') return officialCubismWebLive2DAdapter;
+  if (resolvedRuntime.adapterId === 'untitled-pixi-live2d-engine-cubism') return cubismPixiLive2DAdapter;
   return cubism2Live2DAdapter;
 }

@@ -6,7 +6,9 @@ This file lists third-party components that are either copied into the packaged 
 
 ## Who is NOT bundled
 
-Live2D Cubism runtimes (`live2d.min.js`, `live2dcubismcore.min.js`, the official Cubism Web framework and its shaders) are **never** part of a release build. They are proprietary Live2D software and must be obtained and staged locally by the user. Only the internal verification build (`npm run dist:win:verify`) contains them, and that build must never be redistributed.
+Live2D Cubism Core scripts (`live2d.min.js`, `live2dcubismcore.min.js`) are **never** part of a release build. They are proprietary Live2D software and must be obtained and staged locally by the user. Only the internal verification build (`npm run dist:win:verify`) contains them, and that build must never be redistributed.
+
+The Cubism 3/4/5 framework and shaders are bundled through `untitled-pixi-live2d-engine/cubism`; no external SDK checkout is required. Live2D-derived framework code remains subject to Live2D license terms.
 
 ## License summary
 
@@ -117,7 +119,7 @@ Live2D Cubism runtimes (`live2d.min.js`, `live2dcubismcore.min.js`, the official
 
 ### Live2D runtimes (user-supplied)
 
-- `live2d.min.js` (Cubism 2.1 core) and `live2dcubismcore.min.js` + the Cubism Web framework are covered by Live2D Inc. license terms; see <https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html> and <https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html>.
+- `live2d.min.js` (Cubism 2.1 core) and `live2dcubismcore.min.js` (Cubism 3/4/5 Core) are covered by Live2D Inc. license terms; see <https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html> and <https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html>.
 - They are staged locally by the user (see <https://github.com/AEbia/aeonstagery#live2d-runtimes-are-not-part-of-the-repository>) and are the user's responsibility to license.
 
 ## License texts for separately bundled packages

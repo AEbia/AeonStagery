@@ -1128,7 +1128,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1159,7 +1159,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1191,6 +1191,31 @@ describe('CharacterSynchronizer', () => {
     }));
   });
 
+  it.each([false, true])('passes expression elapsed time independently of native motion (motion=%s)', async (withMotion) => {
+    live2D.listCharacters.mockReturnValue(['char1']);
+    live2D.hasCharacter.mockReturnValue(true);
+    live2D.getAllCharacters.mockReturnValue(new Map([['char1', {
+      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' },
+    }]]));
+    const restoreSeekState = vi.fn().mockResolvedValue(undefined);
+    (live2D as any).restoreSeekState = restoreSeekState;
+
+    await synchronizer.syncTo({
+      time: 5,
+      desiredChars: new Map([['char1', {
+        id: 'char1', model: 'm.model3.json', config: {},
+        expression: { key: 'smile', time: 4.9 },
+        ...(withMotion ? { motion: { output: { kind: 'resource' as const, key: 'wave' }, time: 0 } } : {}),
+      }]]),
+      transformationProxies: new ProxyRegistry(), snapshotStore: snapshots,
+      shouldCancel: () => false, skipHardReset: false, isScrubbing: true,
+    });
+
+    expect(restoreSeekState).toHaveBeenCalledWith('char1', expect.objectContaining({
+      expression: { key: 'smile', elapsedSeconds: expect.closeTo(0.1, 5) },
+    }));
+  });
+
   it('passes the previous action pose as the native motion fade-in handoff', async () => {
     const handoffSnapshot = {
       params: new Float32Array([12]),
@@ -1202,7 +1227,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'official-cubism-web' } },
+      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1243,7 +1268,7 @@ describe('CharacterSynchronizer', () => {
     live2D.listCharacters.mockReturnValue(['char1']);
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([['char1', {
-      runtime: { adapterId: 'official-cubism-web' },
+      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' },
     }]]));
     let renderedParameter = 2;
     (live2D as any).restoreSeekState = vi.fn(async (_id: string, restore: any) => {
@@ -1268,6 +1293,7 @@ describe('CharacterSynchronizer', () => {
       resolveStateAtTime: () => new Map([['char1', {
         id: 'char1', model: 'm.model3.json', config: {},
         motion: { output: { kind: 'resource' as const, key: 'previous' }, time: 0 },
+        expression: { key: 'smile', time: 0.5 },
       }]]),
       transformationProxies: new ProxyRegistry(),
       snapshotStore: snapshots,
@@ -1279,6 +1305,7 @@ describe('CharacterSynchronizer', () => {
     expect((live2D as any).restoreSeekState).toHaveBeenNthCalledWith(1, 'char1', expect.objectContaining({
       targetSceneTime: 1,
       motion: expect.objectContaining({ key: 'previous', offset: 1 }),
+      expression: { key: 'smile', elapsedSeconds: 0.5 },
     }));
     expect((live2D as any).restoreSeekState).toHaveBeenNthCalledWith(2, 'char1', expect.objectContaining({
       targetSceneTime: 1.25,

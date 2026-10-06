@@ -33,6 +33,7 @@ import { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
 import { getUnsupportedLive2DRuntimeMessage } from './Live2DRuntimeResolver';
 import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
+import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import {
   resolveRimLightStateAtTime,
 } from './RimLightResolver';
@@ -1169,8 +1170,8 @@ class Live2DManager {
    *
    * Called from takeOverCustomMotion and lazily re-invoked by updateAll so a
    * motion that started before its model finished loading still gets staged
-   * once the model arrives. A failed install (runtime without the emitter
-   * seam, e.g. official-cubism-web) is recorded per custom-motion state
+   * once the model arrives. A failed install (runtime without the writable Cubism 2
+   * seam, e.g. untitled-pixi-live2d-engine-cubism) is recorded per custom-motion state
    * object — otherwise updateAll would retry the (always failing) install
    * every frame.
    */
@@ -1219,7 +1220,7 @@ class Live2DManager {
    */
   private restoreCustomMotionBaseline(entry: CharacterEntry): void {
     if (!entry.model) return;
-    if (entry.runtime?.adapterId === 'official-cubism-web') {
+    if (entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism') {
       if (entry.idleSnapshot) {
         getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, entry.idleSnapshot as ModelSnapshot);
       }
@@ -1343,7 +1344,22 @@ class Live2DManager {
     }
 
     try {
-      if (entry.runtimeHandle) {
+      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
+      if (!this._shouldUpdate
+        && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+        && controls.setExpressionForSeek) {
+        // An explicit inspector preview should show the final expression while
+        // the timeline is paused. Re-evaluate at the same motion timestamp so
+        // displaying it does not advance the scene or accumulate motion fades.
+        const model = entry.model;
+        void controls.setExpressionForSeek(model, expressionName, Number.POSITIVE_INFINITY)
+          .then(() => {
+            if (this.characters.get(id) === entry && entry.model === model && entry.expressionKey === expressionName) {
+              controls.advanceFrame(model, 0);
+            }
+          })
+          .catch((err) => console.error(`[Live2D] Failed to preview expression on "${id}":`, err));
+      } else if (entry.runtimeHandle) {
         entry.runtimeHandle.expression.setExpression(expressionName);
       } else {
         getLive2DRuntimeAdapter(entry.runtime).getControls().setExpression(entry.model, expressionName);
@@ -2367,7 +2383,7 @@ class Live2DManager {
       handoffSnapshot?: ModelSnapshot | null;
       targetSceneTime: number;
       motion?: { key: string; priority?: number; offset: number; sceneTime: number; fadeInSeconds?: number } | null;
-      expression?: { key: string | null } | null;
+      expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
     },
@@ -2568,7 +2584,7 @@ class Live2DManager {
     // 将动作作为后台任务踢出，_motionMutex 负责串行化。
     this._pendingMotionCount = 0;
     for (const entry of targetMap.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'official-cubism-web') {
+      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
         continue;
       }
       if ((entry as any)._pendingPlayMotion) {
@@ -2627,7 +2643,7 @@ class Live2DManager {
 
     // 保持 _currentDt 为初始值 0，确保 render 钩子在播放时不重复推进时间
     for (const entry of this.characters.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'official-cubism-web') {
+      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
         continue;
       }
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !this._scriptEngine?.isReconstructing) {
@@ -2690,7 +2706,11 @@ class Live2DManager {
           // The 0ms seek flush must not advance model time; and when a seek
           // boundary snapshot was just re-applied above, the step must come
           // after it so the handoff pose survives into the rendered frame.
-          if (shouldStepModels) {
+          // Native motion fades blend against the saved pose on every update;
+          // even the legacy pause throttle would accumulate their fade weight.
+          const freezeNativeMotion = !this._shouldUpdate && !forceStep
+            && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
+          if (shouldStepModels && !freezeNativeMotion) {
             getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
           }
 
