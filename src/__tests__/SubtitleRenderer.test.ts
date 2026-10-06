@@ -35,6 +35,21 @@ vi.mock('../ui/SettingsStore', () => ({
   },
 }));
 
+function useRealTextMetrics() {
+  vi.mocked(PIXI.CanvasTextMetrics.measureText).mockRestore();
+  const context = {
+    font: '',
+    measureText(text: string) {
+      const size = Number(this.font.match(/([\d.]+)px/)?.[1] ?? 48);
+      return { width: Array.from(text.replace(/\u200B/g, '')).length * size, actualBoundingBoxLeft: 0, actualBoundingBoxRight: 0 };
+    },
+  };
+  vi.spyOn(PIXI.CanvasTextMetrics, '_canvas', 'get').mockReturnValue({ getContext: () => context } as any);
+  vi.spyOn(PIXI.CanvasTextMetrics, '_context', 'get').mockReturnValue(context as any);
+  vi.spyOn(PIXI.CanvasTextMetrics, 'experimentalLetterSpacingSupported', 'get').mockReturnValue(false);
+  vi.spyOn(PIXI.CanvasTextMetrics, 'measureFont').mockReturnValue({ ascent: 40, descent: 8, fontSize: 48 });
+}
+
 describe('SubtitleRenderer', () => {
   beforeEach(() => {
     stageState.subtitleLayer = new PIXI.Container();
@@ -82,6 +97,135 @@ describe('SubtitleRenderer', () => {
     vi.restoreAllMocks();
     stageState.subtitleLayer.destroy({ children: true });
     stageState.subtitleLayer = null;
+  });
+
+  it.each(['pink-nameplate', 'immersive-subtitle', 'glass', 'minimal', 'classic'])('wraps long Chinese text using real Pixi metrics for %s', (styleId) => {
+    useRealTextMetrics();
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
+    const content = '这是一段需要在舞台文本框内自动换行的中文对白'.repeat(3);
+    const image = preset.renderer === 'image-dialogue-v1';
+    const config = { _id: `real-wrap-${styleId}`, speaker: '', text: content, style: 'typewriter' as const, duration: 4, template: styleId,
+      presentation: image ? { ...preset.params, renderer: 'image-dialogue-v1', styleId } as any : undefined };
+    const renderer = new SubtitleRenderer();
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 3);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const lines = container.children.filter((child) => child instanceof PIXI.Text) as PIXI.Text[];
+    if (image) expect(lines.length).toBeGreaterThan(1);
+    expect(lines.map((line) => line.text.replace(/\u200B/g, '')).join('')).toBe(content);
+    for (const line of lines) {
+      const metrics = PIXI.CanvasTextMetrics.measureText(line.text, line.style);
+      expect(metrics.maxLineWidth).toBeLessThanOrEqual(line.style.wordWrapWidth);
+      if (!image) expect(metrics.lines.length).toBeGreaterThan(1);
+      expect(line.y + metrics.height).toBeLessThanOrEqual(1080);
+    }
+  });
+
+  it('keeps large classic dialogue text within the stage', () => {
+    useRealTextMetrics();
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? 96 : key === 'dialogueTextSpeed' ? 0.01 : '');
+    const content = '中文对白需要在大字号下根据经典文本框宽度换行'.repeat(2);
+    const config = { _id: 'large-classic-dialogue', speaker: '', text: content, style: 'instant' as const, duration: 4, template: 'classic' };
+    const renderer = new SubtitleRenderer();
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const dialogueText = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+    const metrics = PIXI.CanvasTextMetrics.measureText(dialogueText.text, dialogueText.style);
+    expect(metrics.lines.length).toBeGreaterThan(1);
+    expect(dialogueText.y + metrics.height).toBeLessThanOrEqual(1080);
+  });
+
+  it.each(['typewriter', 'fadeIn', 'cinematic', 'instant'] as const)('wraps mixed text, explicit newlines and oversized words with %s subtitles', (style) => {
+    useRealTextMetrics();
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const content = `中文和🙂表情${'LongWord'.repeat(10)}\n保留换行`;
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === 'pink-nameplate')!;
+    const config = { _id: `mixed-wrap-${style}`, speaker: '', text: content, style, duration: 4,
+      presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any };
+    const renderer = new SubtitleRenderer();
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 3);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const texts = container.children.filter((child) => child instanceof PIXI.Text) as PIXI.Text[];
+    const lines = texts.flatMap((text) => {
+      const metrics = PIXI.CanvasTextMetrics.measureText(text.text, text.style);
+      expect(metrics.maxLineWidth).toBeLessThanOrEqual(text.style.wordWrapWidth);
+      return metrics.lines;
+    });
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.join('')).toBe(content.replace(/\n/g, ''));
+    expect(lines.at(-1)).toBe('保留换行');
+  });
+
+  it('reflows active dialogue after a font change while preserving playback and the nameplate position', () => {
+    useRealTextMetrics();
+    let fontSize = 32;
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? fontSize : key === 'dialogueTextSpeed' ? 0.01 : key === 'dialogueEntranceAnimation' ? false : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const content = '调整字号应当更新文本测量并保持对白在舞台内自动换行'.repeat(3);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === 'pink-nameplate')!;
+    const config = { _id: 'live-font-reflow', speaker: '角色', text: content, style: 'typewriter' as const, duration: 4,
+      presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any };
+    const renderer = new SubtitleRenderer();
+    const original = renderer.showDialogue(config);
+    const master = gsap.timeline({ paused: true }).add(original, 2);
+    const coordinator = new DialogueCoordinator(renderer, { stop: vi.fn(), setTextMouthAt: vi.fn(), startAudioDrivenLipSync: vi.fn() });
+    const sync = (offset: number) => {
+      master.seek(2 + offset, true);
+      coordinator.sync(2 + offset, { ...config, startTime: 2 }, false, vi.fn(), (path) => path, vi.fn());
+    };
+    sync(1);
+    const before = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const firstLines = before.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 32);
+    expect(firstLines.length).toBeGreaterThan(1);
+    fontSize = 72;
+    renderer.forceUpdate();
+    const after = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const lines = after.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 72) as PIXI.Text[];
+    expect(lines.length).toBeGreaterThan(firstLines.length);
+    expect(lines.map((line) => line.text).join('')).toBe(content);
+    expect(lines[0].style.lineHeight).toBe(93);
+    const replacement = renderer.getCurrentTimeline()!;
+    expect(replacement).not.toBe(original);
+    expect(replacement.parent).toBe(master);
+    expect(replacement.startTime()).toBe(2);
+    expect(replacement.time()).toBeCloseTo(1);
+    const box = after.children[0] as PIXI.Sprite;
+    const namebox = after.children[1] as PIXI.Container;
+    expect(box.y + box.height).toBeCloseTo(1040);
+    expect(namebox.y - box.y).toBe(-78);
+    expect(lines[0].y - box.y).toBe(38);
+    expect(lines.at(-1)!.y + 93).toBeLessThanOrEqual(1040);
+    sync(0.15);
+    expect(lines.map((line) => line.text).join('')).toBe(content.slice(0, 15));
+    sync(3);
+    expect(lines.map((line) => line.text).join('')).toBe(content);
+    expect(stageState.subtitleLayer.children).toHaveLength(1);
+  });
+
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('keeps the speaker font unchanged when adjusting dialogue font size for %s', (styleId) => {
+    let fontSize = 32;
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? fontSize : key === 'dialogueTextSpeed' ? 0.01 : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === styleId)!;
+    const config = { _id: `speaker-font-${styleId}`, speaker: '说话人', text: 'Hello', style: 'instant' as const, duration: 3, template: styleId,
+      presentation: preset.renderer === 'image-dialogue-v1' ? { ...preset.params, renderer: 'image-dialogue-v1', styleId } as any : undefined };
+    const renderer = new SubtitleRenderer();
+    renderer.showDialogue(config).pause();
+    const collectTexts = (container: PIXI.Container): PIXI.Text[] => container.children.flatMap((child) =>
+      child instanceof PIXI.Text ? [child] : child instanceof PIXI.Container ? collectTexts(child) : []);
+    const readTexts = () => collectTexts(stageState.subtitleLayer.children[0] as PIXI.Container);
+    renderer.ensureDialogueOnStage(config, 1);
+    const initialSpeaker = readTexts().find((text) => text.text.includes('说话人'))!;
+    const speakerFontSize = initialSpeaker.style.fontSize;
+    expect(readTexts().find((text) => text.text === 'Hello')!.style.fontSize).toBe(32);
+    fontSize = 72;
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(readTexts().find((text) => text.text.includes('说话人'))!.style.fontSize).toBe(speakerFontSize);
+    expect(readTexts().find((text) => text.text === 'Hello')!.style.fontSize).toBe(72);
   });
 
   it.each(['typewriter', 'fadeIn', 'cinematic', 'instant'] as const)('plays %s subtitles in image dialogue with the entrance disabled', (style) => {

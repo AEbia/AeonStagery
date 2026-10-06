@@ -4,6 +4,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { bootstrap, createAiProseConfigurationFromSettings, verifyProjectAgentTargetIdentity } from '../engine/Bootstrapper';
+import { subtitleRenderer } from '../engine/SubtitleRenderer';
+import { settingsManager } from '../ui/SettingsStore';
 import { AiProseGlobalConfiguration } from '../services/ai-authoring/AiProseGlobalConfiguration';
 import { AiProseDraftPersistence } from '../services/ai-authoring/AiProseDraftPersistence';
 import type { ProjectState } from '../api/types/project';
@@ -55,7 +57,7 @@ vi.mock('../ui/SettingsStore', () => ({
   settingsProjectWorkflowSettingsPort: { setAssetsPath: vi.fn() },
 }));
 vi.mock('../engine/SubtitleRenderer', () => ({
-  subtitleRenderer: { showDialogue: vi.fn(), hideDialogue: vi.fn(), getCurrentTimeline: vi.fn() },
+  subtitleRenderer: { showDialogue: vi.fn(), hideDialogue: vi.fn(), getCurrentTimeline: vi.fn(), forceUpdate: vi.fn() },
 }));
 vi.mock('gsap', () => ({
   default: { timeline: vi.fn().mockReturnValue({ to: vi.fn(), call: vi.fn(), seek: vi.fn(), time: vi.fn().mockReturnValue(0), duration: vi.fn().mockReturnValue(0), play: vi.fn(), pause: vi.fn(), kill: vi.fn(), getChildren: vi.fn().mockReturnValue([]), timeScale: vi.fn() }), to: vi.fn() },
@@ -108,6 +110,19 @@ function bootstrapCtxWithEngine() {
 }
 
 describe('Bootstrapper', () => {
+  it('refreshes the active dialogue when the font size setting changes', () => {
+    vi.mocked(settingsManager.subscribeKey).mockClear();
+    vi.mocked(subtitleRenderer.forceUpdate).mockClear();
+    const ctx = bootstrapCtx();
+    const fontSizeSubscription = vi.mocked(settingsManager.subscribeKey).mock.calls
+      .find(([key]) => key === 'dialogueFontSize');
+
+    expect(fontSizeSubscription).toBeDefined();
+    fontSizeSubscription?.[1]();
+    expect(subtitleRenderer.forceUpdate).toHaveBeenCalledOnce();
+    ctx.dispose();
+  });
+
   it('bootstrap() returns adapters, stores, and dispose', () => {
     const ctx = bootstrapCtx();
     expect(ctx).toBeDefined();

@@ -111,6 +111,14 @@ export const IconMessageCircle = (props: IconProps) => (
   <IconBase {...props}><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></IconBase>
 );
 
+export const IconDialogue = (props: IconProps) => (
+  <IconBase {...props}>
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    <path d="M8 9h8" />
+    <path d="M8 13h6" />
+  </IconBase>
+);
+
 export const IconCamera = (props: IconProps) => (
   <IconBase {...props}><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" /><circle cx="12" cy="13" r="3" /></IconBase>
 );

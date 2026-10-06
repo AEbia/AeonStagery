@@ -269,9 +269,9 @@ export const MinimalTemplate: DialogueTemplate = {
 export const ClassicTemplate: DialogueTemplate = {
   id: 'classic',
   name: 'Classic VN',
-  render(container, config, _metrics) {
+  render(container, config, metrics) {
     const { speaker, speakerColor, fontSize = 44, position = 'bottom' } = config;
-    const boxHeight = 320;
+    const boxHeight = Math.min(STAGE_HEIGHT, Math.max(320, metrics.height + 150));
     const boxY = position === 'bottom' ? STAGE_HEIGHT - boxHeight : position === 'top' ? 0 : (STAGE_HEIGHT - boxHeight) / 2;
 
     const finalSpeakerColor = speakerColor || '#FFD700';

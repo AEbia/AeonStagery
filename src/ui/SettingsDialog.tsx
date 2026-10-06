@@ -9,6 +9,7 @@ import {
   IconVolume2,
   IconCheck,
   IconRefresh,
+  IconDialogue,
 } from './icons';
 import { InfoTip } from './Tooltip';
 import {
@@ -17,6 +18,7 @@ import {
   settingsManager,
   DEFAULT_SETTINGS,
   DIALOGUE_TEXT_SPEED_SECONDS_RANGE,
+  DIALOGUE_FONT_SIZE_RANGE,
   DEFAULT_DIALOGUE_DURATION_SECONDS_RANGE,
 } from './SettingsStore';
 import { ShortcutSettingsPanel } from './shortcuts/ShortcutSettingsPanel';
@@ -293,7 +295,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
 
   const tabs = findSettingsCategories(searchQuery);
   const activeCategory = SETTINGS_CATEGORIES.find(category => category.id === activeTab)!;
-  const categoryIcons = { settings: IconSettings, activity: IconActivity, sparkles: IconSparkles, volume: IconVolume2, folder: IconFolder, info: IconInfo };
+  const categoryIcons = { settings: IconSettings, activity: IconActivity, sparkles: IconSparkles, volume: IconVolume2, folder: IconFolder, info: IconInfo, dialogue: IconDialogue };
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     const matches = findSettingsCategories(query);
@@ -511,6 +513,11 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   />
                 </Section>
                 <Section title="文字与动画">
+                  <SettingItem
+                    title="对白字体大小"
+                    description="仅调整舞台对白正文的字号（像素），说话人字号保持各样式的设定。正文按文本框可用宽度自动换行，行距随字号调整。"
+                    control={<Slider label="对白字体大小" min={DIALOGUE_FONT_SIZE_RANGE.min} max={DIALOGUE_FONT_SIZE_RANGE.max} step={DIALOGUE_FONT_SIZE_RANGE.step} value={settings.dialogueFontSize} onChange={(value) => setSetting('dialogueFontSize', value)} suffix=" 像素" />}
+                  />
                   <SettingItem
                     title="文本框入场动画"
                     description="控制文本框的淡入与上滑效果；文字仍按所选字幕样式展现。所有对白共用此开关。"

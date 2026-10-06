@@ -3,7 +3,7 @@ export const SETTINGS_CATEGORIES = [
   { id: 'general', group: '编辑器', label: '常规', icon: 'settings', description: '主题、自动保存和工作区布局', scope: '本机偏好 · 修改后即时保存', keywords: '外观 浅色 深色 性能 布局' },
   { id: 'engine', group: '编辑器', label: '播放与性能', icon: 'activity', description: '预览与播放行为', scope: '本机播放设置 · 修改后即时保存', keywords: '引擎 渲染 预烘焙 缓存' },
   { id: 'audio', group: '编辑器', label: '音频', icon: 'volume', description: '主音量和背景音乐', scope: '本机监听设置 · 修改后即时保存', keywords: '混音 bgm 背景音乐' },
-  { id: 'dialogue', group: '编辑器', label: '对白', icon: 'settings', description: '默认样式、文字速度、时长和入场动画', scope: '默认样式保存在项目；文字与动画偏好保存在本机 · 修改后即时保存', keywords: '对话 字幕 文本框 粉色 名牌 打字机 节奏' },
+  { id: 'dialogue', group: '编辑器', label: '对白', icon: 'dialogue', description: '默认样式、字号、文字速度、时长和入场动画', scope: '默认样式保存在项目；文字与动画偏好保存在本机 · 修改后即时保存', keywords: '对话 字幕 文本框 粉色 名牌 打字机 节奏 字体 大小 换行' },
   { id: 'shortcuts', group: '编辑器', label: '快捷键', icon: 'settings', description: '键盘操作与快捷键绑定', scope: '本机快捷键 · 修改后即时保存', keywords: '键盘 按键 热键' },
   { id: 'ai', group: '功能服务', label: 'AI 服务', icon: 'sparkles', description: '模型、连接、并发与访问密钥', scope: '本机 AI 服务 · 密钥需单独保存', keywords: 'api 模型 大模型 铺戏 agent 项目助手 endpoint base url' },
   { id: 'voice', group: '功能服务', label: '配音服务', icon: 'volume', description: 'GPT-SoVITS、模型与参考音频目录', scope: '本机语音服务 · 配置即时保存，连接和启停手动执行', keywords: '语音 音色 声音 gpt sovits 克隆 参考音频' },

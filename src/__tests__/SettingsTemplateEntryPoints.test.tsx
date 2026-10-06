@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, settingsManager } from '../ui/SettingsStore';
 import { AppProvider } from '../ui/context/AppContext';
 import { SettingsDialog } from '../ui/SettingsDialog';
 import { findSettingsCategories, isSettingsDialogTab, SETTINGS_CATEGORIES } from '../ui/settingsNavigation';
+import { IconDialogue } from '../ui/icons';
 
 beforeEach(() => {
   Object.defineProperty(window, 'aeonStageryAPI', {
@@ -29,6 +30,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   settingsManager.set('dialogueEntranceAnimation', DEFAULT_SETTINGS.dialogueEntranceAnimation);
+  settingsManager.set('dialogueFontSize', DEFAULT_SETTINGS.dialogueFontSize);
 });
 
 describe('settings template entry point', () => {
@@ -50,6 +52,11 @@ describe('settings template entry point', () => {
     expect(screen.getByRole('tab', { name: '对白' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByText('默认对白时长')).toBeTruthy();
     expect(screen.getByText('对白文本速度')).toBeTruthy();
+    const fontSize = screen.getByRole('slider', { name: '对白字体大小' });
+    fireEvent.change(fontSize, { target: { value: '64' } });
+    expect(settingsManager.get('dialogueFontSize')).toBe(64);
+    expect(fontSize.getAttribute('aria-valuetext')).toBe('64 像素');
+    expect(findSettingsCategories('字号').map((category) => category.id)).toContain('dialogue');
     const entrance = screen.getByRole('switch', { name: '文本框入场动画' });
     fireEvent.click(entrance);
     expect(settingsManager.get('dialogueEntranceAnimation')).toBe(false);
@@ -86,5 +93,14 @@ describe('settings template entry point', () => {
 
     expect(screen.getByRole('tab', { name: '项目模板' })).toBeTruthy();
     expect(screen.getByText('模板能力配置测试面板')).toBeTruthy();
+  });
+
+  it('registers a dedicated dialogue icon for the dialogue category', () => {
+    const category = SETTINGS_CATEGORIES.find((candidate) => candidate.id === 'dialogue');
+    expect(category?.icon).toBe('dialogue');
+    const { container } = render(<IconDialogue data-testid="dialogue-icon" />);
+    const svg = container.querySelector('svg');
+    expect(svg).toBeTruthy();
+    expect(svg?.querySelectorAll('path').length).toBeGreaterThanOrEqual(1);
   });
 });
