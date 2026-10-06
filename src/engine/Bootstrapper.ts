@@ -951,6 +951,8 @@ export function bootstrap(options?: {
   const playbackAdapter = new PlaybackAdapter(playbackStore, {
     play: () => getScriptEngine()?.play(),
     pause: () => getScriptEngine()?.pause(),
+    isPlaying: () => getScriptEngine()?.isPlaying() ?? false,
+    onPlayingChange: (callback) => getScriptEngine()?.onPlayingChange(callback) ?? (() => undefined),
     seek: (t: number, forceReconstruct?: boolean) => getScriptEngine()?.seek(t, forceReconstruct),
     setLoop: (s: number, e: number) => getScriptEngine()?.setLoopRegion(s, e),
     setLoopEnabled: (v: boolean) => getScriptEngine()?.setLoopEnabled(v),
