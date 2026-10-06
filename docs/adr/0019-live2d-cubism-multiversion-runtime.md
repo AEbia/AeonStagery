@@ -43,6 +43,7 @@ Cubism 2 当前由 `Cubism2PixiLive2DAdapter` 包住 `untitled-pixi-live2d-engin
 - 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情清理与异步取消、确定性 blink/breath、Core 更新前的参数注入以及多模型扩容后的内存视图刷新。
 - 使用引擎内置的原生 Pixi 渲染，预览质量随舞台 renderer resolution 生效；Bake 通过 Pixi v8 RenderTexture contract 绘制。
 - Cubism 2.1 的 core、动作与私有 controls 不变。3/4/5 的 Core 缺失时仍只在对应模型加载处报告明确错误。
+- 当前锁定的 npm 引擎尚不支持离屏部件合成及扩展颜色/透明度混合模式；含这些效果的模型继续允许加载，但渲染结果可能缺失相应效果。普通 drawable 遮罩及兼容的正常、加算、乘算混合继续使用原渲染器。高版本运行时只使用一个用户提供的 Core，不新增官方 Framework 包。
 
 Implementation: `src/engine/CubismPixiSdk.ts`, `src/engine/CubismPixiModel.ts`, `src/engine/Live2DEngineBridge.ts`, `src/engine/Live2DRuntimeAdapter.ts`.
 Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
