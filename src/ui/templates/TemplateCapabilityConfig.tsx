@@ -72,6 +72,7 @@ export const buildAvailableDialogueStyles = (
     .filter((templatePackage) => selectedTemplateIdSet.has(templatePackage.id))
     .flatMap((templatePackage) => (templatePackage.dialogueStyles ?? []).map((style) => ({
       ...style,
+      name: ({ glass: '玻璃', minimal: '极简', classic: '经典' } as Record<string, string>)[style.id] ?? style.name,
       templateScope: templatePackage.scope,
       templateId: templatePackage.id,
       templateName: templatePackage.name,

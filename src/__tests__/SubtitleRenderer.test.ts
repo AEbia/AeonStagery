@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import SubtitleRenderer from '../engine/SubtitleRenderer';
+import { DialogueCoordinator } from '../engine/coordinators/DialogueCoordinator';
+import { SEMANTIC_BUILTIN_TEMPLATE_PACKAGE } from '../services/template-package/BuiltinTemplatePackage';
 
 const stageState = vi.hoisted(() => ({
   subtitleLayer: null as any,
@@ -80,6 +82,127 @@ describe('SubtitleRenderer', () => {
     vi.restoreAllMocks();
     stageState.subtitleLayer.destroy({ children: true });
     stageState.subtitleLayer = null;
+  });
+
+  it.each(['typewriter', 'fadeIn', 'cinematic', 'instant'] as const)('plays %s subtitles in image dialogue with the entrance disabled', (style) => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueEntranceAnimation' ? false : key === 'dialogueTextSpeed' ? 0.01 : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: `pink-${style}`, speaker: '', text: 'Hello', style, duration: 2,
+      presentation: {
+        renderer: 'image-dialogue-v1' as const, styleId: 'pink-nameplate',
+        textbox: { image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 },
+        text: { x: 198, y: 820, maxWidth: 1520, fontSize: 48, lineHeight: 68 },
+      },
+    };
+    const timeline = renderer.showDialogue(config);
+    timeline.pause();
+    renderer.ensureDialogueOnStage(config, 0);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+    expect(container.alpha).toBe(1);
+    expect(container.y).toBe(0);
+    renderer.ensureDialogueOnStage(config, 0.001);
+    if (style === 'typewriter') {
+      expect(text.text).toBe('');
+      expect(text.mask).toBeFalsy();
+    }
+    if (style === 'fadeIn' || style === 'cinematic') expect(text.alpha).toBeLessThan(1);
+    if (style === 'cinematic') expect(text.y).toBeGreaterThan(config.presentation.text.y);
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(text.alpha).toBe(1);
+    expect(text.y).toBe(config.presentation.text.y);
+    if (style === 'typewriter') expect(text.text).toBe('Hello');
+    renderer.ensureDialogueOnStage(config, 0);
+    expect(container.alpha).toBe(1);
+    expect(container.y).toBe(0);
+  });
+
+  it('submits only revealed Chinese characters while the real dialogue playback coordinator advances', () => {
+    const content = '粉色名牌应当逐字显示对白';
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueEntranceAnimation' ? false : key === 'dialogueTextSpeed' ? 0.1 : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    vi.mocked(PIXI.CanvasTextMetrics.measureText).mockReturnValue({
+      lines: [content], lineWidths: [content.length * 48], lineHeight: 62, maxLineWidth: content.length * 48,
+      width: content.length * 48, height: 62, fontProperties: { ascent: 40, descent: 8, fontSize: 48 },
+    } as any);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'pink-nameplate')!;
+    const presentation = { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any;
+    const config = { _id: 'pink-playback', speaker: '', text: content, style: 'typewriter' as const, duration: 3, presentation };
+    const renderer = new SubtitleRenderer();
+    const timeline = renderer.showDialogue(config);
+    const master = gsap.timeline({ paused: true }).add(timeline, 1);
+    const coordinator = new DialogueCoordinator(renderer, { stop: vi.fn(), setTextMouthAt: vi.fn(), startAudioDrivenLipSync: vi.fn() });
+    const sync = (offset: number) => {
+      master.seek(1 + offset, true);
+      coordinator.sync(1 + offset, { ...config, startTime: 1 }, false, vi.fn(), (path) => path, vi.fn());
+    };
+    sync(0.15);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+    expect(text.text.replace(/\u200B/g, '')).toBe(content.slice(0, 1));
+    sync(0.35);
+    expect(text.text.replace(/\u200B/g, '')).toBe(content.slice(0, 3));
+    sync(2);
+    expect(text.text.replace(/\u200B/g, '')).toBe(content);
+    sync(0.15);
+    expect(text.text.replace(/\u200B/g, '')).toBe(content.slice(0, 1));
+  });
+
+  it('keeps wrapped image dialogue lines aligned while revealing Unicode characters and seeking backwards', () => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueEntranceAnimation' ? false : key === 'dialogueTextSpeed' ? 0.1 : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    vi.mocked(PIXI.CanvasTextMetrics.measureText).mockReturnValue({
+      lines: ['你\u200B好\u200B🙂', '再\u200B见'], lineWidths: [144, 96], lineHeight: 62, maxLineWidth: 144,
+      width: 144, height: 124, fontProperties: { ascent: 40, descent: 8, fontSize: 48 },
+    } as any);
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: 'pink-wrap', speaker: '', text: '你好🙂再见', style: 'typewriter' as const, duration: 2,
+      presentation: {
+        renderer: 'image-dialogue-v1' as const, styleId: 'pink-nameplate',
+        textbox: { image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 },
+        text: { x: 176, y: 830, maxWidth: 144, fontSize: 48, lineHeight: 62, align: 'center' as const },
+      },
+    };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 0.25);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const lines = container.children.filter((child) => child instanceof PIXI.Text) as PIXI.Text[];
+    const content = () => lines.map((line) => line.text.replace(/\u200B/g, ''));
+    expect(content()).toEqual(['你好', '']);
+    const positions = lines.map((line) => [line.x, line.y]);
+    expect(positions).toEqual([[176, 830], [200, 892]]);
+    renderer.ensureDialogueOnStage(config, 0.35);
+    expect(content()).toEqual(['你好🙂', '']);
+    renderer.ensureDialogueOnStage(config, 0.45);
+    expect(content()).toEqual(['你好🙂', '再']);
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(content()).toEqual(['你好🙂', '再见']);
+    renderer.ensureDialogueOnStage(config, 0.15);
+    expect(content()).toEqual(['你', '']);
+    expect(lines.map((line) => [line.x, line.y])).toEqual(positions);
+    renderer.ensureDialogueOnStage(config, 0);
+    expect(content()).toEqual(['', '']);
+  });
+
+  it('honors the global entrance switch for already scheduled dialogue', () => {
+    let enabled = true;
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueEntranceAnimation' ? enabled : key === 'dialogueTextSpeed' ? 0.01 : '');
+    const renderer = new SubtitleRenderer();
+    const config = { _id: 'entrance-switch', speaker: '', text: 'Hello', style: 'instant' as const, duration: 2 };
+    const timeline = renderer.showDialogue(config);
+    timeline.pause();
+    renderer.ensureDialogueOnStage(config, 0.05);
+    expect(stageState.subtitleLayer.children[0].alpha).toBeLessThan(1);
+    enabled = false;
+    renderer.ensureDialogueOnStage(config, 0.05);
+    expect(stageState.subtitleLayer.children[0].alpha).toBe(1);
+    expect(stageState.subtitleLayer.children[0].y).toBe(0);
+    enabled = true;
+    renderer.ensureDialogueOnStage(config, 0.05);
+    expect(stageState.subtitleLayer.children[0].alpha).toBeLessThan(1);
   });
 
   it('rebuilds a cached dialogue when the same statement moves to another screen position', () => {

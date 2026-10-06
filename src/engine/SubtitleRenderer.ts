@@ -3,7 +3,7 @@
  *
  * Optimized for high performance:
  * 1. TextMetrics caching to reduce CPU load.
- * 2. Mask-based reveal for typewriter effect (zero texture uploads during animation).
+ * 2. Mask-based reveal for built-in boxes; fixed-line text reveal for image boxes.
  * 3. Pluggable Template system.
  */
 
@@ -75,6 +75,7 @@ class SubtitleRenderer {
       templateId,
       presentation ? JSON.stringify(presentation) : '',
       speedKey,
+      settingsManager.get('dialogueEntranceAnimation') !== false,
     ].join('_');
     return config._id ? `${config._id}_${textHash}` : textHash;
   }
@@ -96,7 +97,7 @@ class SubtitleRenderer {
   }
 
   private getCachedMetrics(text: string, style: PIXI.TextStyle): PIXI.CanvasTextMetrics {
-    const key = `${text}|${style.fontSize}|${style.wordWrapWidth}|${style.lineHeight}`;
+    const key = `${text}|${style.styleKey}`;
     if (metricsCache.has(key)) return metricsCache.get(key)!;
     const metrics = PIXI.CanvasTextMetrics.measureText(text, style);
     metricsCache.set(key, metrics);
@@ -227,15 +228,19 @@ class SubtitleRenderer {
       for (const cb of syncCallbacks) cb();
     });
 
+    const animateEntrance = settingsManager.get('dialogueEntranceAnimation') !== false;
+    const textStart = animateEntrance ? 0.2 : 0;
     const entranceProxy = { alpha: 0, y: 40 };
     const syncEntrance = () => {
       if (!container.destroyed) {
-        container.alpha = entranceProxy.alpha;
-        container.y = entranceProxy.y;
+        const enabled = settingsManager.get('dialogueEntranceAnimation') !== false;
+        container.alpha = enabled ? entranceProxy.alpha : 1;
+        container.y = enabled ? entranceProxy.y : 0;
       }
     };
     syncCallbacks.push(syncEntrance);
 
+    syncEntrance();
     // Alpha fade in quickly
     tl.to(entranceProxy, {
       alpha: 1, duration: 0.2, ease: 'power2.out',
@@ -247,11 +252,60 @@ class SubtitleRenderer {
       y: 0, duration: 0.45, ease: 'back.out(1.4)',
       onUpdate: syncEntrance,
     }, 0);
-    // Typewriter logic
-    if (style === 'typewriter') {
-      const charCount = text.length;
+    // Image dialogue reveals text itself so sprite/stencil batching cannot
+    // expose the unrevealed suffix. Wrap and alignment use the full metrics.
+    if (style === 'typewriter' && config.presentation?.renderer === 'image-dialogue-v1') {
+      dialogueText.mask = null;
+      container.removeChild(textMask);
+      textMask.destroy();
+      const lineStyle = textStyle.clone();
+      const align = lineStyle.align;
+      lineStyle.wordWrap = false;
+      lineStyle.align = 'left';
+      const lineHeight = (lineStyle.lineHeight || metrics.lineHeight) + lineStyle.leading;
+      const lineTexts = metrics.lines.map((_, index) => {
+        const lineText = index === 0 ? dialogueText : new PIXI.Text({ text: '', style: lineStyle });
+        lineText.style = lineStyle;
+        lineText.text = '';
+        lineText.resolution = 2;
+        const alignmentOffset = metrics.maxLineWidth - metrics.lineWidths[index];
+        lineText.x = layout.textX + (align === 'center' ? alignmentOffset / 2 : align === 'right' ? alignmentOffset : 0);
+        lineText.y = layout.textY + index * lineHeight;
+        if (index > 0) container.addChild(lineText);
+        return lineText;
+      });
+      const steps: { lineIndex: number; end: number }[] = [];
+      metrics.lines.forEach((line, lineIndex) => {
+        let end = 0;
+        for (const character of line) {
+          end += character.length;
+          if (character !== '\u200B') steps.push({ lineIndex, end });
+        }
+      });
+      const reveal = { count: 0 };
+      let lastCount = -1;
+      const syncText = () => {
+        const count = Math.max(0, Math.min(steps.length, Math.floor(reveal.count)));
+        if (count === lastCount || container.destroyed) return;
+        lastCount = count;
+        const current = count > 0 ? steps[count - 1] : undefined;
+        lineTexts.forEach((lineText, index) => {
+          const visible = count === steps.length || (current && index < current.lineIndex)
+            ? metrics.lines[index]
+            : current && index === current.lineIndex ? metrics.lines[index].slice(0, current.end) : '';
+          if (lineText.text !== visible) lineText.text = visible;
+        });
+      };
+      syncCallbacks.push(syncText);
+      syncText();
+      tl.to(reveal, {
+        count: steps.length,
+        duration: Math.max(0, Math.min(duration - textStart, steps.length * dialogueTextSpeed)),
+        ease: 'none',
+        onUpdate: syncText,
+      }, textStart);
+    } else if (style === 'typewriter') {
       const revealProxy = { charIndex: 0 };
-      const totalTypeTime = Math.min(duration - 0.5, charCount * dialogueTextSpeed);
 
       const lineCharWidths: number[][] = [];
       const canvas = document.createElement('canvas');
@@ -283,7 +337,8 @@ class SubtitleRenderer {
         }
       });
 
-      const LINE_HEIGHT = textStyle.lineHeight || fontSize * 1.4;
+      const totalTypeTime = Math.max(0, Math.min(duration - textStart, animSteps.length * dialogueTextSpeed));
+      const LINE_HEIGHT = textStyle.lineHeight || Number(textStyle.fontSize) * 1.4;
       const updateMask = () => {
         if (textMask.destroyed) return; // Container destroyed during seek
         const stepIdx = Math.floor(revealProxy.charIndex);
@@ -321,7 +376,7 @@ class SubtitleRenderer {
         duration: totalTypeTime,
         ease: 'none',
         onUpdate: updateMask
-      }, 0.2);
+      }, textStart);
     } else {
       textMask.beginFill(0xFFFFFF).drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT).endFill();
       if (style === 'fadeIn') {
@@ -332,7 +387,7 @@ class SubtitleRenderer {
         };
         syncCallbacks.push(syncFade);
 
-        tl.to(fadeProxy, { alpha: 1, duration: 0.6, ease: 'power2.out', onUpdate: syncFade }, 0.2);
+        tl.to(fadeProxy, { alpha: 1, duration: 0.6, ease: 'power2.out', onUpdate: syncFade }, textStart);
       } else if (style === 'cinematic') {
         dialogueText.alpha = 0;
         const originalY = dialogueText.y;
@@ -343,7 +398,7 @@ class SubtitleRenderer {
         };
         syncCallbacks.push(syncCinematic);
 
-        tl.to(cinProxy, { alpha: 1, y: originalY, duration: 0.8, ease: 'power2.out', onUpdate: syncCinematic }, 0.2);
+        tl.to(cinProxy, { alpha: 1, y: originalY, duration: 0.8, ease: 'power2.out', onUpdate: syncCinematic }, textStart);
       }
     }
 

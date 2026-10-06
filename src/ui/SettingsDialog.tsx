@@ -44,6 +44,7 @@ import type {
 import { SETTINGS_CATEGORIES, findSettingsCategories, type SettingsDialogTab } from './settingsNavigation';
 import { formatAeonStageryVersionLabel } from '../services/product/ProductInfo';
 import './settingsNavigation.css';
+import { DialogueDefaultsSettings } from './settings/DialogueDefaultsSettings';
 import { getAiProseProviderIdentity } from '../services/ai-authoring/AiProseGlobalConfiguration';
 
 interface SettingsDialogProps {
@@ -488,22 +489,36 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                     description="控制工作区整体混音输出音量，影响预览与实时播放监听。"
                     control={<Slider label="主音量" min={0} max={1} step={0.01} value={settings.masterVolume} onChange={(value: number) => setSetting('masterVolume', value)} percent />}
                   />
-                  <SettingItem
-                    title="对白音量"
-                    description="控制角色配音轨道的监听音量。"
-                    control={<Slider label="对白音量" min={0} max={1} step={0.01} value={settings.voiceVolume} onChange={(value: number) => setSetting('voiceVolume', value)} percent />}
-                  />
+
                   <SettingItem
                     title="背景音乐"
                     description="控制 BGM 与环境声轨道的监听音量。"
                     control={<Slider label="背景音乐" min={0} max={1} step={0.01} value={settings.bgmVolume} onChange={(value: number) => setSetting('bgmVolume', value)} percent />}
                   />
                 </Section>
-
-                <Section title="对白">
+              </div>
+            )}
+            {activeTab === 'dialogue' && (
+              <div className="settings-dialog__stack settings-dialog__stack--loose">
+                <Section title="默认对白样式">
+                  <DialogueDefaultsSettings />
+                </Section>
+                <Section title="对白监听">
+                  <SettingItem
+                    title="对白音量"
+                    description="控制角色配音轨道的监听音量。"
+                    control={<Slider label="对白音量" min={0} max={1} step={0.01} value={settings.voiceVolume} onChange={(value: number) => setSetting('voiceVolume', value)} percent />}
+                  />
+                </Section>
+                <Section title="文字与动画">
+                  <SettingItem
+                    title="文本框入场动画"
+                    description="控制文本框的淡入与上滑效果；文字仍按所选字幕样式展现。所有对白共用此开关。"
+                    control={<Toggle label="文本框入场动画" active={settings.dialogueEntranceAnimation} onChange={(value) => setSetting('dialogueEntranceAnimation', value)} />}
+                  />
                   <SettingItem
                     title="对白文本速度"
-                    description="控制未包含配音时对白文字以打字机效果逐字展现的时间（秒/字）。数值越小打字速度越快。"
+                    description="控制打字机字幕逐字展现的时间（秒/字）。数值越小打字速度越快。"
                     control={(
                       <Slider
                         label="对白文本速度"
@@ -532,7 +547,6 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                     )}
                   />
                 </Section>
-
               </div>
             )}
             {activeTab === 'voice' && (

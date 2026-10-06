@@ -8,8 +8,6 @@ import {
 } from '../../api/types/project';
 import {
   buildAvailableCharacterPresets,
-  buildAvailableDialogueStyles,
-  resolveTemplateDefaultValue,
   TemplateCapabilityConfig,
   TemplatePackageSelector,
 } from './TemplateCapabilityConfig';
@@ -91,20 +89,6 @@ export const TemplateProjectConfigDialog = ({
     () => buildAvailableCharacterPresets(templatePackages, selectedTemplateIds),
     [selectedTemplateIds, templatePackages],
   );
-  const availableDialogueStyles = useMemo(
-    () => buildAvailableDialogueStyles(templatePackages, selectedTemplateIds),
-    [selectedTemplateIds, templatePackages],
-  );
-  const resolvedDialogueStyle = useMemo(
-    () => resolveTemplateDefaultValue(
-      'dialogueStyleId',
-      templatePackages,
-      selectedTemplateIds,
-      defaultOverrides,
-      DEFAULT_PROJECT_TEMPLATE_CONFIGURATION.defaults?.dialogueStyleId,
-    ),
-    [defaultOverrides, selectedTemplateIds, templatePackages],
-  );
 
   useEffect(() => {
     const availableIds = new Set(availableCharacterPresets.map((preset) => preset.id));
@@ -145,22 +129,6 @@ export const TemplateProjectConfigDialog = ({
     ));
   };
 
-  const handleChangeDialogueStyleOverride = (styleId: string | undefined) => {
-    updateDefaultOverride('dialogueStyleId', styleId);
-  };
-
-  const updateDefaultOverride = (key: keyof ProjectTemplateDefaults, value: string | undefined) => {
-    setDefaultOverrides((current) => {
-      const next = { ...current };
-      if (!value) {
-        delete next[key];
-      } else {
-        next[key] = value;
-      }
-      return next;
-    });
-  };
-
   const handleSave = async (options: { importCharacters?: boolean } = {}) => {
     if (isSaving) return;
     setIsSaving(true);
@@ -195,9 +163,6 @@ export const TemplateProjectConfigDialog = ({
             onMove={moveTemplate}
           />
           <TemplateCapabilityConfig
-            dialogueStyles={availableDialogueStyles}
-            resolvedDialogueStyle={resolvedDialogueStyle}
-            onChangeDialogueStyleOverride={handleChangeDialogueStyleOverride}
             characterPresets={availableCharacterPresets}
             selectedCharacterPresetIds={selectedCharacterPresetIds}
             onToggleCharacterPreset={toggleCharacterPreset}
