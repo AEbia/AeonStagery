@@ -3,6 +3,7 @@ import { sceneDocumentCodec } from '../services/semantic-scene';
 import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 import { MOVE_HANDLERS } from '../engine/MoveHandlers';
+import { computeCameraStateAtTime } from '../engine/CameraStateResolver';
 
 function makeDocument(statements: unknown[]): CurrentSceneDocument {
   return sceneDocumentCodec.parseAndValidate({
@@ -82,4 +83,28 @@ describe('scene statement compiler — camera focus lowered move types', () => {
 
     expect(action.params.focus).toEqual({ character: 'tomori', part: 'head' });
   });
+
+  const absoluteFocusPoint = [0.27, 0.73] as const;
+  const absolutePointCases: Array<{ name: string; zoom?: Record<string, unknown> }> = [
+    { name: 'pan focus' },
+    { name: 'absolute zoom focus', zoom: { kind: 'absolute', value: 1.2 } },
+    { name: 'push focus', zoom: { kind: 'delta', value: 0.3 } },
+    { name: 'pull focus', zoom: { kind: 'delta', value: -0.3 } },
+  ];
+
+  for (const { name, zoom } of absolutePointCases) {
+    it(`seeks to the authored absolute point for ${name}`, () => {
+      const action = compileFocusMove({
+        mode: 'focus',
+        position: absoluteFocusPoint,
+        zoom,
+        durationSeconds: 1,
+      });
+
+      expect(action.params.focus).toEqual({ point: absoluteFocusPoint });
+      const state = computeCameraStateAtTime([action as any], 2);
+      expect(state.position.x).toBeCloseTo(absoluteFocusPoint[0], 5);
+      expect(state.position.y).toBeCloseTo(absoluteFocusPoint[1], 5);
+    });
+  }
 });
