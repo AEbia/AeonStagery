@@ -1,17 +1,20 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
 export interface ResizableLayoutOptions {
+  initialLeftPanelWidth?: number;
   initialPanelWidth?: number;
   initialDetailWidth?: number;
   initialContextWidth?: number;
   initialTimelineHeight?: number;
   onPanelWidthCommit?: (width: number) => void;
+  onLeftPanelWidthCommit?: (width: number) => void;
   onDetailWidthCommit?: (width: number) => void;
   onContextWidthCommit?: (width: number) => void;
   onTimelineHeightCommit?: (height: number) => void;
 }
 
 export const WORKBENCH_PANEL_WIDTH = { min: 280, max: 640, defaultValue: 380 };
+export const WORKBENCH_LEFT_PANEL_WIDTH = { min: 320, max: 420, defaultValue: 340 };
 export const WORKBENCH_DETAIL_WIDTH = { min: 320, max: 480, defaultValue: 360 };
 export const WORKBENCH_CONTEXT_WIDTH = { min: 320, max: 620, defaultValue: 400 };
 export const WORKBENCH_TIMELINE_HEIGHT = { min: 180, max: 560, defaultValue: 300 };
@@ -22,6 +25,39 @@ export function clampWorkbenchValue(value: number | undefined, min: number, max:
 }
 
 export function useResizableLayout(options: ResizableLayoutOptions = {}) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const [leftPanelWidth, setLeftPanelWidthState] = useState(() => clampWorkbenchValue(
+    options.initialLeftPanelWidth,
+    WORKBENCH_LEFT_PANEL_WIDTH.min,
+    WORKBENCH_LEFT_PANEL_WIDTH.max,
+    WORKBENCH_LEFT_PANEL_WIDTH.defaultValue,
+  ));
+  const leftPanelWidthRef = useRef(leftPanelWidth);
+  const leftDragRef = useRef<{ x: number; width: number } | null>(null);
+  const setLeftPanelWidth = useCallback((value: number) => {
+    const next = clampWorkbenchValue(value, WORKBENCH_LEFT_PANEL_WIDTH.min,
+      WORKBENCH_LEFT_PANEL_WIDTH.max, WORKBENCH_LEFT_PANEL_WIDTH.defaultValue);
+    leftPanelWidthRef.current = next;
+    setLeftPanelWidthState(next);
+  }, []);
+  const handleLeftResizeMouseDown = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    leftDragRef.current = { x: event.clientX, width: leftPanelWidthRef.current };
+    document.body.style.cursor = 'col-resize';
+    document.body.setAttribute('data-resizing', 'true');
+  }, []);
+  const handleLeftResizeKeyDown = useCallback((event: React.KeyboardEvent) => {
+    let next = leftPanelWidthRef.current;
+    if (event.key === 'ArrowLeft') next -= 10;
+    else if (event.key === 'ArrowRight') next += 10;
+    else if (event.key === 'Home') next = WORKBENCH_LEFT_PANEL_WIDTH.min;
+    else if (event.key === 'End') next = WORKBENCH_LEFT_PANEL_WIDTH.max;
+    else return;
+    event.preventDefault();
+    setLeftPanelWidth(next);
+    options.onLeftPanelWidthCommit?.(leftPanelWidthRef.current);
+  }, [options.onLeftPanelWidthCommit, setLeftPanelWidth]);
   const [panelWidth, setPanelWidthState] = useState(() => clampWorkbenchValue(
     options.initialPanelWidth,
     WORKBENCH_PANEL_WIDTH.min,
@@ -141,6 +177,9 @@ export function useResizableLayout(options: ResizableLayoutOptions = {}) {
 
   useEffect(() => {
     const handleGlobalMove = (e: MouseEvent) => {
+      if (leftDragRef.current) {
+        setLeftPanelWidth(leftDragRef.current.width + e.clientX - leftDragRef.current.x);
+      }
       if (isDraggingRef.current) {
         const delta = startXRef.current - e.clientX;
         const newWidth = startWRef.current + delta;
@@ -162,17 +201,21 @@ export function useResizableLayout(options: ResizableLayoutOptions = {}) {
       }
     };
     const handleGlobalUp = () => {
+      if (leftDragRef.current) {
+        optionsRef.current.onLeftPanelWidthCommit?.(leftPanelWidthRef.current);
+        leftDragRef.current = null;
+      }
       if (isDraggingRef.current) {
-        options.onPanelWidthCommit?.(panelWidthRef.current);
+        optionsRef.current.onPanelWidthCommit?.(panelWidthRef.current);
       }
       if (isDraggingDetailRef.current) {
-        options.onDetailWidthCommit?.(detailWidthRef.current);
+        optionsRef.current.onDetailWidthCommit?.(detailWidthRef.current);
       }
       if (isDraggingContextRef.current) {
-        options.onContextWidthCommit?.(contextWidthRef.current);
+        optionsRef.current.onContextWidthCommit?.(contextWidthRef.current);
       }
       if (isDraggingHeightRef.current) {
-        options.onTimelineHeightCommit?.(timelineHeightRef.current);
+        optionsRef.current.onTimelineHeightCommit?.(timelineHeightRef.current);
       }
       isDraggingRef.current = false;
       isDraggingDetailRef.current = false;
@@ -184,13 +227,17 @@ export function useResizableLayout(options: ResizableLayoutOptions = {}) {
     window.addEventListener('mousemove', handleGlobalMove);
     window.addEventListener('mouseup', handleGlobalUp);
     return () => {
+      document.body.style.cursor = 'default';
       document.body.removeAttribute('data-resizing');
       window.removeEventListener('mousemove', handleGlobalMove);
       window.removeEventListener('mouseup', handleGlobalUp);
     };
-  }, [options, setContextWidth, setDetailWidth, setPanelWidth, setTimelineHeight]);
+  }, [setContextWidth, setDetailWidth, setPanelWidth, setTimelineHeight, setLeftPanelWidth]);
 
   return {
+    leftPanelWidth,
+    handleLeftResizeMouseDown,
+    handleLeftResizeKeyDown,
     panelWidth,
     setPanelWidth,
     detailWidth,

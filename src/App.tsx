@@ -396,6 +396,16 @@ function AppContent({
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
   const isListMode = settings.workbenchTimelineLayoutMode === 'list';
+  const [initialLeftPanelWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aeonstagery:left-panel-width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!Number.isNaN(parsed)) return Math.min(420, Math.max(320, parsed));
+      }
+    } catch {}
+    return 340;
+  });
   const layoutOptions = useMemo(() => {
     const defaultWidth = isListMode ? 600 : 400;
     const initialWidth = (!settings.workbenchPanelWidth || settings.workbenchPanelWidth === 380 || (isListMode && (settings.workbenchPanelWidth === 400 || settings.workbenchPanelWidth < 560)))
@@ -403,6 +413,10 @@ function AppContent({
       : settings.workbenchPanelWidth;
     return {
       initialPanelWidth: initialWidth,
+      initialLeftPanelWidth,
+      onLeftPanelWidthCommit: (width: number) => {
+        try { localStorage.setItem('aeonstagery:left-panel-width', String(width)); } catch {}
+      },
       initialDetailWidth: settings.workbenchDetailWidth,
       initialTimelineHeight: settings.workbenchTimelineHeight,
       onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
@@ -410,6 +424,7 @@ function AppContent({
       onTimelineHeightCommit: (height: number) => setSetting('workbenchTimelineHeight', height),
     };
   }, [
+    initialLeftPanelWidth,
     isListMode,
     settings.workbenchDetailWidth,
     settings.workbenchPanelWidth,
@@ -419,6 +434,9 @@ function AppContent({
   const {
     panelWidth,
     setPanelWidth,
+    leftPanelWidth,
+    handleLeftResizeMouseDown,
+    handleLeftResizeKeyDown,
     detailWidth,
     timelineHeight,
     handleMouseDown,
@@ -493,64 +511,6 @@ function AppContent({
   }, [handleSelectWorkspaceView, handleSetSidePanelView]);
 
   const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
-  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aeonstagery:left-panel-width');
-      if (saved) {
-        const parsed = parseInt(saved, 10);
-        if (!Number.isNaN(parsed)) return Math.min(420, Math.max(320, parsed));
-      }
-    } catch {}
-    return 340;
-  });
-  const leftPanelWidthRef = useRef(leftPanelWidth);
-  useEffect(() => {
-    leftPanelWidthRef.current = leftPanelWidth;
-  }, [leftPanelWidth]);
-
-  const handleLeftResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = leftPanelWidthRef.current;
-    document.body.style.cursor = 'col-resize';
-    document.body.setAttribute('data-resizing', 'true');
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const delta = moveEvent.clientX - startX;
-      const nextWidth = Math.min(420, Math.max(320, startW + delta));
-      setLeftPanelWidth(nextWidth);
-      try {
-        localStorage.setItem('aeonstagery:left-panel-width', String(nextWidth));
-      } catch {}
-    };
-
-    const handleMouseUp = () => {
-      document.body.style.cursor = 'default';
-      document.body.removeAttribute('data-resizing');
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-  }, []);
-
-  const handleLeftResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
-    let next = leftPanelWidthRef.current;
-    if (e.key === 'ArrowLeft') next -= 10;
-    else if (e.key === 'ArrowRight') next += 10;
-    else if (e.key === 'Home') next = 320;
-    else if (e.key === 'End') next = 420;
-    else return;
-
-    e.preventDefault();
-    const clamped = Math.min(420, Math.max(320, next));
-    setLeftPanelWidth(clamped);
-    try {
-      localStorage.setItem('aeonstagery:left-panel-width', String(clamped));
-    } catch {}
-  }, []);
-
   const workspaceToolsPanelWidth = Math.max(panelWidth, 400);
   const inspectorNavigatorWidth = sidePanelView === 'workspace-tools'
     ? workspaceToolsPanelWidth
