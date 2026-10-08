@@ -128,13 +128,14 @@ describe('timeline structural write guard', () => {
     expect(characterDirectory).not.toContain('useCharacterDirectoryService');
   });
 
-  it('keeps InspectorArea batch delete on semantic statement authoring', () => {
-    const inspector = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'InspectorArea.tsx'), 'utf8');
-
-    expect(inspector).toContain('useSemanticAuthoringService');
-    expect(inspector).toContain('buildSemanticDeleteTimelineIntents');
-    expect(inspector).not.toContain('useTimelineAuthoringService');
-    expect(inspector).not.toContain("kind: 'delete-actions'");
+  it('keeps both inspector layouts on semantic statement authoring for batch delete', () => {
+    for (const file of ['PropertyInspectorShell.tsx', 'TimelineListView.tsx']) {
+      const inspector = fs.readFileSync(path.join(UI_ROOT, 'timeline', file), 'utf8');
+      expect(inspector).toContain('useSemanticAuthoringService');
+      expect(inspector).toContain('buildSemanticDeleteTimelineIntents');
+      expect(inspector).not.toContain('useTimelineAuthoringService');
+      expect(inspector).not.toContain("kind: 'delete-actions'");
+    }
   });
 
   it('keeps marker prompt edits on semantic statement authoring', () => {

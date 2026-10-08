@@ -418,6 +418,7 @@ function AppContent({
   ]);
   const {
     panelWidth,
+    setPanelWidth,
     detailWidth,
     timelineHeight,
     handleMouseDown,
@@ -425,6 +426,16 @@ function AppContent({
     handleDetailKeyDown,
     handleHeightMouseDown,
   } = useResizableLayout(layoutOptions);
+  const panelWidthsByModeRef = useRef({ list: 600, tracks: 400 });
+  const previousPanelModeRef = useRef(isListMode);
+  useEffect(() => {
+    if (previousPanelModeRef.current === isListMode) return;
+    panelWidthsByModeRef.current[previousPanelModeRef.current ? 'list' : 'tracks'] = panelWidth;
+    previousPanelModeRef.current = isListMode;
+    const next = panelWidthsByModeRef.current[isListMode ? 'list' : 'tracks'];
+    setPanelWidth(next);
+    setSetting('workbenchPanelWidth', next);
+  }, [isListMode, panelWidth, setPanelWidth, setSetting]);
   const { issues: globalIssues, errorsCount, warningsCount } = useValidationIssues();
 
   useEffect(() => {
@@ -557,14 +568,9 @@ function AppContent({
     detailWidth,
     timelineLayoutMode: settings.workbenchTimelineLayoutMode,
   });
-  const navigatorReplacedByDetail = sidePanelView === 'inspector'
-    && inspectorLayout === 'replace'
-    && isInspectorDetailVisible
-    && selectedActionCount > 0;
   const navigatorPriorityActive = !isTracksMode
     && settings.workbenchTimelineLayoutMode === 'list'
-    && hasLoadedScene
-    && !navigatorReplacedByDetail;
+    && hasLoadedScene;
   const timelinePanelWidth = isTracksMode
     ? '100%'
     : (navigatorPriorityActive ? 'auto' : '100%');

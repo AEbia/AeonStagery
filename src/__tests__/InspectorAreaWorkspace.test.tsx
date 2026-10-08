@@ -114,7 +114,7 @@ describe('InspectorArea workspace navigator', () => {
     };
   });
 
-  it('opens detail for an action loaded after the inspector mounted', () => {
+  it('keeps the navigator mounted when an action is selected after loading', () => {
     const { rerender } = render(
       <InspectorArea
         {...baseProps}
@@ -141,16 +141,16 @@ describe('InspectorArea workspace navigator', () => {
       />,
     );
 
-    expect(screen.getByTestId('action-detail')).toBeTruthy();
+    expect(screen.queryByTestId('action-detail')).toBeNull();
     expect(screen.queryByText('1 个动作已选中')).toBeNull();
   });
 
   it.each(['diagnostics', 'snapshot'] as const)(
-    'keeps the %s navigator visible beside selected action detail',
+    'shows the %s tool without a separate selected action detail',
     (inspectorView) => {
       render(<InspectorArea {...baseProps} inspectorView={inspectorView} />);
 
-      expect(screen.getByTestId('action-detail')).toBeTruthy();
+      expect(screen.queryByTestId('action-detail')).toBeNull();
       expect(screen.getByTestId('workspace-navigator')).toBeTruthy();
       expect(screen.queryByTestId('timeline-navigator')).toBeNull();
     },
@@ -172,7 +172,7 @@ describe('InspectorArea workspace navigator', () => {
     expect(container.querySelector('.inspector-workspace__pane--navigator')?.getAttribute('data-timeline-layout')).toBe('list');
   });
 
-  it('keeps the last detail mounted while its exit animation runs', () => {
+  it('does not mount a separate detail during a legacy closing state', () => {
     const { container } = render(
       <InspectorArea
         {...baseProps}
@@ -182,8 +182,8 @@ describe('InspectorArea workspace navigator', () => {
       />,
     );
 
-    expect(screen.getByTestId('action-detail')).toBeTruthy();
-    expect(container.querySelector('.inspector-workspace__pane--detail')?.getAttribute('data-state')).toBe('closing');
+    expect(screen.queryByTestId('action-detail')).toBeNull();
+    expect(container.querySelector('.inspector-workspace__pane--detail')).toBeNull();
   });
 
   it('does not show action detail in character management', () => {
@@ -194,6 +194,7 @@ describe('InspectorArea workspace navigator', () => {
   });
 
   it('delegates multi-selection copy and delete to aggregate handlers', async () => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
     const copyActions = vi.fn();
     const deleteActions = vi.fn();
     render(
@@ -217,6 +218,7 @@ describe('InspectorArea workspace navigator', () => {
   it.each(['split', 'replace'] as const)(
     'saves before closing action detail in %s layout',
     async (layoutMode) => {
+      settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
       let resolveSave!: (result: { success: true; path: string }) => void;
       const handleSave = vi.fn(() => new Promise<{ success: true; path: string }>((resolve) => {
         resolveSave = resolve;
@@ -250,6 +252,7 @@ describe('InspectorArea workspace navigator', () => {
     { success: false as const, error: 'disk full' },
     { success: false as const, cancelled: true as const },
   ])('keeps action detail open when saving does not succeed', async (saveResult) => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
     const handleSave = vi.fn(async () => saveResult);
     const onDetailClose = vi.fn();
 

@@ -64,7 +64,7 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
   const semanticAuthoring = useSemanticAuthoringService();
   const { document: semanticDocument } = useSemanticDocument();
 
-  const detailSelectedActionIds = props.detailSelectedActionIds ?? props.selectedActionIds;
+  const detailSelectedActionIds = props.selectedActionIds;
   const selectedIdsList = useMemo(
     () => Object.keys(detailSelectedActionIds).filter((id) => detailSelectedActionIds[id]),
     [detailSelectedActionIds],

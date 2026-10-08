@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { editNumericControl } from './fixtures/editNumericControl';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimelineListView } from '../ui/timeline/TimelineListView';
@@ -160,9 +161,7 @@ describe('timeline list inline authoring', () => {
     renderList([0, 1, 2]);
     fireEvent.click(screen.getByRole('button', { name: '全自动' }));
 
-    fireEvent.change(screen.getAllByTitle('编辑时间')[1], {
-      target: { value: '2.0' },
-    });
+    editNumericControl(screen.getAllByTitle('编辑时间')[1], '2.0');
 
     await waitFor(() => expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'update-statement',

@@ -81,6 +81,7 @@ export interface ActionInspectorProps {
   copyActions?: (ids: readonly string[]) => void;
   onClose: () => void | Promise<void>;
   closeMode?: 'back' | 'close';
+  presentation?: 'panel' | 'inline';
   inspectorTab?: any;
   setInspectorTab?: any;
 }
@@ -305,7 +306,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   };
 
   return (
-    <div className="selected-action-inspector">
+    <div className="selected-action-inspector" data-presentation={props.presentation ?? 'panel'}>
       <InspectorHeader
         closeMode={closeMode} onClose={onClose} actionId={actionId}
         actionDisplayName={actionDisplayName} inspectorTitle={inspectorTitle}

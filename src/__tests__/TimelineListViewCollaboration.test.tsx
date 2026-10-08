@@ -260,7 +260,7 @@ describe('TimelineListView collaboration undo exclusion', () => {
     const selectButton = screen.getByRole('button', { name: /^选择/ });
     const startTime = screen.getByTitle('编辑时间');
     const playButton = screen.getByRole('button', { name: '播放到此句' });
-    expect(startTime.tagName).toBe('INPUT');
+    expect(startTime.querySelector('[role="spinbutton"]')).toBeTruthy();
     expect(selectButton.contains(startTime)).toBe(false);
     expect(selectButton.contains(playButton)).toBe(false);
 

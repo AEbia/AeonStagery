@@ -11,9 +11,11 @@ import {
 import {
   IconPlus, IconTrash, IconPlay, IconUndo, IconRedo, IconSearch,
   IconX, IconSelectLeft, IconSelectRight, IconUsers, IconGripVertical,
-  IconChevronDown,
+  IconChevronDown, IconCopy,
 } from '../icons';
+import { InlineNumericInput } from './FormComponents';
 import { ActionInspector } from './ActionInspector';
+import { StatementQuickControls, type QuickParamPatch } from './StatementQuickControls';
 import { ActionIcons } from './TimelineConstants';
 import { showToast } from '../Toast';
 import { deriveCollaborationStatusUx } from '../../services/collaboration/CollaborationStatusUxModel';
@@ -39,6 +41,8 @@ import {
 } from '../../services/collaboration/CollaborationPresence';
 import {
   buildSemanticPasteTimelineIntent,
+  buildSemanticCopyBufferForTimelineActions,
+  buildSemanticDeleteTimelineIntents,
   createSemanticTimelineCorrelationId,
   locatorForCompiledTimelineAction,
   selectCompiledActionsForStatements,
@@ -155,10 +159,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const app = useOptionalApp();
 
   const toggleExpand = useCallback((id: string) => {
-    setExpandedActionIds((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    setExpandedActionIds((prev) => ({ [id]: !prev[id] }));
   }, []);
 
   useEffect(() => {
@@ -190,6 +191,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const listContainerRef = useRef<HTMLDivElement>(null);
 
   const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
+  const selectedSingleId = selectedIdsList.length === 1 ? selectedIdsList[0] : undefined;
+  useEffect(() => {
+    if (allowInlineExpand && selectedSingleId) setExpandedActionIds({ [selectedSingleId]: true });
+  }, [allowInlineExpand, selectedSingleId]);
   const characterCount = sceneData.meta.characters?.length ?? 0;
   const charactersById = useMemo(
     () => new Map((sceneData.meta.characters || []).map((character) => [character.id, character])),
@@ -563,9 +568,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     setSelectedIds(selected);
   }, [playbackAdapter, setSelectedIds, timelineReadModelActions]);
 
-  const handleTimeEdit = useCallback((event: React.ChangeEvent<HTMLInputElement>, id: string) => {
-    const value = Number.parseFloat(event.target.value);
-    if (!Number.isFinite(value) || !semanticAuthoring) return;
+  const handleTimeEdit = useCallback((value: number, id: string) => {
+    if (blockOfflineAuthoring() || !Number.isFinite(value) || !semanticAuthoring) return;
     const item = semanticTimelineItemByDisplayId.get(id);
     if (!item || item.locator.kind !== 'statement') return;
     void semanticAuthoring.author({
@@ -577,7 +581,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
       patch: { time: Math.max(0, value) },
       flow: item.source.type === 'dialogue' && dialogueFlowEnabled,
     });
-  }, [dialogueFlowEnabled, semanticAuthoring, semanticTimelineItemByDisplayId]);
+  }, [blockOfflineAuthoring, dialogueFlowEnabled, semanticAuthoring, semanticTimelineItemByDisplayId]);
 
   const handleUndo = useCallback(() => {
     if (collaborationUndoDisabled) {
@@ -607,283 +611,32 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     setExpandedActionIds({});
   }, []);
 
-  const handleInlineDialogueSpeaker = useCallback((action: TimelineAction, speakerId: string) => {
-    if (blockOfflineAuthoring()) return;
-    const char = sceneData.meta.characters?.find((c) => c.id === speakerId);
-    const speakerName = char ? char.name : speakerId;
-    if (semanticAuthoring) {
-      const item = semanticTimelineItemByDisplayId.get(action._id!);
-      if (item && item.locator.kind === 'statement') {
-        void semanticAuthoring.author({
-          version: AUTHORING_SCHEMA_VERSION,
-          correlationId: createTimelineListCorrelationId(),
-          origin: 'timeline-editor',
-          kind: 'update-statement',
-          statementId: item.statementId,
-          patch: {
-            params: {
-              ...(item.source.params as Record<string, unknown> || {}),
-              speakerId,
-              speaker: speakerName,
-            } as any,
-          },
-          flow: dialogueFlowEnabled,
-        });
+  const commitInlineParams = useCallback((action: TimelineAction, patch: QuickParamPatch, replace = false) => {
+    if (blockOfflineAuthoring() || !semanticAuthoring || !action._id) return;
+    const item = semanticTimelineItemByDisplayId.get(action._id);
+    if (!item) return;
+    // Build against the latest document inside the serial authoring queue.
+    // A quick edit and the full inspector share the same canonical source seam.
+    void semanticAuthoring.authorTransaction((document) => {
+      const statement = document.statements.find((candidate) => candidate.id === item.statementId);
+      const source = item.locator.kind === 'companion'
+        ? statement?.companions?.find((candidate) => candidate.id === item.companionId)
+        : statement;
+      if (!source) throw new Error('语句已不存在');
+      const changes = typeof patch === 'function' ? patch(source.params as Record<string, unknown>) : patch;
+      const params: Record<string, unknown> = replace ? { ...changes } : { ...source.params, ...changes };
+      for (const key of Object.keys(params)) {
+        if (params[key] === undefined) delete params[key];
       }
-    }
-    if (props.updateAction && action._id) {
-      props.updateAction(action._id, {
-        params: {
-          ...action.params,
-          speakerId,
-          speaker: speakerName,
-        },
-      });
-    }
-  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, sceneData.meta.characters, semanticAuthoring, semanticTimelineItemByDisplayId]);
-
-  const handleInlineDialogueText = useCallback((action: TimelineAction, text: string) => {
-    if (blockOfflineAuthoring()) return;
-    if (semanticAuthoring) {
-      const item = semanticTimelineItemByDisplayId.get(action._id!);
-      if (item && item.locator.kind === 'statement') {
-        void semanticAuthoring.author({
-          version: AUTHORING_SCHEMA_VERSION,
-          correlationId: createTimelineListCorrelationId(),
-          origin: 'timeline-editor',
-          kind: 'update-statement',
-          statementId: item.statementId,
-          patch: {
-            params: {
-              ...(item.source.params as Record<string, unknown> || {}),
-              text,
-            } as any,
-          },
-          flow: dialogueFlowEnabled,
-        });
-      }
-    }
-    if (props.updateParam && action._id) {
-      props.updateParam(action._id, 'text', text);
-    } else if (props.updateAction && action._id) {
-      props.updateAction(action._id, {
-        params: {
-          ...action.params,
-          text,
-        },
-      });
-    }
-  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
-
-  const handleInlineParamChange = useCallback((action: TimelineAction, key: string, val: unknown) => {
-    if (blockOfflineAuthoring()) return;
-    if (semanticAuthoring) {
-      const item = semanticTimelineItemByDisplayId.get(action._id!);
-      if (item && item.locator.kind === 'statement') {
-        void semanticAuthoring.author({
-          version: AUTHORING_SCHEMA_VERSION,
-          correlationId: createTimelineListCorrelationId(),
-          origin: 'timeline-editor',
-          kind: 'update-statement',
-          statementId: item.statementId,
-          patch: {
-            params: {
-              ...(item.source.params as Record<string, unknown> || {}),
-              [key]: val,
-            } as any,
-          },
-          flow: dialogueFlowEnabled,
-        });
-      }
-    }
-    if (props.updateParam && action._id) {
-      props.updateParam(action._id, key, val);
-    } else if (props.updateAction && action._id) {
-      props.updateAction(action._id, {
-        params: {
-          ...action.params,
-          [key]: val,
-        },
-      });
-    }
-  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
-
-  const renderInlineControls = (action: TimelineAction) => {
-    if (action.action === 'dialogue') {
-      return (
-        <>
-          <select
-            className="timeline-item__inline-select timeline-item__inline-select--speaker"
-            value={action.params?.speakerId || ''}
-            onChange={(e) => handleInlineDialogueSpeaker(action, e.target.value)}
-            aria-label="选择说话角色"
-            title="选择说话角色"
-          >
-            <option value="">(旁白)</option>
-            {sceneData.meta.characters?.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            className="timeline-item__inline-input timeline-item__inline-input--text"
-            value={action.params?.text ?? ''}
-            placeholder="输入台词内容..."
-            aria-label="编辑台词内容"
-            title="编辑台词内容"
-            onChange={(e) => handleInlineDialogueText(action, e.target.value)}
-          />
-        </>
-      );
-    }
-
-    if (action.action === 'cameraShake') {
-      return (
-        <>
-          <label className="timeline-item__inline-field">
-            <span className="timeline-item__inline-label">强度</span>
-            <input
-              type="number"
-              step="0.1"
-              min="0.1"
-              className="timeline-item__inline-input timeline-item__inline-input--num"
-              value={action.params?.intensity ?? 1}
-              aria-label="震动强度"
-              onChange={(e) => handleInlineParamChange(action, 'intensity', Number.parseFloat(e.target.value) || 0)}
-            />
-          </label>
-          <label className="timeline-item__inline-field">
-            <span className="timeline-item__inline-label">时长</span>
-            <input
-              type="number"
-              step="0.1"
-              min="0.1"
-              className="timeline-item__inline-input timeline-item__inline-input--num"
-              value={action.params?.duration ?? 1}
-              aria-label="震动时长"
-              onChange={(e) => handleInlineParamChange(action, 'duration', Number.parseFloat(e.target.value) || 0)}
-            />
-          </label>
-        </>
-      );
-    }
-
-    if (action.action === 'cameraFollow') {
-      return (
-        <label className="timeline-item__inline-field">
-          <span className="timeline-item__inline-label">跟随</span>
-          <select
-            className="timeline-item__inline-select"
-            value={action.params?.characterId ?? ''}
-            aria-label="跟随目标"
-            onChange={(e) => handleInlineParamChange(action, 'characterId', e.target.value)}
-          >
-            <option value="">(无)</option>
-            {sceneData.meta.characters?.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </label>
-      );
-    }
-
-    if (action.action.startsWith('camera')) {
-      return (
-        <label className="timeline-item__inline-field">
-          <span className="timeline-item__inline-label">时长</span>
-          <input
-            type="number"
-            step="0.1"
-            min="0.1"
-            className="timeline-item__inline-input timeline-item__inline-input--num"
-            value={action.params?.duration ?? 1}
-            aria-label="镜头时长"
-            onChange={(e) => handleInlineParamChange(action, 'duration', Number.parseFloat(e.target.value) || 0)}
-          />
-        </label>
-      );
-    }
-
-    if (action.semanticCategory === 'character') {
-      return (
-        <>
-          {sceneData.meta.characters && sceneData.meta.characters.length > 0 && (
-            <select
-              className="timeline-item__inline-select"
-              value={action.params?.id || action.params?.target || ''}
-              aria-label="选择角色"
-              onChange={(e) => {
-                const key = 'id' in (action.params || {}) ? 'id' : 'target';
-                handleInlineParamChange(action, key, e.target.value);
-              }}
-            >
-              <option value="">选择角色...</option>
-              {sceneData.meta.characters.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          )}
-          {action.action === 'setExpression' && (
-            <input
-              type="text"
-              className="timeline-item__inline-input"
-              value={action.params?.expression ?? ''}
-              placeholder="表情名称..."
-              aria-label="表情名称"
-              onChange={(e) => handleInlineParamChange(action, 'expression', e.target.value)}
-            />
-          )}
-          {(action.action === 'playMotion' || action.action === 'characterPerformance') && (
-            <input
-              type="text"
-              className="timeline-item__inline-input"
-              value={typeof action.params?.motion === 'string' ? action.params.motion : ''}
-              placeholder="动作名称..."
-              aria-label="动作名称"
-              onChange={(e) => handleInlineParamChange(action, 'motion', e.target.value)}
-            />
-          )}
-        </>
-      );
-    }
-
-    if (action.semanticCategory === 'audio') {
-      return (
-        <input
-          type="text"
-          className="timeline-item__inline-input"
-          value={action.params?.key || action.params?.src || action.params?.track || ''}
-          placeholder="音频资源/轨道..."
-          aria-label="音频资源"
-          onChange={(e) => {
-            const key = 'key' in (action.params || {}) ? 'key' : 'src';
-            handleInlineParamChange(action, key, e.target.value);
-          }}
-        />
-      );
-    }
-
-    if (action.semanticCategory === 'visual' || action.semanticCategory === 'layer') {
-      return (
-        <input
-          type="text"
-          className="timeline-item__inline-input"
-          value={action.params?.preset || action.params?.layerId || action.params?.slot || ''}
-          placeholder="预设/图层..."
-          aria-label="视觉参数"
-          onChange={(e) => {
-            const key = action.params?.preset !== undefined ? 'preset' : action.params?.layerId !== undefined ? 'layerId' : 'slot';
-            handleInlineParamChange(action, key, e.target.value);
-          }}
-        />
-      );
-    }
-
-    return null;
-  };
+      const base = { version: AUTHORING_SCHEMA_VERSION, correlationId: createTimelineListCorrelationId(), origin: 'timeline-editor' as const };
+      return [item.locator.kind === 'companion'
+        ? { ...base, kind: 'update-dialogue-companion', locator: item.locator, patch: { params } as any }
+        : { ...base, kind: 'update-statement', statementId: item.statementId, patch: { params } as any, flow: dialogueFlowEnabled }];
+    }).catch((error) => showToast(error instanceof Error ? error.message : '无法修改语句属性', 'warning'));
+  }, [blockOfflineAuthoring, dialogueFlowEnabled, semanticAuthoring, semanticTimelineItemByDisplayId]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div className={`timeline-list-view${allowInlineExpand ? '' : ' timeline-list-view--outline'}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Toolbar */}
       <div className="timeline-toolbar">
         <InspectorViewPicker
@@ -936,6 +689,25 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
             </button>
           </div>
         )}
+        {selectedIdsList.length > 1 && (
+          <div className="timeline-toolbar__selection" role="group" aria-label="批量操作">
+            <button type="button" className="btn btn--icon" aria-label="复制到剪贴板" title="复制选中语句"
+              onClick={() => {
+                if (props.copyActions) props.copyActions(selectedIdsList);
+                else app?.stores.editor.setCopyBuffer(buildSemanticCopyBufferForTimelineActions(documentStore, selectedIdsList));
+              }}><IconCopy width={14} height={14} /></button>
+            <button type="button" className="btn btn--icon" aria-label="批量删除" title="删除选中语句" disabled={isOfflineEditingBlocked}
+              onClick={async () => {
+                if (blockOfflineAuthoring()) return;
+                if (props.deleteActions) await props.deleteActions(selectedIdsList);
+                else if (semanticAuthoring) {
+                  const intents = buildSemanticDeleteTimelineIntents(documentStore, selectedIdsList);
+                  if (intents.length) await semanticAuthoring.authorTransaction(intents);
+                }
+                setSelectedIds({});
+              }}><IconTrash width={14} height={14} /></button>
+          </div>
+        )}
         <div className="timeline-toolbar__spacer" />
         <button
           type="button"
@@ -967,7 +739,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
       </div>
 
       {/* Search */}
-      <div style={{ padding: '0 12px 4px 12px' }}>
+      <div className="timeline-list-search-container" style={{ padding: allowInlineExpand ? '0 12px 4px 12px' : '0 6px 4px' }}>
         <div className="timeline-search">
           <IconSearch width={14} height={14} className="timeline-search__icon" />
           <input
@@ -1024,6 +796,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
           </div>
 
           <div
+            className="timeline-list-scroll"
             ref={listContainerRef}
             onDragLeave={(event) => {
               if (listContainerRef.current && !listContainerRef.current.contains(event.relatedTarget as Node)) {
@@ -1032,11 +805,11 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
               }
             }}
             style={{
-              flex: 1, overflowY: 'auto', padding: '0 8px 16px 8px',
+              flex: 1, overflowY: 'auto', padding: allowInlineExpand ? '0 8px 16px' : '0 8px 12px',
               position: 'relative', minHeight: 0, isolation: 'isolate'
             }}
           >
-            <div className="timeline-list-items" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="timeline-list-items" style={{ display: 'flex', flexDirection: 'column', gap: allowInlineExpand ? 6 : 4 }}>
               {filteredActions.map((action, realIdx) => {
                 const isSelected = !!action._id && !!selectedActionIds[action._id];
                 const isExpanded = !!action._id && !!expandedActionIds[action._id];
@@ -1235,12 +1008,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 return (
                   <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
                     <div
-                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : ''}`}
+                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
                       onClick={(event) => {
                         handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                        if (allowInlineExpand) {
-                          toggleExpand(action._id!);
-                        }
+                        if (allowInlineExpand && !event.ctrlKey && !event.metaKey) toggleExpand(action._id!);
                       }}
                       onDragOver={(event) => {
                         if (!draggingActionId || searchQuery.trim()) return;
@@ -1278,7 +1049,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       aria-label={`${title}${action.action === 'dialogue' && action.params?.text ? `，${action.params.text}` : ''}，时间 ${(action.time || 0).toFixed(1)} 秒${isSelected ? '，已选中' : ''}`}
                       title={collaborationEditingSummary || undefined}
                     >
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: 38, flexShrink: 0 }}>
+                      <div className="timeline-item__identity">
                         {canDragRootStatement ? (
                           <button
                             type="button"
@@ -1320,16 +1091,11 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                             <IconComp width={15} height={15} />
                           </div>
                         )}
-                        <input
-                          className="timeline-item__time tabular-nums"
-                          type="text"
-                          value={(action.time || 0).toFixed(1)}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => handleTimeEdit(event, action._id!)}
-                          style={{ width: 36, textAlign: 'center', fontSize: 10 }}
-                          title="编辑时间"
-                          aria-label={`${title}开始时间`}
-                        />
+                        <div className="timeline-item__time" title="编辑时间" onClick={(event) => event.stopPropagation()}>
+                          <InlineNumericInput value={action.time || 0} step="0.1" min="0" popoverMin="0" popoverMax="60"
+                            ariaLabel={`${title}开始时间`} disabled={isOfflineEditingBlocked}
+                            onChange={(value, transient) => { if (!transient) handleTimeEdit(value, action._id!); }} />
+                        </div>
                       </div>
 
                       {allowInlineExpand && (
@@ -1363,35 +1129,9 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         onClick={(event) => {
                           event.stopPropagation();
                           handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                          if (allowInlineExpand) {
-                            toggleExpand(action._id!);
-                          }
+                          if (allowInlineExpand && !event.ctrlKey && !event.metaKey) toggleExpand(action._id!);
                         }}
-                        style={allowInlineExpand ? {
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'center',
-                          minWidth: 100,
-                          maxWidth: 180,
-                          flexShrink: 0,
-                          padding: 0,
-                          border: 0,
-                          background: 'transparent',
-                          color: 'inherit',
-                          font: 'inherit',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                        } : {
-                          flex: 1,
-                          minWidth: 0,
-                          padding: 0,
-                          border: 0,
-                          background: 'transparent',
-                          color: 'inherit',
-                          font: 'inherit',
-                          textAlign: 'left',
-                          cursor: 'pointer',
-                        }}
+
                       >
                         <div className="timeline-item__title-row">
                           <div className="timeline-item__title">{title}</div>
@@ -1407,18 +1147,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                           )}
                         </div>
                         {environmentLayer && (
-                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              padding: '2px 8px',
-                              borderRadius: 'var(--radius-full)',
-                              fontSize: 10,
-                              lineHeight: 1.2,
-                              color: 'var(--text-secondary)',
-                              background: 'rgba(255,255,255,0.05)',
-                              border: '1px solid var(--border-subtle)',
-                            }}>
+                          <div className="timeline-item__layer-label" style={allowInlineExpand ? { display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' } : undefined}>
+                            <span className="timeline-item__layer-tag">
                               {environmentLayer.isBackground ? '主背景' : environmentLayer.displayLabel}
                             </span>
                           </div>
@@ -1430,7 +1160,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                           className="timeline-item__inline-controls"
                           onClick={(event) => event.stopPropagation()}
                         >
-                          {renderInlineControls(action)}
+                          {readModelItem && (
+                            <StatementQuickControls item={readModelItem} sceneMeta={sceneData.meta} sceneVisual={sceneData.visual}
+                              disabled={isOfflineEditingBlocked} onChange={(patch) => commitInlineParams(action, patch)} />
+                          )}
                         </div>
                       )}
 
@@ -1464,16 +1197,17 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         <ActionInspector
                           key={action._id}
                           sceneData={sceneData}
+                          presentation="inline"
                           selectedActionIds={{ [action._id!]: true }}
                           setSelectedIds={setSelectedIds}
                           updateAction={props.updateAction ?? ((_id, updates) => {
-                            handleInlineParamChange(action, 'params', updates.params);
+                            if (updates.params) commitInlineParams(action, updates.params, true);
                           })}
                           updateParam={props.updateParam ?? ((_id, key, val) => {
-                            handleInlineParamChange(action, key, val);
+                            commitInlineParams(action, { [key]: val });
                           })}
                           replaceSourceParams={props.replaceSourceParams ?? ((_id, params) => {
-                            handleInlineParamChange(action, 'params', params);
+                            commitInlineParams(action, params, true);
                           })}
                           deleteAction={props.deleteAction ?? ((id) => {
                             void handleDeleteItem({ stopPropagation: () => {} } as any, id);

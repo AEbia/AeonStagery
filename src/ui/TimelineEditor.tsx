@@ -76,7 +76,6 @@ export interface TimelineEditorProps {
   canDetachWorkspaceTools?: boolean;
 }
 
-const DETAIL_EXIT_DURATION_MS = 200;
 
 export function TimelineEditor({
   mode = 'all',
@@ -114,15 +113,10 @@ export function TimelineEditor({
   const [timelineWidth, setTimelineWidth] = useState(1000);
   const [inspectorTab, setInspectorTab] = useState<'basic' | 'transform' | 'state'>('basic');
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailClosing, setDetailClosing] = useState(false);
-  const [detailSelectedActionIds, setDetailSelectedActionIds] = useState<Record<string, boolean>>({});
   const [isZoomSliderInteracting, setIsZoomSliderInteracting] = useState(false);
   const [zoomViewportPreview, setZoomViewportPreview] = useState<TimelineViewportTarget | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const viewportAnimationRef = useRef<ViewportAnimationHandle | null>(null);
-  const detailCloseTimerRef = useRef<number | null>(null);
-  const detailOpenRef = useRef(false);
-  const detailClosingRef = useRef(false);
   const lastSeekTime = useRef<number>(0);
   const lastAutoRevealSelectionRef = useRef<string | null>(null);
   const suppressScrollSyncRef = useRef(false);
@@ -422,52 +416,11 @@ export function TimelineEditor({
     [selectedActionIds],
   );
   const selectedIdsKey = useMemo(() => selectedIdsList.slice().sort().join('|'), [selectedIdsList]);
-  const detailSelectedIdsList = useMemo(
-    () => Object.keys(detailSelectedActionIds).filter((id) => detailSelectedActionIds[id]),
-    [detailSelectedActionIds],
-  );
-  const cancelPendingDetailClose = useCallback(() => {
-    if (detailCloseTimerRef.current === null) return;
-    window.clearTimeout(detailCloseTimerRef.current);
-    detailCloseTimerRef.current = null;
-  }, []);
-
-  const openDetail = useCallback(() => {
-    cancelPendingDetailClose();
-    detailOpenRef.current = true;
-    detailClosingRef.current = false;
-    setDetailClosing(false);
-    setDetailOpen(true);
-  }, [cancelPendingDetailClose]);
-
-  const closeDetail = useCallback(() => {
-    cancelPendingDetailClose();
-    if (!detailOpenRef.current) return;
-
-    const skipAnimation = document.documentElement.dataset.perf === 'low'
-      || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (skipAnimation) {
-      detailOpenRef.current = false;
-      detailClosingRef.current = false;
-      setDetailClosing(false);
-      setDetailOpen(false);
-      return;
-    }
-
-    detailClosingRef.current = true;
-    setDetailClosing(true);
-    detailCloseTimerRef.current = window.setTimeout(() => {
-      detailCloseTimerRef.current = null;
-      detailOpenRef.current = false;
-      detailClosingRef.current = false;
-      setDetailOpen(false);
-      setDetailClosing(false);
-    }, DETAIL_EXIT_DURATION_MS);
-  }, [cancelPendingDetailClose]);
+  const openDetail = useCallback(() => setDetailOpen(true), []);
+  const closeDetail = useCallback(() => setDetailOpen(false), []);
 
   useLayoutEffect(() => {
     if (selectedIdsKey) {
-      setDetailSelectedActionIds(Object.fromEntries(selectedIdsList.map((id) => [id, true])));
       openDetail();
       return;
     }
@@ -484,13 +437,11 @@ export function TimelineEditor({
     onInspectorDetailVisibilityChange?.(
       inspectorViewSupportsActionDetail(inspectorView)
       && detailOpen
-      && !detailClosing
-      && detailSelectedIdsList.length > 0,
+      && selectedIdsList.length > 0,
     );
   }, [
-    detailClosing,
     detailOpen,
-    detailSelectedIdsList.length,
+    selectedIdsList.length,
     inspectorView,
     mode,
     onInspectorDetailVisibilityChange,
@@ -500,10 +451,6 @@ export function TimelineEditor({
     if (mode !== 'inspector') return;
     return () => onInspectorDetailVisibilityChange?.(false);
   }, [mode, onInspectorDetailVisibilityChange]);
-
-  useEffect(() => () => {
-    cancelPendingDetailClose();
-  }, [cancelPendingDetailClose]);
 
   const singleSelectedAction = useMemo(
     () => selectedIdsList.length === 1
@@ -1088,8 +1035,6 @@ export function TimelineEditor({
             handleSave={handleSave}
             loadExample={loadExample}
             detailOpen={detailOpen}
-            detailClosing={detailClosing}
-            detailSelectedActionIds={detailSelectedActionIds}
             onDetailOpen={openDetail}
             onDetailClose={closeDetail}
             layoutMode={inspectorLayout}

@@ -192,6 +192,7 @@ export function useResizableLayout(options: ResizableLayoutOptions = {}) {
 
   return {
     panelWidth,
+    setPanelWidth,
     detailWidth,
     contextWidth,
     timelineHeight,
