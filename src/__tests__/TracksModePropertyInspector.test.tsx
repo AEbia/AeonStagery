@@ -182,8 +182,8 @@ describe('Tracks mode dedicated Property Inspector', () => {
       expect(resizedWidth).toBe(450);
     });
 
-    it('preserves expandable split width behavior in list mode', () => {
-      const panelWidth = 380;
+    it('keeps sidePanelWidth fixed at panel width in list mode (inline inspector)', () => {
+      const panelWidth = 600;
       const detailWidth = 360;
 
       // In list mode: detail closed
@@ -195,9 +195,9 @@ describe('Tracks mode dedicated Property Inspector', () => {
         isInspectorDetailVisible: false,
         detailWidth,
       });
-      expect(listWidthClosed).toBe(380);
+      expect(listWidthClosed).toBe(600);
 
-      // In list mode: detail open
+      // In list mode: detail open - remains fixed at panel width
       const listWidthOpen = computeSidePanelWidth({
         isTracksMode: false,
         panelWidth,
@@ -206,7 +206,7 @@ describe('Tracks mode dedicated Property Inspector', () => {
         isInspectorDetailVisible: true,
         detailWidth,
       });
-      expect(listWidthOpen).toBe(380 + 360 + 4);
+      expect(listWidthOpen).toBe(600);
     });
   });
 

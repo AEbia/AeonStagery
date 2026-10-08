@@ -1,10 +1,18 @@
 /* ─── Inspector Grid Layout ──────────────────────────────────── */
+.inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 14px;
+  align-items: center;
+}
+
 .inspector-row {
   display: grid;
   grid-template-columns: 80px 1fr;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 6px;
+  min-width: 0;
 }
 
 .inspector-row.stacked {
@@ -12,6 +20,54 @@
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
+  grid-column: 1 / -1;
+}
+
+/* Compact multi-column layout inside expanded detail container */
+.inspector-workspace__detail .inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 12px;
+}
+
+.inspector-workspace__detail .inspector-row {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.inspector-workspace__detail .inspector-row.stacked {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-workspace__detail .inspector-label {
+  font-size: 11.5px;
+  min-width: 60px;
+}
+
+.inspector-workspace__detail .inspector-section {
+  padding: 2px 0 6px 0;
+}
+
+.inspector-workspace__detail .inspector-section-title {
+  font-size: 11px;
+  margin-bottom: 8px;
+  margin-top: 4px;
+  padding-bottom: 4px;
+}
+
+.inspector-workspace__detail .selected-action-inspector {
+  padding: 0;
+  background: transparent;
+}
+
+.inspector-workspace__detail .selected-action-inspector__content {
+  padding: 4px 6px;
 }
 
 .inspector-label {

@@ -10,8 +10,10 @@ import {
 } from '../context/AppContext';
 import {
   IconPlus, IconTrash, IconPlay, IconUndo, IconRedo, IconSearch,
-  IconX, IconSelectLeft, IconSelectRight, IconUsers, IconGripVertical
+  IconX, IconSelectLeft, IconSelectRight, IconUsers, IconGripVertical,
+  IconChevronDown,
 } from '../icons';
+import { ActionInspector } from './ActionInspector';
 import { ActionIcons } from './TimelineConstants';
 import { showToast } from '../Toast';
 import { deriveCollaborationStatusUx } from '../../services/collaboration/CollaborationStatusUxModel';
@@ -63,9 +65,6 @@ import { useSettings } from '../SettingsStore';
 import { useSemanticDocument } from '../store/storeHooks';
 import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
 
-const TIMELINE_LIST_ITEM_HEIGHT = 68;
-const TIMELINE_LIST_OVERSCAN = 6;
-
 function getTimelineItemClassForSemanticCategory(category: TimelineAction['semanticCategory']): string {
   switch (category) {
     case 'dialogue':
@@ -115,6 +114,12 @@ export interface TimelineListViewProps {
   workspaceWarningCount?: number;
   availableTemplates?: SourcedSemanticAuthoringCombo[];
   onSelectWorkspaceView?: (tab: WorkspaceToolTab) => void;
+  updateAction?: (id: string, updates: any, isTransient?: boolean) => void;
+  updateParam?: (id: string, key: string, val: any, isTransient?: boolean) => void;
+  replaceSourceParams?: (id: string, params: Record<string, unknown>) => void | Promise<unknown>;
+  deleteAction?: (id: string) => void;
+  deleteActions?: (ids: readonly string[]) => void | Promise<void>;
+  copyActions?: (ids: readonly string[]) => void;
 }
 
 export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
@@ -139,12 +144,19 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const dialogueFlowEnabled = settings.workbenchDialogueFlowMode === 'auto';
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [listScrollTop, setListScrollTop] = useState(0);
+  const [expandedActionIds, setExpandedActionIds] = useState<Record<string, boolean>>({});
   const [draggingActionId, setDraggingActionId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; placement: 'before' | 'after' } | null>(null);
   const [dragOverGapIndex, setDragOverGapIndex] = useState<number | null>(null);
   const gapInsertPendingRef = useRef(false);
   const app = useOptionalApp();
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedActionIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  }, []);
 
   useEffect(() => {
     const handleWindowDragEnd = () => {
@@ -173,8 +185,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     return true;
   }, [isOfflineEditingBlocked, offlineEditMessage]);
   const listContainerRef = useRef<HTMLDivElement>(null);
-  const listScrollFrameRef = useRef<number | null>(null);
-  const pendingListScrollTopRef = useRef(0);
 
   const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
   const characterCount = sceneData.meta.characters?.length ?? 0;
@@ -276,51 +286,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
       return false;
     });
   }, [charactersById, environmentLayers, searchQuery, timelineReadModelActions]);
-
-  // ── Virtualization ─────────────────────────────────────
-  const totalItems = filteredActions.length;
-  const [containerHeight, setContainerHeight] = useState(400);
-  
-  useEffect(() => {
-    if (!listContainerRef.current) return;
-    const observer = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerHeight(entry.contentRect.height);
-      }
-    });
-    observer.observe(listContainerRef.current);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (listScrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(listScrollFrameRef.current);
-      }
-    };
-  }, []);
-
-  const startIdx = Math.max(0, Math.floor(listScrollTop / TIMELINE_LIST_ITEM_HEIGHT) - TIMELINE_LIST_OVERSCAN);
-  const endIdx = Math.min(
-    totalItems,
-    Math.ceil((listScrollTop + containerHeight) / TIMELINE_LIST_ITEM_HEIGHT) + TIMELINE_LIST_OVERSCAN,
-  );
-  const visibleItems = useMemo(
-    () => filteredActions.slice(startIdx, endIdx),
-    [endIdx, filteredActions, startIdx],
-  );
-
-  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    pendingListScrollTopRef.current = e.currentTarget.scrollTop;
-    if (listScrollFrameRef.current !== null) return;
-
-    listScrollFrameRef.current = window.requestAnimationFrame(() => {
-      listScrollFrameRef.current = null;
-      setListScrollTop((current) => (
-        current === pendingListScrollTopRef.current ? current : pendingListScrollTopRef.current
-      ));
-    });
-  }, []);
 
   // ── Actions ────────────────────────────────────────────
   const handleDeleteItem = useCallback(async (e: React.MouseEvent, id: string) => {
@@ -627,6 +592,290 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     void semanticAuthoring?.redo();
   }, [collaborationUndoDisabled, semanticAuthoring]);
 
+  const handleExpandAll = useCallback(() => {
+    const next: Record<string, boolean> = {};
+    filteredActions.forEach((action) => {
+      if (action._id) next[action._id] = true;
+    });
+    setExpandedActionIds(next);
+  }, [filteredActions]);
+
+  const handleCollapseAll = useCallback(() => {
+    setExpandedActionIds({});
+  }, []);
+
+  const handleInlineDialogueSpeaker = useCallback((action: TimelineAction, speakerId: string) => {
+    const char = sceneData.meta.characters?.find((c) => c.id === speakerId);
+    const speakerName = char ? char.name : speakerId;
+    if (semanticAuthoring) {
+      const item = semanticTimelineItemByDisplayId.get(action._id!);
+      if (item && item.locator.kind === 'statement') {
+        void semanticAuthoring.author({
+          version: AUTHORING_SCHEMA_VERSION,
+          correlationId: createTimelineListCorrelationId(),
+          origin: 'timeline-editor',
+          kind: 'update-statement',
+          statementId: item.statementId,
+          patch: {
+            params: {
+              ...(item.source.params as Record<string, unknown> || {}),
+              speakerId,
+              speaker: speakerName,
+            } as any,
+          },
+          flow: dialogueFlowEnabled,
+        });
+      }
+    }
+    if (props.updateAction && action._id) {
+      props.updateAction(action._id, {
+        params: {
+          ...action.params,
+          speakerId,
+          speaker: speakerName,
+        },
+      });
+    }
+  }, [dialogueFlowEnabled, props.updateAction, sceneData.meta.characters, semanticAuthoring, semanticTimelineItemByDisplayId]);
+
+  const handleInlineDialogueText = useCallback((action: TimelineAction, text: string) => {
+    if (semanticAuthoring) {
+      const item = semanticTimelineItemByDisplayId.get(action._id!);
+      if (item && item.locator.kind === 'statement') {
+        void semanticAuthoring.author({
+          version: AUTHORING_SCHEMA_VERSION,
+          correlationId: createTimelineListCorrelationId(),
+          origin: 'timeline-editor',
+          kind: 'update-statement',
+          statementId: item.statementId,
+          patch: {
+            params: {
+              ...(item.source.params as Record<string, unknown> || {}),
+              text,
+            } as any,
+          },
+          flow: dialogueFlowEnabled,
+        });
+      }
+    }
+    if (props.updateParam && action._id) {
+      props.updateParam(action._id, 'text', text);
+    } else if (props.updateAction && action._id) {
+      props.updateAction(action._id, {
+        params: {
+          ...action.params,
+          text,
+        },
+      });
+    }
+  }, [dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
+
+  const handleInlineParamChange = useCallback((action: TimelineAction, key: string, val: unknown) => {
+    if (semanticAuthoring) {
+      const item = semanticTimelineItemByDisplayId.get(action._id!);
+      if (item && item.locator.kind === 'statement') {
+        void semanticAuthoring.author({
+          version: AUTHORING_SCHEMA_VERSION,
+          correlationId: createTimelineListCorrelationId(),
+          origin: 'timeline-editor',
+          kind: 'update-statement',
+          statementId: item.statementId,
+          patch: {
+            params: {
+              ...(item.source.params as Record<string, unknown> || {}),
+              [key]: val,
+            } as any,
+          },
+          flow: dialogueFlowEnabled,
+        });
+      }
+    }
+    if (props.updateParam && action._id) {
+      props.updateParam(action._id, key, val);
+    } else if (props.updateAction && action._id) {
+      props.updateAction(action._id, {
+        params: {
+          ...action.params,
+          [key]: val,
+        },
+      });
+    }
+  }, [dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
+
+  const renderInlineControls = (action: TimelineAction) => {
+    if (action.action === 'dialogue') {
+      return (
+        <>
+          <select
+            className="timeline-item__inline-select timeline-item__inline-select--speaker"
+            value={action.params?.speakerId || ''}
+            onChange={(e) => handleInlineDialogueSpeaker(action, e.target.value)}
+            aria-label="选择说话角色"
+            title="选择说话角色"
+          >
+            <option value="">(旁白)</option>
+            {sceneData.meta.characters?.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            className="timeline-item__inline-input timeline-item__inline-input--text"
+            value={action.params?.text ?? ''}
+            placeholder="输入台词内容..."
+            aria-label="编辑台词内容"
+            title="编辑台词内容"
+            onChange={(e) => handleInlineDialogueText(action, e.target.value)}
+          />
+        </>
+      );
+    }
+
+    if (action.action === 'cameraShake') {
+      return (
+        <>
+          <label className="timeline-item__inline-field">
+            <span className="timeline-item__inline-label">强度</span>
+            <input
+              type="number"
+              step="0.1"
+              min="0.1"
+              className="timeline-item__inline-input timeline-item__inline-input--num"
+              value={action.params?.intensity ?? 1}
+              aria-label="震动强度"
+              onChange={(e) => handleInlineParamChange(action, 'intensity', Number.parseFloat(e.target.value) || 0)}
+            />
+          </label>
+          <label className="timeline-item__inline-field">
+            <span className="timeline-item__inline-label">时长</span>
+            <input
+              type="number"
+              step="0.1"
+              min="0.1"
+              className="timeline-item__inline-input timeline-item__inline-input--num"
+              value={action.params?.duration ?? 1}
+              aria-label="震动时长"
+              onChange={(e) => handleInlineParamChange(action, 'duration', Number.parseFloat(e.target.value) || 0)}
+            />
+          </label>
+        </>
+      );
+    }
+
+    if (action.action === 'cameraFollow') {
+      return (
+        <label className="timeline-item__inline-field">
+          <span className="timeline-item__inline-label">跟随</span>
+          <select
+            className="timeline-item__inline-select"
+            value={action.params?.characterId ?? ''}
+            aria-label="跟随目标"
+            onChange={(e) => handleInlineParamChange(action, 'characterId', e.target.value)}
+          >
+            <option value="">(无)</option>
+            {sceneData.meta.characters?.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (action.action.startsWith('camera')) {
+      return (
+        <label className="timeline-item__inline-field">
+          <span className="timeline-item__inline-label">时长</span>
+          <input
+            type="number"
+            step="0.1"
+            min="0.1"
+            className="timeline-item__inline-input timeline-item__inline-input--num"
+            value={action.params?.duration ?? 1}
+            aria-label="镜头时长"
+            onChange={(e) => handleInlineParamChange(action, 'duration', Number.parseFloat(e.target.value) || 0)}
+          />
+        </label>
+      );
+    }
+
+    if (action.semanticCategory === 'character') {
+      return (
+        <>
+          {sceneData.meta.characters && sceneData.meta.characters.length > 0 && (
+            <select
+              className="timeline-item__inline-select"
+              value={action.params?.id || action.params?.target || ''}
+              aria-label="选择角色"
+              onChange={(e) => {
+                const key = 'id' in (action.params || {}) ? 'id' : 'target';
+                handleInlineParamChange(action, key, e.target.value);
+              }}
+            >
+              <option value="">选择角色...</option>
+              {sceneData.meta.characters.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+          {action.action === 'setExpression' && (
+            <input
+              type="text"
+              className="timeline-item__inline-input"
+              value={action.params?.expression ?? ''}
+              placeholder="表情名称..."
+              aria-label="表情名称"
+              onChange={(e) => handleInlineParamChange(action, 'expression', e.target.value)}
+            />
+          )}
+          {(action.action === 'playMotion' || action.action === 'characterPerformance') && (
+            <input
+              type="text"
+              className="timeline-item__inline-input"
+              value={typeof action.params?.motion === 'string' ? action.params.motion : ''}
+              placeholder="动作名称..."
+              aria-label="动作名称"
+              onChange={(e) => handleInlineParamChange(action, 'motion', e.target.value)}
+            />
+          )}
+        </>
+      );
+    }
+
+    if (action.semanticCategory === 'audio') {
+      return (
+        <input
+          type="text"
+          className="timeline-item__inline-input"
+          value={action.params?.key || action.params?.src || action.params?.track || ''}
+          placeholder="音频资源/轨道..."
+          aria-label="音频资源"
+          onChange={(e) => {
+            const key = 'key' in (action.params || {}) ? 'key' : 'src';
+            handleInlineParamChange(action, key, e.target.value);
+          }}
+        />
+      );
+    }
+
+    if (action.semanticCategory === 'visual' || action.semanticCategory === 'layer') {
+      return (
+        <input
+          type="text"
+          className="timeline-item__inline-input"
+          value={action.params?.preset || action.params?.layerId || action.params?.slot || ''}
+          placeholder="预设/图层..."
+          aria-label="视觉参数"
+          onChange={(e) => {
+            const key = action.params?.preset !== undefined ? 'preset' : action.params?.layerId !== undefined ? 'layerId' : 'slot';
+            handleInlineParamChange(action, key, e.target.value);
+          }}
+        />
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {/* Toolbar */}
@@ -657,6 +906,26 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
             onClick={() => setSetting('workbenchDialogueFlowMode', 'manual')}
           >
             不自动重排
+          </button>
+        </div>
+        <div className="timeline-expand-controls" role="group" aria-label="展开控制">
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={handleExpandAll}
+            title="全部展开"
+            aria-label="全部展开"
+          >
+            全部展开
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={handleCollapseAll}
+            title="全部折叠"
+            aria-label="全部折叠"
+          >
+            全部折叠
           </button>
         </div>
         <div className="timeline-toolbar__spacer" />
@@ -748,7 +1017,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
 
           <div
             ref={listContainerRef}
-            onScroll={handleListScroll}
             onDragLeave={(event) => {
               if (listContainerRef.current && !listContainerRef.current.contains(event.relatedTarget as Node)) {
                 setDropTarget(null);
@@ -756,14 +1024,14 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
               }
             }}
             style={{
-              flex: 1, overflowY: 'auto', padding: '0 8px',
-              position: 'relative', minHeight: 0, isolation: 'isolate', contain: 'strict'
+              flex: 1, overflowY: 'auto', padding: '0 8px 16px 8px',
+              position: 'relative', minHeight: 0, isolation: 'isolate'
             }}
           >
-            <div style={{ position: 'relative', height: totalItems * TIMELINE_LIST_ITEM_HEIGHT }}>
-              {visibleItems.map((action, idx) => {
-                const realIdx = startIdx + idx;
+            <div className="timeline-list-items" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {filteredActions.map((action, realIdx) => {
                 const isSelected = !!action._id && !!selectedActionIds[action._id];
+                const isExpanded = !!action._id && !!expandedActionIds[action._id];
                 const presenceLocator = action._id
                   ? locatorForCompiledTimelineAction(documentStore, action._id)
                   : null;
@@ -957,208 +1225,245 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 const isDropAfter = !isDragging && dropTarget?.index === realIdx && dropTarget.placement === 'after';
 
                 return (
-                  <React.Fragment key={action._id ?? `timeline-item:${realIdx}`}>
+                  <div key={action._id ?? `timeline-item:${realIdx}`} className="timeline-item-container" style={{ position: 'relative' }}>
                     <div
-                      style={{
-                        position: 'absolute',
-                        top: realIdx * TIMELINE_LIST_ITEM_HEIGHT,
-                        left: 0,
-                        right: 0,
-                        height: TIMELINE_LIST_ITEM_HEIGHT - 6,
+                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''}`}
+                      onClick={(event) => {
+                        handleSelect(action._id!, event.ctrlKey || event.metaKey);
+                        toggleExpand(action._id!);
                       }}
-                    >
-                      <div
-                        className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''}`}
-                        onClick={(event) => handleSelect(action._id!, event.ctrlKey || event.metaKey)}
-                        onDragOver={(event) => {
-                          if (!draggingActionId || searchQuery.trim()) return;
-                          if (isDragging) {
-                            setDropTarget(null);
-                            return;
-                          }
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = 'move';
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
-                          setDropTarget((current) => {
-                            if (current?.index === realIdx && current?.placement === placement) return current;
-                            return { index: realIdx, placement };
-                          });
-                          setDragOverGapIndex(null);
-                        }}
-                        onDragLeave={(event) => {
-                          if (event.currentTarget.contains(event.relatedTarget as Node)) return;
-                          setDropTarget((current) => (current?.index === realIdx ? null : current));
-                        }}
-                        onDrop={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const currentDraggingId = draggingActionId;
+                      onDragOver={(event) => {
+                        if (!draggingActionId || searchQuery.trim()) return;
+                        if (isDragging) {
                           setDropTarget(null);
-                          setDragOverGapIndex(null);
-                          if (!currentDraggingId || searchQuery.trim()) return;
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          const insertAfter = event.clientY >= rect.top + rect.height / 2;
-                          void dropRootStatementAt(currentDraggingId, realIdx + (insertAfter ? 1 : 0));
-                        }}
-                        role="group"
-                        aria-label={`${title}${action.action === 'dialogue' && action.params?.text ? `，${action.params.text}` : ''}，时间 ${(action.time || 0).toFixed(1)} 秒${isSelected ? '，已选中' : ''}`}
-                        title={collaborationEditingSummary || undefined}
-                        style={{
-                          padding: '10px 12px',
-                          borderRadius: 'var(--radius-md)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          transition: 'all var(--transition-fast)',
+                          return;
+                        }
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.dataTransfer.dropEffect = 'move';
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                        setDropTarget((current) => {
+                          if (current?.index === realIdx && current?.placement === placement) return current;
+                          return { index: realIdx, placement };
+                        });
+                        setDragOverGapIndex(null);
+                      }}
+                      onDragLeave={(event) => {
+                        if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+                        setDropTarget((current) => (current?.index === realIdx ? null : current));
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const currentDraggingId = draggingActionId;
+                        setDropTarget(null);
+                        setDragOverGapIndex(null);
+                        if (!currentDraggingId || searchQuery.trim()) return;
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const insertAfter = event.clientY >= rect.top + rect.height / 2;
+                        void dropRootStatementAt(currentDraggingId, realIdx + (insertAfter ? 1 : 0));
+                      }}
+                      role="group"
+                      aria-label={`${title}${action.action === 'dialogue' && action.params?.text ? `，${action.params.text}` : ''}，时间 ${(action.time || 0).toFixed(1)} 秒${isSelected ? '，已选中' : ''}`}
+                      title={collaborationEditingSummary || undefined}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: 38, flexShrink: 0 }}>
+                        {canDragRootStatement ? (
+                          <button
+                            type="button"
+                            className={`timeline-item__drag-handle ${isDragging ? 'timeline-item__drag-handle--dragging' : ''}`}
+                            draggable
+                            style={{ background: isSelected ? 'rgba(255,255,255,0.08)' : 'var(--bg-surface)' }}
+                            title="拖拽调整语句顺序"
+                            aria-label={`拖拽第 ${realIdx + 1} 行调整语句顺序`}
+                            onClick={(event) => event.stopPropagation()}
+                            onDragStart={(event) => {
+                              if (!readModelItem || readModelItem.locator.kind !== 'statement') {
+                                event.preventDefault();
+                                return;
+                              }
+                              event.stopPropagation();
+                              event.dataTransfer.effectAllowed = 'move';
+                              event.dataTransfer.setData('text/plain', readModelItem.statementId);
+                              setDraggingActionId(readModelItem.statementId);
+                              setDropTarget(null);
+                              setDragOverGapIndex(null);
+                            }}
+                            onDragEnd={() => {
+                              setDraggingActionId(null);
+                              setDropTarget(null);
+                              setDragOverGapIndex(null);
+                            }}
+                          >
+                            <span className="timeline-item__type-glyph" aria-hidden="true">
+                              <IconComp width={15} height={15} />
+                            </span>
+                            <IconGripVertical className="timeline-item__grip-glyph" width={15} height={15} aria-hidden="true" />
+                          </button>
+                        ) : (
+                          <div
+                            className="timeline-item__type-icon"
+                            aria-hidden="true"
+                            style={{ background: isSelected ? 'rgba(255,255,255,0.08)' : 'var(--bg-surface)' }}
+                          >
+                            <IconComp width={15} height={15} />
+                          </div>
+                        )}
+                        <input
+                          className="timeline-item__time tabular-nums"
+                          type="text"
+                          value={(action.time || 0).toFixed(1)}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => handleTimeEdit(event, action._id!)}
+                          style={{ width: 36, textAlign: 'center', fontSize: 10 }}
+                          title="编辑时间"
+                          aria-label={`${title}开始时间`}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        className={`timeline-item__expand-btn ${isExpanded ? 'timeline-item__expand-btn--expanded' : ''}`}
+                        aria-expanded={isExpanded}
+                        aria-label={isExpanded ? '折叠详情' : '展开详情'}
+                        title={isExpanded ? '折叠详情' : '展开详情'}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleExpand(action._id!);
                         }}
                       >
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: 38, flexShrink: 0 }}>
-                          {canDragRootStatement ? (
-                            <button
-                              type="button"
-                              className={`timeline-item__drag-handle ${isDragging ? 'timeline-item__drag-handle--dragging' : ''}`}
-                              draggable
-                              style={{ background: isSelected ? 'rgba(255,255,255,0.08)' : 'var(--bg-surface)' }}
-                              title="拖拽调整语句顺序"
-                              aria-label={`拖拽第 ${realIdx + 1} 行调整语句顺序`}
-                              onClick={(event) => event.stopPropagation()}
-                              onDragStart={(event) => {
-                                if (!readModelItem || readModelItem.locator.kind !== 'statement') {
-                                  event.preventDefault();
-                                  return;
-                                }
-                                event.stopPropagation();
-                                event.dataTransfer.effectAllowed = 'move';
-                                event.dataTransfer.setData('text/plain', readModelItem.statementId);
-                                setDraggingActionId(readModelItem.statementId);
-                                setDropTarget(null);
-                                setDragOverGapIndex(null);
-                              }}
-                              onDragEnd={() => {
-                                setDraggingActionId(null);
-                                setDropTarget(null);
-                                setDragOverGapIndex(null);
-                              }}
-                            >
-                              <span className="timeline-item__type-glyph" aria-hidden="true">
-                                <IconComp width={15} height={15} />
-                              </span>
-                              <IconGripVertical className="timeline-item__grip-glyph" width={15} height={15} aria-hidden="true" />
-                            </button>
-                          ) : (
-                            <div
-                              className="timeline-item__type-icon"
-                              aria-hidden="true"
-                              style={{ background: isSelected ? 'rgba(255,255,255,0.08)' : 'var(--bg-surface)' }}
-                            >
-                              <IconComp width={15} height={15} />
-                            </div>
-                          )}
-                          <input
-                            className="timeline-item__time tabular-nums"
-                            type="text"
-                            value={(action.time || 0).toFixed(1)}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => handleTimeEdit(event, action._id!)}
-                            style={{ width: 36, textAlign: 'center', fontSize: 10 }}
-                            title="编辑时间"
-                            aria-label={`${title}开始时间`}
-                          />
-                        </div>
+                        <IconChevronDown
+                          width={13}
+                          height={13}
+                          style={{
+                            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                            transition: 'transform var(--transition-fast)',
+                          }}
+                        />
+                      </button>
 
+                      <button
+                        type="button"
+                        className="timeline-item__select-button"
+                        aria-label={`选择${title}${isSelected ? '，当前已选中' : ''}`}
+                        aria-pressed={isSelected}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleSelect(action._id!, event.ctrlKey || event.metaKey);
+                          toggleExpand(action._id!);
+                        }}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          minWidth: 80,
+                          maxWidth: 130,
+                          flexShrink: 0,
+                          padding: 0,
+                          border: 0,
+                          background: 'transparent',
+                          color: 'inherit',
+                          font: 'inherit',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div className="timeline-item__title-row">
+                          <div className="timeline-item__title">{title}</div>
+                          {collaborationEditingSummary && (
+                            <span
+                              className="timeline-item__collaboration-badge"
+                              title={collaborationEditingSummary}
+                              aria-label={collaborationEditingSummary}
+                            >
+                              <IconUsers width={11} height={11} />
+                              <span>{editingPeers.length}</span>
+                            </span>
+                          )}
+                        </div>
+                        {environmentLayer && (
+                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-full)',
+                              fontSize: 10,
+                              lineHeight: 1.2,
+                              color: 'var(--text-secondary)',
+                              background: 'rgba(255,255,255,0.05)',
+                              border: '1px solid var(--border-subtle)',
+                            }}>
+                              {environmentLayer.isBackground ? '主背景' : environmentLayer.displayLabel}
+                            </span>
+                          </div>
+                        )}
+                      </button>
+
+                      <div
+                        className="timeline-item__inline-controls"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {renderInlineControls(action)}
+                      </div>
+
+                      <div className="timeline-item__actions">
                         <button
-                          type="button"
-                          className="timeline-item__select-button"
-                          aria-label={`选择${title}${isSelected ? '，当前已选中' : ''}`}
-                          aria-pressed={isSelected}
+                          className="timeline-item__action-btn timeline-item__action-btn--play"
                           onClick={(event) => {
                             event.stopPropagation();
-                            handleSelect(action._id!, event.ctrlKey || event.metaKey);
+                            setCurrentTime(action.time || 0);
+                            playbackAdapter.seek(action.time || 0);
+                            playbackAdapter.play();
                           }}
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            padding: 0,
-                            border: 0,
-                            background: 'transparent',
-                            color: 'inherit',
-                            font: 'inherit',
-                            textAlign: 'left',
-                            cursor: 'pointer',
-                          }}
+                          title="播放到此句"
+                          aria-label="播放到此句"
                         >
-                          <div className="timeline-item__title-row">
-                            <div className="timeline-item__title">{title}</div>
-                            {collaborationEditingSummary && (
-                              <span
-                                className="timeline-item__collaboration-badge"
-                                title={collaborationEditingSummary}
-                                aria-label={collaborationEditingSummary}
-                              >
-                                <IconUsers width={11} height={11} />
-                                <span>{editingPeers.length}</span>
-                              </span>
-                            )}
-                          </div>
-                          {environmentLayer && (
-                            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '2px 8px',
-                                borderRadius: 'var(--radius-full)',
-                                fontSize: 10,
-                                lineHeight: 1.2,
-                                color: 'var(--text-secondary)',
-                                background: 'rgba(255,255,255,0.05)',
-                                border: '1px solid var(--border-subtle)',
-                              }}>
-                                {environmentLayer.isBackground ? '主背景' : environmentLayer.displayLabel}
-                              </span>
-                            </div>
-                          )}
+                          <IconPlay width={13} height={13} />
                         </button>
-
-                        <div className="timeline-item__actions">
-                          <button
-                            className="timeline-item__action-btn timeline-item__action-btn--play"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setCurrentTime(action.time || 0);
-                              playbackAdapter.seek(action.time || 0);
-                              playbackAdapter.play();
-                            }}
-                            title="播放到此句"
-                            aria-label="播放到此句"
-                          >
-                            <IconPlay width={13} height={13} />
-                          </button>
-                          <button
-                            className="timeline-item__action-btn timeline-item__action-btn--delete"
-                            onClick={(event) => { void handleDeleteItem(event, action._id!); }}
-                            title="删除语句"
-                            aria-label="删除语句"
-                          >
-                            <IconTrash width={13} height={13} />
-                          </button>
-                        </div>
+                        <button
+                          className="timeline-item__action-btn timeline-item__action-btn--delete"
+                          onClick={(event) => { void handleDeleteItem(event, action._id!); }}
+                          title="删除语句"
+                          aria-label="删除语句"
+                        >
+                          <IconTrash width={13} height={13} />
+                        </button>
                       </div>
                     </div>
+
+                    {isExpanded && (
+                      <div className="inspector-workspace__detail" onClick={(event) => event.stopPropagation()}>
+                        <ActionInspector
+                          key={action._id}
+                          sceneData={sceneData}
+                          selectedActionIds={{ [action._id!]: true }}
+                          setSelectedIds={setSelectedIds}
+                          updateAction={props.updateAction ?? ((_id, updates) => {
+                            handleInlineParamChange(action, 'params', updates.params);
+                          })}
+                          updateParam={props.updateParam ?? ((_id, key, val) => {
+                            handleInlineParamChange(action, key, val);
+                          })}
+                          replaceSourceParams={props.replaceSourceParams ?? ((_id, params) => {
+                            handleInlineParamChange(action, 'params', params);
+                          })}
+                          deleteAction={props.deleteAction ?? ((id) => {
+                            void handleDeleteItem({ stopPropagation: () => {} } as any, id);
+                          })}
+                          copyActions={props.copyActions}
+                          onClose={() => toggleExpand(action._id!)}
+                          closeMode="close"
+                        />
+                      </div>
+                    )}
+
                     {gap && (
                       <div
                         className={`timeline-list-gap ${dragOverGapIndex === gap.index ? 'timeline-list-gap--drag-over' : ''}`}
                         data-testid="timeline-list-gap"
                         data-active={activeGapMenu?.gap.index === gap.index}
-                        style={{
-                          position: 'absolute',
-                          top: realIdx * TIMELINE_LIST_ITEM_HEIGHT + TIMELINE_LIST_ITEM_HEIGHT - 7,
-                          left: 0,
-                          right: 0,
-                          height: 8,
-                        }}
                         onDragOver={(event) => {
                           if (!draggingActionId) return;
                           event.preventDefault();
@@ -1202,7 +1507,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         </button>
                       </div>
                     )}
-                  </React.Fragment>
+                  </div>
                 );
               })}
             </div>

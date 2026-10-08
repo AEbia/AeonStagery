@@ -371,10 +371,12 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
 
         {groups.General.length > 0 && (
           <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>
+            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
               {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
             </div>
-            {groups.General.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            <div className="inspector-grid">
+              {groups.General.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            </div>
           </div>
         )}
 
@@ -395,15 +397,19 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
 
         {groups.Transform.length > 0 && (
           <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>变换属性</div>
-            {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>变换属性</div>
+            <div className="inspector-grid">
+              {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            </div>
           </div>
         )}
 
         {groups.State.length > 0 && (
           <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>状态与控制</div>
-            {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>状态与控制</div>
+            <div className="inspector-grid">
+              {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            </div>
           </div>
         )}
 

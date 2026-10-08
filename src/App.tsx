@@ -221,14 +221,15 @@ export function computeSidePanelWidth(params: {
   inspectorLayout: 'split' | 'replace';
   isInspectorDetailVisible: boolean;
   detailWidth: number;
+  timelineLayoutMode?: 'tracks' | 'list';
 }): number {
-  return params.isTracksMode
-    ? params.panelWidth
-    : params.inspectorNavigatorWidth + (
-        params.inspectorLayout === 'split' && params.isInspectorDetailVisible
-          ? params.detailWidth + 4
-          : 0
-      );
+  if (params.isTracksMode) {
+    return params.panelWidth;
+  }
+  // In list mode, inspector detail is embedded directly inside TimelineListView,
+  // so sidePanelWidth remains fixed at the panel width (inspectorNavigatorWidth)
+  // rather than splitting or popping out a separate side column.
+  return params.inspectorNavigatorWidth;
 }
 
 function AppContent({
@@ -394,14 +395,22 @@ function AppContent({
   });
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
-  const layoutOptions = useMemo(() => ({
-    initialPanelWidth: (settings.workbenchPanelWidth === 380 || !settings.workbenchPanelWidth) ? 400 : settings.workbenchPanelWidth,
-    initialDetailWidth: settings.workbenchDetailWidth,
-    initialTimelineHeight: settings.workbenchTimelineHeight,
-    onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
-    onDetailWidthCommit: (width: number) => setSetting('workbenchDetailWidth', width),
-    onTimelineHeightCommit: (height: number) => setSetting('workbenchTimelineHeight', height),
-  }), [
+  const isListMode = settings.workbenchTimelineLayoutMode === 'list';
+  const layoutOptions = useMemo(() => {
+    const defaultWidth = isListMode ? 600 : 400;
+    const initialWidth = (!settings.workbenchPanelWidth || settings.workbenchPanelWidth === 380 || (isListMode && (settings.workbenchPanelWidth === 400 || settings.workbenchPanelWidth < 560)))
+      ? defaultWidth
+      : settings.workbenchPanelWidth;
+    return {
+      initialPanelWidth: initialWidth,
+      initialDetailWidth: settings.workbenchDetailWidth,
+      initialTimelineHeight: settings.workbenchTimelineHeight,
+      onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
+      onDetailWidthCommit: (width: number) => setSetting('workbenchDetailWidth', width),
+      onTimelineHeightCommit: (height: number) => setSetting('workbenchTimelineHeight', height),
+    };
+  }, [
+    isListMode,
     settings.workbenchDetailWidth,
     settings.workbenchPanelWidth,
     settings.workbenchTimelineHeight,
@@ -546,6 +555,7 @@ function AppContent({
     inspectorLayout,
     isInspectorDetailVisible,
     detailWidth,
+    timelineLayoutMode: settings.workbenchTimelineLayoutMode,
   });
   const navigatorReplacedByDetail = sidePanelView === 'inspector'
     && inspectorLayout === 'replace'

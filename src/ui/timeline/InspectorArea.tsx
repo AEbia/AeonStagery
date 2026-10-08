@@ -139,6 +139,12 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
       workspaceWarningCount={workspaceWarningCount}
       availableTemplates={availableTemplates}
       onSelectWorkspaceView={(tab) => props.onSelectInspectorView?.(tab)}
+      updateAction={props.updateAction}
+      updateParam={props.updateParam}
+      replaceSourceParams={props.replaceSourceParams}
+      deleteAction={props.deleteAction}
+      deleteActions={props.deleteActions}
+      copyActions={props.copyActions}
     />
   );
 
@@ -180,7 +186,7 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
         <div
           className="inspector-workspace"
           data-timeline-layout={settings.workbenchTimelineLayoutMode}
-          data-state="closed"
+          data-state={props.inspectorView === 'actions' ? 'open' : 'closed'}
         >
           <div key="navigator" className="inspector-workspace__navigator" style={{ width: navigatorWidth }}>
             {navigator}
