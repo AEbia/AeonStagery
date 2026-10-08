@@ -1519,3 +1519,103 @@ html[data-perf="low"] .side-panel {
     display: none;
   }
 }
+
+/* ─── Left Sidebar Panel ────────────────────────────────────────── */
+.left-panel {
+  width: 340px;
+  min-width: 320px;
+  max-width: 420px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  z-index: 10;
+}
+
+body[data-resizing="true"] .left-panel,
+html[data-perf="low"] .left-panel {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .left-panel {
+    transition: none !important;
+  }
+}
+
+.left-panel__tabs {
+  display: flex;
+  min-height: 40px;
+  height: 40px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.left-panel__tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.left-panel__tab:hover {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 74%, transparent);
+}
+
+.left-panel__tab[aria-selected="true"],
+.left-panel__tab--active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.left-panel__tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.left-panel__content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.left-panel__tabpanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.left-panel__tabpanel[hidden] {
+  display: none !important;
+}
+
+.resize-handle--left {
+  border-right: 1px solid var(--border-subtle);
+}

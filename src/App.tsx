@@ -49,6 +49,7 @@ import { useSceneMigrationDialog } from './ui/hooks/useSceneMigrationDialog';
 import { SceneMigrationConfirmationDialog } from './ui/SceneMigrationConfirmationDialog';
 import { AppProvider, isCollaborationUndoDisabled, useTimelineAdapter } from './ui/context/AppContext';
 import type { InspectorPanelView } from './ui/timeline/InspectorViewPicker';
+import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { scriptEngine } from './engine/ScriptEngine';
 import { cameraController } from './engine/CameraController';
@@ -454,11 +455,71 @@ function AppContent({
     handleSelectWorkspaceView(view);
   }, [handleSelectWorkspaceView, handleSetSidePanelView]);
 
+  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aeonstagery:left-panel-width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!Number.isNaN(parsed)) return Math.min(420, Math.max(320, parsed));
+      }
+    } catch {}
+    return 340;
+  });
+  const leftPanelWidthRef = useRef(leftPanelWidth);
+  useEffect(() => {
+    leftPanelWidthRef.current = leftPanelWidth;
+  }, [leftPanelWidth]);
+
+  const handleLeftResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = leftPanelWidthRef.current;
+    document.body.style.cursor = 'col-resize';
+    document.body.setAttribute('data-resizing', 'true');
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = Math.min(420, Math.max(320, startW + delta));
+      setLeftPanelWidth(nextWidth);
+      try {
+        localStorage.setItem('aeonstagery:left-panel-width', String(nextWidth));
+      } catch {}
+    };
+
+    const handleMouseUp = () => {
+      document.body.style.cursor = 'default';
+      document.body.removeAttribute('data-resizing');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const handleLeftResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    let next = leftPanelWidthRef.current;
+    if (e.key === 'ArrowLeft') next -= 10;
+    else if (e.key === 'ArrowRight') next += 10;
+    else if (e.key === 'Home') next = 320;
+    else if (e.key === 'End') next = 420;
+    else return;
+
+    e.preventDefault();
+    const clamped = Math.min(420, Math.max(320, next));
+    setLeftPanelWidth(clamped);
+    try {
+      localStorage.setItem('aeonstagery:left-panel-width', String(clamped));
+    } catch {}
+  }, []);
+
   const workspaceToolsPanelWidth = Math.max(panelWidth, 400);
   const inspectorNavigatorWidth = sidePanelView === 'workspace-tools'
     ? workspaceToolsPanelWidth
     : panelWidth;
-  const inspectorLayout = windowWidth - inspectorNavigatorWidth - detailWidth >= 720
+  const availableStageWidth = windowWidth - (isTracksMode ? leftPanelWidth : 0) - inspectorNavigatorWidth - detailWidth;
+  const inspectorLayout = availableStageWidth >= 720
     ? 'split'
     : 'replace';
   const sidePanelWidth = inspectorNavigatorWidth + (
@@ -470,15 +531,16 @@ function AppContent({
     && inspectorLayout === 'replace'
     && isInspectorDetailVisible
     && selectedActionCount > 0;
-  const navigatorPriorityActive = settings.workbenchTimelineLayoutMode === 'list'
+  const navigatorPriorityActive = !isTracksMode
+    && settings.workbenchTimelineLayoutMode === 'list'
     && hasLoadedScene
     && !navigatorReplacedByDetail;
-  const timelinePanelWidth = navigatorPriorityActive
-    ? 'auto'
-    : '100%';
-  const timelinePanelMarginRight = navigatorPriorityActive
-    ? inspectorNavigatorWidth
-    : 0;
+  const timelinePanelWidth = isTracksMode
+    ? '100%'
+    : (navigatorPriorityActive ? 'auto' : '100%');
+  const timelinePanelMarginRight = isTracksMode
+    ? 0
+    : (navigatorPriorityActive ? inspectorNavigatorWidth : 0);
 
   const handleInspectorDetailVisibilityChange = useCallback((visible: boolean) => {
     if (inspectorDetailVisibleRef.current === visible) return;
@@ -1673,6 +1735,25 @@ function AppContent({
       </div>
 
       <div className="main-content" data-navigator-extended={navigatorPriorityActive}>
+        {isTracksMode && (
+          <>
+            <ErrorBoundary name="左侧面板">
+              <LeftSidebarPanel width={leftPanelWidth} />
+            </ErrorBoundary>
+            <div
+              className="resize-handle resize-handle--left"
+              role="separator"
+              aria-label="调整左侧面板宽度"
+              aria-orientation="vertical"
+              aria-valuemin={320}
+              aria-valuemax={420}
+              aria-valuenow={leftPanelWidth}
+              tabIndex={0}
+              onMouseDown={handleLeftResizeMouseDown}
+              onKeyDown={handleLeftResizeKeyDown}
+            />
+          </>
+        )}
         <ErrorBoundary name="舞台">
           <div className="stage-area" ref={stageAreaRef}>
             <div
@@ -1862,6 +1943,7 @@ function AppContent({
       <ErrorBoundary name="时间轴">
         <div
           className="bottom-panel"
+          data-timeline-layout={settings.workbenchTimelineLayoutMode}
           style={{
             width: timelinePanelWidth,
             height: timelineHeight,

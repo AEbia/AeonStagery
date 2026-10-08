@@ -83,6 +83,12 @@ h1, h2, h3, h4, h5, h6 {
   z-index: 30;
 }
 
+.bottom-panel[data-timeline-layout="tracks"] {
+  width: 100% !important;
+  max-width: 100vw;
+  margin-right: 0 !important;
+}
+
 /* ─── Top Bar ───────────────────────────────────────────────── */
 .top-bar {
   display: flex;
