@@ -77,6 +77,12 @@ const MAX_BASE_SECONDS = 7;
 const MIN_TOTAL_SECONDS = 1.4;
 const MAX_TOTAL_SECONDS = 9;
 
+export interface DialogueTypewriterTiming {
+  /** Seconds per visible character, read from the current local setting. */
+  textSpeed: number;
+  entranceAnimation: boolean;
+}
+
 export type DialogueDurationPolicyRequest =
   | {
     /** 时间线 UI 新建草稿或字段默认值。 */
@@ -84,10 +90,18 @@ export type DialogueDurationPolicyRequest =
     defaultDurationSeconds?: number;
   }
   | {
+    /** New editor dialogue: retain its default hold while allowing the text to finish. */
+    context: 'authoring-insert';
+    text: string;
+    authoredDurationSeconds: number;
+    typewriter?: DialogueTypewriterTiming;
+  }
+  | {
     /** AI / 顺序铺戏 / authoring 插入按场景节奏档位估算。 */
     context: 'pace-tier';
     text: string;
     pace: AiRhythmPace;
+    typewriter?: DialogueTypewriterTiming;
   }
   | {
     /** WebGAL 导入按阅读速度估算。 */
@@ -103,6 +117,7 @@ export type DialogueDurationPolicyRequest =
     authoredDurationSeconds: number;
     timeWasEdited: boolean;
     durationWasEdited: boolean;
+    typewriter?: DialogueTypewriterTiming;
   };
 
 /**
@@ -119,15 +134,25 @@ export function resolveDialogueDuration(request: DialogueDurationPolicyRequest):
         request.defaultDurationSeconds,
         DEFAULT_DIALOGUE_DURATION_SECONDS,
       );
+    case 'authoring-insert':
+      return allowTypewriterDuration(request.authoredDurationSeconds, request.text, request.typewriter);
     case 'pace-tier':
-      return estimateDialogueDuration(request.text, request.pace);
+      return allowTypewriterDuration(estimateDialogueDuration(request.text, request.pace), request.text, request.typewriter);
     case 'reading-speed':
       return estimateDialogueDurationByReadingSpeed(request.text, request.options);
     case 'authoring-update':
       return request.timeWasEdited || request.durationWasEdited
         ? request.authoredDurationSeconds
-        : estimateDialogueDuration(request.text, request.pace);
+        : allowTypewriterDuration(estimateDialogueDuration(request.text, request.pace), request.text, request.typewriter);
   }
+}
+
+function allowTypewriterDuration(duration: number, text: string, timing?: DialogueTypewriterTiming): number {
+  if (!timing || !Number.isFinite(timing.textSpeed) || timing.textSpeed <= 0) return duration;
+  const characters = [...text.replace(/[\r\n\u200B]/g, '')].length;
+  const revealSeconds = characters * timing.textSpeed + (timing.entranceAnimation ? 0.2 : 0);
+  // Round upward so authoring's 0.1-second precision cannot cut off the last character.
+  return Math.max(duration, Math.ceil(revealSeconds * 10 - 1e-9) / 10);
 }
 
 /** 规范化设置覆盖；非法值回退到 policy 的默认值。 */
