@@ -605,6 +605,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   }, []);
 
   const handleInlineDialogueSpeaker = useCallback((action: TimelineAction, speakerId: string) => {
+    if (blockOfflineAuthoring()) return;
     const char = sceneData.meta.characters?.find((c) => c.id === speakerId);
     const speakerName = char ? char.name : speakerId;
     if (semanticAuthoring) {
@@ -636,9 +637,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
         },
       });
     }
-  }, [dialogueFlowEnabled, props.updateAction, sceneData.meta.characters, semanticAuthoring, semanticTimelineItemByDisplayId]);
+  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, sceneData.meta.characters, semanticAuthoring, semanticTimelineItemByDisplayId]);
 
   const handleInlineDialogueText = useCallback((action: TimelineAction, text: string) => {
+    if (blockOfflineAuthoring()) return;
     if (semanticAuthoring) {
       const item = semanticTimelineItemByDisplayId.get(action._id!);
       if (item && item.locator.kind === 'statement') {
@@ -668,9 +670,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
         },
       });
     }
-  }, [dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
+  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
 
   const handleInlineParamChange = useCallback((action: TimelineAction, key: string, val: unknown) => {
+    if (blockOfflineAuthoring()) return;
     if (semanticAuthoring) {
       const item = semanticTimelineItemByDisplayId.get(action._id!);
       if (item && item.locator.kind === 'statement') {
@@ -700,7 +703,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
         },
       });
     }
-  }, [dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
+  }, [blockOfflineAuthoring, dialogueFlowEnabled, props.updateAction, props.updateParam, semanticAuthoring, semanticTimelineItemByDisplayId]);
 
   const renderInlineControls = (action: TimelineAction) => {
     if (action.action === 'dialogue') {

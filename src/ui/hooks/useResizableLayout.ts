@@ -11,7 +11,7 @@ export interface ResizableLayoutOptions {
   onTimelineHeightCommit?: (height: number) => void;
 }
 
-export const WORKBENCH_PANEL_WIDTH = { min: 280, max: 620, defaultValue: 380 };
+export const WORKBENCH_PANEL_WIDTH = { min: 280, max: 640, defaultValue: 380 };
 export const WORKBENCH_DETAIL_WIDTH = { min: 320, max: 480, defaultValue: 360 };
 export const WORKBENCH_CONTEXT_WIDTH = { min: 320, max: 620, defaultValue: 400 };
 export const WORKBENCH_TIMELINE_HEIGHT = { min: 180, max: 560, defaultValue: 300 };
