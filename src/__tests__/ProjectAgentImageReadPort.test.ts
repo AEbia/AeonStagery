@@ -11,6 +11,7 @@ import {
   PROJECT_AGENT_MAX_IMAGE_BYTES,
 } from '../services/project-agent/ProjectAgentImageReadPort';
 import { GIF_3000X2000, GIF_ANIMATED_2X2, GIF_STATIC_2X2 } from './fixtures/gifFixtures';
+import { createSymlinkFixture, FILE_SYMLINKS_SUPPORTED } from './helpers/symlinkFixtures';
 
 interface Sandbox {
   root: string;
@@ -33,7 +34,7 @@ function createSandbox(prefix: string): Sandbox {
       fs.writeFileSync(absolute, content);
     },
     symlink(target, relative) {
-      fs.symlinkSync(target, path.join(root, relative));
+      createSymlinkFixture(target, path.join(root, relative));
     },
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true });
@@ -324,7 +325,7 @@ describe('project agent image read port (sandbox)', () => {
     }
   });
 
-  it('never follows symlinks even when the target stays inside the root', async () => {
+  it.skipIf(!FILE_SYMLINKS_SUPPORTED)('never follows symlinks even when the target stays inside the root', async () => {
     sandbox.write('images/real.png', pngHeaderBytes(4, 4));
     const linkTarget = path.join(sandbox.root, 'images', 'real.png');
     sandbox.symlink(linkTarget, 'images/linked.png');
