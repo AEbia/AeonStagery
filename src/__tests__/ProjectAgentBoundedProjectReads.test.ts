@@ -31,6 +31,7 @@ import {
 } from '../services/project-agent-service/ProjectAgentTaskCoordinator';
 import { FileSystemProjectAgentJournalPort } from '../services/project-agent-service/FileSystemProjectAgentJournalPort';
 import { buildProjectAgentSystemPrompt } from '../services/project-agent-service/ProjectAgentSystemPrompt';
+import { createSymlinkFixture } from './helpers/symlinkFixtures';
 
 const SCENE_DOCUMENT_ID = 'scene-doc-bounded';
 const SCENE_ENTRY_ID = 'scene-entry-bounded';
@@ -56,7 +57,7 @@ function createSandbox(): Sandbox {
       fs.mkdirSync(path.join(root, relative), { recursive: true });
     },
     symlink(target, relative) {
-      fs.symlinkSync(target, path.join(root, relative));
+      createSymlinkFixture(target, path.join(root, relative));
     },
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true });
@@ -313,7 +314,7 @@ describe('bounded project read ports (sandbox)', () => {
       fs.writeFileSync(path.join(outside, 'secret.txt'), 'outside secret');
       fs.mkdirSync(path.join(outside, 'dir'), { recursive: true });
       fs.writeFileSync(path.join(outside, 'dir', 'inner.txt'), 'inner secret');
-      sandbox.symlink(path.join(outside, 'secret.txt'), 'escape.txt');
+      sandbox.symlink(outside, 'escape-root');
       sandbox.symlink(path.join(outside, 'dir'), 'escape-dir');
       sandbox.write('inside.txt', 'inside content');
 
@@ -327,7 +328,7 @@ describe('bounded project read ports (sandbox)', () => {
         }
       }
 
-      const escapingFile = await tools.readProjectText({ path: 'escape.txt' });
+      const escapingFile = await tools.readProjectText({ path: 'escape-root/secret.txt' });
       expect(escapingFile.ok).toBe(false);
       if (!escapingFile.ok) expect(escapingFile.error.code).toBe('forbidden_path');
 
@@ -335,7 +336,7 @@ describe('bounded project read ports (sandbox)', () => {
       expect(escapingDirList.ok).toBe(true);
       if (escapingDirList.ok) {
         const paths = escapingDirList.data.entries.map((entry) => entry.path);
-        expect(paths).not.toContain('escape.txt');
+        expect(paths).not.toContain('escape-root/secret.txt');
         expect(paths).not.toContain('escape-dir/inner.txt');
         expect(paths).toContain('inside.txt');
       }
@@ -378,7 +379,7 @@ describe('bounded project read ports (sandbox)', () => {
       mount.write('.env', 'MOUNT_SECRET=value');
       mount.mkdir('docs');
       outside.write('secret.txt', 'outside secret');
-      mount.symlink(path.join(outside.root, 'secret.txt'), 'docs/escape.txt');
+      mount.symlink(outside.root, 'docs/escape');
       const { tools } = createTools(sandbox.root, [
         { id: 'shared-library', path: mount.root },
       ]);
@@ -386,7 +387,7 @@ describe('bounded project read ports (sandbox)', () => {
       for (const reference of [
         '@mount/missing/docs/library-guide.txt',
         '@mount/shared-library/.env',
-        '@mount/shared-library/docs/escape.txt',
+        '@mount/shared-library/docs/escape/secret.txt',
       ]) {
         const result = await tools.readProjectText({ path: reference });
         expect(result.ok).toBe(false);
