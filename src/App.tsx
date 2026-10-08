@@ -214,6 +214,23 @@ export default function App() {
   );
 }
 
+export function computeSidePanelWidth(params: {
+  isTracksMode: boolean;
+  panelWidth: number;
+  inspectorNavigatorWidth: number;
+  inspectorLayout: 'split' | 'replace';
+  isInspectorDetailVisible: boolean;
+  detailWidth: number;
+}): number {
+  return params.isTracksMode
+    ? params.panelWidth
+    : params.inspectorNavigatorWidth + (
+        params.inspectorLayout === 'split' && params.isInspectorDetailVisible
+          ? params.detailWidth + 4
+          : 0
+      );
+}
+
 function AppContent({
   contextValue,
   collaborationStatus,
@@ -378,7 +395,7 @@ function AppContent({
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
   const layoutOptions = useMemo(() => ({
-    initialPanelWidth: settings.workbenchPanelWidth,
+    initialPanelWidth: (settings.workbenchPanelWidth === 380 || !settings.workbenchPanelWidth) ? 400 : settings.workbenchPanelWidth,
     initialDetailWidth: settings.workbenchDetailWidth,
     initialTimelineHeight: settings.workbenchTimelineHeight,
     onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
@@ -522,11 +539,14 @@ function AppContent({
   const inspectorLayout = availableStageWidth >= 720
     ? 'split'
     : 'replace';
-  const sidePanelWidth = inspectorNavigatorWidth + (
-    inspectorLayout === 'split' && isInspectorDetailVisible
-      ? detailWidth + 4
-      : 0
-  );
+  const sidePanelWidth = computeSidePanelWidth({
+    isTracksMode,
+    panelWidth,
+    inspectorNavigatorWidth,
+    inspectorLayout,
+    isInspectorDetailVisible,
+    detailWidth,
+  });
   const navigatorReplacedByDetail = sidePanelView === 'inspector'
     && inspectorLayout === 'replace'
     && isInspectorDetailVisible

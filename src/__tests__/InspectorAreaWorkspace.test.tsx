@@ -100,7 +100,7 @@ const baseProps = {
 
 describe('InspectorArea workspace navigator', () => {
   beforeEach(() => {
-    settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
+    settingsManager.set('workbenchTimelineLayoutMode', 'list');
     semanticDocumentState.document = {
       schemaVersion: 4,
       sceneId: 'scene_1',

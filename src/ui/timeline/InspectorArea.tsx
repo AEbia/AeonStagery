@@ -23,8 +23,9 @@ import { resolveMatchingTimelineAction } from './selectionHygiene';
 import type { TimelineScene } from './semanticTimelineTypes';
 import { useSemanticDocument } from '../store/storeHooks';
 import { useSettings } from '../SettingsStore';
+import { PropertyInspectorShell } from './PropertyInspectorShell';
 
-interface InspectorAreaProps {
+export interface InspectorAreaProps {
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
@@ -77,6 +78,11 @@ export const InspectorArea = (props: InspectorAreaProps) => {
   const documentStore = useDocumentStore();
   const semanticAuthoring = useSemanticAuthoringService();
   const { settings } = useSettings();
+  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
+
+  if (isTracksMode) {
+    return <PropertyInspectorShell {...props} />;
+  }
   const templateCatalog = useTemplatePackageCatalog();
   const templatePackageSnapshot = useSyncExternalStore(
     templateCatalog ? (listener) => templateCatalog.subscribe(listener) : () => () => {},
