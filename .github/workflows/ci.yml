@@ -48,3 +48,18 @@ jobs:
 
       - name: Build renderer and Electron bundles
         run: npm run build
+
+  required-check:
+    # Branch protection requires this stable name; matrix job names include the OS.
+    name: lint / check / build
+    if: always()
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass when every platform succeeds
+        if: needs.verify.result == 'success'
+        run: echo "All platform checks passed."
+
+      - name: Fail if a platform check failed or was cancelled
+        if: needs.verify.result != 'success'
+        run: exit 1
