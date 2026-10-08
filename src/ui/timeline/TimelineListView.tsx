@@ -16,6 +16,7 @@ import {
 import { InlineNumericInput } from './FormComponents';
 import { ActionInspector } from './ActionInspector';
 import { StatementQuickControls, type QuickParamPatch } from './StatementQuickControls';
+import { MeasuredTimelineRow, useVirtualTimelineRows } from './useVirtualTimelineRows';
 import { ActionIcons } from './TimelineConstants';
 import { showToast } from '../Toast';
 import { deriveCollaborationStatusUx } from '../../services/collaboration/CollaborationStatusUxModel';
@@ -44,7 +45,6 @@ import {
   buildSemanticCopyBufferForTimelineActions,
   buildSemanticDeleteTimelineIntents,
   createSemanticTimelineCorrelationId,
-  locatorForCompiledTimelineAction,
   selectCompiledActionsForStatements,
 } from './semanticTimelineEditing';
 import {
@@ -159,7 +159,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const app = useOptionalApp();
 
   const toggleExpand = useCallback((id: string) => {
-    setExpandedActionIds((prev) => ({ [id]: !prev[id] }));
+    setExpandedActionIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
   useEffect(() => {
@@ -193,7 +193,9 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
   const selectedSingleId = selectedIdsList.length === 1 ? selectedIdsList[0] : undefined;
   useEffect(() => {
-    if (allowInlineExpand && selectedSingleId) setExpandedActionIds({ [selectedSingleId]: true });
+    if (allowInlineExpand && selectedSingleId) setExpandedActionIds((prev) => (
+      prev[selectedSingleId] ? prev : { ...prev, [selectedSingleId]: true }
+    ));
   }, [allowInlineExpand, selectedSingleId]);
   const characterCount = sceneData.meta.characters?.length ?? 0;
   const charactersById = useMemo(
@@ -294,6 +296,17 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
       return false;
     });
   }, [charactersById, environmentLayers, searchQuery, timelineReadModelActions]);
+
+  const virtualRowSizes = useMemo(() => filteredActions.map((action, index) => {
+    const id = action._id ?? `timeline-item:${index}`;
+    const expanded = allowInlineExpand && !!expandedActionIds[id];
+    return {
+      id,
+      measurementKey: `${id}:${allowInlineExpand}:${expanded}`,
+      estimatedHeight: expanded ? 700 : allowInlineExpand ? 160 : 52,
+    };
+  }), [filteredActions, allowInlineExpand, expandedActionIds]);
+  const virtualRows = useVirtualTimelineRows(listContainerRef, virtualRowSizes);
 
   // ── Actions ────────────────────────────────────────────
   const handleDeleteItem = useCallback(async (e: React.MouseEvent, id: string) => {
@@ -809,13 +822,15 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
               position: 'relative', minHeight: 0, isolation: 'isolate'
             }}
           >
-            <div className="timeline-list-items" style={{ display: 'flex', flexDirection: 'column', gap: allowInlineExpand ? 6 : 4 }}>
-              {filteredActions.map((action, realIdx) => {
+            <div className="timeline-list-items" style={{ position: 'relative', height: virtualRows.totalHeight }}>
+              {virtualRows.indices.map((realIdx) => {
+                const action = filteredActions[realIdx];
                 const isSelected = !!action._id && !!selectedActionIds[action._id];
                 const isExpanded = !!action._id && !!expandedActionIds[action._id];
-                const presenceLocator = action._id
-                  ? locatorForCompiledTimelineAction(documentStore, action._id)
-                  : null;
+                const readModelItem = action._id
+                  ? semanticTimelineItemByDisplayId.get(action._id)
+                  : undefined;
+                const presenceLocator = readModelItem?.locator;
                 const editingPeers = presenceLocator
                   ? getPeersEditingLocator(collaborationPeers, presenceLocator)
                   : [];
@@ -827,9 +842,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 const environmentLayerId = getEnvironmentActionLayerId(action);
                 const environmentLayer = environmentLayerId ? environmentLayers.get(environmentLayerId) : null;
                 const gap = !searchQuery.trim() ? timelineListGapByIndex.get(realIdx) : undefined;
-                const readModelItem = action._id
-                  ? semanticTimelineItemByDisplayId.get(action._id)
-                  : undefined;
                 const canDragRootStatement = !searchQuery.trim() && isRootStatementItem(readModelItem);
                 const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
 
@@ -1006,6 +1018,12 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 const isDropAfter = !isDragging && dropTarget?.index === realIdx && dropTarget.placement === 'after';
 
                 return (
+                  <MeasuredTimelineRow key={virtualRowSizes[realIdx].id}
+                    measurementKey={virtualRowSizes[realIdx].measurementKey}
+                    top={virtualRows.offsets[realIdx]} gap={allowInlineExpand ? 6 : 4}
+                    measure={virtualRows.measure}
+                    onFocus={() => virtualRows.setFocusedId(virtualRowSizes[realIdx].id)}
+                    onBlur={() => virtualRows.setFocusedId(null)}>
                   <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
                     <div
                       className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
@@ -1197,6 +1215,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         <ActionInspector
                           key={action._id}
                           sceneData={sceneData}
+                          semanticTimelineItems={semanticTimelineItems}
                           presentation="inline"
                           selectedActionIds={{ [action._id!]: true }}
                           setSelectedIds={setSelectedIds}
@@ -1268,6 +1287,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       </div>
                     )}
                   </div>
+                  </MeasuredTimelineRow>
                 );
               })}
             </div>

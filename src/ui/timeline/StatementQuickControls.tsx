@@ -1,7 +1,7 @@
 import type { SceneMeta } from '../../api/types/scene-common';
 import type { SceneVisualBlock } from '../../api/types/visual';
 import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
-import { InlineNumericInput } from './FormComponents';
+import { CollaborativeDraftNotice, InlineNumericInput, useRemoteAwareStringDraft } from './FormComponents';
 import { getSemanticInspectorFields } from './semanticInspectorFieldCatalog';
 
 const quickKeys = new Set([
@@ -12,6 +12,42 @@ const quickKeys = new Set([
 const coordinateKeys = new Set(['position', 'to', 'offset', 'screenTarget']);
 
 export type QuickParamPatch = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
+
+function QuickTextInput({ value, label, multiline = false, readOnly = false, title, disabled, onChange }: {
+  value: string;
+  label: string;
+  multiline?: boolean;
+  readOnly?: boolean;
+  title?: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const draft = useRemoteAwareStringDraft(value, onChange);
+  const inputProps = {
+    value: draft.localValue,
+    'aria-label': label,
+    disabled,
+    readOnly,
+    title,
+    onFocus: draft.beginEditing,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => draft.setLocalValue(event.target.value),
+    onBlur: () => { if (disabled || readOnly) draft.cancelEditing(); else draft.commitEditing(); },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (event.key === 'Escape') {
+        draft.cancelEditing();
+        event.currentTarget.blur();
+      } else if (event.key === 'Enter' && !multiline && !event.nativeEvent.isComposing) {
+        event.currentTarget.blur();
+      }
+    },
+  };
+  return <>
+    {multiline
+      ? <textarea {...inputProps} rows={2} className="timeline-item__inline-input timeline-item__inline-input--text" placeholder="输入台词内容..." />
+      : <input {...inputProps} className="timeline-item__inline-input" />}
+    <CollaborativeDraftNotice visible={draft.hasRemoteUpdate} />
+  </>;
+}
 
 export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled, onChange }: {
   item: SemanticTimelineReadModelItem;
@@ -73,10 +109,9 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
           ));
         }
         if (field.key === 'text') {
-          return <textarea key={field.key} rows={2} className="timeline-item__inline-input timeline-item__inline-input--text"
-            value={typeof value === 'string' ? value : ''} aria-label={isDialogue ? '编辑台词内容' : field.label}
-            placeholder={isDialogue ? '输入台词内容...' : field.label}
-            onChange={(event) => onChange({ text: event.target.value })} />;
+          return <QuickTextInput key={field.key} multiline disabled={disabled}
+            value={typeof value === 'string' ? value : ''} label={isDialogue ? '编辑台词内容' : field.label}
+            onChange={(text) => onChange({ text })} />;
         }
         if (field.key === 'zoom') {
           const zoom = value && typeof value === 'object' ? value as { kind: string; value: number } : undefined;
@@ -97,10 +132,12 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
           return (
             <label key={field.key} className="timeline-item__inline-field">
               <span className="timeline-item__inline-label">动作</span>
-              <input className="timeline-item__inline-input" aria-label="动作名称" readOnly={motion?.kind === 'custom'}
+              <QuickTextInput label="动作名称" disabled={disabled} readOnly={motion?.kind === 'custom'}
                 title={motion?.kind === 'custom' ? '展开详情编辑自定义动作' : undefined}
                 value={motion?.kind === 'custom' ? '自定义动作' : motion?.key ?? ''}
-                onChange={(event) => onChange({ motion: event.target.value ? { ...motion, kind: 'resource', key: event.target.value } : '' })} />
+                onChange={(key) => onChange((current) => ({ motion: key
+                  ? { ...(current.motion as Record<string, unknown>), kind: 'resource', key }
+                  : '' }))} />
             </label>
           );
         }
@@ -122,12 +159,8 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
         return (
           <label key={field.key} className="timeline-item__inline-field">
             <span className="timeline-item__inline-label">{field.label}</span>
-            <input type="text" min={field.min} max={field.max} step={field.step}
-              className="timeline-item__inline-input"
-              value={value ?? ''} aria-label={label}
-              onChange={(event) => {
-                onChange({ [field.key]: event.target.value });
-              }} />
+            <QuickTextInput value={String(value ?? '')} label={label} disabled={disabled}
+              onChange={(text) => onChange({ [field.key]: text })} />
           </label>
         );
       })}

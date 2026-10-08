@@ -319,8 +319,11 @@ describe('List mode inline inspector and layout', () => {
       expect(textInputs.length).toBeGreaterThanOrEqual(2);
       expect((textInputs[0] as HTMLInputElement).value).toBe('你好，这是第一句台词。');
 
-      // Change text inline
+      // Keep typing local; commit the final draft on blur
+      fireEvent.mouseDown(textInputs[0]);
+      fireEvent.focus(textInputs[0]);
       fireEvent.change(textInputs[0], { target: { value: '修改后的台词内容' } });
+      fireEvent.blur(textInputs[0]);
       expect(state.authorMock).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'update-statement',
         patch: expect.objectContaining({
@@ -419,6 +422,54 @@ describe('List mode inline inspector and layout', () => {
       />);
     }
 
+    it('keeps other rows expanded when collapsing one after expand-all', () => {
+      renderList();
+      fireEvent.click(screen.getByRole('button', { name: '全部展开' }));
+      expect(screen.getAllByTestId('inline-action-inspector')).toHaveLength(3);
+      fireEvent.click(screen.getAllByRole('button', { name: '折叠详情' })[0]);
+      expect(screen.getAllByTestId('inline-action-inspector')).toHaveLength(2);
+    });
+
+    it('retains typing through asynchronous authoring and submits once on blur', async () => {
+      state.authorMock.mockImplementationOnce(() => new Promise(() => {}));
+      renderList();
+      const text = screen.getAllByRole('textbox', { name: '编辑台词内容' })[0] as HTMLTextAreaElement;
+      fireEvent.mouseDown(text);
+      fireEvent.focus(text);
+      fireEvent.change(text, { target: { value: 'First' } });
+      fireEvent.change(text, { target: { value: 'First and second' } });
+      expect(text.value).toBe('First and second');
+      expect(state.authorMock).not.toHaveBeenCalled();
+      fireEvent.blur(text);
+      await waitFor(() => expect(state.authorMock).toHaveBeenCalledTimes(1));
+      expect(text.value).toBe('First and second');
+      expect(state.authorMock).toHaveBeenCalledWith(expect.objectContaining({
+        patch: expect.objectContaining({ params: expect.objectContaining({ text: 'First and second' }) }),
+      }));
+    });
+
+    it('cancels a draft with Escape without authoring', () => {
+      renderList();
+      const text = screen.getAllByRole('textbox', { name: '编辑台词内容' })[0] as HTMLTextAreaElement;
+      fireEvent.mouseDown(text);
+      fireEvent.focus(text);
+      fireEvent.change(text, { target: { value: 'Discard me' } });
+      fireEvent.keyDown(text, { key: 'Escape' });
+      expect(text.value).toBe('你好，这是第一句台词。');
+      expect(state.authorMock).not.toHaveBeenCalled();
+    });
+
+    it('mounts only visible inspectors after expanding a long scene', () => {
+      loadStatements(Array.from({ length: 200 }, (_, index) => ({
+        id: `line-${index}`, type: 'dialogue', time: index * 3,
+        params: { text: `Line ${index}`, durationSeconds: 2 },
+      })));
+      const { container } = renderList();
+      expect(container.querySelectorAll('[data-timeline-virtual-row]').length).toBeLessThan(20);
+      fireEvent.click(screen.getByRole('button', { name: '全部展开' }));
+      expect(screen.getAllByTestId('inline-action-inspector').length).toBeLessThan(20);
+    });
+
     it('edits X and Y while collapsed, preserving queued edits and the other transform fields', async () => {
       loadStatements([{ id: 'move', time: 0, type: 'characterTransform',
         params: { id: 'alice', position: [0.25, 0.8], rotation: 30, durationSeconds: 1 } }]);
@@ -487,7 +538,11 @@ describe('List mode inline inspector and layout', () => {
           params: { target: 'alice', motion: { kind: 'resource', key: 'wave', fadeInSeconds: 0.4 } },
         }] }]);
       renderList();
-      fireEvent.change(screen.getByRole('textbox', { name: '动作名称' }), { target: { value: 'nod' } });
+      const motion = screen.getByRole('textbox', { name: '动作名称' });
+      fireEvent.mouseDown(motion);
+      fireEvent.focus(motion);
+      fireEvent.change(motion, { target: { value: 'nod' } });
+      fireEvent.blur(motion);
       await waitFor(() => expect(state.document.statements[0].companions[0].params.motion).toEqual({ kind: 'resource', key: 'nod', fadeInSeconds: 0.4 }));
       expect(state.authorMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'update-dialogue-companion', locator: expect.objectContaining({ statementId: 'line', companionId: 'performance' }) }));
       expect(state.document.statements[0].params.text).toBe('Hello');

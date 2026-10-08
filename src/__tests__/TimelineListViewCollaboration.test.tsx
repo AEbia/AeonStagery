@@ -85,7 +85,7 @@ function makeContext(
           sceneId: sceneData.sceneId,
           meta: sceneData.meta,
           statements: sceneData.timeline.map((action) => ({
-            id: action._id,
+            id: `statement-${action._id}`,
             time: action.time ?? 0,
             type: 'dialogue',
             params: {

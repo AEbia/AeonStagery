@@ -147,6 +147,8 @@ flowchart TD
 
 两种布局的入口由 `InspectorArea` 分流：轨道优先使用 `LeftSidebarPanel` 的剧本/角色双 Tab 和右侧固定 `PropertyInspectorShell`，左侧大纲以紧凑单行展示语句，不混入对白与动作摘要，底部轨道占满全宽；未选中语句时右栏显示空态。剧本动作优先仅使用右侧 `TimelineListView`，`StatementQuickControls` 在折叠行中使用 `InlineNumericInput` 等软件控件编辑语句源参数，完整 `ActionInspector` 以 `presentation="inline"` 在语句下展开。JSON、运行快照和诊断视图替换右栏内容；选择和展开语句不改变舞台区域的尺寸。
 
+两种布局的语句列表均由 [`useVirtualTimelineRows`](../src/ui/timeline/useVirtualTimelineRows.tsx) 测量行高并按视口挂载，保留正在编辑的焦点行；内联检查器复用列表的 semantic read model。快捷文本控件复用 `FormComponents` 的远端感知草稿，失焦提交、Escape 取消，避免逐字符重建场景。左栏拖拽由 `useResizableLayout` 管理，宽度在拖拽结束时持久化。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |

@@ -25,7 +25,7 @@ if (typeof document !== 'undefined' && !draftMouseDownTargetListenerAttached) {
   }, true);
 }
 
-function useRemoteAwareStringDraft(value: string, onChange: (val: string) => void) {
+export function useRemoteAwareStringDraft(value: string, onChange: (val: string) => void) {
   const incomingValue = normalizeStringDraftValue(value);
   const [localValue, setLocalValue] = useState(incomingValue);
   const [isFocused, setIsFocused] = useState(false);
@@ -179,7 +179,7 @@ function useRemoteAwareStringDraft(value: string, onChange: (val: string) => voi
   };
 }
 
-function CollaborativeDraftNotice({ visible }: { visible: boolean }) {
+export function CollaborativeDraftNotice({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
     <div className="collaborative-draft-notice" role="status">

@@ -2,7 +2,7 @@
 // action and its semantic read-model item (ADR-0022 placeholders included).
 import React from 'react';
 import { isCharacterPerformancePlaceholderParams } from '../../../services/semantic-scene';
-import { buildSemanticTimelineReadModel } from '../semanticTimelineReadModel';
+import { buildSemanticTimelineReadModel, type SemanticTimelineReadModelItem } from '../semanticTimelineReadModel';
 import type { useDocumentStore } from '../../context/AppContext';
 
 type InspectorSemanticDocument = Parameters<typeof buildSemanticTimelineReadModel>[0];
@@ -11,17 +11,18 @@ export function useActionSelection(args: {
   selectedActionIds: Record<string, boolean>;
   semanticDocument: InspectorSemanticDocument;
   documentStore: ReturnType<typeof useDocumentStore>;
+  items?: SemanticTimelineReadModelItem[];
 }) {
-  const { selectedActionIds, semanticDocument, documentStore } = args;
+  const { selectedActionIds, semanticDocument, documentStore, items } = args;
 
   const selectedIdsList = Object.keys(selectedActionIds);
   const selectedActionId = selectedIdsList[0];
   const semanticTimelineItems = React.useMemo(
-    () => buildSemanticTimelineReadModel(
+    () => items ?? buildSemanticTimelineReadModel(
       semanticDocument,
       documentStore.getCompiledSceneSnapshot(),
     ),
-    [documentStore, semanticDocument],
+    [documentStore, semanticDocument, items],
   );
   // Ordinary statement display actions only — no synthetic StateSpan projection.
   const timelineActions = React.useMemo(

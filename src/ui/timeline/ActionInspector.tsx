@@ -69,8 +69,10 @@ import { useActionSelection } from './inspector/useActionSelection';
 import { useCustomMotionAuthoring } from './inspector/useCustomMotionAuthoring';
 import { useInspectorOptions } from './inspector/useInspectorOptions';
 import { useModelData } from './inspector/useModelData';
+import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
 
 export interface ActionInspectorProps {
+  semanticTimelineItems?: SemanticTimelineReadModelItem[];
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
@@ -115,7 +117,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     actionId,
     semanticItem,
     performanceTargetSpeakerId,
-  } = useActionSelection({ selectedActionIds, semanticDocument, documentStore });
+  } = useActionSelection({ selectedActionIds, semanticDocument, documentStore, items: props.semanticTimelineItems });
   const { targetModelPath, modelData, isModelDataLoading } = useModelData({
     characterAdapter,
     sceneData,
@@ -308,6 +310,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   return (
     <div className="selected-action-inspector" data-presentation={props.presentation ?? 'panel'}>
       <InspectorHeader
+        presentation={props.presentation ?? 'panel'}
         closeMode={closeMode} onClose={onClose} actionId={actionId}
         actionDisplayName={actionDisplayName} inspectorTitle={inspectorTitle}
         actionStart={actionStart} actionEnd={actionEnd}
@@ -370,7 +373,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
         />
 
         {groups.General.length > 0 && (
-          <div className="inspector-section">
+          <div className="inspector-section inspector-section--properties">
             <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
               {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
             </div>
@@ -396,7 +399,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
         />
 
         {groups.Transform.length > 0 && (
-          <div className="inspector-section">
+          <div className="inspector-section inspector-section--properties">
             <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>变换属性</div>
             <div className="inspector-grid">
               {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
@@ -405,7 +408,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
         )}
 
         {groups.State.length > 0 && (
-          <div className="inspector-section">
+          <div className="inspector-section inspector-section--properties">
             <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>状态与控制</div>
             <div className="inspector-grid">
               {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
