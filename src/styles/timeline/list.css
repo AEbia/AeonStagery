@@ -1149,14 +1149,6 @@
   line-height: 1;
 }
 
-.timeline-item__desc {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .timeline-item__actions {
   display: flex;
   gap: 2px;

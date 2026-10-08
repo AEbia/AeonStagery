@@ -8,11 +8,6 @@
   flex-shrink: 0;
   overflow: visible;
   z-index: 10;
-  transition: width var(--motion-exit-panel) var(--ease-settle);
-}
-
-.side-panel[data-detail-visible="true"] {
-  transition: width var(--motion-enter-panel) var(--ease-settle);
 }
 
 body[data-resizing="true"] .side-panel,
@@ -149,22 +144,11 @@ html[data-perf="low"] .side-panel {
 
 .inspector-workspace__pane--detail {
   background: var(--bg-secondary);
-  animation: uiDetailFloatIn var(--motion-enter-panel) var(--ease-settle) both;
-  will-change: transform, opacity;
   contain: content;
 }
 
-.inspector-workspace__pane--detail[data-layout="split"] {
-  animation-name: uiDetailSplitIn;
-}
-
 .inspector-workspace__pane--detail[data-state="closing"] {
-  animation: uiDetailFloatOut var(--motion-exit-panel) var(--ease-settle) both;
   pointer-events: none;
-}
-
-.inspector-workspace__pane--detail[data-layout="split"][data-state="closing"] {
-  animation-name: uiDetailSplitOut;
 }
 
 .inspector-workspace[data-state="closing"] .inspector-workspace__resize {

@@ -30,10 +30,7 @@ import {
   collectEnvironmentLayerPresentations,
   getEnvironmentActionLayerId,
 } from './environmentPresentation';
-import {
-  getCompositeSlotLabel,
-  getRecipeDisplayLabel,
-} from './visualPresentation';
+
 import {
   getPeersEditingLocator,
   summarizeLocatorEditingPeers,
@@ -777,9 +774,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                   ? summarizeLocatorEditingPeers(collaborationPeers, presenceLocator)
                   : null;
                 let title: string = action.semanticLabel ?? action.action;
-                let desc = '';
                 let typeClass = getTimelineItemClassForSemanticCategory(action.semanticCategory);
-                const sourceParams = action.sourceParams ?? action.params;
                 const environmentLayerId = getEnvironmentActionLayerId(action);
                 const environmentLayer = environmentLayerId ? environmentLayers.get(environmentLayerId) : null;
                 const gap = !searchQuery.trim() ? timelineListGapByIndex.get(realIdx) : undefined;
@@ -789,280 +784,168 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 const canDragRootStatement = !searchQuery.trim() && isRootStatementItem(readModelItem);
                 const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
 
-                if (action.semanticType === 'camera') {
-                  desc = `模式:${sourceParams.mode || 'move'}${sourceParams.target ? ` 目标:${sourceParams.target}` : ''}`;
-                } else if (action.semanticType === 'visualStyle') {
-                  desc = `范围:${sourceParams.scope || 'object'} 槽位:${sourceParams.slot || '-'} 模式:${sourceParams.mode || 'set'}`;
-                } else if (action.semanticType === 'filterAdd') {
+                if (action.semanticType === 'filterAdd') {
                   title = '添加滤镜';
-                  desc = `滤镜模板:${sourceParams.recipeId ? getRecipeDisplayLabel(sceneData.visual, sourceParams.recipeId) : '未选择'} 过渡:${sourceParams.durationSeconds ?? 0.6}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.semanticType === 'filterChange') {
                   title = '变化滤镜';
-                  desc = `当前:${sourceParams.fromRecipeId ? getRecipeDisplayLabel(sceneData.visual, sourceParams.fromRecipeId) : '未选择'} → ${sourceParams.recipeId ? getRecipeDisplayLabel(sceneData.visual, sourceParams.recipeId) : '未选择'} 过渡:${sourceParams.durationSeconds ?? 0.6}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.semanticType === 'filterReset') {
                   title = '重置滤镜';
-                  desc = `全部镜头滤镜回到基线 过渡:${sourceParams.durationSeconds ?? 0.4}秒`;
                   typeClass = 'timeline-item--environment';
-                } else if (action.semanticType === 'lighting') {
-                  desc = `效果:${sourceParams.effect || 'preset'} 模式:${sourceParams.mode || 'set'}${sourceParams.id ? ` ID:${sourceParams.id}` : ''}`;
                 } else if (action.action === 'dialogue') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.speakerId);
                   title = char ? char.name : (action.params.speaker || action.params.speakerId || '旁白');
-                  desc = action.params.text || '';
                   typeClass = 'timeline-item--dialogue';
                 } else if (action.action === 'characterPerformance' && !action.params.motion) {
                   const targetCharId = action.resolvedSpeakerId ?? action.params.target;
                   const char = sceneData.meta.characters?.find(c => c.id === targetCharId);
                   title = `${char ? char.name : (targetCharId || '未知角色')} · 动作待定`;
-                  desc = '表演占位：请在检查器中选择动作';
                   typeClass = 'timeline-item--character timeline-item--placeholder';
                 } else if (action.action === 'playMotion') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 播放动作`;
-                  desc = motionKeyLabel(action.params.motion) || '未指定动作';
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'setExpression') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 设置表情`;
-                  desc = action.params.expression || '默认表情';
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'transformCharacter') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 变换角色`;
-                  const posStr = Array.isArray(action.params.position) ? action.params.position.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(',') : '';
-                  desc = `坐标:[${posStr || '无'}] 缩放:${action.params.scale ?? 1} 旋转:${action.params.rotation ?? 0} 深度:${action.params.z ?? 0}`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'addCharacter') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 角色登场`;
-                  const posStr = Array.isArray(action.params.position) ? action.params.position.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(',') : '';
-                  desc = `坐标:[${posStr || '无'}] 缩放:${action.params.scale ?? 1} 深度:${action.params.z ?? 0} 动画:${action.params.enter || '无'}`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'removeCharacter') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 角色退场`;
-                  desc = `动画:${action.params.exit || '无'} 时长:${action.params.duration ?? 1}秒`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'characterLookAt') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 角色对焦`;
-                  const semanticPoint = sourceParams.lookAt?.point;
-                  const runtimePoint = Array.isArray(action.params.point) ? action.params.point : undefined;
-                  const focusX = Array.isArray(semanticPoint)
-                    ? semanticPoint[0]
-                    : Array.isArray(runtimePoint)
-                      ? runtimePoint[0]
-                      : action.params.focusX;
-                  const focusY = Array.isArray(semanticPoint)
-                    ? semanticPoint[1]
-                    : Array.isArray(runtimePoint)
-                      ? runtimePoint[1]
-                      : action.params.focusY;
-                  desc = `对焦位置: (${typeof focusX === 'number' ? focusX.toFixed(1) : '0.0'}, ${typeof focusY === 'number' ? focusY.toFixed(1) : '0.0'})`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'characterBlink') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 角色眨眼`;
-                  const semanticBlink = sourceParams.blink;
-                  const blinkEnabled = typeof semanticBlink?.enabled === 'boolean'
-                    ? semanticBlink.enabled
-                    : action.params.enabled ?? true;
-                  const blinkIntervalSeconds = typeof semanticBlink?.interval === 'number'
-                    ? semanticBlink.interval
-                    : typeof action.params.interval === 'number'
-                      // Legacy runtime actions stored this field in ms. New
-                      // semantic source actions always take the seconds path
-                      // above, so the list remains truthful for both seams.
-                      ? action.params.interval / 1000
-                      : 4;
-                  desc = `启用:${blinkEnabled ? '是' : '否'} 间隔:${blinkIntervalSeconds}秒`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'setCharacterRimLight') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.id);
                   title = `${char ? char.name : (action.params.id || '未知角色')} · 角色边光`;
-                  desc = `颜色:${action.params.color || '#ffffff'} 强度:${action.params.intensity ?? 1.0}`;
                   typeClass = 'timeline-item--character';
                 } else if (action.action === 'cameraPath') {
                   title = '镜头路径运动';
-                  let kfCount = 0;
-                  try {
-                    const kfs = typeof action.params.keyframes === 'string' ? JSON.parse(action.params.keyframes) : action.params.keyframes;
-                    kfCount = Array.isArray(kfs) ? kfs.length : 0;
-                  } catch (e) {}
-                  desc = `关键帧数:${kfCount} 往返:${action.params.yoyo ? '是' : '否'}`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'cameraShake') {
                   title = '镜头震动';
-                  desc = `强度:${action.params.intensity ?? 0.5} 频率:${action.params.frequency ?? 15} 持续:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'cameraFollow') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.characterId);
                   title = `镜头跟随 · ${char ? char.name : (action.params.characterId || '未知角色')}`;
-                  desc = `平滑度:${action.params.smoothing ?? 0.85}`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'cameraHitchcock') {
                   const char = sceneData.meta.characters?.find(c => c.id === action.params.characterId);
                   title = `希区柯克变焦 · ${char ? char.name : (action.params.characterId || '未知角色')}`;
-                  desc = `时长:${action.params.duration ?? 2.0}秒`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'cameraMotion') {
                   title = '运镜动作';
-                  desc = `动作:${action.params.move || '推'} 缓动:${action.params.easing || '平滑'}`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'cameraReset') {
                   title = '重置镜头';
-                  desc = `时长:${action.params.duration ?? 1}秒`;
                   typeClass = 'timeline-item--camera';
                 } else if (action.action === 'setEnvironmentLayer') {
                   const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
                   title = layerId === BACKGROUND_LAYER_ID ? '放入背景' : `放入环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
-                  desc = `图片:${action.params.image || '无'} 布局:${action.params.layoutMode || 'cover'} 坐标:[${action.params.x ?? 0.5},${action.params.y ?? 0.5}] 深度:${action.params.z ?? 0}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'transformEnvironmentLayer') {
                   const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
                   title = layerId === BACKGROUND_LAYER_ID ? '调整背景' : `调整环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
-                  desc = `缩放:${action.params.scale ?? 1} 坐标:[${action.params.x ?? 0.5},${action.params.y ?? 0.5}] 深度:${action.params.z ?? 0} 旋转:${action.params.rotation ?? 0}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'removeEnvironmentLayer') {
                   const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
                   title = layerId === BACKGROUND_LAYER_ID ? '收起背景' : `收起环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
-                  desc = `过渡:${action.params.transition || 'fadeOut'} 时长:${action.params.duration ?? 1}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'setCompositeRecipe') {
                   title = action.params.slot === 'grounding' ? '设置角色明暗融入' : action.params.slot === 'integration' ? '设置角色色彩融入' : '设置角色融入';
-                  const targetLabel = action.params.targetId === 'background'
-                    ? '背景'
-                    : (charactersById.get(action.params.targetId)?.name || action.params.targetId || '未选择');
-                  desc = `对象:${targetLabel} 作用位:${getCompositeSlotLabel(action.params.slot || 'integration')} 配方:${action.params.recipeId ? getRecipeDisplayLabel(sceneData.visual, action.params.recipeId) : '未选择'}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'modulateComposite') {
                   title = action.params.slot === 'grounding' ? '变化角色明暗融入' : action.params.slot === 'integration' ? '变化角色色彩融入' : '变化角色融入';
-                  const targetLabel = action.params.targetId === 'background'
-                    ? '背景'
-                    : (charactersById.get(action.params.targetId)?.name || action.params.targetId || '未选择');
-                  desc = `对象:${targetLabel} 作用位:${getCompositeSlotLabel(action.params.slot || 'accent')} 强度:${action.params.intensity ?? 0.2}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'resetCompositeRecipe') {
                   title = action.params.slot === 'grounding' ? '重置角色明暗融入' : action.params.slot === 'integration' ? '重置角色色彩融入' : '重置角色融入';
-                  desc = `对象:${action.params.targetId || '未选择'} 时长:${action.params.duration ?? 0.4}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'setLighting') {
                   title = '设置光照预设';
-                  desc = `预设:${action.params.preset || '默认'} 强度:${action.params.intensity ?? 0.8} 时长:${action.params.duration ?? 1.0}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'resetLighting') {
                   title = '重置光照';
-                  desc = `时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'setBlur') {
                   title = '设置模糊';
-                  desc = `目标:${action.params.target === 'global' ? '全局' : (action.params.target === 'background' ? '背景' : '角色')} 强度:${action.params.intensity ?? 5}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'resetBlur') {
                   title = '重置模糊';
-                  desc = `目标:${action.params.target || 'all'} 时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'setGodrays') {
                   title = '设置体积光';
-                  desc = `强度:${action.params.intensity ?? 0.5} 角度:${action.params.angle ?? 30}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'resetGodrays') {
                   title = '重置体积光';
-                  desc = `时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'setPostProcessing') {
                   title = '设置后期处理';
-                  const targetId = typeof action.params.target === 'string' && action.params.target.trim()
-                    ? action.params.target
-                    : 'panorama';
-                  const targetLabel = targetId === 'panorama'
-                    ? '全景'
-                    : charactersById.get(targetId)?.name
-                      || environmentLayers.get(targetId)?.displayLabel
-                      || targetId;
-                  const overlay = action.params.overlayIntensity ?? 0;
-                  desc = `对象:${targetLabel} 泛光:${action.params.bloomBloomScale ?? 0} 色差X:${action.params.rgbSplitX ?? 0}${overlay > 0 ? ` 叠加:${action.params.overlayColor || '#ffffff'} ${action.params.overlayBlendMode || 'multiply'} ${overlay}` : ''}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'resetPostProcessing') {
                   title = '重置后处理';
-                  const targetId = typeof action.params.target === 'string' && action.params.target.trim()
-                    ? action.params.target
-                    : 'panorama';
-                  const targetLabel = targetId === 'panorama'
-                    ? '全景'
-                    : charactersById.get(targetId)?.name
-                      || environmentLayers.get(targetId)?.displayLabel
-                      || targetId;
-                  desc = `对象:${targetLabel} 时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'addColorOverlay') {
                   title = '添加色彩叠加';
-                  desc = `颜色:${action.params.color || '#000000'} 模式:${action.params.mode === 'multiply' ? '正片叠底' : '滤色'} 强度:${action.params.intensity ?? 0.5}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'removeColorOverlay') {
                   title = '移除色彩叠加';
-                  desc = `时长:${action.params.duration ?? 0}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'clearColorOverlays') {
                   title = '清除全部色彩叠加';
-                  desc = `时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'addPointLight') {
                   title = '添加点光源';
-                  desc = `坐标:[${action.params.x ?? 960},${action.params.y ?? 540}] 半径:${action.params.radius ?? 400} 强度:${action.params.intensity ?? 0.8}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'clearPointLights') {
                   title = '清除全部点光源';
-                  desc = `时长:${action.params.duration ?? 0.5}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'removePointLight') {
                   title = '移除点光源';
-                  desc = `对象:${action.params.id || '未选择'} 时长:${action.params.duration ?? 0.4}秒`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'addImage') {
                   title = '添加图片';
-                  const posStr = Array.isArray(action.params.position) ? action.params.position.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(',') : '';
-                  desc = `图片:${action.params.file || '无'} 坐标:[${posStr}] 缩放:${action.params.scale ?? 1} 深度:${action.params.z ?? 0}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'transformImage') {
                   title = '变换图片';
-                  const posStr = Array.isArray(action.params.position) ? action.params.position.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(',') : '';
-                  desc = `图层ID:${action.params.id} 坐标:[${posStr}] 缩放:${action.params.scale ?? 1}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'removeImage') {
                   title = '移除图片';
-                  desc = `图层ID:${action.params.id}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'addTextLayer') {
                   title = '添加文本图层';
-                  desc = `内容:${action.params.text || ''}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'transformTextLayer') {
                   title = '变换文本图层';
-                  const posStr = Array.isArray(action.params.position) ? action.params.position.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(',') : '';
-                  desc = `坐标:[${posStr}] 缩放:${action.params.scale ?? 1}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'removeTextLayer') {
                   title = '移除文本图层';
-                  desc = `图层ID:${action.params.id}`;
                   typeClass = 'timeline-item--environment';
                 } else if (action.action === 'playAudio') {
                   title = '播放音频';
-                  desc = `音频:${action.params.file?.split('/').pop() || '未选择'} 音量:${action.params.volume ?? 1.0}`;
                   typeClass = 'timeline-item--audio';
                 } else if (action.action === 'stopAudio') {
                   title = '停止音频';
-                  desc = `图层ID:${action.params.id}`;
                   typeClass = 'timeline-item--audio';
                 } else if (action.action === 'setBGM') {
                   title = '设置背景音乐';
-                  desc = `音频:${action.params.file?.split('/').pop() || '未选择'} 音量:${action.params.volume ?? 0.5}`;
                   typeClass = 'timeline-item--audio';
                 } else if (action.action === 'playCustomAnimation') {
                   title = '自定义动画';
-                  desc = `文件:${action.params.file || '无'} 层级:${action.params.layer || 'overlay'}`;
                   typeClass = 'timeline-item--environment';
                 }
 
@@ -1120,7 +1003,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                           void dropRootStatementAt(currentDraggingId, realIdx + (insertAfter ? 1 : 0));
                         }}
                         role="group"
-                        aria-label={`${title}${desc ? `，${desc}` : ''}，时间 ${(action.time || 0).toFixed(1)} 秒${isSelected ? '，已选中' : ''}`}
+                        aria-label={`${title}${action.action === 'dialogue' && action.params?.text ? `，${action.params.text}` : ''}，时间 ${(action.time || 0).toFixed(1)} 秒${isSelected ? '，已选中' : ''}`}
                         title={collaborationEditingSummary || undefined}
                         style={{
                           padding: '10px 12px',
@@ -1221,7 +1104,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                             )}
                           </div>
                           {environmentLayer && (
-                            <div style={{ display: 'flex', gap: 6, marginTop: 4, marginBottom: desc ? 4 : 0, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                               <span style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
@@ -1237,7 +1120,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                               </span>
                             </div>
                           )}
-                          {desc && <div className="timeline-item__desc">{desc}</div>}
                         </button>
 
                         <div className="timeline-item__actions">
