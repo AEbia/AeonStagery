@@ -1,16 +1,32 @@
 /* ─── Inspector Grid Layout ──────────────────────────────────── */
 .inspector-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  align-items: start;
+}
+
+.inspector-grid > .inspector-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+  gap: 6px;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.inspector-grid > .inspector-row .inspector-label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 44px;
 }
 
 .inspector-row {
   display: grid;
-  grid-template-columns: 80px 1fr;
+  grid-template-columns: 80px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 6px;
   min-width: 0;
 }
@@ -26,15 +42,15 @@
 /* Compact multi-column layout inside expanded detail container */
 .inspector-workspace__detail .inspector-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 10px;
 }
 
 .inspector-workspace__detail .inspector-row {
   display: grid;
-  grid-template-columns: 74px 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 2px;
 }
 
@@ -846,30 +862,9 @@
 }
 
 .selected-action-inspector__content {
-  width: min(100%, 390px);
+  width: min(100%, 460px);
   margin: 0 auto;
-  padding: 16px;
-}
-
-.selected-action-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
-  gap: 8px;
   padding: 12px 14px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
-}
-
-.selected-action-footer__secondary,
-.selected-action-footer__done {
-  width: 100%;
-  min-height: 36px;
-  font-weight: 800;
-  letter-spacing: 0;
 }
 
 .character-integration-controls {

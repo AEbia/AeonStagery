@@ -104,6 +104,7 @@ function motionKeyLabel(value: unknown): string {
 
 export interface TimelineListViewProps {
   sceneData: TimelineScene;
+  inlineExpandable?: boolean;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
   addAction: () => void;
@@ -142,6 +143,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const { peers: collaborationPeers } = useCollaborationPresence();
   const { settings, setSetting } = useSettings();
   const dialogueFlowEnabled = settings.workbenchDialogueFlowMode === 'auto';
+  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
+  const allowInlineExpand = props.inlineExpandable ?? (!isTracksMode);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedActionIds, setExpandedActionIds] = useState<Record<string, boolean>>({});
@@ -911,26 +914,28 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
             不自动重排
           </button>
         </div>
-        <div className="timeline-expand-controls" role="group" aria-label="展开控制">
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={handleExpandAll}
-            title="全部展开"
-            aria-label="全部展开"
-          >
-            全部展开
-          </button>
-          <button
-            type="button"
-            className="btn btn--sm"
-            onClick={handleCollapseAll}
-            title="全部折叠"
-            aria-label="全部折叠"
-          >
-            全部折叠
-          </button>
-        </div>
+        {allowInlineExpand && (
+          <div className="timeline-expand-controls" role="group" aria-label="展开控制">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={handleExpandAll}
+              title="全部展开"
+              aria-label="全部展开"
+            >
+              全部展开
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={handleCollapseAll}
+              title="全部折叠"
+              aria-label="全部折叠"
+            >
+              全部折叠
+            </button>
+          </div>
+        )}
         <div className="timeline-toolbar__spacer" />
         <button
           type="button"
@@ -1228,12 +1233,14 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                 const isDropAfter = !isDragging && dropTarget?.index === realIdx && dropTarget.placement === 'after';
 
                 return (
-                  <div key={action._id ?? `timeline-item:${realIdx}`} className="timeline-item-container" style={{ position: 'relative' }}>
+                  <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
                     <div
-                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''}`}
+                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : ''}`}
                       onClick={(event) => {
                         handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                        toggleExpand(action._id!);
+                        if (allowInlineExpand) {
+                          toggleExpand(action._id!);
+                        }
                       }}
                       onDragOver={(event) => {
                         if (!draggingActionId || searchQuery.trim()) return;
@@ -1325,26 +1332,28 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         />
                       </div>
 
-                      <button
-                        type="button"
-                        className={`timeline-item__expand-btn ${isExpanded ? 'timeline-item__expand-btn--expanded' : ''}`}
-                        aria-expanded={isExpanded}
-                        aria-label={isExpanded ? '折叠详情' : '展开详情'}
-                        title={isExpanded ? '折叠详情' : '展开详情'}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleExpand(action._id!);
-                        }}
-                      >
-                        <IconChevronDown
-                          width={13}
-                          height={13}
-                          style={{
-                            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                            transition: 'transform var(--transition-fast)',
+                      {allowInlineExpand && (
+                        <button
+                          type="button"
+                          className={`timeline-item__expand-btn ${isExpanded ? 'timeline-item__expand-btn--expanded' : ''}`}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? '折叠详情' : '展开详情'}
+                          title={isExpanded ? '折叠详情' : '展开详情'}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleExpand(action._id!);
                           }}
-                        />
-                      </button>
+                        >
+                          <IconChevronDown
+                            width={13}
+                            height={13}
+                            style={{
+                              transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                              transition: 'transform var(--transition-fast)',
+                            }}
+                          />
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -1354,15 +1363,27 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         onClick={(event) => {
                           event.stopPropagation();
                           handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                          toggleExpand(action._id!);
+                          if (allowInlineExpand) {
+                            toggleExpand(action._id!);
+                          }
                         }}
-                        style={{
+                        style={allowInlineExpand ? {
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'center',
-                          minWidth: 80,
-                          maxWidth: 130,
+                          minWidth: 100,
+                          maxWidth: 180,
                           flexShrink: 0,
+                          padding: 0,
+                          border: 0,
+                          background: 'transparent',
+                          color: 'inherit',
+                          font: 'inherit',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        } : {
+                          flex: 1,
+                          minWidth: 0,
                           padding: 0,
                           border: 0,
                           background: 'transparent',
@@ -1404,12 +1425,14 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         )}
                       </button>
 
-                      <div
-                        className="timeline-item__inline-controls"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {renderInlineControls(action)}
-                      </div>
+                      {allowInlineExpand && (
+                        <div
+                          className="timeline-item__inline-controls"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {renderInlineControls(action)}
+                        </div>
+                      )}
 
                       <div className="timeline-item__actions">
                         <button
@@ -1436,7 +1459,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       </div>
                     </div>
 
-                    {isExpanded && (
+                    {allowInlineExpand && isExpanded && (
                       <div className="inspector-workspace__detail" onClick={(event) => event.stopPropagation()}>
                         <ActionInspector
                           key={action._id}

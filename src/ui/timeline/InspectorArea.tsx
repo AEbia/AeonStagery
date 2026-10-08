@@ -126,6 +126,7 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
   const timelineList = (
     <TimelineListView
       sceneData={props.sceneData}
+      inlineExpandable={true}
       selectedActionIds={props.selectedActionIds}
       setSelectedIds={props.setSelectedIds}
       addAction={props.addAction}

@@ -209,6 +209,7 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
           {sceneData ? (
             <TimelineListView
               sceneData={sceneData}
+              inlineExpandable={false}
               selectedActionIds={selectedActionIds}
               setSelectedIds={(ids) => {
                 setSelectedIds(ids);

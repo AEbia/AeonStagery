@@ -46,6 +46,16 @@ vi.mock('../ui/store/storeHooks', () => ({
   useCustomMotionEditorActionId: () => null,
 }));
 
+vi.mock('../ui/SettingsStore', () => ({
+  useSettings: () => ({
+    settings: {
+      workbenchTimelineLayoutMode: 'list',
+      workbenchDialogueFlowMode: 'auto',
+    },
+    setSetting: vi.fn(),
+  }),
+}));
+
 vi.mock('../ui/timeline/ActionInspector', () => ({
   ActionInspector: ({ selectedActionIds, onClose }: any) => (
     <div data-testid="inline-action-inspector" data-action-id={Object.keys(selectedActionIds)[0]}>
@@ -346,6 +356,43 @@ describe('List mode inline inspector and layout', () => {
         }),
       }));
       expect(updateParam).toHaveBeenCalledWith(expect.stringContaining('camera-1'), 'intensity', 2.5);
+    });
+  });
+
+  describe('5. Outline mode (inlineExpandable={false}) in tracks / sidebar mode', () => {
+    it('does not render expand buttons or inline edit controls when inlineExpandable is false', () => {
+      const handleSelect = vi.fn();
+      const { container } = render(
+        <TimelineListView
+          sceneData={{ sceneId: state.document.sceneId, meta: state.document.meta, timeline: [] }}
+          inlineExpandable={false}
+          selectedActionIds={{}}
+          setSelectedIds={vi.fn()}
+          addAction={vi.fn()}
+          handleSelect={handleSelect}
+          setCurrentTime={vi.fn()}
+          loadExample={vi.fn(async () => true)}
+        />,
+      );
+
+      // No expand toggle buttons or toolbar controls
+      expect(screen.queryByRole('button', { name: '展开详情' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '全部展开' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '全部折叠' })).toBeNull();
+
+      // No inline input controls
+      expect(screen.queryByRole('combobox', { name: '选择说话角色' })).toBeNull();
+      expect(screen.queryByRole('textbox', { name: '编辑台词内容' })).toBeNull();
+
+      // Cards render with compact class
+      const compactItems = container.querySelectorAll('.timeline-item--compact');
+      expect(compactItems.length).toBeGreaterThanOrEqual(3);
+
+      // Clicking card triggers handleSelect without expanding
+      const selectButtons = screen.getAllByRole('button', { name: /选择/ });
+      fireEvent.click(selectButtons[0]);
+      expect(handleSelect).toHaveBeenCalledWith(expect.stringContaining('dlg-1'), false);
+      expect(container.querySelectorAll('.inspector-workspace__detail')).toHaveLength(0);
     });
   });
 });

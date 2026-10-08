@@ -907,6 +907,10 @@
   margin-bottom: 6px;
 }
 
+.timeline-item-container--compact {
+  margin-bottom: 3px;
+}
+
 .timeline-item {
   display: flex;
   align-items: center;
@@ -919,6 +923,33 @@
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
+}
+
+.timeline-item--compact {
+  min-height: 38px;
+  padding: 5px 8px;
+  gap: 6px;
+}
+
+.timeline-item--compact .timeline-item__title {
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+
+.timeline-item--compact .timeline-item__time {
+  height: 20px;
+  font-size: 10px;
+}
+
+.timeline-item--compact .timeline-item__type-icon,
+.timeline-item--compact .timeline-item__drag-handle {
+  width: 24px;
+  height: 24px;
+}
+
+.timeline-item--compact .timeline-item__action-btn {
+  width: 22px;
+  height: 22px;
 }
 
 .timeline-item--expanded {

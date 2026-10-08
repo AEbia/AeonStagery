@@ -4,7 +4,6 @@ import { useSemanticDocument, useValidationIssues, useCustomMotionEditorActionId
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
 
-import { IconPlay, IconX } from '../icons';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import {
   getPrimaryVisualIntentLabel,
@@ -432,14 +431,6 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
             onCancel={() => { if (!isConverting) setConversionDialog(null); }}
           />
         </div>
-      </div>
-      <div className="selected-action-footer">
-        <button className="btn selected-action-footer__secondary" onClick={handleSeekToAction}>
-          <IconPlay width={13} height={13} /> 预览此处
-        </button>
-        <button className="btn btn--primary selected-action-footer__done" onClick={() => setSelectedIds({})}>
-          <IconX width={13} height={13} /> 完成编辑
-        </button>
       </div>
     </div>
   );
