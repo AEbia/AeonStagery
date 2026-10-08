@@ -295,4 +295,31 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
     expect(timelinePanel.hidden).toBe(true);
     expect(charactersPanel.hidden).toBe(false);
   });
+
+  it('renders tab icons and badge counts for timeline statements and characters', () => {
+    const { container } = render(<LeftSidebarPanel />);
+
+    const icons = container.querySelectorAll('.left-panel__tab-icon');
+    expect(icons.length).toBe(2);
+
+    const badges = container.querySelectorAll('.left-panel__tab-badge');
+    expect(badges.length).toBe(2);
+    expect(badges[0].textContent?.trim()).toBe('1'); // 1 statement
+    expect(badges[1].textContent?.trim()).toBe('2'); // 2 characters
+  });
+
+  it('renders styled empty state when semantic document is unavailable', () => {
+    const originalDoc = semanticDocumentState.document;
+    semanticDocumentState.document = null as any;
+
+    try {
+      render(<LeftSidebarPanel defaultTab="characters" />);
+      const emptyState = screen.getByTestId('left-panel-empty-state-characters');
+      expect(emptyState).toBeTruthy();
+      expect(emptyState.textContent).toContain('等待场景加载...');
+    } finally {
+      semanticDocumentState.document = originalDoc;
+    }
+  });
 });
+

@@ -10,6 +10,7 @@ import {
 import { useEditorState, useSemanticDocument, useValidationIssues } from '../store/storeHooks';
 import { TimelineListView } from './TimelineListView';
 import { CharacterDirectoryPanel } from './CharacterDirectoryPanel';
+import { IconFilm, IconUsers } from '../icons';
 import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
 import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import {
@@ -161,6 +162,9 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
     [validationIssues],
   );
 
+  const timelineCount = semanticTimelineItems.length;
+  const characterCount = semanticDocument?.meta?.characters?.length ?? 0;
+
   return (
     <aside
       className={`left-panel ${className ?? ''}`.trim()}
@@ -173,6 +177,7 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
           type="button"
           role="tab"
           id="left-panel-tab-timeline"
+          aria-label="剧本时间轴"
           aria-selected={currentTab === 'timeline'}
           aria-controls="left-panel-tabpanel-timeline"
           tabIndex={currentTab === 'timeline' ? 0 : -1}
@@ -180,12 +185,34 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
           onClick={() => handleTabChange('timeline')}
           onKeyDown={handleTabKeyDown}
         >
-          剧本时间轴
+          <IconFilm className="left-panel__tab-icon" width={13} height={13} aria-hidden="true" />
+          <span className="left-panel__tab-text">剧本时间轴</span>
+          {timelineCount > 0 && (
+            <span className="left-panel__tab-badge" aria-hidden="true">
+              {timelineCount}
+            </span>
+          )}
+          {workspaceErrorCount > 0 ? (
+            <span
+              className="left-panel__tab-alert-dot"
+              data-severity="error"
+              title={`${workspaceErrorCount} 个错误`}
+              aria-hidden="true"
+            />
+          ) : workspaceWarningCount > 0 ? (
+            <span
+              className="left-panel__tab-alert-dot"
+              data-severity="warning"
+              title={`${workspaceWarningCount} 个警告`}
+              aria-hidden="true"
+            />
+          ) : null}
         </button>
         <button
           type="button"
           role="tab"
           id="left-panel-tab-characters"
+          aria-label="角色管理"
           aria-selected={currentTab === 'characters'}
           aria-controls="left-panel-tabpanel-characters"
           tabIndex={currentTab === 'characters' ? 0 : -1}
@@ -193,7 +220,13 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
           onClick={() => handleTabChange('characters')}
           onKeyDown={handleTabKeyDown}
         >
-          角色管理
+          <IconUsers className="left-panel__tab-icon" width={13} height={13} aria-hidden="true" />
+          <span className="left-panel__tab-text">角色管理</span>
+          {characterCount > 0 && (
+            <span className="left-panel__tab-badge" aria-hidden="true">
+              {characterCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -225,8 +258,12 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
               onSelectWorkspaceView={handleSelectWorkspaceView}
             />
           ) : (
-            <div className="empty-state" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              等待场景加载...
+            <div className="left-panel__empty-state" data-testid="left-panel-empty-state-timeline">
+              <div className="left-panel__empty-icon" aria-hidden="true">
+                <IconFilm width={22} height={22} />
+              </div>
+              <div className="left-panel__empty-title">等待场景加载...</div>
+              <div className="left-panel__empty-desc">正在准备剧本与时间轴数据</div>
             </div>
           )}
         </div>
@@ -242,8 +279,12 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
           {semanticDocument ? (
             <CharacterDirectoryPanel sceneMeta={semanticDocument.meta} />
           ) : (
-            <div className="empty-state" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-              等待场景加载...
+            <div className="left-panel__empty-state" data-testid="left-panel-empty-state-characters">
+              <div className="left-panel__empty-icon" aria-hidden="true">
+                <IconUsers width={22} height={22} />
+              </div>
+              <div className="left-panel__empty-title">等待场景加载...</div>
+              <div className="left-panel__empty-desc">正在准备角色目录与数据</div>
             </div>
           )}
         </div>
