@@ -714,8 +714,11 @@
 
 .selected-action-inspector {
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  container: action-inspector / inline-size;
   background: var(--bg-secondary);
 }
 
@@ -750,6 +753,8 @@
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.04em;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .selected-action-header__title {
@@ -757,6 +762,7 @@
   font-size: 17px;
   font-weight: 800;
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .selected-action-header__type-select {
@@ -771,6 +777,7 @@
 }
 
 .selected-action-header__meta {
+  grid-column: 1 / -1;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -779,6 +786,7 @@
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   flex-wrap: wrap;
   white-space: normal;
   overflow: visible;
@@ -857,12 +865,15 @@
 
 .selected-action-inspector__body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .selected-action-inspector__content {
   width: min(100%, 460px);
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 12px 14px;
 }
@@ -875,7 +886,139 @@
   color: var(--text-secondary);
 }
 
-/* Inline details use the script column's width; fixed inspectors stay vertical. */
+/* A docked inspector reads down one aligned column at normal sidebar widths. */
+.selected-action-inspector[data-presentation="panel"] {
+  --inspector-field-gap: 8px;
+  --inspector-section-gap: 16px;
+  --inspector-label-width: 88px;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-header {
+  padding: 12px 16px;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-header__title {
+  line-height: 1.35;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-header__intent {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-header__meta {
+  gap: 8px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--inspector-section-gap) 24px;
+  width: 100%;
+  margin: 0;
+  padding: var(--inspector-section-gap);
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content > * {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--inspector-field-gap);
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-row {
+  grid-template-columns: var(--inspector-label-width) minmax(0, 1fr);
+  gap: var(--inspector-field-gap);
+  min-height: 32px;
+  margin-bottom: var(--inspector-field-gap);
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-grid > .inspector-row {
+  margin-bottom: 0;
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content > .inspector-row {
+  margin-bottom: 0;
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-row.stacked {
+  gap: var(--inspector-field-gap);
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-label {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-section {
+  padding: 0 0 var(--inspector-section-gap);
+}
+
+.selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content > .inspector-section {
+  padding-bottom: 0;
+}
+
+.selected-action-inspector[data-presentation="panel"] .inspector-section-title {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+
+.selected-action-inspector[data-presentation="panel"] .form-input,
+.selected-action-inspector[data-presentation="panel"] .form-select {
+  min-width: 0;
+}
+
+@container action-inspector (min-width: 560px) {
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content > .inspector-row:not(.stacked) {
+    grid-column: auto;
+  }
+}
+
+@container action-inspector (max-width: 319px) {
+  .selected-action-inspector[data-presentation="panel"] .inspector-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    align-items: start;
+  }
+
+  .selected-action-inspector[data-presentation="panel"] .selected-action-header {
+    gap: 8px 4px;
+    padding-inline: 12px;
+  }
+
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content {
+    padding-inline: 12px;
+  }
+}
+
+/* Script details stay compact within their statement and grow with that column. */
 .selected-action-inspector[data-presentation="inline"] {
   height: auto;
   min-height: 0;
@@ -898,6 +1041,13 @@
 
 .selected-action-inspector[data-presentation="inline"] .selected-action-inspector__content > * { min-width: 0; }
 .selected-action-inspector[data-presentation="inline"] .inspector-section { padding: 4px 0; }
+.selected-action-inspector[data-presentation="inline"] .inspector-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px 16px;
+}
+.selected-action-inspector[data-presentation="inline"] .inspector-grid > .inspector-row {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
 .selected-action-inspector[data-presentation="inline"] .selected-action-header { padding: 6px 0; }
 .selected-action-inspector[data-presentation="inline"] .selected-action-header__main {
   display: flex;
@@ -914,6 +1064,41 @@
   .selected-action-inspector[data-presentation="inline"] .selected-action-inspector__content > :not(.inspector-section):not(.inspector-row),
   .selected-action-inspector[data-presentation="inline"] .selected-action-inspector__content > .inspector-row.stacked,
   .selected-action-inspector[data-presentation="inline"] .dialogue-companion-editor {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Split independent sections only when there is more than one to compare.
+   A lone section uses the full width; prose and companion editors span all columns. */
+@container action-inspector (min-width: 880px) {
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content {
+    column-gap: 24px;
+    align-items: start;
+  }
+
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content:has(> .inspector-section--properties ~ .inspector-section--properties) > .inspector-section--properties {
+    grid-column: auto;
+  }
+}
+
+@container action-inspector (min-width: 1280px) {
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .selected-action-inspector[data-presentation="panel"] .selected-action-inspector__content:has(> .inspector-section--properties ~ .inspector-section--properties):not(:has(> .inspector-section--properties ~ .inspector-section--properties ~ .inspector-section--properties)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Wide script rows gain a third compact column, without a docked header or scroll area. */
+@container action-inspector (min-width: 1120px) {
+  .selected-action-inspector[data-presentation="inline"] .selected-action-inspector__content {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 16px;
+  }
+
+  .selected-action-inspector[data-presentation="inline"] .selected-action-inspector__content:not(:has(> .inspector-section--properties ~ .inspector-section--properties)) > .inspector-section--properties {
     grid-column: 1 / -1;
   }
 }

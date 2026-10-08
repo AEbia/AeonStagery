@@ -1801,6 +1801,7 @@ html[data-perf="low"] .left-panel {
   height: 100%;
   min-width: 0;
   min-height: 0;
+  container: property-inspector / inline-size;
   background: var(--bg-secondary);
   overflow: hidden;
 }
@@ -1808,10 +1809,11 @@ html[data-perf="low"] .left-panel {
 .property-inspector-shell__toolbar {
   min-height: 40px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-tertiary);
   flex-shrink: 0;
@@ -1821,6 +1823,7 @@ html[data-perf="low"] .left-panel {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 700;
@@ -1835,12 +1838,15 @@ html[data-perf="low"] .left-panel {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .property-inspector-shell__tool-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-height: 28px;
   padding: 4px 8px;
   font-size: 12px;
   font-weight: 600;
@@ -1878,6 +1884,8 @@ html[data-perf="low"] .left-panel {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .property-inspector-shell__content {
@@ -1892,6 +1900,7 @@ html[data-perf="low"] .left-panel {
 
 .property-inspector-shell__detail {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   height: 100%;
   overflow: hidden;
@@ -1965,3 +1974,19 @@ html[data-perf="low"] .left-panel {
   padding: 16px;
 }
 
+@container property-inspector (max-width: 359px) {
+  .property-inspector-shell__toolbar {
+    padding-inline: 12px;
+  }
+
+  .property-inspector-shell__tool-btn {
+    width: 32px;
+    min-height: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .property-inspector-shell__tool-btn > span {
+    display: none;
+  }
+}
