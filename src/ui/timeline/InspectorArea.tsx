@@ -60,7 +60,7 @@ export interface InspectorAreaProps {
   canDetachWorkspaceTools?: boolean;
 }
 
-export const InspectorArea = (props: InspectorAreaProps) => {
+const ListInspectorArea = (props: InspectorAreaProps) => {
   const {
     selectedActionIds,
     sceneData,
@@ -78,11 +78,6 @@ export const InspectorArea = (props: InspectorAreaProps) => {
   const documentStore = useDocumentStore();
   const semanticAuthoring = useSemanticAuthoringService();
   const { settings } = useSettings();
-  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
-
-  if (isTracksMode) {
-    return <PropertyInspectorShell {...props} />;
-  }
   const templateCatalog = useTemplatePackageCatalog();
   const templatePackageSnapshot = useSyncExternalStore(
     templateCatalog ? (listener) => templateCatalog.subscribe(listener) : () => () => {},
@@ -310,6 +305,16 @@ export const InspectorArea = (props: InspectorAreaProps) => {
       </div>
     </div>
   );
+};
+
+export const InspectorArea = (props: InspectorAreaProps) => {
+  const { settings } = useSettings();
+  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
+
+  if (isTracksMode) {
+    return <PropertyInspectorShell {...props} />;
+  }
+  return <ListInspectorArea {...props} />;
 };
 
 const stableEmptyPackages: never[] = [];

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { ActionInspector } from './ActionInspector';
 import { EngineSnapshotTab, DiagnosticsTab } from './ActionInspectorTabs';
 import { CharacterDirectoryPanel } from './CharacterDirectoryPanel';
@@ -99,10 +99,14 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
 
   const activeView = props.inspectorView ?? internalView;
 
-  const handleSwitchView = (nextView: InspectorPanelView) => {
-    setInternalView(nextView);
-    props.onSelectInspectorView?.(nextView);
-  };
+  const { onSelectInspectorView } = props;
+  const handleSwitchView = useCallback(
+    (nextView: InspectorPanelView) => {
+      setInternalView(nextView);
+      onSelectInspectorView?.(nextView);
+    },
+    [onSelectInspectorView],
+  );
 
   const prevSelectedIdRef = useRef<string | undefined>(firstId);
   useEffect(() => {
@@ -110,7 +114,7 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
       handleSwitchView('actions');
     }
     prevSelectedIdRef.current = firstId;
-  }, [firstId, activeView]);
+  }, [firstId, activeView, handleSwitchView]);
 
   const handleDetailClose = async () => {
     const result = await props.handleSave();
