@@ -1,17 +1,29 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 /** Keep closing details mounted until exit completes; virtual remounts do not animate. */
-export function InlineStatementDetails({ expanded, children }: { expanded: boolean; children: ReactNode }) {
+export function InlineStatementDetails({ expanded, animateExpansion = true, children }: {
+  expanded: boolean;
+  animateExpansion?: boolean;
+  children: ReactNode;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const [present, setPresent] = useState(expanded);
   const wasExpanded = useRef(expanded);
+  const wasAnimated = useRef(animateExpansion);
   const activeAnimation = useRef<Animation | null>(null);
   useLayoutEffect(() => {
     const changed = expanded !== wasExpanded.current;
+    // A selection-opened inspector must also close immediately when deselected.
+    const animateTransition = animateExpansion && (expanded || wasAnimated.current);
     wasExpanded.current = expanded;
-    if (!changed) return;
+    wasAnimated.current = animateExpansion;
+    if (!changed) {
+      // Changing the motion policy cancels any animation in the cleanup above.
+      setPresent(expanded);
+      return;
+    }
     const element = container.current;
-    if (!element?.animate || element.closest('[data-perf="low"]')
+    if (!animateTransition || !element?.animate || element.closest('[data-perf="low"]')
       || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       setPresent(expanded);
       return;
@@ -46,7 +58,7 @@ export function InlineStatementDetails({ expanded, children }: { expanded: boole
       activeAnimation.current = null;
       element.style.overflow = '';
     };
-  }, [expanded]);
+  }, [expanded, animateExpansion]);
 
   useLayoutEffect(() => {
     if (expanded || present) return;
