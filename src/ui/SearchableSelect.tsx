@@ -15,6 +15,8 @@ export interface SearchableSelectProps {
   options: string[] | Option[];
   onChange: (val: string) => void;
   placeholder?: string;
+  /** Action text for supplemental pickers whose value is already edited elsewhere. */
+  triggerLabel?: string;
   label?: string;
   loading?: boolean;
   header?: string;
@@ -34,6 +36,7 @@ export const SearchableSelect = ({
   options,
   onChange,
   placeholder = "搜索…",
+  triggerLabel,
   label,
   loading,
   header,
@@ -371,7 +374,7 @@ export const SearchableSelect = ({
   }, [isOpen]);
 
   const selectedOption = normalizedOptions.find(opt => opt.value === value);
-  const displayValue = selectedOption ? selectedOption.label : (value || placeholder);
+  const displayValue = triggerLabel ?? (selectedOption ? selectedOption.label : (value || placeholder));
   const selectOption = (nextValue: string) => {
     previewActiveRef.current = false;
     onChange(nextValue);
@@ -463,7 +466,7 @@ export const SearchableSelect = ({
           minHeight: '32px'
         }}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: value ? 1 : 0.5, display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1 }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: value || triggerLabel ? 1 : 0.5, display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1 }}>
           {loading ? <><IconRefresh width={12} height={12} /> 加载中…</> : displayValue}
         </span>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: '8px' }}>

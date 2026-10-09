@@ -1375,7 +1375,7 @@ export interface FileInputProps {
   placeholder?: string;
   importKind?: ResourceImportKind;
   initialDir?: string;
-  presentation?: 'input' | 'asset';
+  presentation?: 'input' | 'asset' | 'button';
 }
 
 export const FileInput = React.memo(({

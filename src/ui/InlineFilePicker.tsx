@@ -11,8 +11,9 @@ interface InlineFilePickerProps {
   placeholder?: string;
   importKindOverride?: ResourceImportKind;
   inputId?: string;
+  ariaLabel?: string;
   initialDirOverride?: string;
-  presentation?: 'input' | 'asset';
+  presentation?: 'input' | 'asset' | 'button';
 }
 
 export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
@@ -22,6 +23,7 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
   placeholder,
   importKindOverride,
   inputId,
+  ariaLabel,
   initialDirOverride,
   presentation = 'input',
 }) => {
@@ -111,6 +113,13 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
         </div>
       )}
       {presentation === 'input' && renderPathInput()}
+      {presentation === 'button' && (
+        <button id={inputId} type="button" className="btn btn--sm"
+          onClick={() => setShowModal(true)}>
+          <IconFolder width={14} height={14} />
+          {placeholder || '选择文件…'}
+        </button>
+      )}
       {renderPathError()}
 
       {showModal && (
@@ -134,6 +143,7 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0, width: '100%' }}>
         <input
           id={inputId}
+          aria-label={ariaLabel}
           type="text"
           value={localValue}
           onChange={e => {
