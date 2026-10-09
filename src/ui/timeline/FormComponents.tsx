@@ -1375,6 +1375,7 @@ export interface FileInputProps {
   placeholder?: string;
   importKind?: ResourceImportKind;
   initialDir?: string;
+  presentation?: 'input' | 'asset';
 }
 
 export const FileInput = React.memo(({
@@ -1385,6 +1386,7 @@ export const FileInput = React.memo(({
   placeholder,
   importKind,
   initialDir,
+  presentation = 'input',
 }: FileInputProps) => {
   const inputId = useId();
   return (
@@ -1392,6 +1394,7 @@ export const FileInput = React.memo(({
       {label && <label className="inspector-label" htmlFor={inputId}>{label}</label>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <InlineFilePicker
+          presentation={presentation}
           value={value || ''}
           onChange={onChange}
           filters={filters}

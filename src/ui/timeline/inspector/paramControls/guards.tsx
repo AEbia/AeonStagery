@@ -50,6 +50,7 @@ export function resolveGuardedParam(ctx: InspectorParamContext, key: string): Re
     }
     return (
       <FileInput
+        presentation="asset"
         key={key}
         label="模型文件"
         value={ctx.actionParams.model || ''}

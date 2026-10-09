@@ -24,9 +24,10 @@ import {
   dialogueCompanionDefinitions,
   dialogueCompanionNeedsCharacterTarget,
   createDialogueCompanionDraft,
-  characterPerformanceMotionKey,
   type DialogueCompanionFamily,
 } from '../dialogueCompanionModel';
+import { CompanionPerformancePickers } from './CompanionPerformancePickers';
+import type { TimelineAction } from '../../semanticTimelineTypes';
 import { asRecord } from '../asRecord';
 import {
   getVisualStyleOverrideConfig,
@@ -43,6 +44,7 @@ type CharacterMeta = NonNullable<TimelineScene['meta']['characters']>[number];
 export interface DialogueCompanionPanelProps {
   semanticItem: SemanticTimelineReadModelItem | undefined;
   sceneData: TimelineScene;
+  timelineActions: TimelineAction[];
   semanticTimelineItems: Array<{ statementId: string; companionId?: string; displayAction: { _id?: string } }>;
   dialogueSpeakerCharacter: CharacterMeta | undefined;
   semanticAuthoring: SemanticAuthoringApplicationService | undefined;
@@ -53,7 +55,7 @@ export interface DialogueCompanionPanelProps {
 
 export function DialogueCompanionPanel(props: DialogueCompanionPanelProps) {
   const {
-    semanticItem, sceneData, semanticTimelineItems, dialogueSpeakerCharacter, semanticAuthoring,
+    semanticItem, sceneData, timelineActions, semanticTimelineItems, dialogueSpeakerCharacter, semanticAuthoring,
     setSelectedIds, visualTargetOptions, characterVisualTargetOptions,
   } = props;
 
@@ -344,6 +346,7 @@ export function DialogueCompanionPanel(props: DialogueCompanionPanelProps) {
             <button className="btn btn--icon" title="下移" aria-label="下移伴随语句" disabled={index === companions.length - 1} onClick={() => reorder(index, 1)}><IconChevronDown width={13} height={13} /></button>
             <button className="btn btn--icon" title="删除伴随语句" aria-label="删除伴随语句" onClick={() => { void authorCompanion({ version: AUTHORING_SCHEMA_VERSION, correlationId: createSemanticTimelineCorrelationId('dialogue_companion_delete'), origin: 'timeline-editor', kind: 'delete-dialogue-companions', locators: [{ statementId: parent.id, companionId: companion.id }] }); }}><IconTrash width={13} height={13} /></button>
           </div>
+          <div className="inspector-grid dialogue-companion-fields">
           <div className="inspector-row"><label className="inspector-label" htmlFor={`companion-${companion.id}-anchor`}>锚点</label><FormSelect id={`companion-${companion.id}-anchor`} value={companion.anchor} options={[{ value: 'start', label: '对白开始' }, { value: 'end', label: '对白结束' }]} onChange={(value) => updateCompanion(companion, { anchor: value as 'start' | 'end' })} /></div>
           <div className="inspector-row"><span className="inspector-label">偏移</span><InlineNumericInput ariaLabel="伴随语句偏移秒数" dragLabel="秒" step="0.1" popoverMin="-5" popoverMax="5" value={companion.offset} onChange={(value, isTransient) => { if (!isTransient) updateCompanion(companion, { offset: value }); }} /></div>
           {((companion.type === 'camera' && companion.params.mode === 'focus') || companion.type === 'characterPerformance') && (
@@ -365,33 +368,20 @@ export function DialogueCompanionPanel(props: DialogueCompanionPanelProps) {
             <div className="inspector-row"><span className="inspector-label">变焦增量</span><InlineNumericInput ariaLabel="变焦增量" dragLabel="值" step="0.05" popoverMin="-1" popoverMax="1" value={companion.params.zoom?.value ?? 0.15} onChange={(value, isTransient) => { if (!isTransient) updateCompanionParam(companion, 'zoom', { kind: 'delta', value }); }} /></div>
           )}
           {companion.type === 'characterPerformance' && (
-            <>
-              <div className="inspector-row">
-                <label className="inspector-label" htmlFor={`companion-${companion.id}-motion`}>动作</label>
-                <input
-                  id={`companion-${companion.id}-motion`}
-                  className="form-input"
-                  placeholder="输入动作名称..."
-                  value={characterPerformanceMotionKey(companion.params.motion) || ''}
-                  onChange={(event) => updateCompanionParam(companion, 'motion', event.target.value ? { kind: 'resource', key: event.target.value } : undefined)}
-                />
-              </div>
-              <div className="inspector-row">
-                <label className="inspector-label" htmlFor={`companion-${companion.id}-expression`}>表情</label>
-                <input
-                  id={`companion-${companion.id}-expression`}
-                  className="form-input"
-                  placeholder="输入表情名称..."
-                  value={companion.params.expression || ''}
-                  onChange={(event) => updateCompanionParam(companion, 'expression', event.target.value || undefined)}
-                />
-              </div>
-            </>
+            <CompanionPerformancePickers
+              companion={companion}
+              speakerId={parent.params.speakerId}
+              atTime={semanticItem.time + (companion.anchor === 'end' ? semanticItem.durationSeconds : 0) + companion.offset}
+              sceneData={sceneData}
+              timelineActions={timelineActions}
+              onChange={(key, value) => updateCompanionParam(companion, key, value)}
+            />
           )}
           {companion.type === 'visualStyle' && renderVisualStyleCompanion(companion)}
           {companion.type === 'audio' && companion.params.role === 'sfx' && companion.params.mode === 'play' && (
-            <><FileInput label="音效文件" value={companion.params.file || ''} onChange={(value) => updateCompanionParam(companion, 'file', value)} filters={[{ name: '音频', extensions: ['mp3', 'wav', 'ogg'] }]} importKind="generic" initialDir="sfx" placeholder="选择音效文件..." /><div className="inspector-row"><span className="inspector-label">音量</span><InlineNumericInput ariaLabel="伴随音效音量" dragLabel="值" step="0.05" min="0" max="1" value={companion.params.volume ?? 1} onChange={(value, isTransient) => { if (!isTransient) updateCompanionParam(companion, 'volume', value); }} /></div></>
+            <><FileInput presentation="asset" label="音效文件" value={companion.params.file || ''} onChange={(value) => updateCompanionParam(companion, 'file', value)} filters={[{ name: '音频', extensions: ['mp3', 'wav', 'ogg'] }]} importKind="generic" initialDir="sfx" placeholder="选择音效文件..." /><div className="inspector-row"><span className="inspector-label">音量</span><InlineNumericInput ariaLabel="伴随音效音量" dragLabel="值" step="0.05" min="0" max="1" value={companion.params.volume ?? 1} onChange={(value, isTransient) => { if (!isTransient) updateCompanionParam(companion, 'volume', value); }} /></div></>
           )}
+          </div>
         </div>
           );
         })}

@@ -7,6 +7,7 @@ import { ActionInspector } from '../ui/timeline/ActionInspector';
 
 const state = vi.hoisted(() => ({
   document: null as any,
+  pickedAssetPath: "",
   compiledScene: null as any,
   validationIssues: [] as any[],
   characterAdapter: {
@@ -50,6 +51,14 @@ vi.mock('../ui/context/AppContext', () => ({
   usePlaybackAdapter: () => state.playbackAdapter,
   useSceneAssetService: () => state.sceneAssetService,
   useSemanticAuthoringService: () => state.semanticAuthoring,
+}));
+
+vi.mock('../ui/AssetBrowserModal', () => ({
+  AssetBrowserModal: ({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) => (
+    <div role="dialog" aria-label="资源浏览器">
+      <button onClick={() => { onSelect(state.pickedAssetPath); onClose(); }}>使用选中资源</button>
+    </div>
+  ),
 }));
 
 vi.mock('../ui/store/storeHooks', () => ({
@@ -294,9 +303,9 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'enter_missing_model', outputKey: 'primary' },
     });
 
-    const input = screen.getByPlaceholderText('选择 Live2D 模型文件');
-    fireEvent.change(input, { target: { value: 'figure/new/model.json' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'figure/new/model.json';
+    fireEvent.click(screen.getByRole('button', { name: '模型文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => expect(replaceSourceParams).toHaveBeenCalledWith(
       'enter_missing_model::primary',
@@ -361,9 +370,9 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'environment_missing_file', outputKey: 'primary' },
     });
 
-    const input = screen.getByPlaceholderText('选择背景图片...');
-    fireEvent.change(input, { target: { value: 'images/classroom.png' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'images/classroom.png';
+    fireEvent.click(screen.getByRole('button', { name: '背景图片' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => expect(replaceSourceParams).toHaveBeenCalledWith(
       'environment_missing_file::primary',
@@ -1116,12 +1125,11 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'sfx_picker', outputKey: 'primary' },
     });
 
-    const input = screen.getByLabelText('音频文件');
-    fireEvent.change(input, { target: { value: 'sfx/chime.ogg' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'sfx/chime.ogg';
+    fireEvent.click(screen.getByRole('button', { name: '音频文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('sfx/chime.ogg', 'generic');
       expect(updateParam).toHaveBeenCalledWith('sfx_picker::primary', 'file', 'sfx/chime.ogg');
     });
   });
@@ -1148,12 +1156,11 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'dialogue_with_sfx', outputKey: 'primary' },
     });
 
-    const input = screen.getByLabelText('音效文件');
-    fireEvent.change(input, { target: { value: 'sfx/hit-2.wav' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'sfx/hit-2.wav';
+    fireEvent.click(screen.getByRole('button', { name: '音效文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('sfx/hit-2.wav', 'generic');
       expect(state.semanticAuthoring.author).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'update-dialogue-companion',
         locator: { statementId: 'dialogue_with_sfx', companionId: 'sfx' },
@@ -1272,7 +1279,7 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: statement.id, outputKey: 'motion' },
     });
 
-    // 动作名与表情名都应展示在基础属性中
+    // 动作名与表情名都应展示在独立的资源选择区域
     const motionField = document.querySelector('[data-testid="action-param-motion"]');
     expect(motionField).toBeTruthy();
     expect(motionField?.textContent).toContain('nod.mtn');

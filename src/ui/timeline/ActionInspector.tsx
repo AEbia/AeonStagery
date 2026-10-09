@@ -274,6 +274,12 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
 
   const groups = computeParamGroups({ actionType, allKeys, isIntegrationVisualAction, hiddenBasicVisualKeys });
 
+  const resourcePickerKeys = groups.General.filter((key) =>
+    (key === 'motion' || key === 'expression') &&
+    (actionType === 'playMotion' || actionType === 'setExpression' || action.semanticType === 'characterPerformance'),
+  );
+  const generalKeys = groups.General.filter((key) => !resourcePickerKeys.includes(key));
+
   const paramContext: InspectorParamContext = {
     action, actionId, actionType, actionParams, sourceParams, sceneData, allKeys,
     semanticInspectorFieldByKey, semanticItem, semanticDocument,
@@ -329,14 +335,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           actionParams={actionParams} sceneData={sceneData} updateParam={updateParam}
         />
 
-        <PlayheadLifecycleTargetCommands
-          semanticDocument={semanticDocument}
-          semanticItem={semanticItem}
-          sceneMeta={sceneData.meta}
-          semanticAuthoring={semanticAuthoring}
-          documentStore={documentStore}
-          setSelectedIds={setSelectedIds}
-        />
+
 
         {isIntegrationVisualAction && <CharacterIntegrationControls key={actionId}
           params={sourceParams} sceneVisual={sceneData.visual} targets={characterVisualTargetOptions}
@@ -344,24 +343,6 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           durationKey={usesSourceParamForm ? 'durationSeconds' : 'duration'}
           mode={actionType === 'resetCompositeRecipe' ? 'reset' : actionType === 'modulateComposite' ? 'modulate' : 'set'}
           onChange={(next) => usesSourceParamForm ? replaceSourceParams(actionId, next) : updateAction(actionId, { params: next })} />}
-        <SemanticSourcePanel
-          action={action} actionType={actionType} actionId={actionId} actionParams={actionParams}
-          sourceParams={sourceParams} sceneData={sceneData}
-          isIntegrationVisualAction={isIntegrationVisualAction} isLensFilterSourceAction={isLensFilterSourceAction}
-          isRimLightVisualAction={isRimLightVisualAction} visualTargetOptions={visualTargetOptions}
-          rimLightTargetOptions={rimLightTargetOptions} characterVisualTargetOptions={characterVisualTargetOptions}
-          filterTemplateOptions={filterTemplateOptions} activeFilterTemplateOptions={activeFilterTemplateOptions}
-          semanticInspectorFields={semanticInspectorFields} isResourceMotion={isResourceMotion}
-          customMotionAuthoring={customMotionAuthoring} characterAdapter={characterAdapter}
-          openConversionDialog={openConversionDialog} updateParam={updateParam}
-          replaceSourceParams={replaceSourceParams} updateSemanticSourceParam={updateSemanticSourceParam}
-          renderParam={renderParam}
-        />
-        <CustomMotionPanel
-          customMotionValue={customMotionValue} actionId={actionId}
-          expandedCustomMotionActionId={expandedCustomMotionActionId}
-          editorStore={editorStore} openConversionDialog={openConversionDialog}
-        />
         <PrimaryVisualPanel
           isPrimaryVisualIntentBlock={isPrimaryVisualIntentBlock} isIntegrationVisualAction={isIntegrationVisualAction}
           actionType={actionType} action={action} sceneData={sceneData} actionParams={actionParams} actionId={actionId}
@@ -372,53 +353,96 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           renderParam={renderParam}
         />
 
-        {groups.General.length > 0 && (
-          <div className="inspector-section inspector-section--properties">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
-              {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
+        <div className="inspector-property-sections">
+          {generalKeys.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
+                {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
+              </div>
+              <div className="inspector-grid">
+                {generalKeys.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
             </div>
-            <div className="inspector-grid">
-              {groups.General.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+          )}
+
+          {groups.Transform.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>变换属性</div>
+              <div className="inspector-grid">
+                {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
+            </div>
+          )}
+
+          {groups.State.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>状态与控制</div>
+              <div className="inspector-grid">
+                {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {resourcePickerKeys.length > 0 && (
+          <div className="inspector-section inspector-section--resources">
+            <div className="inspector-section-title">角色动作与表情</div>
+            <div className="inspector-grid inspector-grid--resources">
+              {resourcePickerKeys.map((key) => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
             </div>
           </div>
         )}
 
-        <CharacterLookAtPanel
-          action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
-          sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
-          canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+        <CustomMotionPanel
+          customMotionValue={customMotionValue} actionId={actionId}
+          expandedCustomMotionActionId={expandedCustomMotionActionId}
+          editorStore={editorStore} openConversionDialog={openConversionDialog}
         />
-        <CharacterBlinkPanel
-          action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
-          sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
-          canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
-        />
+        <div className="inspector-grid inspector-source-fields">
+          <SemanticSourcePanel
+            action={action} actionType={actionType} actionId={actionId} actionParams={actionParams}
+            sourceParams={sourceParams} sceneData={sceneData}
+            isIntegrationVisualAction={isIntegrationVisualAction} isLensFilterSourceAction={isLensFilterSourceAction}
+            isRimLightVisualAction={isRimLightVisualAction} visualTargetOptions={visualTargetOptions}
+            rimLightTargetOptions={rimLightTargetOptions} characterVisualTargetOptions={characterVisualTargetOptions}
+            filterTemplateOptions={filterTemplateOptions} activeFilterTemplateOptions={activeFilterTemplateOptions}
+            semanticInspectorFields={semanticInspectorFields} isResourceMotion={isResourceMotion}
+            customMotionAuthoring={customMotionAuthoring} characterAdapter={characterAdapter}
+            openConversionDialog={openConversionDialog} updateParam={updateParam}
+            replaceSourceParams={replaceSourceParams} updateSemanticSourceParam={updateSemanticSourceParam}
+            renderParam={renderParam}
+          />
+        </div>
+        <div className="inspector-property-sections">
+          <CharacterLookAtPanel
+            action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
+            sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
+            canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+          />
+          <CharacterBlinkPanel
+            action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
+            sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
+            canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+          />
+        </div>
         <CharacterPerformanceAddControls
           action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
           sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
         />
 
-        {groups.Transform.length > 0 && (
-          <div className="inspector-section inspector-section--properties">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>变换属性</div>
-            <div className="inspector-grid">
-              {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
-            </div>
-          </div>
-        )}
-
-        {groups.State.length > 0 && (
-          <div className="inspector-section inspector-section--properties">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>状态与控制</div>
-            <div className="inspector-grid">
-              {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
-            </div>
-          </div>
-        )}
+        <PlayheadLifecycleTargetCommands
+          semanticDocument={semanticDocument}
+          semanticItem={semanticItem}
+          sceneMeta={sceneData.meta}
+          semanticAuthoring={semanticAuthoring}
+          documentStore={documentStore}
+          setSelectedIds={setSelectedIds}
+        />
 
         <DialogueCompanionPanel
           semanticItem={semanticItem}
           sceneData={sceneData}
+          timelineActions={timelineActions}
           semanticTimelineItems={semanticTimelineItems}
           dialogueSpeakerCharacter={dialogueSpeakerCharacter}
           semanticAuthoring={semanticAuthoring}

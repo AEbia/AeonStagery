@@ -25,7 +25,6 @@ export interface SearchableSelectProps {
   clearable?: boolean;
   clearLabel?: string;
   preferredGroup?: string;
-  costumeHint?: string;
 }
 
 const MAX_SEARCH_RESULTS = 100;
@@ -421,7 +420,7 @@ export const SearchableSelect = ({
   const hasGroups = primaryGroups.length > 1 || (primaryGroups.length === 1 && primaryGroups[0] !== '默认');
 
   return (
-    <div className="inspector-row" ref={containerRef} style={{ position: 'relative' }}>
+    <div className="inspector-row searchable-select" ref={containerRef} style={{ position: 'relative' }}>
       {label && <label id={labelId} htmlFor={controlId} className="inspector-label">{label}</label>}
       <button
         ref={triggerRef}
@@ -592,7 +591,7 @@ export const SearchableSelect = ({
             {!search && hasGroups && (
               <div
                 style={{
-                  width: hasSecondary ? '74px' : '120px',
+                  width: hasSecondary ? 'clamp(64px, 18%, 140px)' : 'clamp(80px, 25%, 160px)',
                   borderRight: '1px solid var(--border-subtle)',
                   overflowY: 'auto',
                   background: 'rgba(0,0,0,0.1)',
@@ -654,7 +653,7 @@ export const SearchableSelect = ({
             {!search && hasSecondary && (
               <div
                 style={{
-                  width: '74px',
+                  width: 'clamp(64px, 18%, 140px)',
                   borderRight: '1px solid var(--border-subtle)',
                   overflowY: 'auto',
                   background: 'rgba(0,0,0,0.06)',

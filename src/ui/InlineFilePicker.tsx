@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { IconFolder } from './icons';
+import { IconFolder, IconX } from './icons';
 import { AssetBrowserModal } from './AssetBrowserModal';
 import { useSceneAssetService } from './context/AppContext';
 import type { ResourceImportKind } from '../api/types/project';
@@ -12,6 +12,7 @@ interface InlineFilePickerProps {
   importKindOverride?: ResourceImportKind;
   inputId?: string;
   initialDirOverride?: string;
+  presentation?: 'input' | 'asset';
 }
 
 export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
@@ -22,6 +23,7 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
   importKindOverride,
   inputId,
   initialDirOverride,
+  presentation = 'input',
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [localValue, setLocalValue] = useState(value || '');
@@ -88,7 +90,47 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
   );
 
   return (
-    <>
+    <div className="inline-file-picker" style={{ flex: 1, minWidth: 0, width: '100%' }}>
+      {presentation === 'asset' && (
+        <div className="inspector-asset-picker">
+          <div className="inspector-asset-picker__selection">
+            <button
+              id={inputId}
+              type="button"
+              className="inspector-asset-picker__browse"
+              title={localValue || '打开资源浏览器'}
+              onClick={() => setShowModal(true)}
+            >
+              <IconFolder width={16} height={16} />
+              <span className="inspector-asset-picker__name">{localValue.split(/[\\/]/).pop() || placeholder || '选择文件...'}</span>
+              <span className="inspector-asset-picker__action">选择</span>
+            </button>
+            {localValue && <button type="button" className="btn btn--icon" aria-label="清除资源" onClick={() => { setLocalValue(''); setPathError(null); onChange(''); }}><IconX width={14} height={14} /></button>}
+          </div>
+          {localValue && <div className="inspector-asset-picker__path" title={localValue}>{localValue}</div>}
+        </div>
+      )}
+      {presentation === 'input' && renderPathInput()}
+      {renderPathError()}
+
+      {showModal && (
+        <AssetBrowserModal
+          value={localValue}
+          onSelect={(nextValue) => {
+            setLocalValue(nextValue);
+            setPathError(null);
+            onChange(nextValue);
+          }}
+          onClose={() => setShowModal(false)}
+          filters={filters}
+          initialDir={inferInitialDir()}
+        />
+      )}
+    </div>
+  );
+
+  function renderPathInput() {
+    return (
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1, minWidth: 0, width: '100%' }}>
         <input
           id={inputId}
@@ -113,21 +155,6 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
           <IconFolder width={14} height={14} />
         </button>
       </div>
-      {renderPathError()}
-
-      {showModal && (
-        <AssetBrowserModal
-          value={localValue}
-          onSelect={(nextValue) => {
-            setLocalValue(nextValue);
-            setPathError(null);
-            onChange(nextValue);
-          }}
-          onClose={() => setShowModal(false)}
-          filters={filters}
-          initialDir={inferInitialDir()}
-        />
-      )}
-    </>
-  );
+    );
+  }
 };

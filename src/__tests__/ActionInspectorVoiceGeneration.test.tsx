@@ -227,7 +227,7 @@ describe('ActionInspector GPT-SoVITS voice workbench entry', () => {
   it('exposes the resource browser button on the dialogue voice field and opens asset browser', () => {
     renderInspector();
 
-    const browseButton = screen.getByRole('button', { name: '打开资源浏览器' });
+    const browseButton = screen.getByRole('button', { name: /manual\.wav/ });
     expect(browseButton).toBeTruthy();
 
     fireEvent.click(browseButton);
