@@ -45,7 +45,7 @@ import {
   insertDialogueFragmentFlow,
   moveDialogueFragmentFlow,
 } from '../sequential-flow/DialogueFlowCascade';
-import { resolveDialogueDuration } from '../pacing/pacing';
+import { resolveDialogueDuration, type DialogueTypewriterTiming } from '../pacing/pacing';
 
 export type SemanticMarkerIdGenerator = (prefix: string) => string;
 
@@ -53,6 +53,7 @@ export interface SemanticTimelineAuthoringServiceOptions {
   statementIdGenerator?: SceneStatementIdGenerator;
   markerIdGenerator?: SemanticMarkerIdGenerator;
   factory?: SceneStatementFactory;
+  getDialogueTypewriterTiming?: () => DialogueTypewriterTiming;
 }
 
 export interface SemanticTimelineAuthoringResult {
@@ -79,12 +80,14 @@ interface SemanticMutation {
 export class SemanticTimelineAuthoringService {
   private readonly factory: SceneStatementFactory;
   private readonly markerIdGenerator: SemanticMarkerIdGenerator;
+  private readonly getDialogueTypewriterTiming?: () => DialogueTypewriterTiming;
 
   constructor(options: SemanticTimelineAuthoringServiceOptions = {}) {
     this.factory = options.factory ?? (options.statementIdGenerator
       ? new SceneStatementFactory({ idGenerator: options.statementIdGenerator })
       : sceneStatementFactory);
     this.markerIdGenerator = options.markerIdGenerator ?? defaultIdGenerator;
+    this.getDialogueTypewriterTiming = options.getDialogueTypewriterTiming;
   }
 
   author(
@@ -123,11 +126,22 @@ export class SemanticTimelineAuthoringService {
 
   private applyIntent(document: CurrentSceneDocument, intent: SemanticAuthorIntent, flow: boolean): SemanticMutation {
     switch (intent.kind) {
-      case 'insert-statement':
+      case 'insert-statement': {
+        const draft = cloneJson(intent.statement);
+        if (draft.type === 'dialogue' && intent.origin !== 'ai-script-panel' && intent.origin !== 'raw-script') {
+          const params = draft.params as DialogueParams;
+          params.durationSeconds = resolveDialogueDuration({
+            context: 'authoring-insert',
+            text: params.text,
+            authoredDurationSeconds: params.durationSeconds,
+            typewriter: this.typewriterTiming(params),
+          });
+        }
         return this.insertStatement(document, {
-          ...intent.statement,
+          ...draft,
           time: roundTime(intent.anchorTime + (intent.statement.time ?? 0)),
         } as SceneStatementCreationDraft, intent.beforeStatementId, flow);
+      }
       case 'insert-dialogue-companion':
         return this.insertDialogueCompanion(document, intent.parentStatementId, intent.companion);
       case 'update-dialogue-companion':
@@ -234,6 +248,10 @@ export class SemanticTimelineAuthoringService {
     };
   }
 
+  private typewriterTiming(params: DialogueParams): DialogueTypewriterTiming | undefined {
+    return (params.style ?? 'typewriter') === 'typewriter' ? this.getDialogueTypewriterTiming?.() : undefined;
+  }
+
   private updateStatement(
     document: CurrentSceneDocument,
     statementId: string,
@@ -255,6 +273,7 @@ export class SemanticTimelineAuthoringService {
     if (
       source.type === 'dialogue'
       && typeof (params as DialogueParams).text === 'string'
+      && (params as DialogueParams).text !== (source.params as DialogueParams).text
     ) {
       (params as DialogueParams).durationSeconds = resolveDialogueDuration({
         context: 'authoring-update',
@@ -263,6 +282,7 @@ export class SemanticTimelineAuthoringService {
         authoredDurationSeconds: (params as DialogueParams).durationSeconds,
         timeWasEdited: patch.time !== undefined,
         durationWasEdited: durationChanged,
+        typewriter: this.typewriterTiming(params as DialogueParams),
       });
     }
     const updated = {
@@ -837,6 +857,7 @@ export class SemanticTimelineAuthoringService {
     const compiled = compileSequentialDialogueDrafts(
       intent.lines,
       intent.pace ?? scenePaceTierOf(document),
+      this.getDialogueTypewriterTiming?.(),
     );
     if (compiled.statements.length === 0) {
       throw new Error('Sequential authoring requires at least one non-empty line');
@@ -879,6 +900,7 @@ export class SemanticTimelineAuthoringService {
             context: 'pace-tier',
             text,
             pace: tier,
+            typewriter: this.getDialogueTypewriterTiming?.(),
           }),
           style: 'typewriter',
           ...(intent.presentation ? { presentation: intent.presentation } : {}),

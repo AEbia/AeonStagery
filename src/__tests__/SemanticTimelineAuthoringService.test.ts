@@ -43,6 +43,73 @@ function makeCustomMotion(durationSeconds: number, key = 'wave'): Extract<Charac
 }
 
 describe('SemanticTimelineAuthoringService', () => {
+  it.each(['insert-statement', 'insert-dialogue-in-chain', 'append-sequential-lines'] as const)(
+    'allows the configured typewriter to finish when creating dialogue through %s', (kind) => {
+      const service = new SemanticTimelineAuthoringService({
+        getDialogueTypewriterTiming: () => ({ textSpeed: 0.1, entranceAnimation: true }),
+      });
+      const text = '文'.repeat(100);
+      const base = { version: AUTHORING_SCHEMA_VERSION, correlationId: 'insert_typewriter', origin: 'timeline-editor' as const };
+      const intent = kind === 'insert-statement'
+        ? { ...base, kind, anchorTime: 0, statement: { type: 'dialogue' as const, params: { text, durationSeconds: 2 } } }
+        : kind === 'insert-dialogue-in-chain' ? { ...base, kind, text } : { ...base, kind, lines: [text, text] };
+      const result = service.author(makeDocument(), intent);
+      expect((result.document.statements[0].params as any).durationSeconds).toBe(10.2);
+      if (kind === 'append-sequential-lines') {
+        expect(result.document.statements[1].time).toBe(10.2 + PACE_GAP.normal);
+      }
+      expect(sceneDocumentCodec.parseAndValidate(result.document)).toBeDefined();
+    },
+  );
+
+  it('reads current typewriter settings on text edits, allows manual shortening, and shrinks after shortening text', () => {
+    let textSpeed = 0.1;
+    const service = new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({ textSpeed, entranceAnimation: true }),
+    });
+    let document = makeDocument({
+      statements: [{ id: 'line_1', time: 0, type: 'dialogue', params: { text: 'Hello', durationSeconds: 2 } }],
+    });
+    const update = (text: string, durationSeconds: number, style: 'typewriter' | 'instant' = 'typewriter') => {
+      document = service.author(document, {
+        version: AUTHORING_SCHEMA_VERSION, correlationId: 'update_typewriter', origin: 'timeline-editor',
+        kind: 'update-statement', statementId: 'line_1', patch: { params: { text, durationSeconds, style } },
+      }).document;
+      return (document.statements[0].params as any).durationSeconds;
+    };
+    expect(update('文'.repeat(100), 2)).toBe(10.2);
+    expect(update('文'.repeat(100), 0.3)).toBe(0.3);
+    textSpeed = 0.2;
+    expect(update('文'.repeat(101), 0.3)).toBe(20.4);
+    expect(update('短', 20.4)).toBe(estimateDialogueDuration('短', 'normal'));
+    expect(update('文'.repeat(100), 1.6, 'instant')).toBe(estimateDialogueDuration('文'.repeat(100), 'normal'));
+    expect(update('手工改文', 0.4)).toBe(0.4);
+  });
+
+  it.each(['raw-script', 'ai-script-panel'] as const)('preserves explicit insert timing from %s', (origin) => {
+    const service = new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({ textSpeed: 0.1, entranceAnimation: true }),
+    });
+    const result = service.author(makeDocument(), {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'authored_insert', origin,
+      kind: 'insert-statement', anchorTime: 0,
+      statement: { type: 'dialogue', params: { text: '文'.repeat(100), durationSeconds: 0.3 } },
+    });
+    expect((result.document.statements[0].params as any).durationSeconds).toBe(0.3);
+  });
+
+  it('preserves a manually shortened duration when other dialogue properties change', () => {
+    const document = makeDocument({
+      statements: [{ id: 'line_1', time: 0, type: 'dialogue', params: { text: 'Hello', durationSeconds: 0.3 } }],
+    });
+    const result = new SemanticTimelineAuthoringService().author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'keep_manual_duration', origin: 'timeline-editor',
+      kind: 'update-statement', statementId: 'line_1',
+      patch: { params: { text: 'Hello', durationSeconds: 0.3, textColor: '#ff0000' } },
+    });
+    expect((result.document.statements[0].params as any).durationSeconds).toBe(0.3);
+  });
+
   it('extends an explicit scene end when a statement duration grows', () => {
     const document = makeDocument({
       meta: { title: 'Test', characters: [], durationSeconds: 3 },

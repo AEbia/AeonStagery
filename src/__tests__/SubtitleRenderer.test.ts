@@ -206,6 +206,59 @@ describe('SubtitleRenderer', () => {
     expect(stageState.subtitleLayer.children).toHaveLength(1);
   });
 
+  it.each([false, true])('keeps configured typewriter speed in a short dialogue (entrance: %s)', (entrance) => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
+      ? 0.1 : key === 'dialogueEntranceAnimation' ? entrance : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'pink-nameplate')!;
+    const textStart = entrance ? 0.2 : 0;
+
+    for (const image of [false, true]) {
+      const renderer = new SubtitleRenderer();
+      const config = { _id: `short-${image}`, speaker: '', text: 'Hello', style: 'typewriter' as const,
+        duration: textStart + 0.25,
+        presentation: image ? { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any : undefined };
+      const timeline = renderer.showDialogue(config).pause();
+      renderer.ensureDialogueOnStage(config, textStart + 0.15);
+      const tween = timeline.getChildren().find((child) => 'count' in child.vars || 'charIndex' in child.vars)!;
+      const property = image ? 'count' : 'charIndex';
+      const reveal = (tween as gsap.core.Tween).targets()[0] as Record<string, number>;
+      expect(reveal[property]).toBeCloseTo(1.5);
+      renderer.ensureDialogueOnStage(config, config.duration);
+      expect(reveal[property]).toBeCloseTo(2.5);
+      expect(timeline.duration()).toBeLessThanOrEqual(Math.max(0.45, config.duration + 0.001));
+      if (image) {
+        const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+        const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+        expect(text.text).toBe('He');
+      }
+      renderer.clear();
+    }
+  });
+
+  it('rebuilds the active typewriter timeline when dialogue text speed changes', () => {
+    let dialogueTextSpeed = 0.01;
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
+      ? dialogueTextSpeed
+      : key === 'dialogueEntranceAnimation' ? false : '');
+    const renderer = new SubtitleRenderer();
+    const config = { _id: 'live-text-speed', speaker: '', text: 'Hello', style: 'typewriter' as const, duration: 4 };
+    const original = renderer.showDialogue(config);
+    const master = gsap.timeline({ paused: true }).add(original, 2);
+    renderer.ensureDialogueOnStage(config, 0.02);
+    expect(original.getChildren().some((child) => Math.abs(child.duration() - 0.05) < 0.001)).toBe(true);
+
+    dialogueTextSpeed = 0.1;
+    renderer.forceUpdate();
+
+    const updated = renderer.getCurrentTimeline()!;
+    expect(updated).not.toBe(original);
+    expect(updated.getChildren().some((child) => Math.abs(child.duration() - 0.5) < 0.001)).toBe(true);
+    expect(updated.parent).toBe(master);
+    expect(updated.startTime()).toBe(2);
+    expect(updated.time()).toBeCloseTo(0.02);
+  });
+
   it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('keeps the speaker font unchanged when adjusting dialogue font size for %s', (styleId) => {
     let fontSize = 32;
     stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? fontSize : key === 'dialogueTextSpeed' ? 0.01 : '');

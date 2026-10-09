@@ -27,9 +27,16 @@ class SubtitleRenderer {
   private currentTimeline: gsap.core.Timeline | null = null;
   private currentTemplateId: string = 'glass';
   // 彻底解决 Seek 重复创建时间轴/容器导致的打字机消失、画面卡死 Bug
-  private dialogueCache = new Map<string, { container: PIXI.Container; timeline: gsap.core.Timeline; config: DialogueConfig; fontSize: number }>();
+  private dialogueCache = new Map<string, {
+    container: PIXI.Container;
+    timeline: gsap.core.Timeline;
+    config: DialogueConfig;
+    fontSize: number;
+    textSpeed: number;
+  }>();
   private activeConfig: DialogueConfig | null = null;
   private activeFontSize = 48;
+  private activeTextSpeed = 0.025;
   /** fontFamily → runtimeUri of dialogue fonts already registered with document.fonts. */
   private readonly loadedDialogueFonts = new Map<string, string>();
 
@@ -283,7 +290,7 @@ class SubtitleRenderer {
       const reveal = { count: 0 };
       let lastCount = -1;
       const syncText = () => {
-        const count = Math.max(0, Math.min(steps.length, Math.floor(reveal.count)));
+        const count = Math.max(0, Math.min(steps.length, Math.floor(reveal.count + 1e-7)));
         if (count === lastCount || container.destroyed) return;
         lastCount = count;
         const current = count > 0 ? steps[count - 1] : undefined;
@@ -296,9 +303,11 @@ class SubtitleRenderer {
       };
       syncCallbacks.push(syncText);
       syncText();
+      const revealDuration = Math.max(0, Math.min(duration - textStart, steps.length * dialogueTextSpeed));
       tl.to(reveal, {
-        count: steps.length,
-        duration: Math.max(0, Math.min(duration - textStart, steps.length * dialogueTextSpeed)),
+        // A short authored window truncates the reveal without speeding it up.
+        count: revealDuration === steps.length * dialogueTextSpeed ? steps.length : revealDuration / dialogueTextSpeed,
+        duration: revealDuration,
         ease: 'none',
         onUpdate: syncText,
       }, textStart);
@@ -324,14 +333,15 @@ class SubtitleRenderer {
       const animSteps: { lineIdx: number; localIdx: number }[] = [];
       metrics.lines.forEach((line, lineIdx) => {
         let isInsideTag = false;
-        for (let i = 1; i <= line.length; i++) {
-          const char = line[i - 1];
+        let localIdx = 0;
+        for (const char of line) {
+          localIdx += char.length;
           if (char === '<') isInsideTag = true;
           if (char === '\u200B' || isInsideTag) {
             if (char === '>') isInsideTag = false;
             continue;
           }
-          animSteps.push({ lineIdx, localIdx: i });
+          animSteps.push({ lineIdx, localIdx });
         }
       });
 
@@ -339,7 +349,7 @@ class SubtitleRenderer {
       const LINE_HEIGHT = textStyle.lineHeight || Number(textStyle.fontSize) * 1.4;
       const updateMask = () => {
         if (textMask.destroyed) return; // Container destroyed during seek
-        const stepIdx = Math.floor(revealProxy.charIndex);
+        const stepIdx = Math.floor(revealProxy.charIndex + 1e-7);
         textMask.clear().beginFill(0xFFFFFF);
 
         // 如果打字机动画已全部完成（或 seek 到动作之后），直接绘制全画幅遮罩，确保文本 100% 完整显示且无任何字符裁切
@@ -370,7 +380,7 @@ class SubtitleRenderer {
       syncCallbacks.push(updateMask);
 
       tl.to(revealProxy, {
-        charIndex: animSteps.length,
+        charIndex: totalTypeTime === animSteps.length * dialogueTextSpeed ? animSteps.length : totalTypeTime / dialogueTextSpeed,
         duration: totalTypeTime,
         ease: 'none',
         onUpdate: updateMask
@@ -401,7 +411,13 @@ class SubtitleRenderer {
     }
 
     tl.to({}, { duration: 0.001 }, duration);
-    this.dialogueCache.set(cacheKey, { container, timeline: tl, config, fontSize: globalFontSize });
+    this.dialogueCache.set(cacheKey, {
+      container,
+      timeline: tl,
+      config,
+      fontSize: globalFontSize,
+      textSpeed: dialogueTextSpeed,
+    });
     return tl;
   }
 
@@ -424,8 +440,10 @@ class SubtitleRenderer {
     }
     if (!cached) return;
 
-    if (cached.fontSize !== this.getDialogueFontSize()) {
-      // Keep the scheduled position and parent when changing a local font
+    if (cached.fontSize !== this.getDialogueFontSize()
+      || ((cached.config.style ?? 'typewriter') === 'typewriter'
+        && cached.textSpeed !== settingsManager.get('dialogueTextSpeed'))) {
+      // Keep the scheduled position and parent when changing a local dialogue
       // preference; the full resolved config preserves speaker/template data.
       const parent = cached.timeline.parent;
       const start = cached.timeline.startTime();
@@ -451,6 +469,7 @@ class SubtitleRenderer {
     this.currentTimeline = timeline;
     this.activeConfig = cached.config;
     this.activeFontSize = cached.fontSize;
+    this.activeTextSpeed = cached.textSpeed;
 
     const layer = stageManager.getLayer('subtitle');
     if (layer && !layer.destroyed) {
@@ -631,7 +650,11 @@ class SubtitleRenderer {
   }
 
   public forceUpdate(): void {
-    if (this.activeConfig && this.currentTimeline && this.activeFontSize !== this.getDialogueFontSize()) {
+    if (this.activeConfig && this.currentTimeline && (
+      this.activeFontSize !== this.getDialogueFontSize()
+      || ((this.activeConfig.style ?? 'typewriter') === 'typewriter'
+        && this.activeTextSpeed !== settingsManager.get('dialogueTextSpeed'))
+    )) {
       this.ensureDialogueOnStage(this.activeConfig, this.currentTimeline.time());
     }
     if (this.currentTimeline) {
