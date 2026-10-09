@@ -55,42 +55,44 @@ export function CharacterLookAtPanel(props: Omit<CharacterPerformancePanelsProps
           </button>
         )}
       </div>
-      <div className="inspector-row">
-        <label className="inspector-label" htmlFor={`action-${actionId}-look-at-target`}>注视目标</label>
-        <FormSelect id={`action-${actionId}-look-at-target`} value={lookAt.target || ''} options={[
-          { value: '', label: '自由点' },
-          ...(sceneData.meta.characters ?? []).map((character) => ({ value: character.id, label: `${character.name} (ID: ${character.id})` })),
-        ]} onChange={(value) => updateLookAt('target', value || undefined)} />
-      </div>
-      <div className="inspector-row">
-        <span className="inspector-label">注视点</span>
-        <div className="compound-input">
-          <InlineNumericInput dragLabel="X" step="0.01" min="0" max="1" value={point[0]} onChange={(v, isTransient) => updateLookAt('point', [v, point[1]], isTransient)} />
-          <InlineNumericInput dragLabel="Y" step="0.01" min="0" max="1" value={point[1]} onChange={(v, isTransient) => updateLookAt('point', [point[0], v], isTransient)} />
+      <div className="inspector-grid">
+        <div className="inspector-row">
+          <label className="inspector-label" htmlFor={`action-${actionId}-look-at-target`}>注视目标</label>
+          <FormSelect id={`action-${actionId}-look-at-target`} value={lookAt.target || ''} options={[
+            { value: '', label: '自由点' },
+            ...(sceneData.meta.characters ?? []).map((character) => ({ value: character.id, label: `${character.name} (ID: ${character.id})` })),
+          ]} onChange={(value) => updateLookAt('target', value || undefined)} />
         </div>
-      </div>
-      <div className="inspector-row">
-        <span className="inspector-label">注视强度</span>
-        <InlineNumericInput dragLabel="强度" step="0.05" min="0" max="1" value={lookAt.intensity ?? 1} onChange={(v, isTransient) => updateLookAt('intensity', v, isTransient)} />
-      </div>
-      <div className="inspector-row">
-        <span className="inspector-label">视线时长</span>
-        <InlineNumericInput
-          ariaLabel="视线时长（秒）"
-          dragLabel="秒"
-          step="0.1"
-          min="0"
-          popoverMin="0"
-          popoverMax="5"
-          value={typeof actionParams.durationSeconds === 'number' ? actionParams.durationSeconds : 0.5}
-          onChange={(value, isTransient) => updateAuthoringParam('durationSeconds', Math.max(0, value), isTransient)}
-        />
-      </div>
-      <div className="inspector-row">
-        <div />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input id={`action-${actionId}-look-at-enabled`} type="checkbox" checked={lookAt.enabled ?? true} onChange={(e) => updateLookAt('enabled', e.target.checked)} />
-          <label htmlFor={`action-${actionId}-look-at-enabled`} className="inspector-label" style={{ margin: 0, textAlign: 'left' }}>启用视线</label>
+        <div className="inspector-row">
+          <span className="inspector-label">注视点</span>
+          <div className="compound-input">
+            <InlineNumericInput dragLabel="X" step="0.01" min="0" max="1" value={point[0]} onChange={(v, isTransient) => updateLookAt('point', [v, point[1]], isTransient)} />
+            <InlineNumericInput dragLabel="Y" step="0.01" min="0" max="1" value={point[1]} onChange={(v, isTransient) => updateLookAt('point', [point[0], v], isTransient)} />
+          </div>
+        </div>
+        <div className="inspector-row">
+          <span className="inspector-label">注视强度</span>
+          <InlineNumericInput dragLabel="强度" step="0.05" min="0" max="1" value={lookAt.intensity ?? 1} onChange={(v, isTransient) => updateLookAt('intensity', v, isTransient)} />
+        </div>
+        <div className="inspector-row">
+          <span className="inspector-label">视线时长</span>
+          <InlineNumericInput
+            ariaLabel="视线时长（秒）"
+            dragLabel="秒"
+            step="0.1"
+            min="0"
+            popoverMin="0"
+            popoverMax="5"
+            value={typeof actionParams.durationSeconds === 'number' ? actionParams.durationSeconds : 0.5}
+            onChange={(value, isTransient) => updateAuthoringParam('durationSeconds', Math.max(0, value), isTransient)}
+          />
+        </div>
+        <div className="inspector-row">
+          <div />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input id={`action-${actionId}-look-at-enabled`} type="checkbox" checked={lookAt.enabled ?? true} onChange={(e) => updateLookAt('enabled', e.target.checked)} />
+            <label htmlFor={`action-${actionId}-look-at-enabled`} className="inspector-label" style={{ margin: 0, textAlign: 'left' }}>启用视线</label>
+          </div>
         </div>
       </div>
     </div>
@@ -132,19 +134,21 @@ export function CharacterBlinkPanel(props: CharacterPerformancePanelsProps) {
           </button>
         )}
       </div>
-      <div className="inspector-row">
-        <span className="inspector-label">眨眼间隔</span>
-        <InlineNumericInput dragLabel="秒" step="0.1" min="0.1" popoverMin="0.5" popoverMax="10" value={blink.interval ?? 4} onChange={(v, isTransient) => updateBlink('interval', v, isTransient)} />
-      </div>
-      <div className="inspector-row">
-        <span className="inspector-label">随机范围</span>
-        <InlineNumericInput ariaLabel="眨眼随机范围" dragLabel="±秒" step="0.1" min="0" popoverMin="0" popoverMax="5" value={blink.intervalRange ?? 0} onChange={(v, isTransient) => updateBlink('intervalRange', v, isTransient)} />
-      </div>
-      <div className="inspector-row">
-        <div />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input id={`action-${actionId}-blink-enabled`} type="checkbox" checked={blink.enabled ?? true} onChange={(e) => updateBlink('enabled', e.target.checked)} />
-          <label htmlFor={`action-${actionId}-blink-enabled`} className="inspector-label" style={{ margin: 0, textAlign: 'left' }}>启用眨眼</label>
+      <div className="inspector-grid">
+        <div className="inspector-row">
+          <span className="inspector-label">眨眼间隔</span>
+          <InlineNumericInput dragLabel="秒" step="0.1" min="0.1" popoverMin="0.5" popoverMax="10" value={blink.interval ?? 4} onChange={(v, isTransient) => updateBlink('interval', v, isTransient)} />
+        </div>
+        <div className="inspector-row">
+          <span className="inspector-label">随机范围</span>
+          <InlineNumericInput ariaLabel="眨眼随机范围" dragLabel="±秒" step="0.1" min="0" popoverMin="0" popoverMax="5" value={blink.intervalRange ?? 0} onChange={(v, isTransient) => updateBlink('intervalRange', v, isTransient)} />
+        </div>
+        <div className="inspector-row">
+          <div />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input id={`action-${actionId}-blink-enabled`} type="checkbox" checked={blink.enabled ?? true} onChange={(e) => updateBlink('enabled', e.target.checked)} />
+            <label htmlFor={`action-${actionId}-blink-enabled`} className="inspector-label" style={{ margin: 0, textAlign: 'left' }}>启用眨眼</label>
+          </div>
         </div>
       </div>
     </div>
