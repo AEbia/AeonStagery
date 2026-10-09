@@ -212,7 +212,7 @@ describe('List mode inline inspector and layout', () => {
       expect(screen.queryByTestId('inline-action-inspector')).toBeNull();
     });
 
-    it('toggles expansion when clicking the statement select button', () => {
+    it('toggles expansion when clicking the statement title button', () => {
       const { container } = render(
         <TimelineListView
           sceneData={{ sceneId: state.document.sceneId, meta: state.document.meta, timeline: [] }}
@@ -225,15 +225,15 @@ describe('List mode inline inspector and layout', () => {
         />,
       );
 
-      const selectButtons = screen.getAllByRole('button', { name: /选择/ });
-      expect(selectButtons.length).toBeGreaterThanOrEqual(3);
+      const titleButtons = screen.getAllByRole('button', { name: /^展开.+详情$/ });
+      expect(titleButtons.length).toBeGreaterThanOrEqual(3);
 
-      // Click statement select button to expand
-      fireEvent.click(selectButtons[0]);
+      // Click statement title button to expand
+      fireEvent.click(titleButtons[0]);
       expect(container.querySelectorAll('.inspector-workspace__detail')).toHaveLength(1);
 
-      // Click statement select button again to collapse
-      fireEvent.click(selectButtons[0]);
+      // Click statement title button again to collapse
+      fireEvent.click(titleButtons[0]);
       expect(container.querySelectorAll('.inspector-workspace__detail')).toHaveLength(0);
     });
   });
@@ -299,10 +299,11 @@ describe('List mode inline inspector and layout', () => {
       // Inline speaker selectors are visible
       const speakerSelects = screen.getAllByRole('combobox', { name: '选择说话角色' });
       expect(speakerSelects.length).toBeGreaterThanOrEqual(2);
-      expect((speakerSelects[0] as HTMLSelectElement).value).toBe('alice');
+      expect(speakerSelects[0].textContent).toBe('Alice');
 
       // Change speaker inline
-      fireEvent.change(speakerSelects[0], { target: { value: 'bob' } });
+      fireEvent.click(speakerSelects[0]);
+      fireEvent.click(screen.getByRole('option', { name: 'Bob' }));
       expect(state.authorMock).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'update-statement',
         patch: expect.objectContaining({
@@ -525,9 +526,11 @@ describe('List mode inline inspector and layout', () => {
       state.compiledScene = sceneStatementCompiler.compile(state.document);
       renderList();
       const speaker = screen.getByRole('combobox', { name: '选择说话角色' });
-      fireEvent.change(speaker, { target: { value: '' } });
+      fireEvent.click(speaker);
+      fireEvent.click(screen.getByRole('option', { name: '(旁白)' }));
       await waitFor(() => expect(state.document.statements[0].params).toEqual({ text: 'Hello', durationSeconds: 2 }));
-      fireEvent.change(speaker, { target: { value: 'bob' } });
+      fireEvent.click(speaker);
+      fireEvent.click(screen.getByRole('option', { name: 'Bob' }));
       await waitFor(() => expect(state.document.statements[0].params).toMatchObject({ speakerId: 'bob', speaker: 'Bob', speakerColor: '#123456' }));
     });
 

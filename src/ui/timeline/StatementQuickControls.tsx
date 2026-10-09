@@ -1,28 +1,63 @@
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import type { SceneMeta } from '../../api/types/scene-common';
 import type { SceneVisualBlock } from '../../api/types/visual';
 import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
 import { CollaborativeDraftNotice, InlineNumericInput, useRemoteAwareStringDraft } from './FormComponents';
-import { getSemanticInspectorFields } from './semanticInspectorFieldCatalog';
-
-const quickKeys = new Set([
-  'id', 'target', 'layerId', 'speakerId', 'text', 'file', 'model', 'recipeId',
-  'position', 'to', 'offset', 'screenTarget', 'scale', 'rotation', 'opacity',
-  'zoom', 'intensity', 'durationSeconds', 'volume', 'fadeOut', 'motion', 'expression',
-]);
-const coordinateKeys = new Set(['position', 'to', 'offset', 'screenTarget']);
+import { getStatementQuickFields, quickCoordinateKeys } from './statementQuickFields';
+import { FormSelect } from '../FormSelect';
+import { InlineFilePicker } from '../InlineFilePicker';
+import { buildCharacterEntranceModelOptions } from './inspector/entranceModelOptions';
 
 export type QuickParamPatch = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
 
-function QuickTextInput({ value, label, multiline = false, readOnly = false, title, disabled, onChange }: {
+function QuickTextInput({ value, label, multiline = false, expanded = false, readOnly = false, title, disabled, onChange }: {
   value: string;
   label: string;
   multiline?: boolean;
+  expanded?: boolean;
   readOnly?: boolean;
   title?: string;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const draft = useRemoteAwareStringDraft(value, onChange);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sizing = useRef({ expanded, height: '', manualMinimum: 0 });
+  const resize = useCallback(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    const previous = sizing.current;
+    if (previous.expanded !== expanded) previous.manualMinimum = 0;
+    else if (element.style.height !== previous.height) {
+      previous.manualMinimum = Number.parseFloat(element.style.height) || 0;
+    }
+    previous.expanded = expanded;
+    if (!expanded) {
+      element.style.height = '';
+      previous.height = '';
+      return;
+    }
+    const style = window.getComputedStyle(element);
+    const lineHeight = Number.parseFloat(style.lineHeight) || (Number.parseFloat(style.fontSize) || 12) * 1.4;
+    const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+    const borders = (Number.parseFloat(style.borderTopWidth) || 0) + (Number.parseFloat(style.borderBottomWidth) || 0);
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(lineHeight * 10 + padding + borders,
+      Math.max(lineHeight * 5 + padding + borders, element.scrollHeight + borders, previous.manualMinimum))}px`;
+    previous.height = element.style.height;
+  }, [expanded]);
+  useLayoutEffect(resize, [resize, draft.localValue]);
+  useLayoutEffect(() => {
+    const element = textareaRef.current;
+    if (!element || !expanded) return;
+    let width = element.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = element.getBoundingClientRect().width;
+      if (nextWidth !== width) { width = nextWidth; resize(); }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded, resize]);
   const inputProps = {
     value: draft.localValue,
     'aria-label': label,
@@ -43,24 +78,63 @@ function QuickTextInput({ value, label, multiline = false, readOnly = false, tit
   };
   return <>
     {multiline
-      ? <textarea {...inputProps} rows={2} className="timeline-item__inline-input timeline-item__inline-input--text" placeholder="输入台词内容..." />
+      ? <textarea {...inputProps} ref={textareaRef} rows={expanded ? 5 : 2} className="timeline-item__inline-input timeline-item__inline-input--text" placeholder="输入台词内容..." />
       : <input {...inputProps} className="timeline-item__inline-input" />}
     <CollaborativeDraftNotice visible={draft.hasRemoteUpdate} />
   </>;
 }
 
-export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled, onChange }: {
+export function StatementQuickControls({ item, sceneMeta, sceneVisual, expanded = false, disabled, onChange }: {
   item: SemanticTimelineReadModelItem;
   sceneMeta: SceneMeta;
   sceneVisual?: SceneVisualBlock;
+  expanded?: boolean;
   disabled: boolean;
   onChange: (patch: QuickParamPatch) => void;
 }) {
   const source = item.source.params as Record<string, unknown>;
-  const fields = getSemanticInspectorFields(item.source.type, source, sceneVisual)
-    .filter((field) => quickKeys.has(field.key));
+  const fields = getStatementQuickFields(item, sceneVisual);
   const isDialogue = item.source.type === 'dialogue';
   const characters = sceneMeta.characters ?? [];
+
+  const resourcePicker = (key: string, value: unknown, label: string) => {
+    const params = source;
+    const semanticType = item.source.type;
+    const isImage = key === 'image'
+      || (key === 'file' && (semanticType === 'environmentLayer'
+        || (semanticType === 'graphicLayer' && params.kind === 'image')));
+    const isAudio = key === 'voice' || key === 'audio' || key === 'bgm' || key === 'se'
+      || (key === 'file' && semanticType === 'audio');
+    const isAnimation = (key === 'file' || key === 'animation') && semanticType === 'customAnimation';
+    const isModel = key === 'model';
+    const filters = isModel
+      ? [{ name: 'Live2D 模型', extensions: ['json', 'wmdl'] }]
+      : isImage
+        ? [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] }]
+        : isAudio
+          ? [{ name: '音频', extensions: ['mp3', 'wav', 'ogg'] }]
+          : isAnimation
+            ? [{ name: 'HTML 动画', extensions: ['html'] }]
+            : [{ name: '所有文件', extensions: ['*'] }];
+    const importKind = isModel ? 'figure' : isImage ? 'images' : isAnimation ? 'animation'
+      : semanticType === 'dialogue' && key === 'voice' ? 'vocal'
+        : semanticType === 'audio' && key === 'file' && params.role === 'bgm' ? 'bgm' : undefined;
+    const initialDir = isModel ? 'figure' : isImage ? (semanticType === 'environmentLayer' ? 'background' : 'images')
+      : isAnimation ? 'animation' : semanticType === 'dialogue' && key === 'voice' ? 'vocal'
+        : semanticType === 'audio' && key === 'file' && params.role === 'bgm' ? 'bgm' : undefined;
+    return (
+      <InlineFilePicker
+        presentation="input"
+        value={typeof value === 'string' ? value : ''}
+        onChange={(next) => onChange({ [key]: next })}
+        filters={filters}
+        importKindOverride={importKind}
+        initialDirOverride={initialDir}
+        ariaLabel={label}
+        placeholder={isModel ? '选择 Live2D 模型...' : isImage ? '选择图片...' : isAudio ? '选择音频...' : undefined}
+      />
+    );
+  };
 
   return (
     <fieldset className="timeline-item__quick-fields" disabled={disabled} aria-label="基本属性">
@@ -75,21 +149,24 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
           return (
             <label key={field.key} className="timeline-item__inline-field">
               {!isDialogue && <span className="timeline-item__inline-label">{field.label}</span>}
-              <select className="timeline-item__inline-select" value={current} aria-label={label}
-                onChange={(event) => {
-                  const id = event.target.value;
+              <FormSelect className="timeline-item__inline-select" value={current} aria-label={label}
+                disabled={disabled}
+                placeholder={isDialogue ? '(旁白)' : '未绑定角色'}
+                options={[
+                  ...(isDialogue ? [{ value: '', label: '(旁白)' }] : []),
+                  ...(current && !characters.some((character) => character.id === current)
+                    ? [{ value: current, label: current }] : []),
+                  ...characters.map((character) => ({ value: character.id, label: character.name })),
+                ]}
+                onChange={(id) => {
                   if (!isDialogue) { onChange({ [field.key]: id }); return; }
                   const character = characters.find((candidate) => candidate.id === id);
                   onChange({ speakerId: id || undefined, speaker: character?.name, speakerColor: character?.color });
-                }}>
-                <option value="">{isDialogue ? '(旁白)' : '选择角色...'}</option>
-                {current && !characters.some((character) => character.id === current) && <option value={current}>{current}</option>}
-                {characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
-              </select>
+                }} />
             </label>
           );
         }
-        if (coordinateKeys.has(field.key)) {
+        if (quickCoordinateKeys.has(field.key)) {
           const position = Array.isArray(value) ? value : field.key === 'offset' ? [0, 0] : [0.5, 0.5];
           return [0, 1].map((axis) => (
             <div key={`${field.key}:${axis}`} className="timeline-item__inline-field">
@@ -109,7 +186,7 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
           ));
         }
         if (field.key === 'text') {
-          return <QuickTextInput key={field.key} multiline disabled={disabled}
+          return <QuickTextInput key={field.key} multiline expanded={expanded} disabled={disabled}
             value={typeof value === 'string' ? value : ''} label={isDialogue ? '编辑台词内容' : field.label}
             onChange={(text) => onChange({ text })} />;
         }
@@ -139,6 +216,29 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, disabled,
                   ? { ...(current.motion as Record<string, unknown>), kind: 'resource', key }
                   : '' }))} />
             </label>
+          );
+        }
+        if (['file', 'image', 'model', 'voice', 'audio', 'bgm', 'se', 'animation'].includes(field.key)) {
+          const charId = typeof source.id === 'string' ? source.id : undefined;
+          const character = charId ? characters.find((candidate) => candidate.id === charId) : undefined;
+          if (field.key === 'model' && character && (character.model || character.variants?.length)) {
+            const options = buildCharacterEntranceModelOptions(character);
+            const currentModel = (typeof value === 'string' ? value.trim() : '') || character.model?.trim() || '';
+            return (
+              <label key={field.key} className="timeline-item__inline-field">
+                <span className="timeline-item__inline-label">模型变体</span>
+                <FormSelect className="timeline-item__inline-select" aria-label="模型变体" disabled={disabled}
+                  value={currentModel} options={options}
+                  placeholder={currentModel ? '自定义模型' : '未设置模型'}
+                  onChange={(next) => onChange({ model: next })} />
+              </label>
+            );
+          }
+          return (
+            <div key={field.key} className="timeline-item__inline-field timeline-item__inline-field--resource">
+              <span className="timeline-item__inline-label">{field.label}</span>
+              {resourcePicker(field.key, value, field.label)}
+            </div>
           );
         }
         if (value !== undefined && typeof value !== 'string' && typeof value !== 'number') return null;

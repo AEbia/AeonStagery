@@ -16,6 +16,7 @@ import {
 import { InlineNumericInput } from './FormComponents';
 import { ActionInspector } from './ActionInspector';
 import { StatementQuickControls, type QuickParamPatch } from './StatementQuickControls';
+import { InlineStatementDetails } from './InlineStatementDetails';
 import { MeasuredTimelineRow, useVirtualTimelineRows } from './useVirtualTimelineRows';
 import { ActionIcons } from './TimelineConstants';
 import { showToast } from '../Toast';
@@ -104,6 +105,24 @@ function motionKeyLabel(value: unknown): string {
     if (candidate.kind === 'custom') return '自定义动作';
   }
   return '';
+}
+
+function isStatementRowSurface(event: React.SyntheticEvent<HTMLElement>) {
+  const target = event.target;
+  return target instanceof Element && event.currentTarget.contains(target) && !target.closest(
+    'input, textarea, select, a, label, button:not(.timeline-item__select-button), '
+    + '[role="button"], [role="combobox"], [role="spinbutton"], [contenteditable="true"], .timeline-item__time',
+  );
+}
+
+function clearStatementRowPress(event: React.SyntheticEvent<HTMLElement>) {
+  delete event.currentTarget.dataset.pressed;
+}
+
+function preserveInlineDraftFocus(event: React.MouseEvent<HTMLElement>) {
+  const controls = event.currentTarget.closest('.timeline-item')?.querySelector('.timeline-item__inline-controls');
+  // Opening this row should not blur its draft or interrupt native text composition.
+  if (controls?.contains(document.activeElement)) event.preventDefault();
 }
 
 export interface TimelineListViewProps {
@@ -1026,11 +1045,23 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                     onBlur={() => virtualRows.setFocusedId(null)}>
                   <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
                     <div
-                      className={`timeline-item ${typeClass} ${isSelected ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
+                      className={`timeline-item ${typeClass} ${isSelected && !allowInlineExpand ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
                       onClick={(event) => {
-                        handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                        if (allowInlineExpand && !event.ctrlKey && !event.metaKey) toggleExpand(action._id!);
+                        if (!isStatementRowSurface(event)) return;
+                        clearStatementRowPress(event);
+                        const multi = event.ctrlKey || event.metaKey;
+                        if (allowInlineExpand && !multi) toggleExpand(action._id!);
+                        else handleSelect(action._id!, multi);
                       }}
+                      onMouseDown={(event) => {
+                        if (isStatementRowSurface(event)) preserveInlineDraftFocus(event);
+                      }}
+                      onPointerDown={(event) => {
+                        if (event.button === 0 && isStatementRowSurface(event)) event.currentTarget.dataset.pressed = 'true';
+                      }}
+                      onPointerUp={clearStatementRowPress}
+                      onPointerCancel={clearStatementRowPress}
+                      onPointerLeave={clearStatementRowPress}
                       onDragOver={(event) => {
                         if (!draggingActionId || searchQuery.trim()) return;
                         if (isDragging) {
@@ -1123,33 +1154,22 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                           aria-expanded={isExpanded}
                           aria-label={isExpanded ? '折叠详情' : '展开详情'}
                           title={isExpanded ? '折叠详情' : '展开详情'}
+                          onMouseDown={preserveInlineDraftFocus}
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleExpand(action._id!);
                           }}
                         >
-                          <IconChevronDown
-                            width={13}
-                            height={13}
-                            style={{
-                              transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                              transition: 'transform var(--transition-fast)',
-                            }}
-                          />
+                          <span className="timeline-item__expand-indicator"><IconChevronDown width={13} height={13} /></span>
                         </button>
                       )}
 
                       <button
                         type="button"
                         className="timeline-item__select-button"
-                        aria-label={`选择${title}${isSelected ? '，当前已选中' : ''}`}
-                        aria-pressed={isSelected}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleSelect(action._id!, event.ctrlKey || event.metaKey);
-                          if (allowInlineExpand && !event.ctrlKey && !event.metaKey) toggleExpand(action._id!);
-                        }}
-
+                        aria-label={allowInlineExpand ? `${isExpanded ? '折叠' : '展开'}${title}详情` : `选择${title}${isSelected ? '，当前已选中' : ''}`}
+                        aria-expanded={allowInlineExpand ? isExpanded : undefined}
+                        aria-pressed={allowInlineExpand ? undefined : isSelected}
                       >
                         <div className="timeline-item__title-row">
                           <div className="timeline-item__title">{title}</div>
@@ -1174,12 +1194,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       </button>
 
                       {allowInlineExpand && (
-                        <div
-                          className="timeline-item__inline-controls"
-                          onClick={(event) => event.stopPropagation()}
-                        >
+                        <div className="timeline-item__inline-controls">
                           {readModelItem && (
                             <StatementQuickControls item={readModelItem} sceneMeta={sceneData.meta} sceneVisual={sceneData.visual}
+                              expanded={isExpanded}
                               disabled={isOfflineEditingBlocked} onChange={(patch) => commitInlineParams(action, patch)} />
                           )}
                         </div>
@@ -1210,8 +1228,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       </div>
                     </div>
 
-                    {allowInlineExpand && isExpanded && (
-                      <div className="inspector-workspace__detail" onClick={(event) => event.stopPropagation()}>
+                    {allowInlineExpand && (
+                      <InlineStatementDetails expanded={isExpanded}>
                         <ActionInspector
                           key={action._id}
                           sceneData={sceneData}
@@ -1235,7 +1253,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                           onClose={() => toggleExpand(action._id!)}
                           closeMode="close"
                         />
-                      </div>
+                      </InlineStatementDetails>
                     )}
 
                     {gap && (
