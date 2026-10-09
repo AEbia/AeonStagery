@@ -14,6 +14,7 @@ function List({ height = 40 }: { height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const virtual = useVirtualTimelineRows(ref, rows);
   return <div ref={ref} data-testid="viewport">
+    <button onClick={() => virtual.revealRow('row-500')}>Reveal row 500</button>
     <div data-testid="list" style={{ height: virtual.totalHeight }}>
       {virtual.indices.map((index) => <MeasuredTimelineRow key={rows[index].id}
         measurementKey={rows[index].measurementKey} top={virtual.offsets[index]} gap={0}
@@ -31,6 +32,12 @@ function scrollTo(viewport: HTMLElement, top: number) {
   act(() => {
     const frames = animationFrames.splice(0);
     frames.forEach((callback) => callback(0));
+  });
+}
+
+function notifyRowResizes(container: HTMLElement) {
+  act(() => {
+    container.querySelectorAll('[data-timeline-virtual-row]').forEach((row) => observers.get(row)?.());
   });
 }
 
@@ -65,9 +72,31 @@ describe('variable-height timeline virtualization', () => {
   it('remeasures expanded rows and leaves no overlap with the following row', () => {
     const view = render(<List />);
     view.rerender(<List height={120} />);
+    notifyRowResizes(view.container);
     const first = screen.getByRole('textbox', { name: 'Row 0' }).closest('[data-timeline-virtual-row]') as HTMLElement;
     const second = screen.getByRole('textbox', { name: 'Row 1' }).closest('[data-timeline-virtual-row]') as HTMLElement;
     expect(first.style.top).toBe('0px');
+    expect(second.style.top).toBe('120px');
+  });
+
+  it('does not recurse through synchronous updates while a row height is animating', () => {
+    let reads = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const isAnimatingRow = this.querySelector('[aria-label="Row 0"]') !== null;
+      return { height: isAnimatingRow ? 40 + Math.min(++reads, 8000) / 100 : 40 } as DOMRect;
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => render(<List />)).not.toThrow();
+    expect(reads).toBeLessThan(50);
+
+    // A real size notification still updates the layout to the final height.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this.querySelector('[aria-label="Row 0"]') ? 120 : 40 } as DOMRect;
+    });
+    notifyRowResizes(screen.getByTestId('list'));
+    const second = screen.getByRole('textbox', { name: 'Row 1' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement;
     expect(second.style.top).toBe('120px');
   });
 
@@ -94,5 +123,49 @@ describe('variable-height timeline virtualization', () => {
     // Visible rows are measured again; hidden rows return to estimates until mounted.
     expect(screen.getByTestId('list').style.height).not.toBe(before);
     expect(screen.getAllByRole('textbox').length).toBeLessThan(20);
+  });
+
+  it.each([10, 200])('reveals an unmounted row after neighbors measure %i px, without a scroll event', (height) => {
+    const view = render(<List height={height} />);
+    const viewport = screen.getByTestId('viewport');
+    expect(screen.queryByRole('textbox', { name: 'Row 500' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal row 500' }));
+
+    const row = screen.getByRole('textbox', { name: 'Row 500' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement;
+    const top = Number.parseFloat(row.style.top);
+    expect(top).toBeGreaterThanOrEqual(viewport.scrollTop);
+    expect(top).toBeLessThan(viewport.scrollTop + 400);
+
+    scrollTo(viewport, 8000);
+    view.rerender(<List height={height + 1} />);
+    notifyRowResizes(view.container);
+    expect(viewport.scrollTop).toBe(8000);
+  });
+
+  it('keeps the destination visible when an earlier row finishes collapsing after the jump', () => {
+    render(<List height={200} />);
+    const viewport = screen.getByTestId('viewport');
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal row 500' }));
+    const previous = screen.getByRole('textbox', { name: 'Row 499' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this === previous ? 20 : 200 } as DOMRect;
+    });
+
+    act(() => observers.get(previous)?.());
+
+    const destination = screen.getByRole('textbox', { name: 'Row 500' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement;
+    expect(Number.parseFloat(destination.style.top)).toBe(viewport.scrollTop);
+
+    const alignedTop = viewport.scrollTop;
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this === previous ? 10 : 200 } as DOMRect;
+    });
+    act(() => observers.get(previous)?.());
+    expect(viewport.scrollTop).toBe(alignedTop);
   });
 });
