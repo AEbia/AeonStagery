@@ -1,12 +1,16 @@
-import { useCallback, useLayoutEffect, useRef } from 'react';
-import type { SceneMeta } from '../../api/types/scene-common';
-import type { SceneVisualBlock } from '../../api/types/visual';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
+import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
+import { useCharacterAdapter } from '../context/AppContext';
 import { CollaborativeDraftNotice, InlineNumericInput, useRemoteAwareStringDraft } from './FormComponents';
 import { getStatementQuickFields, quickCoordinateKeys } from './statementQuickFields';
 import { FormSelect } from '../FormSelect';
 import { InlineFilePicker } from '../InlineFilePicker';
-import { buildCharacterEntranceModelOptions } from './inspector/entranceModelOptions';
+import { buildCharacterEntranceModelOptions, resolveActiveModelPath } from './inspector/entranceModelOptions';
+import { resolveCharacterPerformanceTargetCharId } from './characterPerformancePresentation';
+import { Live2DResourceSelect } from './inspector/Live2DResourceSelect';
+import { useCharacterModelData } from './inspector/useModelData';
+import { characterPerformanceMotionKey } from './inspector/dialogueCompanionModel';
 
 export type QuickParamPatch = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
 
@@ -84,14 +88,72 @@ function QuickTextInput({ value, label, multiline = false, expanded = false, rea
   </>;
 }
 
-export function StatementQuickControls({ item, sceneMeta, sceneVisual, expanded = false, disabled, onChange }: {
+function QuickPerformanceResourceSelect({ item, fieldKey, sceneData, timelineActions, disabled, onChange }: {
   item: SemanticTimelineReadModelItem;
-  sceneMeta: SceneMeta;
-  sceneVisual?: SceneVisualBlock;
+  fieldKey: 'motion' | 'expression';
+  sceneData: TimelineScene;
+  timelineActions: readonly TimelineAction[];
+  disabled: boolean;
+  onChange: (patch: QuickParamPatch) => void;
+}) {
+  const characterAdapter = useCharacterAdapter();
+  const charId = resolveCharacterPerformanceTargetCharId(item.displayAction, item.displayAction.resolvedSpeakerId);
+  const character = sceneData.meta.characters?.find((candidate) => candidate.id === charId);
+  const modelPath = useMemo(
+    () => charId ? resolveActiveModelPath(sceneData, timelineActions, charId, item.time) : undefined,
+    [sceneData, timelineActions, charId, item.time],
+  );
+  const { modelData, isModelDataLoading } = useCharacterModelData(characterAdapter, modelPath);
+  const source = item.source.params as Record<string, unknown>;
+  const isMotion = fieldKey === 'motion';
+  const label = isMotion ? '动作名称' : '表情名';
+
+  return (
+    <div className="timeline-item__performance-resource" {...{ inert: disabled ? '' : undefined }}
+      onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}>
+      <Live2DResourceSelect
+        label={label}
+        value={isMotion ? characterPerformanceMotionKey(source.motion) ?? '' : String(source.expression ?? '')}
+        options={isMotion ? modelData.motions : modelData.expressions}
+        loading={isModelDataLoading}
+        charId={charId} character={character} modelPath={modelPath}
+        placeholder={isMotion ? '选择动作...' : '选择表情...'}
+        clearable clearLabel={isMotion ? '（无动作）' : '（无表情）'}
+        onChange={(key) => {
+          if (disabled) return;
+          if (isMotion) {
+            onChange((current) => ({ motion: key
+              ? { ...(current.motion as Record<string, unknown>), kind: 'resource', key }
+              : '' }));
+          } else {
+            onChange((current) => ({
+              expression: key || undefined,
+              ...(!key && current.motion === undefined && current.lookAt === undefined && current.blink === undefined
+                ? { motion: '' } : {}),
+            }));
+          }
+        }}
+        onPreview={charId ? (key) => {
+          if (disabled) return;
+          if (!isMotion) characterAdapter.setExpression(charId, key || '');
+          else if (key) characterAdapter.playMotion(charId, key);
+          else characterAdapter.stopAllMotions(charId);
+        } : undefined}
+      />
+    </div>
+  );
+}
+
+export function StatementQuickControls({ item, sceneData, timelineActions, expanded = false, disabled, onChange }: {
+  item: SemanticTimelineReadModelItem;
+  sceneData: TimelineScene;
+  timelineActions: readonly TimelineAction[];
   expanded?: boolean;
   disabled: boolean;
   onChange: (patch: QuickParamPatch) => void;
 }) {
+  const { meta: sceneMeta, visual: sceneVisual } = sceneData;
   const source = item.source.params as Record<string, unknown>;
   const fields = getStatementQuickFields(item, sceneVisual);
   const isDialogue = item.source.type === 'dialogue';
@@ -204,8 +266,12 @@ export function StatementQuickControls({ item, sceneMeta, sceneVisual, expanded 
             </div>
           );
         }
-        if (field.key === 'motion') {
+        if (field.key === 'motion' || field.key === 'expression') {
           const motion = value && typeof value === 'object' ? value as { kind: string; key: string } : undefined;
+          if (field.key === 'expression' || motion?.kind !== 'custom') {
+            return <QuickPerformanceResourceSelect key={field.key} item={item} fieldKey={field.key}
+              sceneData={sceneData} timelineActions={timelineActions} disabled={disabled} onChange={onChange} />;
+          }
           return (
             <label key={field.key} className="timeline-item__inline-field">
               <span className="timeline-item__inline-label">动作</span>

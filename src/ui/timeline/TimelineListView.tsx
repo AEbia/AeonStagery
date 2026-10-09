@@ -170,7 +170,12 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const allowInlineExpand = props.inlineExpandable ?? (!isTracksMode);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [expandedActionIds, setExpandedActionIds] = useState<Record<string, boolean>>({});
+  const [manuallyExpandedActionIds, setManuallyExpandedActionIds] = useState<Record<string, boolean>>({});
+  const [automaticallyExpandedActionId, setAutomaticallyExpandedActionId] = useState<string | null>(null);
+  const expandedActionIds = useMemo(() => automaticallyExpandedActionId
+    ? { ...manuallyExpandedActionIds, [automaticallyExpandedActionId]: true }
+    : manuallyExpandedActionIds, [automaticallyExpandedActionId, manuallyExpandedActionIds]);
+  const [revealedActionId, setRevealedActionId] = useState<string | null>(null);
   const [draggingActionId, setDraggingActionId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; placement: 'before' | 'after' } | null>(null);
   const [dragOverGapIndex, setDragOverGapIndex] = useState<number | null>(null);
@@ -178,8 +183,10 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const app = useOptionalApp();
 
   const toggleExpand = useCallback((id: string) => {
-    setExpandedActionIds((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, []);
+    const expandedBySelection = automaticallyExpandedActionId === id;
+    setManuallyExpandedActionIds((prev) => ({ ...prev, [id]: !(prev[id] || expandedBySelection) }));
+    setAutomaticallyExpandedActionId((current) => current === id ? null : current);
+  }, [automaticallyExpandedActionId]);
 
   useEffect(() => {
     const handleWindowDragEnd = () => {
@@ -212,9 +219,12 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
   const selectedSingleId = selectedIdsList.length === 1 ? selectedIdsList[0] : undefined;
   useEffect(() => {
-    if (allowInlineExpand && selectedSingleId) setExpandedActionIds((prev) => (
-      prev[selectedSingleId] ? prev : { ...prev, [selectedSingleId]: true }
-    ));
+    if (!revealedActionId) return;
+    const timeout = window.setTimeout(() => setRevealedActionId(null), 250);
+    return () => window.clearTimeout(timeout);
+  }, [revealedActionId, selectedSingleId]);
+  useEffect(() => {
+    setAutomaticallyExpandedActionId(allowInlineExpand && selectedSingleId ? selectedSingleId : null);
   }, [allowInlineExpand, selectedSingleId]);
   const characterCount = sceneData.meta.characters?.length ?? 0;
   const charactersById = useMemo(
@@ -326,6 +336,23 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     };
   }), [filteredActions, allowInlineExpand, expandedActionIds]);
   const virtualRows = useVirtualTimelineRows(listContainerRef, virtualRowSizes);
+  const lastRevealedSelectionRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!selectedSingleId) {
+      virtualRows.cancelReveal();
+      lastRevealedSelectionRef.current = undefined;
+      setRevealedActionId(null);
+      return;
+    }
+    if (lastRevealedSelectionRef.current === selectedSingleId) return;
+    virtualRows.cancelReveal();
+    // Expand first so the scroll range includes the inline inspector's height.
+    if (allowInlineExpand && !expandedActionIds[selectedSingleId]) return;
+    if (virtualRows.revealRow(selectedSingleId)) {
+      lastRevealedSelectionRef.current = selectedSingleId;
+      setRevealedActionId(selectedSingleId);
+    }
+  }, [allowInlineExpand, expandedActionIds, selectedSingleId, virtualRows.revealRow, virtualRows.cancelReveal]);
 
   // ── Actions ────────────────────────────────────────────
   const handleDeleteItem = useCallback(async (e: React.MouseEvent, id: string) => {
@@ -632,16 +659,20 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   }, [collaborationUndoDisabled, semanticAuthoring]);
 
   const handleExpandAll = useCallback(() => {
+    virtualRows.cancelReveal();
     const next: Record<string, boolean> = {};
     filteredActions.forEach((action) => {
       if (action._id) next[action._id] = true;
     });
-    setExpandedActionIds(next);
-  }, [filteredActions]);
+    setManuallyExpandedActionIds(next);
+    setAutomaticallyExpandedActionId(null);
+  }, [filteredActions, virtualRows.cancelReveal]);
 
   const handleCollapseAll = useCallback(() => {
-    setExpandedActionIds({});
-  }, []);
+    virtualRows.cancelReveal();
+    setManuallyExpandedActionIds({});
+    setAutomaticallyExpandedActionId(null);
+  }, [virtualRows.cancelReveal]);
 
   const commitInlineParams = useCallback((action: TimelineAction, patch: QuickParamPatch, replace = false) => {
     if (blockOfflineAuthoring() || !semanticAuthoring || !action._id) return;
@@ -838,7 +869,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
             }}
             style={{
               flex: 1, overflowY: 'auto', padding: allowInlineExpand ? '0 8px 16px' : '0 8px 12px',
-              position: 'relative', minHeight: 0, isolation: 'isolate'
+              position: 'relative', minHeight: 0, isolation: 'isolate', overflowAnchor: 'none'
             }}
           >
             <div className="timeline-list-items" style={{ position: 'relative', height: virtualRows.totalHeight }}>
@@ -1043,9 +1074,9 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                     measure={virtualRows.measure}
                     onFocus={() => virtualRows.setFocusedId(virtualRowSizes[realIdx].id)}
                     onBlur={() => virtualRows.setFocusedId(null)}>
-                  <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
+                  <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${action._id === revealedActionId ? 'timeline-item-container--revealed' : ''} ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
                     <div
-                      className={`timeline-item ${typeClass} ${isSelected && !allowInlineExpand ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
+                      className={`timeline-item ${typeClass} ${isSelected && !allowInlineExpand ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${action._id === revealedActionId ? 'timeline-item--revealed' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
                       onClick={(event) => {
                         if (!isStatementRowSurface(event)) return;
                         clearStatementRowPress(event);
@@ -1196,7 +1227,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                       {allowInlineExpand && (
                         <div className="timeline-item__inline-controls">
                           {readModelItem && (
-                            <StatementQuickControls item={readModelItem} sceneMeta={sceneData.meta} sceneVisual={sceneData.visual}
+                            <StatementQuickControls item={readModelItem} sceneData={sceneData} timelineActions={semanticTimelineActions}
                               expanded={isExpanded}
                               disabled={isOfflineEditingBlocked} onChange={(patch) => commitInlineParams(action, patch)} />
                           )}
@@ -1229,7 +1260,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                     </div>
 
                     {allowInlineExpand && (
-                      <InlineStatementDetails expanded={isExpanded}>
+                      <InlineStatementDetails expanded={isExpanded}
+                        animateExpansion={automaticallyExpandedActionId !== action._id || !!manuallyExpandedActionIds[action._id!]}>
                         <ActionInspector
                           key={action._id}
                           sceneData={sceneData}
