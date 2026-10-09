@@ -26,6 +26,7 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
         character={charMeta}
         modelPath={ctx.targetModelPath}
         placeholder="选择动作..."
+        triggerLabel={ctx.rowFieldKeys?.has(key) ? '浏览并预览动作…' : undefined}
         dataTestId={base.paramTestId}
         clearable
         clearLabel="（无动作）"
@@ -65,6 +66,7 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
         character={charMeta}
         modelPath={ctx.targetModelPath}
         placeholder="选择表情..."
+        triggerLabel={ctx.rowFieldKeys?.has(key) ? '浏览并预览表情…' : undefined}
         dataTestId={base.paramTestId}
         clearable
         clearLabel="（无表情）"

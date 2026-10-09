@@ -27,6 +27,7 @@ export interface ParamControlBase {
 
 /** The component environment the dispatch chain closes over, passed explicitly. */
 export interface InspectorParamContext {
+  rowFieldKeys?: ReadonlySet<string>;
   action: TimelineAction;
   actionId: string;
   actionType: string;

@@ -126,7 +126,7 @@ export function resolveResourceParam(ctx: InspectorParamContext, key: string, ba
   }
   return (
     <FileInput
-      presentation="asset"
+      presentation={ctx.rowFieldKeys?.has(key) ? 'button' : 'asset'}
       key={key}
       label={base.label}
       value={val}

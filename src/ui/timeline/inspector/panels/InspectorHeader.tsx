@@ -1,5 +1,8 @@
 // Action inspector header: back/close, title + time scrubber, lifecycle-peer
 // jump, issue badge, seek/copy/delete tools, collaboration warning.
+// Only the docked (panel) presentation renders the header. In 剧本动作优先模式
+// the statement row already carries title, time, play and delete, so
+// `.selected-action-header` is not rendered there; just the collaboration warning.
 // Pure move of the header JSX from ActionInspector's return block.
 import { InlineNumericInput } from '../../FormComponents';
 import { IconArrowLeft, IconCopy, IconInfo, IconPlay, IconTrash, IconUsers, IconX } from '../../../icons';
@@ -33,7 +36,18 @@ export function InspectorHeader(props: InspectorHeaderProps) {
     actionIssues, actionIssueSeverity, handleSeekToAction, handleCopyAction,
     deleteAction, updateAction, collaborationEditingSummary,
   } = props;
-  const isInline = props.presentation === 'inline';
+
+  const collaborationWarning = collaborationEditingSummary && (
+    <div className="selected-action-collaboration-warning" role="status">
+      <IconUsers width={13} height={13} />
+      <span>{collaborationEditingSummary}</span>
+    </div>
+  );
+
+  // 剧本动作优先模式（inline）不显示 .selected-action-header：语句行本身已经是
+  // 标题 + 时间 + 播放/删除的操作条，展开区只需要属性表单。
+  if (props.presentation === 'inline') return <>{collaborationWarning}</>;
+
   const effectSummary = actionDisplayName && (
     <div className="selected-action-header__intent">
       当前效果: {actionDisplayName}
@@ -88,11 +102,10 @@ export function InspectorHeader(props: InspectorHeaderProps) {
         {closeMode === 'back' ? <IconArrowLeft width={16} height={16} /> : <IconX width={16} height={16} />}
       </button>
       <div className="selected-action-header__main">
-        {isInline && effectSummary}
         <div className="selected-action-header__title">
           {inspectorTitle}
         </div>
-        {isInline ? timingMeta : effectSummary}
+        {effectSummary}
       </div>
       <div className="selected-action-header__tools">
         <button className="btn btn--icon" onClick={handleSeekToAction} title="跳到动作起点" aria-label="跳到动作起点">
@@ -105,15 +118,10 @@ export function InspectorHeader(props: InspectorHeaderProps) {
       <button className="btn btn--icon selected-action-header__delete" onClick={() => deleteAction(actionId)} title="删除" aria-label="删除动作">
         <IconTrash width={16} height={16} />
       </button>
-      {!isInline && timingMeta}
+      {timingMeta}
     </div>
 
-    {collaborationEditingSummary && (
-      <div className="selected-action-collaboration-warning" role="status">
-        <IconUsers width={13} height={13} />
-        <span>{collaborationEditingSummary}</span>
-      </div>
-    )}
+    {collaborationWarning}
     </>
   );
 }

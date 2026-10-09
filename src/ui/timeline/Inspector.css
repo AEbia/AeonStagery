@@ -1038,13 +1038,6 @@
 .selected-action-inspector[data-presentation="inline"] .inspector-grid > .inspector-row {
   grid-template-columns: 80px minmax(0, 1fr);
 }
-.selected-action-inspector[data-presentation="inline"] .selected-action-header { padding: 6px 0; }
-.selected-action-inspector[data-presentation="inline"] .selected-action-header__main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-}
 
 /* Properties lead in source order; wide selectors and supporting tools use full rows. */
 .selected-action-inspector__content > * {

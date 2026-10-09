@@ -70,6 +70,10 @@ import { useCustomMotionAuthoring } from './inspector/useCustomMotionAuthoring';
 import { useInspectorOptions } from './inspector/useInspectorOptions';
 import { useModelData } from './inspector/useModelData';
 import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
+import { getStatementQuickFields } from './statementQuickFields';
+
+// These fields retain supplemental browsing/preview tools, without displaying their value again.
+const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression', 'layerId']);
 
 export interface ActionInspectorProps {
   semanticTimelineItems?: SemanticTimelineReadModelItem[];
@@ -178,6 +182,9 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const semanticInspectorFieldByKey = new Map(
     semanticInspectorFields.map((fieldDefinition) => [fieldDefinition.key, fieldDefinition] as const),
   );
+  const rowFieldKeys = new Set(props.presentation === 'inline' && semanticItem
+    ? getStatementQuickFields(semanticItem, sceneData.visual).map((field) => field.key)
+    : []);
   const dialogueSpeakerCharacter = actionType === 'dialogue' && typeof actionParams.speakerId === 'string'
     ? sceneData.meta.characters?.find((character) => character.id === actionParams.speakerId)
     : undefined;
@@ -219,7 +226,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     action, actionType, actionParams, usesSourceParamForm,
     isLensFilterSourceAction, isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     semanticItem, semanticInspectorFields, semanticInspectorFieldByKey, isCharacterEntranceAction,
-  });
+  }).filter((key) => !rowFieldKeys.has(key) || ROW_TOOL_KEYS.has(key));
   const semanticActionLabel = action.semanticType === 'visualStyle'
     ? getVisualStyleSemanticLabel(actionParams)
     : action.semanticType === 'lighting'
@@ -281,6 +288,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const generalKeys = groups.General.filter((key) => !resourcePickerKeys.includes(key));
 
   const paramContext: InspectorParamContext = {
+    rowFieldKeys,
     action, actionId, actionType, actionParams, sourceParams, sceneData, allKeys,
     semanticInspectorFieldByKey, semanticItem, semanticDocument,
     showVisualAdvanced, isPrimaryVisualIntentBlock, isCharacterEntranceAction,
@@ -295,6 +303,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   };
 
   const renderParam = (key: string) => {
+    if (rowFieldKeys.has(key) && !ROW_TOOL_KEYS.has(key)) return null;
     const guarded = resolveGuardedParam(paramContext, key);
     if (guarded !== undefined) return guarded;
     return resolveParamControl(paramContext, key, computeParamBase(paramContext, key));
@@ -338,6 +347,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
 
 
         {isIntegrationVisualAction && <CharacterIntegrationControls key={actionId}
+          rowFieldKeys={rowFieldKeys}
           params={sourceParams} sceneVisual={sceneData.visual} targets={characterVisualTargetOptions}
           targetKey={usesSourceParamForm ? 'target' : 'targetId'}
           durationKey={usesSourceParamForm ? 'durationSeconds' : 'duration'}
@@ -357,7 +367,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           {generalKeys.length > 0 && (
             <div className="inspector-section inspector-section--properties">
               <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
-                {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
+                {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : props.presentation === 'inline' ? '更多设置' : '基础属性'}
               </div>
               <div className="inspector-grid">
                 {generalKeys.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
@@ -400,6 +410,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
         />
         <div className="inspector-grid inspector-source-fields">
           <SemanticSourcePanel
+            rowFieldKeys={rowFieldKeys}
             action={action} actionType={actionType} actionId={actionId} actionParams={actionParams}
             sourceParams={sourceParams} sceneData={sceneData}
             isIntegrationVisualAction={isIntegrationVisualAction} isLensFilterSourceAction={isLensFilterSourceAction}

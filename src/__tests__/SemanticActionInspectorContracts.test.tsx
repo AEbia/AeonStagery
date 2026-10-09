@@ -337,7 +337,7 @@ describe('Task 2 ActionInspector contracts', () => {
     });
 
     const modelSelect = screen.getByRole('combobox', { name: '模型文件' });
-    expect(modelSelect.textContent).toContain('默认模型');
+    expect(modelSelect.textContent).toContain('主模型');
     expect(screen.queryByPlaceholderText('选择 Live2D 模型文件')).toBeNull();
 
     await act(async () => {
@@ -345,6 +345,8 @@ describe('Task 2 ActionInspector contracts', () => {
     });
     expect(screen.getByRole('option', { name: '冬装' })).toBeTruthy();
     expect(screen.getByRole('option', { name: '夏装' })).toBeTruthy();
+    // Only registered models are selectable; the ad-hoc current path is not a catalog entry.
+    expect(screen.queryByRole('option', { name: '当前模型文件' })).toBeNull();
     await act(async () => {
       fireEvent.click(screen.getByRole('option', { name: '夏装' }));
     });
@@ -1310,7 +1312,7 @@ describe('Task 2 ActionInspector contracts', () => {
     });
   });
 
-  it('exposes lookAt and blink panels on characterPerformance and allows adding/removing them', () => {
+  it('exposes lookAt and blink panels on characterPerformance and allows adding lookAt only', () => {
     const statement = {
       id: 'performance_controls',
       time: 0,
@@ -1318,7 +1320,7 @@ describe('Task 2 ActionInspector contracts', () => {
       params: {
         target: 'hero',
         motion: { kind: 'resource', key: 'idle.mtn' },
-        lookAt: { point: [0.3, 0.4], intensity: 0.8, enabled: true },
+        blink: { enabled: true, interval: 4 },
       },
     };
     const actionId = 'performance_controls::motion';
@@ -1332,18 +1334,19 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: statement.id, outputKey: 'motion' },
     });
 
-    // 已有 lookAt 应展示视线控制面板，且有移除按钮
-    expect(screen.getByText('视线控制')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '移除视线' })).toBeTruthy();
+    // 已有 blink 应展示眨眼控制面板，且有移除按钮
+    expect(screen.getByText('眨眼控制')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移除眨眼' })).toBeTruthy();
 
-    // 未配置 blink 应提供添加眨眼控制按钮
-    const addBlinkBtn = screen.getByRole('button', { name: '+ 添加眨眼控制' });
-    expect(addBlinkBtn).toBeTruthy();
+    // 不再提供添加眨眼控制按钮，未配置 lookAt 时仅提供添加视线控制
+    expect(screen.queryByRole('button', { name: '+ 添加眨眼控制' })).toBeNull();
+    const addLookAtBtn = screen.getByRole('button', { name: '+ 添加视线控制' });
+    expect(addLookAtBtn).toBeTruthy();
 
-    fireEvent.click(addBlinkBtn);
+    fireEvent.click(addLookAtBtn);
     expect(replaceSourceParams).toHaveBeenCalledWith(
       actionId,
-      expect.objectContaining({ blink: { enabled: true, interval: 4 } }),
+      expect.objectContaining({ lookAt: { point: [0, 0], intensity: 1, enabled: true } }),
     );
   });
 });

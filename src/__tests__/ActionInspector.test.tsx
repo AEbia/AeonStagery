@@ -915,4 +915,28 @@ describe('ActionInspector', () => {
 
     expect(screen.getByText('power4.inOut (自定义)')).toBeTruthy();
   });
+
+  it('renders the action header only in the docked panel, not in script-action priority', async () => {
+    const props = {
+      sceneData: { sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] },
+      selectedActionIds: { dialogue_1: true },
+      setSelectedIds: vi.fn(),
+      updateAction: vi.fn(),
+      updateParam: vi.fn(),
+      replaceSourceParams: vi.fn(),
+      deleteAction: vi.fn(),
+      onClose: vi.fn(),
+    };
+
+    const panel = render(<ActionInspector {...props} />);
+    expect(panel.container.querySelector('.selected-action-header')).toBeTruthy();
+    await act(async () => { panel.unmount(); });
+
+    const inline = render(<ActionInspector {...props} presentation="inline" closeMode="close" />);
+    // 剧本动作优先模式：语句行本身已提供标题/时间/播放/删除，头部不再渲染。
+    expect(inline.container.querySelector('.selected-action-header')).toBeNull();
+    // The property form still expands under the statement row.
+    expect(inline.container.querySelector('.selected-action-inspector__content')).toBeTruthy();
+    await act(async () => { inline.unmount(); });
+  });
 });

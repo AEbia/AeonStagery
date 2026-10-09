@@ -1,4 +1,4 @@
-// CharacterPerformance look-at / blink editors + the "add control" buttons
+// CharacterPerformance look-at / blink editors + the "add look-at control" button
 // (was renderCharacterLookAtPanel / renderCharacterBlinkPanel /
 // renderCharacterPerformanceControls).
 import {
@@ -168,33 +168,18 @@ export function CharacterPerformanceAddControls(props: Omit<CharacterPerformance
   if (isPureLookAt || isPureBlink) return null;
 
   const hasLookAt = actionParams.lookAt !== undefined || actionType === 'characterLookAt';
-  const hasBlink = actionParams.blink !== undefined || actionType === 'characterBlink';
-  if (hasLookAt && hasBlink) return null;
+  if (hasLookAt) return null;
 
   return (
     <div className="inspector-section" style={{ paddingTop: 8 }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        {!hasLookAt && (
-          <button
-            type="button"
-            className="btn btn--sm btn--secondary"
-            style={{ flex: 1, fontSize: 12 }}
-            onClick={() => updateAuthoringParam('lookAt', { point: [0, 0], intensity: 1, enabled: true })}
-          >
-            + 添加视线控制
-          </button>
-        )}
-        {!hasBlink && (
-          <button
-            type="button"
-            className="btn btn--sm btn--secondary"
-            style={{ flex: 1, fontSize: 12 }}
-            onClick={() => updateAuthoringParam('blink', { enabled: true, interval: 4 })}
-          >
-            + 添加眨眼控制
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        className="btn btn--sm btn--secondary"
+        style={{ fontSize: 12 }}
+        onClick={() => updateAuthoringParam('lookAt', { point: [0, 0], intensity: 1, enabled: true })}
+      >
+        + 添加视线控制
+      </button>
     </div>
   );
 }
