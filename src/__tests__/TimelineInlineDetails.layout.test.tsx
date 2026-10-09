@@ -2,8 +2,7 @@
 import { setupInlineDetailsFixture, list, expand } from './fixtures/timelineInlineDetails';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readStylesheet } from './helpers/readStylesheet';
 import { InlineStatementDetails } from '../ui/timeline/InlineStatementDetails';
 
 setupInlineDetailsFixture();
@@ -131,7 +130,7 @@ describe('Inline details layout', () => {
   });
 
   it('extends the statement decorative color strip down the expanded detail panel seamlessly with unified hover', () => {
-    const listCss = readFileSync(resolve(process.cwd(), 'src', 'styles', 'timeline', 'list.css'), 'utf8')
+    const listCss = readStylesheet('src/styles/timeline/list.css')
       // jsdom has no browser hover state; use an attribute to exercise the same rules.
       .replaceAll(':hover', '[data-test-hover]')
       .replaceAll('var(--color-dialogue)', 'rgb(0, 170, 0)')

@@ -5,6 +5,8 @@
 @import './controls.css';
 @import './stage.css';
 @import './side-panel.css';
+@import './left-panel.css';
+@import './property-inspector.css';
 @import './resize-handles.css';
 @import './bottom-panel.css';
 @import './feedback.css';

@@ -1,11 +1,10 @@
 /** @vitest-environment jsdom */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readStylesheet } from './helpers/readStylesheet';
 import { render } from '@testing-library/react';
 import { expect, it } from 'vitest';
 
 it('lights up the statement and expanded details together immediately without a dividing border', () => {
-  const css = readFileSync(resolve(process.cwd(), 'src/styles/timeline/list.css'), 'utf8')
+  const css = readStylesheet('src/styles/timeline/list.css')
     .replaceAll('var(--accent-glow)', 'rgba(79, 70, 229, 0.15)')
     .replaceAll('var(--accent-primary)', 'rgb(79, 70, 229)')
     .replaceAll('var(--border-subtle)', 'rgb(40, 40, 40)')
