@@ -1046,7 +1046,8 @@
   color: var(--text-primary);
   cursor: pointer;
   max-width: 120px;
-  min-width: 0;
+  /* Short values (「新角色」, placeholders) should not collapse the control. */
+  min-width: 84px;
   width: auto;
   flex-shrink: 0;
 }
@@ -1076,8 +1077,11 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
   border-bottom-left-radius: var(--radius-md);
   border-bottom-right-radius: var(--radius-md);
+  margin-top: 0;
   padding: 8px 12px;
   height: auto;
   min-height: auto;
@@ -1087,7 +1091,10 @@
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.timeline-item:hover {
+.timeline-item:hover,
+.timeline-item-container:hover .timeline-item,
+.timeline-item-container:hover .inspector-workspace__detail,
+.timeline-item-container .inspector-workspace__detail:hover {
   border-color: var(--border-highlight);
 }
 
@@ -1107,11 +1114,24 @@
 }
 
 /* Color-coded left borders */
-.timeline-item--dialogue { border-left: 3px solid var(--color-dialogue); }
-.timeline-item--character { border-left: 3px solid var(--color-character); }
-.timeline-item--camera { border-left: 3px solid var(--color-camera); }
-.timeline-item--environment { border-left: 3px solid var(--color-environment); }
-.timeline-item--audio { border-left: 3px solid var(--color-audio); }
+.timeline-item--dialogue,
+.timeline-item-container .timeline-item--dialogue ~ .inspector-workspace__detail,
+.timeline-item--dialogue ~ .inspector-workspace__detail { border-left: 3px solid var(--color-dialogue); }
+.timeline-item--character,
+.timeline-item-container .timeline-item--character ~ .inspector-workspace__detail,
+.timeline-item--character ~ .inspector-workspace__detail { border-left: 3px solid var(--color-character); }
+.timeline-item--placeholder,
+.timeline-item-container .timeline-item--placeholder ~ .inspector-workspace__detail,
+.timeline-item--placeholder ~ .inspector-workspace__detail { border-left-style: dashed; }
+.timeline-item--camera,
+.timeline-item-container .timeline-item--camera ~ .inspector-workspace__detail,
+.timeline-item--camera ~ .inspector-workspace__detail { border-left: 3px solid var(--color-camera); }
+.timeline-item--environment,
+.timeline-item-container .timeline-item--environment ~ .inspector-workspace__detail,
+.timeline-item--environment ~ .inspector-workspace__detail { border-left: 3px solid var(--color-environment); }
+.timeline-item--audio,
+.timeline-item-container .timeline-item--audio ~ .inspector-workspace__detail,
+.timeline-item--audio ~ .inspector-workspace__detail { border-left: 3px solid var(--color-audio); }
 
 .timeline-item__drag-handle,
 .timeline-item__type-icon {
@@ -1265,10 +1285,31 @@
 }
 
 .timeline-item[data-pressed="true"],
-.timeline-item:has(> .timeline-item__select-button:active) {
+.timeline-item--revealed,
+.timeline-item-container--revealed > .timeline-item,
+.timeline-item-container--revealed > .inspector-workspace__detail,
+.timeline-item:has(> .timeline-item__select-button:active),
+.timeline-item[data-pressed="true"] ~ .inspector-workspace__detail,
+.timeline-item--revealed ~ .inspector-workspace__detail,
+.timeline-item:has(> .timeline-item__select-button:active) ~ .inspector-workspace__detail,
+.timeline-item-container:has(> .timeline-item[data-pressed="true"]) .inspector-workspace__detail,
+.timeline-item-container:has(> .timeline-item--revealed) .inspector-workspace__detail,
+.timeline-item-container:has(> .timeline-item > .timeline-item__select-button:active) .inspector-workspace__detail {
   background: var(--accent-glow) !important;
-  border-color: var(--accent-primary);
-  box-shadow: inset 0 1px 4px var(--accent-glow);
+  border-color: var(--accent-primary) !important;
+  box-shadow: inset 1px 0 0 var(--accent-glow), inset -1px 0 0 var(--accent-glow);
+}
+
+/* Light up both halves at once, then let their normal transitions fade out. */
+.timeline-item-container--revealed > .timeline-item,
+.timeline-item-container--revealed > .inspector-workspace__detail {
+  transition: none;
+}
+
+.timeline-item.timeline-item--expanded {
+  /* Adjacent translucent fills must not overlap at the join. */
+  border-bottom-width: 0;
+  border-bottom-color: transparent !important;
 }
 
 [data-perf="low"] .timeline-item,
@@ -1686,6 +1727,21 @@
   flex: 0 1 auto;
 }
 
+.timeline-item__quick-fields .timeline-item__performance-resource {
+  flex: 1 1 320px;
+  min-width: min(100%, 240px);
+  max-width: 100%;
+}
+
+.timeline-item__performance-resource .searchable-select {
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 0;
+}
+
+.timeline-item__performance-resource .inspector-label {
+  font-size: 11px;
+}
+
 /* Path inputs start at width: 0, so their field must reserve usable space. */
 .timeline-item__quick-fields .timeline-item__inline-field--resource {
   flex: 1 1 280px;
@@ -1701,6 +1757,7 @@
   flex: 1;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 
 .timeline-item__quick-fields .timeline-item__inline-input:not(.timeline-item__inline-input--num) {
