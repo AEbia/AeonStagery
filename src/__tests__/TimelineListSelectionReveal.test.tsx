@@ -5,7 +5,7 @@
  * 「跳转到该语句并展开」。列表行是虚拟化的，屏幕外的行根本没有挂载，
  * 所以既要滚动到目标行，也要让它内联展开。
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCENE_SCHEMA_VERSION } from '../api/types/semantic-scene';
 import { sceneDocumentCodec, sceneStatementCompiler } from '../services/semantic-scene';
@@ -140,6 +140,40 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Track selection reveals the statement in the script list', () => {
+  it('retains a focused composing draft when another selected row is revealed, then commits once on blur', async () => {
+    const view = renderList();
+    const text = screen.getByDisplayValue('S0') as HTMLTextAreaElement;
+    const row = text.closest('.timeline-item-container') as HTMLElement;
+    fireEvent.mouseDown(text);
+    act(() => text.focus());
+    fireEvent.compositionStart(text);
+    fireEvent.change(text, { target: { value: '正在编写的草稿' } });
+    text.setSelectionRange(2, 4);
+    fireEvent.mouseDown(within(row).getByRole('button', { name: '展开详情' }));
+    fireEvent.click(within(row).getByRole('button', { name: '展开详情' }));
+
+    const viewport = selectOnTrack(view, 39);
+
+    expect(viewport.scrollTop).toBeGreaterThan(0);
+    expect(mountedTitles(view.container)).toContain('S39');
+    expect(screen.getByDisplayValue('正在编写的草稿')).toBe(text);
+    expect(document.activeElement).toBe(text);
+    expect(text.selectionStart).toBe(2);
+    expect(text.selectionEnd).toBe(4);
+    expect(view.container.querySelectorAll('[data-timeline-virtual-row]').length).toBeLessThan(20);
+    expect(state.author).not.toHaveBeenCalled();
+
+    fireEvent.compositionEnd(text);
+    act(() => text.blur());
+    await waitFor(() => expect(state.author).toHaveBeenCalledTimes(1));
+    expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'update-statement',
+      statementId: 'line-0',
+      patch: expect.objectContaining({ params: expect.objectContaining({ text: '正在编写的草稿' }) }),
+    }));
+    expect(view.container.contains(text)).toBe(false);
+  });
+
   it('switches track selections without height animations or retaining the previous inspector', () => {
     const animate = vi.fn(() => ({ cancel: vi.fn(), onfinish: null }));
     Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: animate });

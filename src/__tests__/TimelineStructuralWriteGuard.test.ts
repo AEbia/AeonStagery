@@ -94,12 +94,16 @@ describe('timeline structural write guard', () => {
 
   it('keeps TimelineListView direct item edits on semantic statement authoring', () => {
     const listView = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TimelineListView.tsx'), 'utf8');
+    const editing = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'useTimelineListEditing.ts'), 'utf8');
 
-    expect(listView).toContain('useSemanticAuthoringService');
-    expect(listView).toContain('AUTHORING_SCHEMA_VERSION');
-    expect(listView).not.toContain('useTimelineAuthoringService');
-    expect(listView).not.toContain('commitActionEdit');
-    expect(listView).not.toContain("kind: 'delete-actions'");
+    expect(listView).toContain('useTimelineListEditing');
+    expect(editing).toContain('useSemanticAuthoringService');
+    expect(editing).toContain('AUTHORING_SCHEMA_VERSION');
+    for (const content of [listView, editing]) {
+      expect(content).not.toContain('useTimelineAuthoringService');
+      expect(content).not.toContain('commitActionEdit');
+      expect(content).not.toContain("kind: 'delete-actions'");
+    }
   });
 
   it('keeps TimelineEditor structural edits on semantic statement authoring', () => {
@@ -131,13 +135,18 @@ describe('timeline structural write guard', () => {
   });
 
   it('keeps both inspector layouts on semantic statement authoring for batch delete', () => {
-    for (const file of ['PropertyInspectorShell.tsx', 'TimelineListView.tsx']) {
+    for (const [file, deleteCall] of [
+      ['PropertyInspectorShell.tsx', 'commands.delete(selectedIdsList)'],
+      ['useTimelineListEditing.ts', 'deleteActions: commands.delete'],
+    ]) {
       const inspector = fs.readFileSync(path.join(UI_ROOT, 'timeline', file), 'utf8');
       expect(inspector).toContain('useSemanticTimelineCommands');
-      expect(inspector).toContain('commands.delete(selectedIdsList)');
+      expect(inspector).toContain(deleteCall);
       expect(inspector).not.toContain('useTimelineAuthoringService');
       expect(inspector).not.toContain("kind: 'delete-actions'");
     }
+    const listView = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TimelineListView.tsx'), 'utf8');
+    expect(listView).toContain('editing.deleteActions(selectedIdsList)');
   });
 
   it('keeps marker prompt edits on semantic statement authoring', () => {
@@ -209,7 +218,7 @@ describe('timeline structural write guard', () => {
     const timelineTypes = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'semanticTimelineTypes.ts'), 'utf8');
     const trackComponents = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TrackComponents.tsx'), 'utf8');
     const density = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'timelineDensity.ts'), 'utf8');
-    const listView = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TimelineListView.tsx'), 'utf8');
+    const statementRow = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TimelineStatementRow.tsx'), 'utf8');
     const selectionBar = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'TimelineSelectionBar.tsx'), 'utf8');
     const actionInspector = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'ActionInspector.tsx'), 'utf8');
     const inspectorSubmodules = collectUiFiles(path.join(UI_ROOT, 'timeline', 'inspector'))
@@ -235,9 +244,9 @@ describe('timeline structural write guard', () => {
     expect(density).toContain('item.action.semanticType ?? item.action.action');
     expect(density).toContain('item.action.semanticLabel');
     expect(density).toContain("dominantActionType: dominantType?.type ?? 'unknown'");
-    expect(listView).toContain('action.semanticIconKey ?? action.action');
-    expect(listView).toContain('action.semanticLabel ?? action.action');
-    expect(listView).not.toContain("action.action === 'wait'");
+    expect(statementRow).toContain('action.semanticIconKey ?? action.action');
+    expect(statementRow).toContain('action.semanticLabel ?? action.action');
+    expect(statementRow).not.toContain("action.action === 'wait'");
     expect(selectionBar).toContain('action.semanticLabel ?? getActionDisplayLabel');
     expect(actionInspector).toContain('action.semanticLabel || getActionDisplayLabel');
     expect(actionInspector).toContain('const usesSourceParamForm =');
@@ -294,6 +303,10 @@ describe('timeline structural write guard', () => {
       ['CharacterDirectoryPanel.tsx', ['legacy-scene', 'sceneData.timeline']],
       ['ActionInspectorTabs.tsx', ['legacy-scene', 'sceneData.timeline']],
       ['TimelineListView.tsx', ['legacy-scene', 'sceneData.timeline']],
+      ['TimelineStatementRow.tsx', ['legacy-scene', 'sceneData.timeline']],
+      ['TimelineListGapMenu.tsx', ['legacy-scene', 'sceneData.timeline']],
+      ['useTimelineListEditing.ts', ['legacy-scene', 'sceneData.timeline']],
+      ['useTimelineListExpansion.ts', ['legacy-scene', 'sceneData.timeline']],
       ['ActionInspector.tsx', ['legacy-scene', 'sceneData.timeline']],
       ['InspectorArea.tsx', ['legacy-scene', 'sceneData.timeline']],
     ];
