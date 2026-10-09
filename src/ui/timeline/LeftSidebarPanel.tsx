@@ -1,23 +1,14 @@
 import React, { useState, useMemo, useCallback, useSyncExternalStore } from 'react';
 import {
   usePlaybackAdapter,
-  useDocumentStore,
-  useSemanticAuthoringService,
-  useTimelineAdapter,
   useTemplatePackageCatalog,
-  useCollaborationStatus,
 } from '../context/AppContext';
-import { useEditorState, useSemanticDocument, useValidationIssues } from '../store/storeHooks';
+import { useEditorState, useValidationIssues } from '../store/storeHooks';
 import { TimelineListView } from './TimelineListView';
 import { CharacterDirectoryPanel } from './CharacterDirectoryPanel';
 import { IconFilm, IconUsers } from '../icons';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
-import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
-import {
-  createSemanticTimelineCorrelationId,
-  defaultDialogueStatementDraft,
-  selectCompiledActionsForStatements,
-} from './semanticTimelineEditing';
+import { useSemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 import type { TimelineScene } from './semanticTimelineTypes';
 import type { WorkspaceToolTab } from '../workspace-tools/types';
 
@@ -56,12 +47,9 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
     }
   }, [currentTab, handleTabChange]);
 
-  const { document: semanticDocument } = useSemanticDocument();
-  const documentStore = useDocumentStore();
+  const semanticSnapshot = useSemanticTimelineSnapshot();
+  const { document: semanticDocument, actions: timelineReadModelActions } = semanticSnapshot;
   const playbackAdapter = usePlaybackAdapter();
-  const semanticAuthoring = useSemanticAuthoringService();
-  const timelineAdapter = useTimelineAdapter();
-  const collaborationStatus = useCollaborationStatus();
   const { selectedActionIds, setSelectedIds, loadExample } = useEditorState();
   const { issues: validationIssues } = useValidationIssues();
 
@@ -79,19 +67,6 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
     [templateCatalog, templatePackageSnapshot],
   );
 
-  const semanticTimelineItems = useMemo(
-    () => buildSemanticTimelineReadModel(
-      semanticDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore, semanticDocument],
-  );
-
-  const timelineReadModelActions = useMemo(
-    () => semanticTimelineItems.map((item) => item.displayAction),
-    [semanticTimelineItems],
-  );
-
   const sceneData = useMemo<TimelineScene | null>(() => {
     if (!semanticDocument) return null;
     return {
@@ -107,7 +82,6 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
       const next: Record<string, boolean> = {};
       idOrIds.forEach((id) => { next[id] = true; });
       setSelectedIds(next);
-      timelineAdapter.select(next);
     } else if (isMulti) {
       const current = { ...selectedActionIds };
       if (current[idOrIds]) {
@@ -116,36 +90,14 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
         current[idOrIds] = true;
       }
       setSelectedIds(current);
-      timelineAdapter.select(current);
     } else {
       const next = { [idOrIds]: true };
       setSelectedIds(next);
-      timelineAdapter.select(next);
     }
-  }, [selectedActionIds, setSelectedIds, timelineAdapter]);
+  }, [selectedActionIds, setSelectedIds]);
 
-  const addAction = useCallback(async () => {
-    if (collaborationStatus === 'offline' || collaborationStatus === 'reconnecting') return;
-    if (!semanticDocument || !semanticAuthoring) return;
-    const time = playbackAdapter.getCurrentTime();
-    const roundedTime = Math.max(0, Math.round(time * 10) / 10);
-    const receipt = await semanticAuthoring.author({
-      version: AUTHORING_SCHEMA_VERSION,
-      correlationId: createSemanticTimelineCorrelationId('timeline_add'),
-      origin: 'timeline-editor',
-      kind: 'insert-statement',
-      anchorTime: roundedTime,
-      statement: defaultDialogueStatementDraft(semanticDocument),
-    });
-    const nextSelected = selectCompiledActionsForStatements(
-      documentStore.getCompiledSceneSnapshot(),
-      receipt.createdStatementIds,
-    );
-    if (Object.keys(nextSelected).length > 0) {
-      setSelectedIds(nextSelected);
-      timelineAdapter.select(nextSelected);
-    }
-  }, [collaborationStatus, documentStore, playbackAdapter, semanticAuthoring, semanticDocument, setSelectedIds, timelineAdapter]);
+  const commands = useSemanticTimelineCommands(setSelectedIds);
+  const addAction = useCallback(() => commands.addDialogue(playbackAdapter.getCurrentTime()), [commands, playbackAdapter]);
 
   const handleSelectWorkspaceView = useCallback((tab: WorkspaceToolTab) => {
     if (tab === 'characters') {
@@ -162,7 +114,7 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
     [validationIssues],
   );
 
-  const timelineCount = semanticTimelineItems.length;
+  const timelineCount = semanticSnapshot.items.length;
   const characterCount = semanticDocument?.meta?.characters?.length ?? 0;
 
   return (
@@ -241,13 +193,11 @@ export const LeftSidebarPanel: React.FC<LeftSidebarPanelProps> = ({
         >
           {sceneData ? (
             <TimelineListView
+              semanticSnapshot={semanticSnapshot}
               sceneData={sceneData}
               inlineExpandable={false}
               selectedActionIds={selectedActionIds}
-              setSelectedIds={(ids) => {
-                setSelectedIds(ids);
-                timelineAdapter.select(ids);
-              }}
+              setSelectedIds={setSelectedIds}
               addAction={addAction}
               handleSelect={handleSelect}
               setCurrentTime={(t) => playbackAdapter.seek(t)}

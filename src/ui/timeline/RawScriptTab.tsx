@@ -4,7 +4,7 @@ import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
 import { eventBus } from '../../api/events';
 import { useDocumentStore, useSceneFileService } from '../context/AppContext';
 import { useSettings } from '../SettingsStore';
-import { useEditorState, useSemanticDocument } from '../store/storeHooks';
+import { useEditorState } from '../store/storeHooks';
 import {
   applyAeonStageryMonacoTheme,
   loadMonacoRuntime,
@@ -12,7 +12,7 @@ import {
   type MonacoApi,
   type MonacoRuntime,
 } from '../monaco/monacoRuntime';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 
 function isDocumentEqual(a: CurrentSceneDocument | null, b: unknown) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -22,10 +22,13 @@ function toRawSceneText(document: CurrentSceneDocument): string {
   return JSON.stringify(document, null, 2);
 }
 
-export const RawScriptTab: React.FC<{ action?: TimelineAction }> = ({ action }) => {
+export const RawScriptTab: React.FC<{ action?: TimelineAction, semanticSnapshot?: SemanticTimelineSnapshot }> = ({ action, semanticSnapshot }) => {
   const documentStore = useDocumentStore();
   const sceneFileService = useSceneFileService();
-  const { document: semanticDocument, filePath } = useSemanticDocument();
+  const { document: semanticDocument, itemById } = useSemanticTimelineSnapshot(semanticSnapshot);
+  const subscribePath = useCallback((listener: () => void) => documentStore.subscribe(listener), [documentStore]);
+  const getPath = useCallback(() => documentStore.filePath, [documentStore]);
+  const filePath = React.useSyncExternalStore(subscribePath, getPath);
   const { undo, redo } = useEditorState();
   const { settings } = useSettings();
   const editorRef = useRef<any>(null);
@@ -108,12 +111,8 @@ export const RawScriptTab: React.FC<{ action?: TimelineAction }> = ({ action }) 
     if (!model) return;
 
     let range: InstanceType<MonacoApi['Range']> | null = null;
-    const semanticItems = buildSemanticTimelineReadModel(
-      semanticDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    );
     const semanticItem = targetAction._id
-      ? semanticItems.find((item) => item.id === targetAction._id)
+      ? itemById.get(targetAction._id)
       : undefined;
     const sourceId = semanticItem?.companionId ?? semanticItem?.statementId;
     const idMatches = sourceId
@@ -165,7 +164,7 @@ export const RawScriptTab: React.FC<{ action?: TimelineAction }> = ({ action }) 
     } else {
       decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
     }
-  }, [documentStore, semanticDocument]);
+  }, [itemById]);
 
   useEffect(() => {
     locateActionInEditor(action);

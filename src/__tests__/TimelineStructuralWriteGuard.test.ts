@@ -77,7 +77,7 @@ describe('timeline structural write guard', () => {
 
     expect(app).toContain('useSemanticDocument');
     expect(app).toContain('JSON.stringify(semanticDocument');
-    expect(rawScriptTab).toContain('useSemanticDocument');
+    expect(rawScriptTab).toContain('useSemanticTimelineSnapshot');
     expect(aiPanel).toContain('useSemanticAuthoringService');
     expect(aiPanel).toContain('compileAiScriptSegmentPlanToSceneStatements');
     expect(sceneFileService).toContain('Only current Scene Document JSON is supported');
@@ -108,10 +108,12 @@ describe('timeline structural write guard', () => {
     expect(editor).toContain('useSemanticAuthoringService');
     expect(editor).toContain('AUTHORING_SCHEMA_VERSION');
     expect(editor).toContain('buildSemanticMoveTimelineIntent');
-    expect(editor).toContain('buildSemanticDeleteTimelineIntents');
-    expect(editor).toContain('buildSemanticDuplicateTimelineIntent');
+    const commands = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'semanticTimelineCommands.ts'), 'utf8');
+    expect(editor).toContain('useSemanticTimelineCommands');
+    expect(commands).toContain('buildSemanticDeleteTimelineIntents');
+    expect(commands).toContain('buildSemanticDuplicateTimelineIntent');
     expect(editor).toContain('buildSemanticRetargetTimelineIntents');
-    expect(editor).toContain('defaultDialogueStatementDraft');
+    expect(commands).toContain('defaultDialogueStatementDraft');
     expect(editor).not.toContain("kind: 'insert-action'");
     expect(editor).not.toContain("kind: 'delete-actions'");
     expect(editor).not.toContain("kind: 'duplicate-actions'");
@@ -131,8 +133,8 @@ describe('timeline structural write guard', () => {
   it('keeps both inspector layouts on semantic statement authoring for batch delete', () => {
     for (const file of ['PropertyInspectorShell.tsx', 'TimelineListView.tsx']) {
       const inspector = fs.readFileSync(path.join(UI_ROOT, 'timeline', file), 'utf8');
-      expect(inspector).toContain('useSemanticAuthoringService');
-      expect(inspector).toContain('buildSemanticDeleteTimelineIntents');
+      expect(inspector).toContain('useSemanticTimelineCommands');
+      expect(inspector).toContain('commands.delete(selectedIdsList)');
       expect(inspector).not.toContain('useTimelineAuthoringService');
       expect(inspector).not.toContain("kind: 'delete-actions'");
     }
@@ -153,11 +155,12 @@ describe('timeline structural write guard', () => {
     const blockMenu = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'useBlockContextMenu.ts'), 'utf8');
 
     expect(blockMenu).toContain('useSemanticAuthoringService');
-    expect(blockMenu).toContain('buildSemanticCopyBufferForTimelineActions');
-    expect(blockMenu).toContain('buildSemanticPasteTimelineIntent');
-    expect(blockMenu).toContain('buildSemanticDuplicateTimelineIntent');
+    expect(blockMenu).toContain('useSemanticTimelineCommands');
+    expect(blockMenu).toContain('commands.copy([id])');
+    expect(blockMenu).toContain('commands.paste(buffer, insertTime');
+    expect(blockMenu).toContain('commands.duplicate([id])');
     expect(blockMenu).toContain('buildSemanticSplitTimelineIntents');
-    expect(blockMenu).toContain('buildSemanticDeleteTimelineIntents');
+    expect(blockMenu).toContain('commands.delete([id])');
     expect(blockMenu).not.toContain('useTimelineAuthoringService');
     expect(blockMenu).not.toContain('createStructuralIntentBase');
     expect(blockMenu).not.toContain("kind: 'paste-actions'");
@@ -280,8 +283,8 @@ describe('timeline structural write guard', () => {
     expect(inspectorCodeText).toContain("'to'");
     expect(inspectorSubmodules.join('\n')).toContain('clampCameraCoordinate');
     expect(inspectorCodeText).toContain("hiddenParamKeys.add('z')");
-    expect(timelineEditor).toContain('buildSemanticSourceParamsReplaceIntent');
-    expect(timelineEditor).toContain('buildSemanticSourceParamUpdateIntent');
+    expect(timelineEditor).toContain('commands.replaceSourceParams(item.locator, params, item.source.params');
+    expect(timelineEditor).toContain('commands.updateSourceParams(id, paramPatch)');
     expect(timelineEditor).toContain('shouldUseSourceParamPatch');
   });
 
@@ -452,7 +455,7 @@ describe('timeline structural write guard', () => {
     expect(companionPanel).toContain("kind: 'reorder-dialogue-companions'");
     expect(companionModel).toContain('sceneStatementDefinitionRegistry.list()');
     expect(trackArea).toContain('buildTemplateAuthoringPreview');
-    expect(trackArea).toContain('semanticAuthoring.author(preview.intent)');
+    expect(trackArea).toContain('commands.insert(preview.intent)');
   });
 
   it('keeps character directory product writes on semantic authoring', () => {

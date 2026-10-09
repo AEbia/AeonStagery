@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore, usePlaybackAdapter } from '../context/AppContext';
-import { useSemanticDocument, useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
+import { useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
 
@@ -17,7 +17,6 @@ import { summarizeLocatorEditingPeers } from '../../services/collaboration/Colla
 import {
   buildSemanticCopyBufferForTimelineActions,
   locatorForCompiledTimelineAction,
-  selectCompiledActionsForStatements,
 } from './semanticTimelineEditing';
 import {
   getSemanticInspectorFields,
@@ -69,14 +68,14 @@ import { useActionSelection } from './inspector/useActionSelection';
 import { useCustomMotionAuthoring } from './inspector/useCustomMotionAuthoring';
 import { useInspectorOptions } from './inspector/useInspectorOptions';
 import { useModelData } from './inspector/useModelData';
-import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import { getStatementQuickFields } from './statementQuickFields';
 
 // These fields retain supplemental browsing/preview tools, without displaying their value again.
 const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression', 'layerId']);
 
 export interface ActionInspectorProps {
-  semanticTimelineItems?: SemanticTimelineReadModelItem[];
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
@@ -88,8 +87,6 @@ export interface ActionInspectorProps {
   onClose: () => void | Promise<void>;
   closeMode?: 'back' | 'close';
   presentation?: 'panel' | 'inline';
-  inspectorTab?: any;
-  setInspectorTab?: any;
 }
 
 export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
@@ -106,7 +103,8 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const playbackAdapter = usePlaybackAdapter();
   const appContext = useApp();
   const documentStore = useDocumentStore();
-  const { document: semanticDocument } = useSemanticDocument();
+  const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
+  const { document: semanticDocument } = semanticSnapshot;
   const { peers: collaborationPeers } = useCollaborationPresence();
   const editorStore = appContext.stores.editor;
   const semanticAuthoring = appContext.services?.semanticAuthoring;
@@ -121,7 +119,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     actionId,
     semanticItem,
     performanceTargetSpeakerId,
-  } = useActionSelection({ selectedActionIds, semanticDocument, documentStore, items: props.semanticTimelineItems });
+  } = useActionSelection({ selectedActionIds, items: semanticSnapshot.items });
   const { targetModelPath, modelData, isModelDataLoading } = useModelData({
     characterAdapter,
     sceneData,
@@ -236,16 +234,11 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const actionStart = action.time || 0;
   const actionDuration = actionParams.durationSeconds ?? action.params.duration ?? 0;
   const actionEnd = actionStart + actionDuration;
-  const lifecyclePeer = computeLifecyclePeerInfo(documentStore.getCurrentSceneDocumentSnapshot(), semanticItem?.statementId);
+  const lifecyclePeer = computeLifecyclePeerInfo(semanticDocument, semanticItem?.statementId);
   const jumpToLifecyclePeer = () => {
     if (!lifecyclePeer) return;
-    const selected = selectCompiledActionsForStatements(
-      documentStore.getCompiledSceneSnapshot(),
-      [lifecyclePeer.peerId],
-    );
-    if (Object.keys(selected).length > 0) {
-      setSelectedIds(selected);
-    }
+    const peer = semanticSnapshot.items.find((item) => item.statementId === lifecyclePeer.peerId && item.locator.kind === 'statement');
+    if (peer) setSelectedIds({ [peer.id]: true });
   };
 
   const primaryVisualQuickKeys = computePrimaryVisualQuickKeys(isPrimaryVisualIntentBlock, actionType, actionParams);

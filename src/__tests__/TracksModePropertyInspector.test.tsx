@@ -81,6 +81,7 @@ vi.mock('../ui/context/AppContext', () => ({
     getCompiledSceneSnapshot: () => null,
   }),
   useSemanticAuthoringService: () => null,
+  useCollaborationStatus: () => 'disconnected',
   useTemplatePackageCatalog: () => undefined,
 }));
 
@@ -112,23 +113,15 @@ const createProps = (overrides: Partial<InspectorAreaProps> = {}): InspectorArea
   sceneData: sceneData as unknown as TimelineScene,
   selectedActionIds: {},
   setSelectedIds: vi.fn(),
-  inspectorTab: 'basic' as const,
-  setInspectorTab: vi.fn(),
   updateAction: vi.fn(),
   updateParam: vi.fn(),
-  deleteAction: vi.fn(),
-  addActionAt: vi.fn(),
   addAction: vi.fn(),
   handleSave: vi.fn(async () => ({ success: true as const, path: '/test.json' })),
   handleSelect: vi.fn(),
   setCurrentTime: vi.fn(),
   loadExample: vi.fn(async () => true),
-  detailOpen: true,
-  onDetailOpen: vi.fn(),
   onDetailClose: vi.fn(),
-  layoutMode: 'split' as const,
   navigatorWidth: 400,
-  detailWidth: 360,
   workspaceIssues: [],
   inspectorView: 'actions' as const,
   onSelectInspectorView: vi.fn(),
@@ -223,7 +216,6 @@ describe('Tracks mode dedicated Property Inspector', () => {
         <PropertyInspectorShell
           {...createProps({
             selectedActionIds: { action_1: true },
-            detailSelectedActionIds: { action_1: true },
           })}
         />,
       );
@@ -241,7 +233,6 @@ describe('Tracks mode dedicated Property Inspector', () => {
         <PropertyInspectorShell
           {...createProps({
             selectedActionIds: { action_1: true },
-            detailSelectedActionIds: { action_1: true },
             setSelectedIds,
             onDetailClose,
           })}
@@ -262,7 +253,6 @@ describe('Tracks mode dedicated Property Inspector', () => {
         <PropertyInspectorShell
           {...createProps({
             selectedActionIds: {},
-            detailSelectedActionIds: {},
           })}
         />,
       );
@@ -428,7 +418,6 @@ describe('Tracks mode dedicated Property Inspector', () => {
           {...createProps({
             inspectorView: 'diagnostics',
             selectedActionIds: { action_1: true },
-            detailSelectedActionIds: { action_1: true },
             onSelectInspectorView,
           })}
         />,
@@ -442,10 +431,7 @@ describe('Tracks mode dedicated Property Inspector', () => {
         <InspectorArea
           {...createProps({
             selectedActionIds: { action_1: true },
-            detailSelectedActionIds: { action_1: true },
-            layoutMode: 'split',
             navigatorWidth: 400,
-            detailWidth: 360,
           })}
         />,
       );

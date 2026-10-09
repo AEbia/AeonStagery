@@ -15,7 +15,7 @@ import {
 } from './context/AppContext';
 import type { TimelineAction, TimelineScene } from './timeline/semanticTimelineTypes';
 import { AUTHORING_SCHEMA_VERSION } from '../api/types/authoring';
-import { useEditorState, useSemanticDocument, useValidationIssues } from './store/storeHooks';
+import { useEditorState, useValidationIssues } from './store/storeHooks';
 
 // Sub-components
 import { TrackArea } from './timeline/TrackArea';
@@ -30,7 +30,8 @@ import {
 } from './timeline/timelineViewport';
 import { withAuthorFacingEnvironmentLabel } from './timeline/environmentAuthoring';
 import { buildTimelineTracks, isCharacterTrackAction } from './timeline/timelineTrackPresentation';
-import { buildSemanticTimelineReadModel } from './timeline/semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot } from './timeline/useSemanticTimelineSnapshot';
+import { useSemanticTimelineCommands } from './timeline/useSemanticTimelineCommands';
 import { deriveTimelineMaxTimeSeconds } from './timeline/timelineMaxTime';
 import { TimelineSelectionBar } from './timeline/TimelineSelectionBar';
 import { pruneSelectedActionIdsForTimeline } from './timeline/selectionHygiene';
@@ -43,33 +44,20 @@ import {
   type InspectorPanelView,
 } from './timeline/InspectorViewPicker';
 import {
-  buildSemanticCopyBufferForTimelineActions,
-  buildSemanticDeleteTimelineIntents,
-  buildSemanticDuplicateTimelineIntent,
   buildSemanticDurationUpdateIntent,
   buildSemanticMoveTimelineIntent,
-  buildSemanticPasteTimelineIntent,
-  buildSemanticSourceParamUpdateIntent,
-  buildSemanticSourceParamsReplaceIntent,
-  buildSemanticTimelineParamUpdateIntent,
   buildSemanticRetargetTimelineIntents,
   buildSemanticSplitTimelineIntents,
   createSemanticTimelineCorrelationId,
-  defaultDialogueStatementDraft,
   locatorForCompiledTimelineAction,
-  selectCompiledActionsForStatements,
   shouldRouteTimelineParamPatchToSource,
 } from './timeline/semanticTimelineEditing';
 import type { ShortcutCommandId } from './shortcuts/types';
 
 export interface TimelineEditorProps {
   mode?: 'all' | 'inspector' | 'tracks';
-  inspectorLayout?: 'split' | 'replace';
   inspectorNavigatorWidth?: number;
-  inspectorDetailWidth?: number;
   inspectorView?: InspectorPanelView;
-  onInspectorDetailResizeStart?: (event: React.MouseEvent) => void;
-  onInspectorDetailResizeKeyDown?: (event: React.KeyboardEvent) => void;
   onInspectorDetailVisibilityChange?: (visible: boolean) => void;
   onSelectInspectorView?: (view: InspectorPanelView) => void;
   onDetachWorkspaceTools?: () => void;
@@ -79,12 +67,8 @@ export interface TimelineEditorProps {
 
 export function TimelineEditor({
   mode = 'all',
-  inspectorLayout = 'replace',
   inspectorNavigatorWidth = 320,
-  inspectorDetailWidth = 360,
   inspectorView = 'actions',
-  onInspectorDetailResizeStart,
-  onInspectorDetailResizeKeyDown,
   onInspectorDetailVisibilityChange,
   onSelectInspectorView,
   onDetachWorkspaceTools,
@@ -98,10 +82,12 @@ export function TimelineEditor({
     loadExample,
     handleSave,
   } = useEditorState();
-  const { document: semanticDocument } = useSemanticDocument();
+  const semanticSnapshot = useSemanticTimelineSnapshot();
+  const { document: semanticDocument, items: semanticTimelineItems, actions: timelineReadModelActions } = semanticSnapshot;
   const playbackAdapter = usePlaybackAdapter();
   const documentStore = useDocumentStore();
   const semanticAuthoring = useSemanticAuthoringService();
+  const commands = useSemanticTimelineCommands(setSelectedIds);
   const app = useApp();
   const editorStore = app.stores.editor;
   const collaborationStatus = useCollaborationStatus();
@@ -111,7 +97,6 @@ export function TimelineEditor({
 
   const [scrollLeft, setScrollLeft] = useState(0);
   const [timelineWidth, setTimelineWidth] = useState(1000);
-  const [inspectorTab, setInspectorTab] = useState<'basic' | 'transform' | 'state'>('basic');
   const [detailOpen, setDetailOpen] = useState(false);
   const [isZoomSliderInteracting, setIsZoomSliderInteracting] = useState(false);
   const [zoomViewportPreview, setZoomViewportPreview] = useState<TimelineViewportTarget | null>(null);
@@ -122,13 +107,6 @@ export function TimelineEditor({
   const suppressScrollSyncRef = useRef(false);
   const isOfflineEditingBlocked = collaborationStatus === 'offline' || collaborationStatus === 'reconnecting';
 
-  const semanticTimelineItems = useMemo(
-    () => buildSemanticTimelineReadModel(
-      semanticDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore, semanticDocument],
-  );
   const semanticSceneEnd = useMemo(() => {
     if (!semanticDocument) return 0;
     let maxActionEnd = semanticDocument.meta.durationSeconds ?? 0;
@@ -143,10 +121,6 @@ export function TimelineEditor({
     [semanticSceneEnd],
   );
   // Ordinary semantic display actions only — no synthetic StateSpan projection.
-  const timelineReadModelActions = useMemo(
-    () => semanticTimelineItems.map((item) => item.displayAction),
-    [semanticTimelineItems],
-  );
   const timelineReadModelActionById = useMemo(
     () => new Map(timelineReadModelActions.flatMap((action) => action._id ? [[action._id, action] as const] : [])),
     [timelineReadModelActions],
@@ -176,11 +150,10 @@ export function TimelineEditor({
   }, [documentStore, timelineReadModelActionById]);
 
   const replaceSourceParams = useCallback(async (id: string, params: Record<string, unknown>) => {
-    if (blockOfflineEdit()) return;
-    if (!semanticDocument || !semanticAuthoring) return;
-    const intent = buildSemanticSourceParamsReplaceIntent(documentStore, id, params);
-    if (intent) await semanticAuthoring.author(intent);
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, semanticDocument]);
+    const item = semanticSnapshot.itemById.get(id);
+    if (item) return commands.replaceSourceParams(item.locator, params, item.source.params as Record<string, unknown>);
+    return undefined;
+  }, [commands, semanticSnapshot]);
   const effectivePixelsPerSecond = zoomViewportPreview?.pixelsPerSecond ?? pixelsPerSecond;
   const effectiveScrollLeft = zoomViewportPreview?.scrollLeft ?? scrollLeft;
 
@@ -339,44 +312,23 @@ export function TimelineEditor({
       if (intent && !isTransient) void semanticAuthoring.author(intent);
     }
     if (Object.keys(paramPatch).length === 0) return;
-    const intent = shouldUseSourceParamPatch(id, paramPatch)
-      ? buildSemanticSourceParamUpdateIntent(documentStore, id, paramPatch)
-      : buildSemanticTimelineParamUpdateIntent(documentStore, id, runtimePatch);
-    if (!intent || isTransient) return;
-    void semanticAuthoring.author(intent);
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
+    if (isTransient) return;
+    if (shouldUseSourceParamPatch(id, paramPatch)) void commands.updateSourceParams(id, paramPatch);
+    else void commands.updateTimelineParams(id, runtimePatch);
+  }, [blockOfflineEdit, commands, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
 
   const updateParam = useCallback((id: string, key: string, value: any, isTransient?: boolean) => {
     if (blockOfflineEdit()) return;
     if (!semanticDocument || !semanticAuthoring) return;
     const paramPatch = { [key]: value };
-    const intent = shouldUseSourceParamPatch(id, paramPatch)
-      ? buildSemanticSourceParamUpdateIntent(documentStore, id, paramPatch)
-      : buildSemanticTimelineParamUpdateIntent(documentStore, id, paramPatch);
-    if (!intent || isTransient) return;
-    void semanticAuthoring.author(intent);
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
+    if (isTransient) return;
+    if (shouldUseSourceParamPatch(id, paramPatch)) void commands.updateSourceParams(id, paramPatch);
+    else void commands.updateTimelineParams(id, paramPatch);
+  }, [blockOfflineEdit, commands, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
 
   const addActionAt = useCallback(async (time: number) => {
-    if (blockOfflineEdit()) return;
-    if (!semanticDocument || !semanticAuthoring) return;
-    const roundedTime = Math.max(0, Math.round(time * 10) / 10);
-    const receipt = await semanticAuthoring.author({
-      version: AUTHORING_SCHEMA_VERSION,
-      correlationId: createSemanticTimelineCorrelationId('timeline_add'),
-      origin: 'timeline-editor',
-      kind: 'insert-statement',
-      anchorTime: roundedTime,
-      statement: defaultDialogueStatementDraft(semanticDocument),
-    });
-    const nextSelected = selectCompiledActionsForStatements(
-      documentStore.getCompiledSceneSnapshot(),
-      receipt.createdStatementIds,
-    );
-    if (Object.keys(nextSelected).length > 0) {
-      setSelectedIds(nextSelected);
-    }
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, semanticDocument, setSelectedIds]);
+    await commands.addDialogue(time);
+  }, [commands]);
 
   const addAction = useCallback(() => addActionAt(playbackAdapter.getCurrentTime()), [addActionAt, playbackAdapter]);
 
@@ -668,78 +620,31 @@ export function TimelineEditor({
 
   const handleCopyActionIds = useCallback((actionIds: readonly string[]) => {
     if (actionIds.length === 0) return;
-    const statements = buildSemanticCopyBufferForTimelineActions(
-      documentStore,
-      actionIds,
-    );
+    const statements = commands.copy(actionIds);
     if (statements.length === 0) return;
     editorStore.setCopyBuffer(statements);
     showToast(`已复制 ${statements.length} 个语义语句`, 'success');
-  }, [documentStore, editorStore]);
+  }, [commands, editorStore]);
 
   const handleCopySelection = useCallback(() => {
     handleCopyActionIds(selectedIdsList);
   }, [handleCopyActionIds, selectedIdsList]);
 
   const handleDuplicateActionIds = useCallback(async (actionIds: readonly string[]) => {
-    if (blockOfflineEdit()) return;
-    if (!semanticAuthoring || actionIds.length === 0) return;
-    const intent = buildSemanticDuplicateTimelineIntent(
-      documentStore,
-      actionIds,
-    );
-    if (!intent) return;
-    const receipt = await semanticAuthoring.author(intent);
-    if (receipt.createdStatementIds.length > 0) {
-      const next = selectCompiledActionsForStatements(
-        documentStore.getCompiledSceneSnapshot(),
-        receipt.createdStatementIds,
-      );
-      if (Object.keys(next).length > 0) setSelectedIds(next);
-    }
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, setSelectedIds]);
+    await commands.duplicate(actionIds);
+  }, [commands]);
 
   const handleDuplicateSelection = useCallback(async () => {
     await handleDuplicateActionIds(selectedIdsList);
   }, [handleDuplicateActionIds, selectedIdsList]);
 
   const handlePasteAtPlayhead = useCallback(async () => {
-    if (blockOfflineEdit()) return;
-    if (!semanticAuthoring || editorStore.copyBuffer.length === 0) return;
-    const intent = buildSemanticPasteTimelineIntent(
-      editorStore.copyBuffer,
-      playbackAdapter.getCurrentTime(),
-      createSemanticTimelineCorrelationId('timeline_shortcut_paste'),
-      'timeline-editor',
-    );
-    if (!intent) return;
-    const receipt = await semanticAuthoring.author(intent);
-    const next = selectCompiledActionsForStatements(
-      documentStore.getCompiledSceneSnapshot(),
-      receipt.createdStatementIds,
-    );
-    if (Object.keys(next).length > 0) setSelectedIds(next);
-  }, [blockOfflineEdit, documentStore, editorStore.copyBuffer, playbackAdapter, semanticAuthoring, setSelectedIds]);
-
-  const performDeleteActionIds = useCallback(async (actionIds: readonly string[]) => {
-    if (blockOfflineEdit()) return;
-    if (!semanticAuthoring || actionIds.length === 0) return;
-    const intents = buildSemanticDeleteTimelineIntents(documentStore, actionIds);
-    try {
-      if (intents.length > 0) await semanticAuthoring.authorTransaction(intents);
-      setSelectedIds({});
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '无法删除所选语句', 'warning');
-    }
-  }, [blockOfflineEdit, documentStore, semanticAuthoring, setSelectedIds]);
+    await commands.paste(editorStore.copyBuffer, playbackAdapter.getCurrentTime());
+  }, [commands, editorStore.copyBuffer, playbackAdapter]);
 
   const handleDeleteActionIds = useCallback(async (actionIds: readonly string[]) => {
-    await performDeleteActionIds(actionIds);
-  }, [performDeleteActionIds]);
-
-  const deleteAction = useCallback(async (id: string) => {
-    await handleDeleteActionIds([id]);
-  }, [handleDeleteActionIds]);
+    await commands.delete(actionIds);
+  }, [commands]);
 
   const handleDeleteSelection = useCallback(async () => {
     await handleDeleteActionIds(selectedIdsList);
@@ -963,6 +868,7 @@ export function TimelineEditor({
             style={{ flex: 1, overflow: 'auto', position: 'relative', borderRight: '1px solid var(--border-subtle)' }}
           >
             <TrackArea
+              semanticSnapshot={semanticSnapshot}
               tracks={tracks} pps={effectivePixelsPerSecond} maxTime={maxTime}
               selectedIds={selectedActionIds} sceneData={timelinePresentationScene}
               onSelect={handleSelect}
@@ -1026,22 +932,15 @@ export function TimelineEditor({
         >
           <InspectorArea
             sceneData={timelinePresentationScene}
+            semanticSnapshot={semanticSnapshot}
             selectedActionIds={selectedActionIds} setSelectedIds={setSelectedIds}
-            inspectorTab={inspectorTab as any} setInspectorTab={setInspectorTab as any}
             updateAction={updateAction} updateParam={updateParam} replaceSourceParams={replaceSourceParams}
-            deleteAction={deleteAction} deleteActions={handleDeleteActionIds} copyActions={handleCopyActionIds}
-            addActionAt={addActionAt} addAction={addAction}
+            addAction={addAction}
             handleSelect={handleSelect} setCurrentTime={(t: number) => playbackAdapter.seek(t)}
             handleSave={handleSave}
             loadExample={loadExample}
-            detailOpen={detailOpen}
-            onDetailOpen={openDetail}
             onDetailClose={closeDetail}
-            layoutMode={inspectorLayout}
             navigatorWidth={inspectorNavigatorWidth}
-            detailWidth={inspectorDetailWidth}
-            onDetailResizeStart={onInspectorDetailResizeStart}
-            onDetailResizeKeyDown={onInspectorDetailResizeKeyDown}
             workspaceIssues={validationIssues}
             inspectorView={inspectorView}
             onSelectInspectorView={onSelectInspectorView}

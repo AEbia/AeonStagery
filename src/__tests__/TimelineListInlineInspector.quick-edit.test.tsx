@@ -10,8 +10,6 @@ setupInlineInspectorFixture();
 
 describe('List inline inspector quick edit', () => {
   it('displays inline editable speaker selector and dialogue text in the row when collapsed', () => {
-    const updateAction = vi.fn();
-    const updateParam = vi.fn();
 
     render(
       <TimelineListView
@@ -22,8 +20,6 @@ describe('List inline inspector quick edit', () => {
         handleSelect={vi.fn()}
         setCurrentTime={vi.fn()}
         loadExample={vi.fn(async () => true)}
-        updateAction={updateAction}
-        updateParam={updateParam}
       />,
     );
 
@@ -44,7 +40,6 @@ describe('List inline inspector quick edit', () => {
         }),
       }),
     }));
-    expect(updateAction).not.toHaveBeenCalled();
 
     // Inline text input is visible and directly editable
     const textInputs = screen.getAllByRole('textbox', { name: '编辑台词内容' });
@@ -64,11 +59,9 @@ describe('List inline inspector quick edit', () => {
         }),
       }),
     }));
-    expect(updateParam).not.toHaveBeenCalled();
     });
 
   it('displays inline camera parameter controls in the row when collapsed', () => {
-    const updateParam = vi.fn();
 
     render(
       <TimelineListView
@@ -79,7 +72,6 @@ describe('List inline inspector quick edit', () => {
         handleSelect={vi.fn()}
         setCurrentTime={vi.fn()}
         loadExample={vi.fn(async () => true)}
-        updateParam={updateParam}
       />,
     );
 
@@ -100,7 +92,6 @@ describe('List inline inspector quick edit', () => {
         params: expect.objectContaining({ intensity: 2.5 }),
       }),
     }));
-    expect(updateParam).not.toHaveBeenCalled();
     });
 
   it('retains typing through asynchronous authoring and submits once on blur', async () => {
@@ -202,13 +193,19 @@ describe('List inline inspector quick edit', () => {
     });
 
   it('keeps batch copy and delete available without opening a separate panel', async () => {
-    const copyActions = vi.fn();
-    const deleteActions = vi.fn();
-    const { container } = renderList({ selectedActionIds: { first: true, second: true }, copyActions, deleteActions });
+    const selectedIds = state.compiledScene.actions.filter((action: any) => action.action === 'dialogue').map((action: any) => action.id);
+    const setSelectedIds = vi.fn();
+    const { container } = renderList({ selectedActionIds: Object.fromEntries(selectedIds.map((id: string) => [id, true])), setSelectedIds });
     fireEvent.click(screen.getByRole('button', { name: '复制到剪贴板' }));
     fireEvent.click(screen.getByRole('button', { name: '批量删除' }));
-    expect(copyActions).toHaveBeenCalledWith(['first', 'second']);
-    await waitFor(() => expect(deleteActions).toHaveBeenCalledWith(['first', 'second']));
+    expect(state.setCopyBuffer).toHaveBeenCalledWith([
+      expect.objectContaining({ type: 'dialogue', params: expect.objectContaining({ text: '你好，这是第一句台词。' }) }),
+      expect.objectContaining({ type: 'dialogue', params: expect.objectContaining({ text: '第二句台词在此。' }) }),
+    ]);
+    await waitFor(() => expect(state.authorMock).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'delete-statements', statementIds: ['dlg-1', 'dlg-2'],
+    })));
+    await waitFor(() => expect(setSelectedIds).toHaveBeenCalledTimes(1));
     expect(container.querySelector('.inspector-workspace__detail')).toBeNull();
     });
 });

@@ -440,8 +440,6 @@ function AppContent({
     detailWidth,
     timelineHeight,
     handleMouseDown,
-    handleDetailMouseDown,
-    handleDetailKeyDown,
     handleHeightMouseDown,
   } = useResizableLayout(layoutOptions);
   const panelWidthsByModeRef = useRef({ list: 600, tracks: 400 });
@@ -1896,12 +1894,8 @@ function AppContent({
                 {hasLoadedScene ? (
                   <LazyTimelineEditor
                     mode="inspector"
-                    inspectorLayout={inspectorLayout}
                     inspectorNavigatorWidth={inspectorNavigatorWidth}
-                    inspectorDetailWidth={detailWidth}
                     inspectorView={sidePanelView === 'workspace-tools' ? contextTab : 'actions'}
-                    onInspectorDetailResizeStart={handleDetailMouseDown}
-                    onInspectorDetailResizeKeyDown={handleDetailKeyDown}
                     onInspectorDetailVisibilityChange={handleInspectorDetailVisibilityChange}
                     onSelectInspectorView={handleSelectInspectorView}
                     onDetachWorkspaceTools={() => void handleOpenWorkspaceTools()}

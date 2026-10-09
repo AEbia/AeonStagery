@@ -14,14 +14,10 @@ import {
 import type { TimelineScene } from './semanticTimelineTypes';
 import type { InspectorPanelView } from './InspectorViewPicker';
 import type { SaveResult } from '../../services/io/SceneFileService';
-import {
-  buildSemanticCopyBufferForTimelineActions,
-  buildSemanticDeleteTimelineIntents,
-} from './semanticTimelineEditing';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import { resolveMatchingTimelineAction } from './selectionHygiene';
-import { useApp, useDocumentStore, useSemanticAuthoringService } from '../context/AppContext';
-import { useSemanticDocument } from '../store/storeHooks';
+import { useApp } from '../context/AppContext';
+import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 
 const RawScriptTab = React.lazy(async () => {
   const module = await import('./RawScriptTab');
@@ -29,60 +25,34 @@ const RawScriptTab = React.lazy(async () => {
 });
 
 export interface PropertyInspectorShellProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
-  inspectorTab?: 'basic' | 'transform' | 'state';
-  setInspectorTab?: (t: 'basic' | 'transform' | 'state') => void;
   updateAction: (id: string, updates: any) => void;
   updateParam: (id: string, key: string, val: any) => void;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
-  deleteAction: (id: string) => void;
-  deleteActions?: (ids: readonly string[]) => void | Promise<void>;
-  copyActions?: (ids: readonly string[]) => void;
-  addActionAt?: (time: number) => void;
-  addAction?: () => void;
   handleSave: () => void | Promise<SaveResult | undefined>;
-  handleSelect: (idOrIds: string | string[], multi?: boolean) => void;
-  setCurrentTime: (t: number) => void;
-  loadExample?: () => Promise<boolean>;
-  detailOpen?: boolean;
-  detailClosing?: boolean;
-  detailSelectedActionIds?: Record<string, boolean>;
-  onDetailOpen?: () => void;
   onDetailClose?: () => void;
   workspaceIssues?: any[];
   inspectorView?: InspectorPanelView;
   onSelectInspectorView?: (view: InspectorPanelView) => void;
-  onDetachWorkspaceTools?: () => void;
-  canDetachWorkspaceTools?: boolean;
 }
 
 export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (props) => {
   const editorStore = useApp().stores.editor;
-  const documentStore = useDocumentStore();
-  const semanticAuthoring = useSemanticAuthoringService();
-  const { document: semanticDocument } = useSemanticDocument();
+  const commands = useSemanticTimelineCommands(props.setSelectedIds);
+  const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
+  const { actions: displayActions } = semanticSnapshot;
 
-  const detailSelectedActionIds = props.selectedActionIds;
+  const { selectedActionIds } = props;
   const selectedIdsList = useMemo(
-    () => Object.keys(detailSelectedActionIds).filter((id) => detailSelectedActionIds[id]),
-    [detailSelectedActionIds],
+    () => Object.keys(selectedActionIds).filter((id) => selectedActionIds[id]),
+    [selectedActionIds],
   );
   const selectedCount = selectedIdsList.length;
   const firstId = selectedIdsList[0];
 
-  const semanticTimelineItems = useMemo(
-    () => buildSemanticTimelineReadModel(
-      semanticDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore, semanticDocument],
-  );
-  const displayActions = useMemo(
-    () => semanticTimelineItems.map((item) => item.displayAction),
-    [semanticTimelineItems],
-  );
   const selectedAction = useMemo(() => {
     if (!firstId) return undefined;
     return displayActions.find((action) => action._id === firstId)
@@ -205,7 +175,7 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
         {activeView === 'script' && (
           <div className="property-inspector-shell__tool-body" data-testid="raw-script-view">
             <React.Suspense fallback={<div className="empty-state" style={{ padding: 20, textAlign: 'center' }}>正在加载代码编辑器...</div>}>
-              <RawScriptTab action={selectedAction} />
+              <RawScriptTab action={selectedAction} semanticSnapshot={semanticSnapshot} />
             </React.Suspense>
           </div>
         )}
@@ -216,7 +186,7 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
         )}
         {activeView === 'diagnostics' && (
           <div className="property-inspector-shell__tool-body" data-testid="diagnostics-view">
-            <DiagnosticsTab globalIssues={props.workspaceIssues ?? []} />
+            <DiagnosticsTab globalIssues={props.workspaceIssues ?? []} semanticSnapshot={semanticSnapshot} />
           </div>
         )}
         {activeView === 'characters' && (
@@ -230,8 +200,11 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
               <ActionInspector
                 key={firstId}
                 {...props}
+                semanticSnapshot={semanticSnapshot}
+                deleteAction={(id) => { void commands.delete([id]); }}
+                copyActions={(ids) => editorStore.setCopyBuffer(commands.copy(ids))}
                 replaceSourceParams={props.replaceSourceParams ?? ((id, params) => props.updateAction(id, { params }))}
-                selectedActionIds={detailSelectedActionIds}
+                selectedActionIds={selectedActionIds}
                 onClose={handleDetailClose}
                 closeMode="close"
               />
@@ -264,24 +237,14 @@ export const PropertyInspectorShell: React.FC<PropertyInspectorShellProps> = (pr
                 </div>
                 <button className="btn btn--danger" style={{ width: '100%', marginBottom: 8 }}
                   onClick={async () => {
-                    if (props.deleteActions) {
-                      await props.deleteActions(selectedIdsList);
-                    } else if (semanticAuthoring) {
-                      const intents = buildSemanticDeleteTimelineIntents(documentStore, selectedIdsList);
-                      if (intents.length !== 0) await semanticAuthoring.authorTransaction(intents);
-                      props.setSelectedIds({});
-                    }
+                    await commands.delete(selectedIdsList);
                   }}>
                   <IconTrash width={14} height={14} /> 批量删除
                 </button>
                 <button className="btn" style={{ width: '100%' }}
                   onClick={() => {
-                    if (props.copyActions) {
-                      props.copyActions(selectedIdsList);
-                    } else {
-                      const statements = buildSemanticCopyBufferForTimelineActions(documentStore, selectedIdsList);
-                      if (statements.length !== 0) editorStore.setCopyBuffer(statements);
-                    }
+                    const statements = commands.copy(selectedIdsList);
+                    if (statements.length) editorStore.setCopyBuffer(statements);
                   }}>
                   <IconCopy width={14} height={14} /> 复制到剪贴板
                 </button>

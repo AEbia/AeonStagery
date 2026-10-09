@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   document: null as any,
   compiledScene: null as any,
   authorMock: vi.fn(async (_intent: any) => ({})),
+  setCopyBuffer: vi.fn(),
   collaborationStatus: 'disconnected',
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({
@@ -54,7 +55,7 @@ vi.mock('../../ui/context/AppContext', () => ({
   useIsCollaborationUndoDisabled: () => false,
   useCollaborationStatus: () => state.collaborationStatus,
   useCollaborationPresence: () => ({ peers: [] }),
-  useOptionalApp: () => null,
+  useOptionalApp: () => ({ stores: { editor: { copyBuffer: [], setCopyBuffer: state.setCopyBuffer } } }),
   useCharacterAdapter: () => state.characterAdapter,
 }));
 
@@ -110,6 +111,7 @@ export function setupInlineInspectorFixture() {
     state.document = createInlineInspectorDocument();
     state.compiledScene = sceneStatementCompiler.compile(state.document);
     state.authorMock.mockClear();
+    state.setCopyBuffer.mockClear();
     Object.values(state.characterAdapter).forEach((mock) => mock.mockClear());
     state.collaborationStatus = 'disconnected';
   });

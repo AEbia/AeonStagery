@@ -41,22 +41,14 @@ import {
   getPeersEditingLocator,
   summarizeLocatorEditingPeers,
 } from '../../services/collaboration/CollaborationPresence';
-import {
-  buildSemanticPasteTimelineIntent,
-  buildSemanticCopyBufferForTimelineActions,
-  buildSemanticDeleteTimelineIntents,
-  createSemanticTimelineCorrelationId,
-  selectCompiledActionsForStatements,
-} from './semanticTimelineEditing';
+import { createSemanticTimelineCorrelationId } from './semanticTimelineEditing';
 import {
   buildSemanticStatementLibraryInsert,
-  submitSemanticStatementLibraryInsert,
 } from './semanticStatementInsertion';
 import { StatementLibraryMenu } from './StatementLibraryMenu';
 import { listAvailableLifecycleEndCommandIds } from './insertLifecycleEndCommand';
 import { listAvailableLifecycleTargetBindingCommandIds } from './lifecycleTargetBinding';
 import {
-  buildSemanticTimelineReadModel,
   type SemanticTimelineReadModelItem,
 } from './semanticTimelineReadModel';
 import {
@@ -67,7 +59,8 @@ import {
   computeTimelineEndSeconds,
 } from '../../services/sequential-flow/SequentialFlowAuthoring';
 import { useSettings } from '../SettingsStore';
-import { useSemanticDocument } from '../store/storeHooks';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
 
 function getTimelineItemClassForSemanticCategory(category: TimelineAction['semanticCategory']): string {
@@ -126,6 +119,7 @@ function preserveInlineDraftFocus(event: React.MouseEvent<HTMLElement>) {
 }
 
 export interface TimelineListViewProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   inlineExpandable?: boolean;
   selectedActionIds: Record<string, boolean>;
@@ -138,12 +132,6 @@ export interface TimelineListViewProps {
   workspaceWarningCount?: number;
   availableTemplates?: SourcedSemanticAuthoringCombo[];
   onSelectWorkspaceView?: (tab: WorkspaceToolTab) => void;
-  updateAction?: (id: string, updates: any, isTransient?: boolean) => void;
-  updateParam?: (id: string, key: string, val: any, isTransient?: boolean) => void;
-  replaceSourceParams?: (id: string, params: Record<string, unknown>) => void | Promise<unknown>;
-  deleteAction?: (id: string) => void;
-  deleteActions?: (ids: readonly string[]) => void | Promise<void>;
-  copyActions?: (ids: readonly string[]) => void;
 }
 
 export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
@@ -160,8 +148,15 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
 
   const playbackAdapter = usePlaybackAdapter();
   const documentStore = useDocumentStore();
-  const { document: sceneDocument } = useSemanticDocument();
+  const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
+  const { document: sceneDocument, items: semanticTimelineItems, actions: semanticTimelineActions, itemById: semanticTimelineItemByDisplayId } = semanticSnapshot;
   const semanticAuthoring = useSemanticAuthoringService();
+  const selectAfterCommit = useCallback((ids: Record<string, boolean>) => {
+    const selected = Object.keys(ids);
+    if (selected.length) handleSelect(selected, false);
+    else setSelectedIds({});
+  }, [handleSelect, setSelectedIds]);
+  const commands = useSemanticTimelineCommands(selectAfterCommit);
   const collaborationUndoDisabled = useIsCollaborationUndoDisabled();
   const { peers: collaborationPeers } = useCollaborationPresence();
   const { settings, setSetting } = useSettings();
@@ -268,21 +263,6 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     () => collectEnvironmentLayerPresentations(sceneData),
     [sceneData],
   );
-  const semanticTimelineItems = useMemo(
-    () => buildSemanticTimelineReadModel(
-      sceneDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore, sceneDocument],
-  );
-  const semanticTimelineActions = useMemo(
-    () => semanticTimelineItems.map((item) => item.displayAction),
-    [semanticTimelineItems],
-  );
-  const semanticTimelineItemByDisplayId = useMemo(
-    () => new Map(semanticTimelineItems.map((item) => [item.id, item])),
-    [semanticTimelineItems],
-  );
   const timelineReadModelActions = semanticTimelineActions;
   const timelineItemCount = semanticTimelineItems.length;
   const timelineListGaps = useMemo(
@@ -357,33 +337,8 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   // ── Actions ────────────────────────────────────────────
   const handleDeleteItem = useCallback(async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!semanticAuthoring || blockOfflineAuthoring()) return;
-    const item = semanticTimelineItemByDisplayId.get(id);
-    if (!item) return;
-    try {
-      if (item.locator.kind === 'companion') {
-        await semanticAuthoring.author({
-          version: AUTHORING_SCHEMA_VERSION,
-          correlationId: createTimelineListCorrelationId(),
-          origin: 'timeline-editor',
-          kind: 'delete-dialogue-companions',
-          locators: [item.locator],
-        });
-      } else {
-        await semanticAuthoring.author({
-          version: AUTHORING_SCHEMA_VERSION,
-          correlationId: createTimelineListCorrelationId(),
-          origin: 'timeline-editor',
-          kind: 'delete-statements',
-          statementIds: [item.statementId],
-          flow: item.source.type === 'dialogue' && dialogueFlowEnabled,
-        });
-      }
-      setSelectedIds({});
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : '无法删除语句', 'warning');
-    }
-  }, [blockOfflineAuthoring, dialogueFlowEnabled, semanticAuthoring, semanticTimelineItemByDisplayId, setSelectedIds]);
+    await commands.delete([id]);
+  }, [commands]);
 
   const handleSelectActionFromLibrary = useCallback(async (type: 'statement' | 'template', data: any) => {
     if (blockOfflineAuthoring()) return;
@@ -437,20 +392,9 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
         }
         if (blockOfflineAuthoring()) return;
 
-        let selectedCalled = false;
-        const receipt = await submitSemanticStatementLibraryInsert({
-          semanticAuthoring,
-          documentStore,
-          intent: result.intent,
-          onSelect: (ids) => {
-            selectedCalled = true;
-            handleSelect(ids, false);
-          },
-        });
+        const receipt = await commands.insert(result.intent);
+        if (!receipt) return;
         showToast(`已插入 ${receipt.createdStatementIds.length} 个语句`, 'success');
-        if (!selectedCalled && receipt.createdStatementIds.length > 0) {
-          handleSelect(receipt.createdStatementIds, false);
-        }
         setActiveGapMenu(null);
       } else if (type === 'template' && data.templateId) {
         const combo = props.availableTemplates?.find((candidate) => candidate.id === data.templateId);
@@ -468,18 +412,9 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
           setActiveGapMenu(null);
           return;
         }
-        const receipt = await semanticAuthoring.author(preview.intent);
+        const receipt = await commands.insert(preview.intent);
+        if (!receipt) return;
         showToast(`已应用模板: ${combo.name}`, 'success');
-        const selected = selectCompiledActionsForStatements(
-          documentStore.getCompiledSceneSnapshot(),
-          receipt.createdStatementIds,
-        );
-        const selectedIds = Object.keys(selected);
-        if (selectedIds.length > 0) {
-          handleSelect(selectedIds, false);
-        } else if (receipt.createdStatementIds.length > 0) {
-          handleSelect(receipt.createdStatementIds, false);
-        }
         setActiveGapMenu(null);
       }
     } catch (error) {
@@ -488,38 +423,16 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     } finally {
       gapInsertPendingRef.current = false;
     }
-  }, [activeGapMenu, blockOfflineAuthoring, documentStore, handleSelect, props.availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems]);
+  }, [activeGapMenu, blockOfflineAuthoring, commands, documentStore, props.availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems]);
 
   const handlePasteAtGap = useCallback(async (time: number) => {
     const editorStore = app?.stores?.editor;
     if (!editorStore || editorStore.copyBuffer.length === 0 || !semanticAuthoring) return;
     if (blockOfflineAuthoring()) return;
-    const intent = buildSemanticPasteTimelineIntent(
-      editorStore.copyBuffer,
-      time,
-      createSemanticTimelineCorrelationId('timeline_list_gap_paste'),
-      'timeline-list-gap',
-    );
-    if (intent) {
-      try {
-        const receipt = await semanticAuthoring.author(intent);
-        showToast(`已粘贴 ${receipt.createdStatementIds.length} 个语句`, 'success');
-        const nextSelected = selectCompiledActionsForStatements(
-          documentStore.getCompiledSceneSnapshot(),
-          receipt.createdStatementIds,
-        );
-        const selectedIds = Object.keys(nextSelected);
-        if (selectedIds.length > 0) {
-          handleSelect(selectedIds, false);
-        } else if (receipt.createdStatementIds.length > 0) {
-          handleSelect(receipt.createdStatementIds, false);
-        }
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : '无法粘贴语句', 'warning');
-      }
-    }
+    const receipt = await commands.paste(editorStore.copyBuffer, time, 'timeline-list-gap');
+    if (receipt) showToast(`已粘贴 ${receipt.createdStatementIds.length} 个语句`, 'success');
     setActiveGapMenu(null);
-  }, [app, blockOfflineAuthoring, documentStore, handleSelect, semanticAuthoring]);
+  }, [app, blockOfflineAuthoring, commands, semanticAuthoring]);
 
   const dropRootStatementAt = useCallback(async (movedStatementId: string, insertionIndex: number) => {
     if (!semanticAuthoring || !sceneDocument || blockOfflineAuthoring()) return;
@@ -675,28 +588,14 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
   }, [virtualRows.cancelReveal]);
 
   const commitInlineParams = useCallback((action: TimelineAction, patch: QuickParamPatch, replace = false) => {
-    if (blockOfflineAuthoring() || !semanticAuthoring || !action._id) return;
-    const item = semanticTimelineItemByDisplayId.get(action._id);
+    const item = action._id ? semanticTimelineItemByDisplayId.get(action._id) : undefined;
     if (!item) return;
-    // Build against the latest document inside the serial authoring queue.
-    // A quick edit and the full inspector share the same canonical source seam.
-    void semanticAuthoring.authorTransaction((document) => {
-      const statement = document.statements.find((candidate) => candidate.id === item.statementId);
-      const source = item.locator.kind === 'companion'
-        ? statement?.companions?.find((candidate) => candidate.id === item.companionId)
-        : statement;
-      if (!source) throw new Error('语句已不存在');
-      const changes = typeof patch === 'function' ? patch(source.params as Record<string, unknown>) : patch;
-      const params: Record<string, unknown> = replace ? { ...changes } : { ...source.params, ...changes };
-      for (const key of Object.keys(params)) {
-        if (params[key] === undefined) delete params[key];
-      }
-      const base = { version: AUTHORING_SCHEMA_VERSION, correlationId: createTimelineListCorrelationId(), origin: 'timeline-editor' as const };
-      return [item.locator.kind === 'companion'
-        ? { ...base, kind: 'update-dialogue-companion', locator: item.locator, patch: { params } as any }
-        : { ...base, kind: 'update-statement', statementId: item.statementId, patch: { params } as any, flow: dialogueFlowEnabled }];
-    }).catch((error) => showToast(error instanceof Error ? error.message : '无法修改语句属性', 'warning'));
-  }, [blockOfflineAuthoring, dialogueFlowEnabled, semanticAuthoring, semanticTimelineItemByDisplayId]);
+    if (replace && typeof patch !== 'function') {
+      void commands.replaceSourceParams(item.locator, patch, item.source.params as Record<string, unknown>);
+    } else {
+      void commands.updateSourceParams(item.locator, patch, replace);
+    }
+  }, [commands, semanticTimelineItemByDisplayId]);
 
   return (
     <div className={`timeline-list-view${allowInlineExpand ? '' : ' timeline-list-view--outline'}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -756,18 +655,11 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
           <div className="timeline-toolbar__selection" role="group" aria-label="批量操作">
             <button type="button" className="btn btn--icon" aria-label="复制到剪贴板" title="复制选中语句"
               onClick={() => {
-                if (props.copyActions) props.copyActions(selectedIdsList);
-                else app?.stores.editor.setCopyBuffer(buildSemanticCopyBufferForTimelineActions(documentStore, selectedIdsList));
+                app?.stores?.editor?.setCopyBuffer(commands.copy(selectedIdsList));
               }}><IconCopy width={14} height={14} /></button>
             <button type="button" className="btn btn--icon" aria-label="批量删除" title="删除选中语句" disabled={isOfflineEditingBlocked}
               onClick={async () => {
-                if (blockOfflineAuthoring()) return;
-                if (props.deleteActions) await props.deleteActions(selectedIdsList);
-                else if (semanticAuthoring) {
-                  const intents = buildSemanticDeleteTimelineIntents(documentStore, selectedIdsList);
-                  if (intents.length) await semanticAuthoring.authorTransaction(intents);
-                }
-                setSelectedIds({});
+                await commands.delete(selectedIdsList);
               }}><IconTrash width={14} height={14} /></button>
           </div>
         )}
@@ -1264,24 +1156,20 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
                         animateExpansion={automaticallyExpandedActionId !== action._id || !!manuallyExpandedActionIds[action._id!]}>
                         <ActionInspector
                           key={action._id}
+                          semanticSnapshot={semanticSnapshot}
                           sceneData={sceneData}
-                          semanticTimelineItems={semanticTimelineItems}
                           presentation="inline"
                           selectedActionIds={{ [action._id!]: true }}
                           setSelectedIds={setSelectedIds}
-                          updateAction={props.updateAction ?? ((_id, updates) => {
+                          updateAction={(_id, updates) => {
                             if (updates.params) commitInlineParams(action, updates.params, true);
-                          })}
-                          updateParam={props.updateParam ?? ((_id, key, val) => {
+                          }}
+                          updateParam={(_id, key, val) => {
                             commitInlineParams(action, { [key]: val });
-                          })}
-                          replaceSourceParams={props.replaceSourceParams ?? ((_id, params) => {
-                            commitInlineParams(action, params, true);
-                          })}
-                          deleteAction={props.deleteAction ?? ((id) => {
-                            void handleDeleteItem({ stopPropagation: () => {} } as any, id);
-                          })}
-                          copyActions={props.copyActions}
+                          }}
+                          replaceSourceParams={(_id, params) => { commitInlineParams(action, params, true); }}
+                          deleteAction={(id) => { void commands.delete([id]); }}
+                          copyActions={(ids) => app?.stores?.editor?.setCopyBuffer(commands.copy(ids))}
                           onClose={() => toggleExpand(action._id!)}
                           closeMode="close"
                         />

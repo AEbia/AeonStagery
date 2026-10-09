@@ -39,7 +39,8 @@ import { useBatchDrag } from './useBatchDrag';
 import { useBlockContextMenu } from './useBlockContextMenu';
 import type { TimelineInteractionFeedbackPayload } from './timelineInteractionFeedback';
 import { formatFeedbackSeconds, formatTimelineFeedbackLabel } from './timelineInteractionFeedback';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 
 import { MarqueeOverlay } from './MarqueeOverlay';
 import { BlankContextMenu } from './BlankContextMenu';
@@ -84,10 +85,8 @@ import {
   buildTemplateAuthoringPreview,
 } from '../../services/template-package';
 import {
-  buildSemanticPasteTimelineIntent,
   createSemanticTimelineCorrelationId,
   locatorForCompiledTimelineAction,
-  selectCompiledActionsForStatements,
 } from './semanticTimelineEditing';
 import {
   listAvailableLifecycleEndCommandIds,
@@ -121,6 +120,7 @@ import {
 } from './semanticStatementInsertion';
 
 interface TrackAreaProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   tracks: Array<{ id: string; label: string; actions: TrackActionItem[] }>;
   pps: number;
   maxTime: number;
@@ -144,6 +144,7 @@ interface TrackAreaProps {
 }
 
 export const TrackArea = React.memo(({
+  semanticSnapshot: providedSemanticSnapshot,
   tracks,
   pps,
   maxTime,
@@ -167,6 +168,10 @@ export const TrackArea = React.memo(({
   const marqueeRef = useRef<HTMLDivElement>(null);
 
   const documentStore = useDocumentStore();
+  const semanticSnapshot = useSemanticTimelineSnapshot(providedSemanticSnapshot);
+  const { items: semanticTimelineItems, itemById: semanticTimelineItemById } = semanticSnapshot;
+  const selectAfterCommit = useCallback((ids: Record<string, boolean>) => onSelect(Object.keys(ids), false), [onSelect]);
+  const commands = useSemanticTimelineCommands(selectAfterCommit);
   const editorStore = useEditorStore();
   const writableEditorStore = useApp().stores.editor;
   const playbackAdapter = usePlaybackAdapter();
@@ -329,21 +334,6 @@ export const TrackArea = React.memo(({
     }
     return map;
   }, [tracks]);
-
-  const semanticTimelineItems = useMemo(() => {
-    // sceneData and tracks are view-level invalidation signals; the document
-    // store remains the canonical source for the semantic read model.
-    void sceneData;
-    void tracks;
-    return buildSemanticTimelineReadModel(
-      documentStore.getCurrentSceneDocumentSnapshot(),
-      documentStore.getCompiledSceneSnapshot(),
-    );
-  }, [documentStore, sceneData, tracks]);
-  const semanticTimelineItemById = useMemo(
-    () => new Map(semanticTimelineItems.map((item) => [item.id, item])),
-    [semanticTimelineItems],
-  );
 
   // 关键帧编辑器展开带目标：仅当该动作仍存在且仍为自定义动作时才展开
   const customMotionEditorTarget = useMemo(() => {
@@ -949,10 +939,7 @@ export const TrackArea = React.memo(({
     const motion = params?.motion;
     if (!motion || typeof motion !== 'object') return [];
     const kind = (motion as { kind?: unknown }).kind;
-    const semanticItem = buildSemanticTimelineReadModel(
-      documentStore.getCurrentSceneDocumentSnapshot(),
-      documentStore.getCompiledSceneSnapshot(),
-    ).find((item) => item.id === id);
+    const semanticItem = semanticTimelineItemById.get(id);
     const motionKey = kind === 'resource' && typeof (motion as { key?: unknown }).key === 'string'
       ? (motion as { key: string }).key
       : kind === 'custom' && (motion as { derivedFrom?: { key?: unknown } }).derivedFrom?.key
@@ -1019,7 +1006,7 @@ export const TrackArea = React.memo(({
       ];
     }
     return [];
-  }, [actionById, documentStore, onSelect, writableEditorStore, characterAdapter]);
+  }, [actionById, semanticTimelineItemById, onSelect, writableEditorStore, characterAdapter]);
 
   const sceneFps = documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
   const estimateKeyframesForDensity = React.useCallback((density: CustomMotionDensity): number => {
@@ -1057,6 +1044,8 @@ export const TrackArea = React.memo(({
     handleBlockContextMenu,
     dispatchMenuAction,
   } = useBlockContextMenu({
+    semanticSnapshot,
+    selectAfterCommit,
     onCopyActions,
     onDuplicateActions,
     onDeleteActions,
@@ -1180,24 +1169,7 @@ export const TrackArea = React.memo(({
   }, [publishCollaborationPresence]);
 
   const completePasteHere = async (time: number) => {
-    if (blockOfflineAuthoring()) return;
-    if (semanticAuthoring && editorStore.copyBuffer.length > 0) {
-      const intent = buildSemanticPasteTimelineIntent(
-        editorStore.copyBuffer,
-        time,
-        createSemanticTimelineCorrelationId('blank_menu_paste'),
-        'blank-context-menu',
-      );
-      if (intent) {
-        if (blockOfflineAuthoring()) return;
-        const receipt = await semanticAuthoring.author(intent);
-        const nextSelected = selectCompiledActionsForStatements(
-          documentStore.getCompiledSceneSnapshot(),
-          receipt.createdStatementIds,
-        );
-        if (Object.keys(nextSelected).length > 0) onSelect(Object.keys(nextSelected), false);
-      }
-    }
+    await commands.paste(editorStore.copyBuffer, time, 'blank-context-menu');
     setBlankMenu(null);
   };
 
@@ -1269,12 +1241,7 @@ export const TrackArea = React.memo(({
         : null;
       if (!preview || !combo) return;
       if (blockOfflineAuthoring()) return;
-      const receipt = await semanticAuthoring.author(preview.intent);
-      const nextSelected = selectCompiledActionsForStatements(
-        documentStore.getCompiledSceneSnapshot(),
-        receipt.createdStatementIds,
-      );
-      if (Object.keys(nextSelected).length > 0) onSelect(Object.keys(nextSelected), false);
+      await commands.insert(preview.intent);
     }
 
     setBlankMenu(null);

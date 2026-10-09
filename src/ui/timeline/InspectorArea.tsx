@@ -1,47 +1,32 @@
 import { TimelineListView } from './TimelineListView';
 import { useMemo, useSyncExternalStore } from 'react';
 import {
-  useDocumentStore,
   useTemplatePackageCatalog,
 } from '../context/AppContext';
 import { ContextPanel } from './ContextPanel';
 import type { SaveResult } from '../../services/io/SceneFileService';
 import type { InspectorPanelView } from './InspectorViewPicker';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import { resolveMatchingTimelineAction } from './selectionHygiene';
 import type { TimelineScene } from './semanticTimelineTypes';
-import { useSemanticDocument } from '../store/storeHooks';
 import { useSettings } from '../SettingsStore';
 import { PropertyInspectorShell } from './PropertyInspectorShell';
 
 export interface InspectorAreaProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
-  inspectorTab: 'basic' | 'transform' | 'state';
-  setInspectorTab: (t: 'basic' | 'transform' | 'state') => void;
   updateAction: (id: string, updates: any) => void;
   updateParam: (id: string, key: string, val: any) => void;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
-  deleteAction: (id: string) => void;
-  deleteActions?: (ids: readonly string[]) => void | Promise<void>;
-  copyActions?: (ids: readonly string[]) => void;
-  addActionAt: (time: number) => void;
   addAction: () => void;
   handleSave: () => void | Promise<SaveResult | undefined>;
   handleSelect: (idOrIds: string | string[], multi?: boolean) => void;
   setCurrentTime: (t: number) => void;
   loadExample: () => Promise<boolean>;
-  detailOpen: boolean;
-  detailClosing?: boolean;
-  detailSelectedActionIds?: Record<string, boolean>;
-  onDetailOpen: () => void;
   onDetailClose: () => void;
-  layoutMode: 'split' | 'replace';
   navigatorWidth: number;
-  detailWidth: number;
-  onDetailResizeStart?: (event: React.MouseEvent) => void;
-  onDetailResizeKeyDown?: (event: React.KeyboardEvent) => void;
   workspaceIssues?: any[];
   inspectorView: InspectorPanelView;
   onSelectInspectorView?: (view: InspectorPanelView) => void;
@@ -50,7 +35,6 @@ export interface InspectorAreaProps {
 }
 
 const ListInspectorArea = (props: InspectorAreaProps) => {
-  const documentStore = useDocumentStore();
   const templateCatalog = useTemplatePackageCatalog();
   const templatePackageSnapshot = useSyncExternalStore(
     templateCatalog ? (listener) => templateCatalog.subscribe(listener) : () => () => {},
@@ -64,11 +48,8 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
     },
     [templateCatalog, templatePackageSnapshot],
   );
-  const { document: semanticDocument } = useSemanticDocument();
-  const items = useMemo(
-    () => buildSemanticTimelineReadModel(semanticDocument, documentStore.getCompiledSceneSnapshot()),
-    [documentStore, semanticDocument],
-  );
+  const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
+  const { items } = semanticSnapshot;
   const selectedIds = Object.keys(props.selectedActionIds);
   const selectedAction = selectedIds.length === 1
     ? resolveMatchingTimelineAction(items.map((item) => item.displayAction), selectedIds[0])
@@ -81,6 +62,7 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
     >
       {props.inspectorView === 'actions' ? (
         <TimelineListView
+          semanticSnapshot={semanticSnapshot}
           sceneData={props.sceneData}
           inlineExpandable
           selectedActionIds={props.selectedActionIds}
@@ -93,15 +75,10 @@ const ListInspectorArea = (props: InspectorAreaProps) => {
           workspaceWarningCount={props.workspaceIssues?.filter((issue) => issue.severity === 'warning').length ?? 0}
           availableTemplates={availableTemplates}
           onSelectWorkspaceView={(view) => props.onSelectInspectorView?.(view)}
-          updateAction={props.updateAction}
-          updateParam={props.updateParam}
-          replaceSourceParams={props.replaceSourceParams}
-          deleteAction={props.deleteAction}
-          deleteActions={props.deleteActions}
-          copyActions={props.copyActions}
         />
       ) : (
         <ContextPanel
+          semanticSnapshot={semanticSnapshot}
           sceneMeta={props.sceneData.meta}
           actionCount={items.length}
           globalIssues={props.workspaceIssues ?? []}

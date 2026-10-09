@@ -120,7 +120,10 @@ describe('timeline list inline authoring', () => {
   });
 
   it('opens track-blank-menu when clicking gap plus and inserts statement at gap position', async () => {
-    state.author.mockResolvedValueOnce({ createdStatementIds: ['created-dialogue'] });
+    state.author.mockImplementationOnce(async () => {
+      state.document = { ...state.document, statements: [...state.document.statements, makeStatement('created-dialogue', 0.1)] };
+      return { createdStatementIds: ['created-dialogue'] };
+    });
     const { handleSelect } = renderList([0.04, 0.16]);
 
     expect(document.querySelector('.track-blank-menu')).toBeNull();

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeftSidebarPanel } from '../ui/timeline/LeftSidebarPanel';
 
@@ -37,14 +37,35 @@ const mockTimelineAdapter = vi.hoisted(() => ({
 
 const mockEditorState = vi.hoisted(() => ({
   selectedActionIds: {} as Record<string, boolean>,
-  setSelectedIds: vi.fn(),
+  setSelectedIds: vi.fn((ids: Record<string, boolean>) => mockTimelineAdapter.select(ids)),
   loadExample: vi.fn(async () => true),
+}));
+
+const mockAuthoring = vi.hoisted(() => ({
+  author: vi.fn(async () => ({ createdStatementIds: ['stmt_new'] })),
+}));
+
+const mockDocumentStore = vi.hoisted(() => ({
+  getCurrentSceneDocumentSnapshot: () => semanticDocumentState.document,
+  getCompiledSceneSnapshot: vi.fn(() => null as any),
 }));
 
 vi.mock('../ui/timeline/TimelineListView', () => ({
   TimelineListView: (props: any) => (
     <div data-testid="mock-timeline-list-view">
       <span>TimelineListView Mounted</span>
+      <button
+        data-testid="clear-selection-btn"
+        onClick={() => props.setSelectedIds({})}
+      >
+        Clear Selection
+      </button>
+      <button
+        data-testid="add-stmt-btn"
+        onClick={() => { void props.addAction(); }}
+      >
+        Add Statement
+      </button>
       <button
         data-testid="select-stmt-btn"
         onClick={() => props.handleSelect('stmt_1', false)}
@@ -96,13 +117,8 @@ vi.mock('../ui/context/AppContext', () => ({
     getCurrentTime: () => 0,
     seek: vi.fn(),
   }),
-  useDocumentStore: () => ({
-    getCurrentSceneDocumentSnapshot: () => semanticDocumentState.document,
-    getCompiledSceneSnapshot: () => null,
-  }),
-  useSemanticAuthoringService: () => ({
-    author: vi.fn(async () => ({ createdStatementIds: ['stmt_new'] })),
-  }),
+  useDocumentStore: () => mockDocumentStore,
+  useSemanticAuthoringService: () => mockAuthoring,
   useTimelineAdapter: () => mockTimelineAdapter,
   useTemplatePackageCatalog: () => undefined,
   useCollaborationStatus: () => 'connected',
@@ -123,6 +139,8 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEditorState.selectedActionIds = {};
+    semanticDocumentState.document.statements = semanticDocumentState.document.statements.filter((statement) => statement.id === 'stmt_1');
+    mockDocumentStore.getCompiledSceneSnapshot.mockReturnValue(null);
   });
 
   it('renders dual tabs: "剧本时间轴" and "角色管理" with accessible markup', () => {
@@ -221,7 +239,7 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
     expect(charactersPanel.hidden).toBe(false);
   });
 
-  it('properly triggers timelineAdapter.select and setSelectedIds when selecting an action', () => {
+  it('writes selection once through setSelectedIds when selecting an action', () => {
     render(<LeftSidebarPanel />);
 
     const selectBtn = screen.getByTestId('select-stmt-btn');
@@ -229,9 +247,11 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
 
     expect(mockEditorState.setSelectedIds).toHaveBeenCalledWith({ stmt_1: true });
     expect(mockTimelineAdapter.select).toHaveBeenCalledWith({ stmt_1: true });
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledTimes(1);
+    expect(mockTimelineAdapter.select).toHaveBeenCalledTimes(1);
   });
 
-  it('properly triggers timelineAdapter.select and setSelectedIds for multi-selection', () => {
+  it('writes selection once when adding to multi-selection', () => {
     mockEditorState.selectedActionIds = { stmt_existing: true };
     render(<LeftSidebarPanel />);
 
@@ -246,9 +266,11 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
       stmt_existing: true,
       stmt_1: true,
     });
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledTimes(1);
+    expect(mockTimelineAdapter.select).toHaveBeenCalledTimes(1);
   });
 
-  it('properly triggers timelineAdapter.select and setSelectedIds when selecting an array of ids', () => {
+  it('writes selection once when selecting an array of ids', () => {
     render(<LeftSidebarPanel />);
 
     const selectMultipleBtn = screen.getByTestId('select-multiple-btn');
@@ -262,6 +284,39 @@ describe('LeftSidebarPanel in Tracks Mode', () => {
       stmt_1: true,
       stmt_2: true,
     });
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledTimes(1);
+    expect(mockTimelineAdapter.select).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes selection once when removing an id from multi-selection', () => {
+    mockEditorState.selectedActionIds = { stmt_existing: true, stmt_1: true };
+    render(<LeftSidebarPanel />);
+    fireEvent.click(screen.getByTestId('multi-select-stmt-btn'));
+    expect(mockTimelineAdapter.select).toHaveBeenCalledExactlyOnceWith({ stmt_existing: true });
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledExactlyOnceWith({ stmt_existing: true });
+  });
+
+  it('writes selection once when the list clears selection', () => {
+    mockEditorState.selectedActionIds = { stmt_1: true };
+    render(<LeftSidebarPanel />);
+    fireEvent.click(screen.getByTestId('clear-selection-btn'));
+    expect(mockTimelineAdapter.select).toHaveBeenCalledExactlyOnceWith({});
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  it('selects the created statement once after authoring completes', async () => {
+    semanticDocumentState.document.statements.push({
+      id: 'stmt_new', time: 0, type: 'dialogue', params: { characterId: 'char_1', text: 'New' },
+    });
+    mockDocumentStore.getCompiledSceneSnapshot.mockReturnValue({ actions: [{
+      id: 'created-action', time: 0, action: 'dialogue', params: {}, source: { statementId: 'stmt_new' },
+    }] });
+    render(<LeftSidebarPanel />);
+    fireEvent.click(screen.getByTestId('add-stmt-btn'));
+    await waitFor(() => expect(mockTimelineAdapter.select)
+      .toHaveBeenCalledExactlyOnceWith({ 'created-action': true }));
+    expect(mockEditorState.setSelectedIds).toHaveBeenCalledExactlyOnceWith({ 'created-action': true });
+    expect(mockAuthoring.author).toHaveBeenCalledTimes(1);
   });
 
   it('supports controlled activeTab and onTabChange callback', () => {
