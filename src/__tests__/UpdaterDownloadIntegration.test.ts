@@ -23,7 +23,9 @@ class TestHttpExecutor extends NodeHttpExecutor {
     if (options.hostname === 'api.github.com' || options.hostname === 'github.com') {
       options = { ...options, protocol: 'http:', hostname: this.githubMirror.hostname, port: this.githubMirror.port };
     }
-    return super.createRequest(options, callback);
+    // Each fixture owns a short-lived server and deliberately aborts downloads.
+    // Avoid reusing global-agent sockets left behind by those failure paths.
+    return super.createRequest({ ...options, agent: false }, callback);
   }
   download(url: URL, destination: string, options: DownloadOptions): Promise<string> {
     return options.cancellationToken.createPromise((resolve, reject, onCancel) => {
