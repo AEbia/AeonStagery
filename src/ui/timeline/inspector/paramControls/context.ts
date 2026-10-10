@@ -47,7 +47,6 @@ export interface InspectorParamContext {
   isLensFilterSourceAction: boolean;
   isEnvironmentLayerAuthoringAction: boolean;
   visualSlot: string;
-  currentEnvironmentLayer: ReturnType<typeof import('../../environmentAuthoring').listAuthorFacingEnvironmentLayers>[number] | undefined;
   displayAction: any;
   performanceTargetSpeakerId: string | undefined;
   customMotionValue: Extract<CharacterMotionOutput, { kind: 'custom' }> | null;
@@ -67,7 +66,6 @@ export interface InspectorParamContext {
   updateDialogueSpeaker: (value: string) => void;
   updateDialogueTemplate: (value: string) => Promise<void>;
   updateVisualSemanticOverride: (key: string, value: unknown, isTransient?: boolean) => void;
-  commitEnvironmentLayerReference: (layerId: string, label?: string | null) => void;
   characterAdapter: ReturnType<typeof useCharacterAdapter>;
   semanticAuthoring: SemanticAuthoringApplicationService | undefined;
 }

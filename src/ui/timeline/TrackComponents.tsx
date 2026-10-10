@@ -10,7 +10,6 @@ import { useActionValidationSeverity } from '../store/storeHooks';
 import { useValidationStore } from '../context/AppContext';
 import type { SummarySegment } from './timelineDensity';
 import { getTimelineActionDuration } from './timelineDensity';
-import { BACKGROUND_LAYER_ID } from '../../engine/environmentLayerModel';
 import {
   getLifecycleBoundaryPresentationMetrics,
   LIFECYCLE_BOUNDARY_PAD_PX,
@@ -241,11 +240,11 @@ export function getActionDisplayLabel(actionType: string, params?: Record<string
     case 'characterBlink':
       return '角色眨眼';
     case 'setEnvironmentLayer':
-      return params?.layerId === BACKGROUND_LAYER_ID ? '放入背景' : `放入${params?.label || '环境画面'}`;
+      return '放入环境画面';
     case 'transformEnvironmentLayer':
-      return params?.layerId === BACKGROUND_LAYER_ID ? '调整背景' : `调整${params?.label || '环境画面'}`;
+      return '调整环境画面';
     case 'removeEnvironmentLayer':
-      return params?.layerId === BACKGROUND_LAYER_ID ? '收起背景' : `收起${params?.label || '环境画面'}`;
+      return '收起环境画面';
     case 'addLensFilter':
       return '添加滤镜';
     case 'changeLensFilter':
