@@ -187,17 +187,22 @@ export function TimelineEditor({
     }
   };
 
-  // Update width tracking
-  useEffect(() => {
+  // Panel resizing and layout switches change the viewport without resizing the window.
+  useLayoutEffect(() => {
+    const viewport = timelineRef.current;
+    if (!viewport) return;
     const updateWidth = () => {
-      setTimelineWidth(timelineRef.current?.clientWidth || 1000);
+      setTimelineWidth(viewport.clientWidth || 1000);
     };
-    if (timelineRef.current) {
-      updateWidth();
-      window.addEventListener('resize', updateWidth);
-    }
-    return () => window.removeEventListener('resize', updateWidth);
-  }, []);
+    updateWidth();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateWidth);
+    observer?.observe(viewport);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [mode, semanticDocument?.sceneId]);
 
   useEffect(() => {
     return () => {

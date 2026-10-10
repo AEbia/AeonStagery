@@ -20,6 +20,7 @@ import type { SemanticTimelineSnapshot } from '../ui/timeline/useSemanticTimelin
 
 let capturedTrackAreaProps: Record<string, unknown> = {};
 let capturedInspectorAreaProps: Record<string, unknown> = {};
+let capturedZoomSliderProps: Record<string, unknown> = {};
 
 vi.mock('../ui/timeline/TrackArea', () => ({
   TrackArea: (props: Record<string, unknown>) => {
@@ -36,7 +37,10 @@ vi.mock('../ui/timeline/InspectorArea', () => ({
 }));
 
 vi.mock('../ui/timeline/TimelineZoomSlider', () => ({
-  TimelineZoomSlider: () => <div data-testid="timeline-zoom-slider" />,
+  TimelineZoomSlider: (props: Record<string, unknown>) => {
+    capturedZoomSliderProps = props;
+    return <div data-testid="timeline-zoom-slider" />;
+  },
 }));
 
 vi.mock('../ui/timeline/TimelineSelectionBar', () => ({
@@ -146,6 +150,37 @@ describe('TimelineEditor interaction → authoring promise chain', () => {
     expect(snapshot.items).toHaveLength(1);
     expect(snapshot.document?.statements[0].id).toBe(snapshot.items[0].statementId);
     expect(snapshot.actions[0]).toBe(snapshot.items[0].displayAction);
+  });
+
+  it('keeps ruler and zoom viewport widths in sync when the adjacent panel resizes', () => {
+    let viewportWidth = 720;
+    let notifyResize = () => {};
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { notifyResize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('timeline-editor-scroll-container') ? viewportWidth : 0;
+      });
+
+    try {
+      const { unmount } = render(<AppProvider {...makeContext()}><TimelineEditor mode="tracks" /></AppProvider>);
+      expect(capturedTrackAreaProps.containerWidth).toBe(720);
+      expect(capturedZoomSliderProps.containerWidth).toBe(620);
+
+      viewportWidth = 480;
+      act(() => notifyResize());
+      expect(capturedTrackAreaProps.containerWidth).toBe(480);
+      expect(capturedZoomSliderProps.containerWidth).toBe(380);
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('blocks a delayed inspector commit when collaboration goes offline after opening the form', async () => {
