@@ -682,6 +682,7 @@ function lowerEnvironmentLayer(params: EnvironmentLayerParams): LoweredAction[] 
   const duration = resolveEnvironmentLayerDuration(params);
   const runtimeParams = cleanParams({
     layerId: params.layerId,
+    label: params.label,
     image: params.image ?? params.file,
     x: params.position?.[0],
     y: params.position?.[1],

@@ -16,7 +16,7 @@ describe('statement params parse diagnostics', () => {
         'statement.params',
       ),
     ).toThrow(
-      /Unknown field at statement\.params\.background\. Allowed fields: mode, layerId, file, image, position, scale, rotation, opacity, z, zIndex, durationSeconds, ease, transition/,
+      /Unknown field at statement\.params\.background\. Allowed fields: mode, layerId, label, file, image, position, scale, rotation, opacity, z, zIndex, durationSeconds, ease, transition/,
     );
   });
 

@@ -956,6 +956,7 @@ function parseEnvironmentLayerParams(input: unknown, path: string): EnvironmentL
   expectKeys(record, path, [
     'mode',
     'layerId',
+    'label',
     'file',
     'image',
     'position',
@@ -971,6 +972,7 @@ function parseEnvironmentLayerParams(input: unknown, path: string): EnvironmentL
   return compact({
     mode: expectOneOf(record.mode, `${path}.mode`, ['set', 'transform', 'remove']),
     layerId: expectString(record.layerId, `${path}.layerId`),
+    label: optionalString(record.label, `${path}.label`),
     file: optionalResourcePath(record.file, `${path}.file`),
     image: optionalResourcePath(record.image, `${path}.image`),
     position: optionalVec2(record.position, `${path}.position`),
