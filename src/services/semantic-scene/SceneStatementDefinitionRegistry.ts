@@ -130,6 +130,8 @@ export interface ResolvedSceneStatementStateSpanDependency {
 
 export interface SceneStatementDefinition<Family extends StatementFamily = StatementFamily> {
   readonly family: Family;
+  /** Omitted for families present in the historical scene v4 contract. */
+  readonly minimumSceneSchemaVersion?: 5;
   readonly category: StatementCategory;
   readonly label: string;
   readonly discriminators: readonly string[];
@@ -1636,6 +1638,29 @@ function lifecyclePresentation<Family extends StatementFamily>(
 }
 
 const definitions = {
+  dialogueVisibility: {
+    family: 'dialogueVisibility',
+    minimumSceneSchemaVersion: 5,
+    category: 'dialogue',
+    label: 'Dialogue Visibility',
+    discriminators: ['type'],
+    parseParams: (input, path) => {
+      const record = expectRecord(input, path);
+      expectKeys(record, path, ['visible', 'durationSeconds']);
+      const visible = optionalBoolean(record.visible, `${path}.visible`);
+      if (visible === undefined) throw new Error(`Expected boolean at ${path}.visible`);
+      return compact({
+        visible,
+        durationSeconds: optionalNonNegativeNumber(record.durationSeconds, `${path}.durationSeconds`),
+      });
+    },
+    temporalExtent: (params) => duration(params.durationSeconds),
+    collectAssetReferences: () => [],
+    timelinePresentation: (params) => ({
+      label: params.visible ? '显示字幕框' : '隐藏字幕框',
+      iconKey: 'dialogue',
+    }),
+  },
   dialogue: {
     family: 'dialogue',
     category: 'dialogue',
@@ -2072,6 +2097,7 @@ export const SCENE_STATEMENT_PATCH_METADATA: Readonly<{
   [Family in StatementFamily]: SceneStatementPatchMetadata;
 }> = Object.freeze({
   dialogue: defaultPatchMetadata(),
+  dialogueVisibility: defaultPatchMetadata(),
   characterPresence: defaultPatchMetadata(),
   characterTransform: defaultPatchMetadata(),
   characterPerformance: defaultPatchMetadata(),
@@ -2104,6 +2130,18 @@ export class SceneStatementDefinitionRegistry {
 
   has(family: string): family is StatementFamily {
     return Object.prototype.hasOwnProperty.call(this.definitions, family);
+  }
+
+  assertSupportedInSchema(family: StatementFamily, schemaVersion: number, path: string): void {
+    const minimum = this.get(family).minimumSceneSchemaVersion ?? 4;
+    if (schemaVersion < minimum) {
+      throw new UnknownSceneDiscriminatorError(
+        path,
+        family,
+        undefined,
+        `Statement family ${family} requires scene schemaVersion ${minimum} at ${path}`,
+      );
+    }
   }
 
   list(): readonly SceneStatementDefinition[] {
@@ -2399,6 +2437,7 @@ export function deriveSceneStatementRegistryFingerprint(
   const definitions = registry ? registry.list() : Object.values(SCENE_STATEMENT_DEFINITIONS);
   const parts = definitions.map((definition) => JSON.stringify({
     family: definition.family,
+    ...(definition.minimumSceneSchemaVersion ? { minimumSceneSchemaVersion: definition.minimumSceneSchemaVersion } : {}),
     category: definition.category,
     label: definition.label,
     discriminators: definition.discriminators,

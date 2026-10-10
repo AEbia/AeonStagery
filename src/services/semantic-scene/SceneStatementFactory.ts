@@ -62,6 +62,7 @@ export interface SceneStatementFactoryOptions {
 
 const FAMILY_ID_PREFIX: Record<StatementFamily, string> = {
   dialogue: 'dlg',
+  dialogueVisibility: 'dlg_visibility',
   characterPresence: 'char_presence',
   characterTransform: 'char_transform',
   characterPerformance: 'char_perf',

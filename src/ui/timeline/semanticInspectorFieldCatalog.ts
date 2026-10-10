@@ -238,6 +238,9 @@ function defaultRimLightValue(key: string, params: Readonly<Record<string, unkno
 }
 
 export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
+  dialogueVisibility: [field('durationSeconds', '过渡时长', {
+    valueType: 'number', min: '0', step: '0.1', defaultValue: inspectorDefault(0),
+  })],
   dialogue: [
     field('speakerId', '绑定角色'),
     field('text', '对话文本', { defaultValue: inspectorDefault('新对白') }),

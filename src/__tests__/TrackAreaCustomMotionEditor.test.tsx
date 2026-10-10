@@ -8,6 +8,7 @@ import { CustomMotionEditor, isTrackAnimated, type CustomMotionEditorProps } fro
 import { TrackArea } from '../ui/timeline/TrackArea';
 import type { CustomMotionEditLeaseGate } from '../services/timeline-authoring/CustomMotionEditLeaseGate';
 import type { LooseTimelineAction as SceneAction } from './fixtures/TimelineTestTypes';
+import type { TimelineAction } from '../ui/timeline/semanticTimelineTypes';
 
 const CUSTOM_MOTION = {
   kind: 'custom',
@@ -40,10 +41,11 @@ function createCustomMotionAction(id: string, time: number, motion: unknown = CU
 
 function renderTrackAreaWithCustomMotion(options: {
   expandedActionId: string | null;
-  actions?: Array<{ id: string; action: SceneAction }>;
+  actions?: Array<{ id: string; action: TimelineAction }>;
   selectedIds?: Record<string, boolean>;
   collaboration?: { status: 'disconnected'; customMotionEditLeaseGate?: CustomMotionEditLeaseGate };
   document?: unknown;
+  viewWindow?: { start: number; end: number };
 } = { expandedActionId: null }) {
   const actions = options.actions ?? [createCustomMotionAction('cm1', 2)];
   void actions;
@@ -131,7 +133,7 @@ function renderTrackAreaWithCustomMotion(options: {
         scrollLeft={0}
         containerWidth={1000}
         onBatchDrag={onBatchDrag}
-        viewWindow={{ start: 0, end: 20 }}
+        viewWindow={options.viewWindow ?? { start: 0, end: 20 }}
         onNavigateRange={vi.fn()}
       />
     </AppProvider>,
@@ -230,6 +232,33 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     const block = container.querySelector('[data-testid="timeline-track-block"]') as HTMLElement;
     expect(block.dataset.actionDuration).toBe('4');
     expect(block.style.width).toBe('40px');
+  });
+
+  it('零时长语句块保留普通最小显示宽度，并按语义范围分行', () => {
+    const { container } = renderTrackAreaWithCustomMotion({
+      expandedActionId: null,
+      actions: [
+        { id: 'hide', action: { time: 2, action: 'setDialogueVisibility', semanticType: 'dialogueVisibility', params: { visible: false, duration: 0 } } },
+        { id: 'show', action: { time: 2.5, action: 'setDialogueVisibility', semanticType: 'dialogueVisibility', params: { visible: true, duration: 0 } } },
+        { id: 'expression', action: { time: 6, action: 'setExpression', params: { id: 'Hina', expression: 'smile', duration: 0 } } },
+      ],
+    });
+    const blocks = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="timeline-track-block"]'));
+    expect(blocks).toHaveLength(3);
+    for (const block of blocks) {
+      expect(block.style.width).toBe('4px');
+      expect(block.dataset.actionDuration).toBe('0');
+    }
+    expect(blocks[0].style.top).toBe(blocks[1].style.top);
+  });
+
+  it('零时长块不会因视觉宽度扩展到视口外而被保留', () => {
+    renderTrackAreaWithCustomMotion({
+      expandedActionId: null,
+      actions: [{ id: 'hide', action: { time: 2, action: 'setDialogueVisibility', semanticType: 'dialogueVisibility', params: { visible: false, duration: 0 } } }],
+      viewWindow: { start: 4.5, end: 5 },
+    });
+    expect(screen.queryByTestId('timeline-track-block')).toBeNull();
   });
 
   it('对白下的自定义角色动作语句块也可以横向拖动改变开始时间', () => {

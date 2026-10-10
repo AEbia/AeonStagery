@@ -479,6 +479,11 @@ function lowerStatement(
   visual: SceneVisualBlock | undefined,
 ): LoweredAction[] {
   switch (statement.type) {
+    case 'dialogueVisibility':
+      return [withOutput('primary', 'setDialogueVisibility', cleanParams({
+        visible: statement.params.visible,
+        duration: statement.params.durationSeconds ?? 0,
+      }))];
     case 'dialogue':
       return lowerDialogue(statement.params);
     case 'characterPresence':
