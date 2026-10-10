@@ -287,6 +287,7 @@ export interface AeonStageryElectronAPI {
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;
+    cancelExport(): Promise<{ success: boolean; error?: string }>;
     onLog(callback: (msg: string) => void): () => void;
   };
   path: {

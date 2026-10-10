@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import * as fs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ffmpegMocks = vi.hoisted(() => ({
@@ -62,9 +63,56 @@ describe('FFmpeg export failure seam', () => {
   });
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     ffmpegMocks.handlers.clear();
     ffmpegMocks.spawn.mockReset();
     registerFFmpegHandlers();
+  });
+
+  it('kills a blocked stream, rejects pending writes, and removes output after close', async () => {
+    const remove = vi.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    const child = new FakeChild();
+    child.stdin.write.mockImplementation(() => false);
+    ffmpegMocks.spawn.mockReturnValue(child);
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/cancelled.mp4', { width: 1, height: 1 });
+    const push = handler('ffmpeg:pushFrame')(null, new Uint8Array(4));
+    const rejectedPush = expect(push).rejects.toThrow('Export cancelled');
+    const cancellation = handler('ffmpeg:cancelExport')();
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    await rejectedPush;
+    child.emit('close', null, 'SIGTERM');
+    await expect(cancellation).resolves.toEqual({ success: true });
+    expect(remove).toHaveBeenCalledWith('/tmp/cancelled.mp4', { force: true });
+    await expect(handler('ffmpeg:pushFrame')(null, new Uint8Array(4))).rejects.toThrow('No active FFmpeg process');
+  });
+
+  it('kills conversion, returns cancellation even on exit code zero, and removes its output', async () => {
+    const remove = vi.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    const child = new FakeChild();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    const conversion = handler('ffmpeg:convert')(null, '/tmp/input.mp4', '/tmp/cancelled.mp4');
+    const cancellation = handler('ffmpeg:cancelExport')();
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
+    child.emit('close', 0, null);
+    await expect(conversion).resolves.toEqual({ success: false, error: 'Export cancelled' });
+    await cancellation;
+    expect(remove).toHaveBeenCalledWith('/tmp/cancelled.mp4', { force: true });
+    expect(remove).not.toHaveBeenCalledWith('/tmp/input.mp4', expect.anything());
+  });
+
+  it('can cancel while waiting for FFmpeg to finalize the stream', async () => {
+    vi.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
+    const child = new FakeChild();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/cancelled.mp4', { width: 1, height: 1 });
+    const finishing = handler('ffmpeg:endStreamExport')();
+    const rejectedFinish = expect(finishing).rejects.toThrow('Export cancelled');
+    const cancellation = handler('ffmpeg:cancelExport')();
+    child.emit('close', null, 'SIGTERM');
+    await rejectedFinish;
+    await cancellation;
   });
 
   it('returns a failed convert result for an FFmpeg process error', async () => {

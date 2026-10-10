@@ -52,6 +52,7 @@ export interface FrameCaptureVisualRuntime {
 }
 
 interface FrameCaptureConfig {
+  signal?: AbortSignal;
   fps: number;
   rangeStart: number;
   rangeEnd: number;
@@ -209,6 +210,15 @@ export class FrameCaptureEngine {
       ? { width: canvasStyle.width, height: canvasStyle.height }
       : null;
     let backendFinished = false;
+    const signal = config.signal;
+    const abortBackend = (backend as ICaptureBackend & { abort?: (cancelled?: boolean) => Promise<void> }).abort;
+    let backendReady = false;
+    const cancelBackend = () => {
+      if (backendReady && !backendFinished && abortBackend) {
+        void abortBackend.call(backend, true).catch((error) => console.error('[FrameCapture] Cancellation cleanup failed:', error));
+      }
+    };
+    signal?.addEventListener('abort', cancelBackend, { once: true });
 
     // Subtitle layer handling for the optional subtitle export modes:
     //  - includeSubtitles=false hides the subtitle layer for the whole capture
@@ -227,6 +237,7 @@ export class FrameCaptureEngine {
     let originalSubtitleVisible = true;
 
     try {
+      signal?.throwIfAborted();
       // ── Init ──
       // Video dimensions are physical output pixels. Preview DPR must not
       // multiply the encoder input size.
@@ -261,6 +272,8 @@ export class FrameCaptureEngine {
         isEncoded: true,
         transparent: subtitleOnly,
       });
+      backendReady = true;
+      signal?.throwIfAborted();
 
       // ── Deterministic Lockdown ──
       live2D.setExportMode(true);
@@ -312,6 +325,7 @@ export class FrameCaptureEngine {
       let lastUiUpdate = Date.now();
 
       for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+        signal?.throwIfAborted();
         const time = rangeStart + frameIdx / fps;
         const dtMs = 1000 / fps;
 
@@ -326,6 +340,7 @@ export class FrameCaptureEngine {
         // when export starts in the middle of an action interval.
         config.voiceLipSync?.beforeSeek(time);
         await this.playback.seek(time);
+        signal?.throwIfAborted();
         gsap.globalTimeline.totalTime(time, false);
         config.visualRuntime?.applyCompositeAtTime(time);
         const visualOverlay = config.visualRuntime?.resolveLightingOverlayAtTime(time) ?? null;
@@ -390,6 +405,7 @@ export class FrameCaptureEngine {
         // If the backend has pushFrame (RawPixelsBackend), it needs the
         // composited RGBA pixels. WebCodecs receives a composited canvas.
         const isRawPixels = 'pushQueue' in backend || typeof (backend as any).pushQueue !== 'undefined';
+        signal?.throwIfAborted();
         if (isRawPixels) {
           const extractedPixels = app.renderer.extract.pixels({
             // Match the render target. Subtitle-only exports must not pull the
@@ -429,16 +445,19 @@ export class FrameCaptureEngine {
             totalFrames,
           });
           lastUiUpdate = now;
+          // Yield to input events even when frame awaits only resolve microtasks.
+          await new Promise(resolve => setTimeout(resolve, 0));
         }
       }
 
+      signal?.throwIfAborted();
       await backend.finish();
+      signal?.throwIfAborted();
       backendFinished = true;
     } catch (error) {
-      const abortBackend = (backend as typeof backend & { abort?: () => Promise<void> }).abort;
       if (!backendFinished && typeof abortBackend === 'function') {
         try {
-          await abortBackend.call(backend);
+          await abortBackend.call(backend, signal?.aborted);
         } catch (cleanupError) {
           // Preserve the capture/renderer/seek failure while still exposing
           // cleanup problems in diagnostics.
@@ -447,6 +466,7 @@ export class FrameCaptureEngine {
       }
       throw error;
     } finally {
+      signal?.removeEventListener('abort', cancelBackend);
       // ── Restore ──
       config.voiceLipSync?.dispose();
       app.renderer.resize(originalWidth, originalHeight, originalResolution);

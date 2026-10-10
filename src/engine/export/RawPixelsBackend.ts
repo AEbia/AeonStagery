@@ -41,6 +41,8 @@ export class RawPixelsBackend implements ICaptureBackend {
         assertExportSuccess(result, 'FFmpeg frame push');
       });
       this.pushQueue.push(p);
+      // Cancellation can reject IPC writes before the next queue drain.
+      void p.catch(() => {});
 
       // Backpressure: drain completed pushes periodically
       if (this.pushQueue.length > 5) {
@@ -64,13 +66,14 @@ export class RawPixelsBackend implements ICaptureBackend {
     }
   }
 
-  async abort(): Promise<void> {
+  async abort(cancelled = false): Promise<void> {
     if (!this.streamStarted || this.streamFinished) return;
     this.streamFinished = true;
     const pendingPushes = this.pushQueue;
     this.pushQueue = [];
     try {
-      await this.electronAPI.endStreamExport();
+      // User cancellation is terminated by ExportAdapter's cancelExport IPC.
+      if (!cancelled) await this.electronAPI.endStreamExport();
     } catch {
       // Preserve the original capture failure while still attempting cleanup.
     }

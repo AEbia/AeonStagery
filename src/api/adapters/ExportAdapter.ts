@@ -55,7 +55,18 @@ export class ExportAdapter implements IExportAdapter {
     );
   }
 
-  async export(config: ExportConfig, onProgress: (p: ExportProgress) => void): Promise<ExportResult> {
+  async export(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal): Promise<ExportResult> {
+    let temporaryVideoPath: string | undefined;
+    let finalCopyStarted = false;
+    let cancellation: Promise<unknown> | undefined;
+    let removeLogListener: (() => void) | undefined;
+    const cancel = () => {
+      cancellation ??= Promise.resolve(this.electronAPI.export.cancelExport());
+      // Observe IPC errors immediately; the cancellation path awaits cleanup below.
+      void cancellation.catch(() => {});
+    };
+    if (signal?.aborted) return { success: false, cancelled: true };
+    signal?.addEventListener('abort', cancel, { once: true });
     try {
       const preparedScene = this.documentStore.getPreparedSceneSnapshot();
       if (!preparedScene) {
@@ -112,7 +123,9 @@ export class ExportAdapter implements IExportAdapter {
           tempDir,
           `video_${Date.now()}.${ext}`,
         );
+        temporaryVideoPath = videoPath;
       }
+      signal?.throwIfAborted();
 
       // ── Capture Phase ──
       const backend = hasWebCodecs
@@ -129,6 +142,7 @@ export class ExportAdapter implements IExportAdapter {
         await voiceLipSync.prepare(preparedScene, rangeStart, rangeEnd, async (voiceScene) => {
           const dialogueOnlyScene = { ...voiceScene, audio: undefined };
           const sources = await this.audioMixer.collectPreparedSources(dialogueOnlyScene, 0, this.playbackAdapter?.getBasePath?.() ?? '');
+          signal?.throwIfAborted();
           const source = sources.find((candidate) => candidate.path);
           if (!source) throw new Error('Voice audio is unavailable for export lip sync.');
           const result = await this.electronAPI.fs.readFile(source.path);
@@ -136,6 +150,7 @@ export class ExportAdapter implements IExportAdapter {
           return result.data;
         });
       }
+      signal?.throwIfAborted();
 
       await this.captureEngine.capture({
         fps,
@@ -153,7 +168,9 @@ export class ExportAdapter implements IExportAdapter {
         includeSubtitles: includeSubtitles !== false,
         subtitleOnly: isSubtitleOnly,
         subtitleChroma: isSubtitleChroma,
+        signal,
       });
+      signal?.throwIfAborted();
 
       // ── Audio Collection ──
       let audioSources: AudioSource[] = [];
@@ -161,6 +178,7 @@ export class ExportAdapter implements IExportAdapter {
         const basePath = this.playbackAdapter?.getBasePath?.() ?? '';
         audioSources = await this.audioMixer.collectPreparedSources(preparedScene, rangeStart, basePath);
       }
+      signal?.throwIfAborted();
 
       // ── Mix Phase ──
       if (audioSources.length > 0 || isTranscodeNeeded) {
@@ -172,8 +190,9 @@ export class ExportAdapter implements IExportAdapter {
 
         // Wire FFmpeg log callback if provided
         if (ffmpegLogCallback) {
-          this.electronAPI.export.onLog(ffmpegLogCallback);
+          removeLogListener = this.electronAPI.export.onLog(ffmpegLogCallback);
         }
+        signal?.throwIfAborted();
 
         const mixResult = await this.audioMixer.mix(
           videoPath,
@@ -194,6 +213,7 @@ export class ExportAdapter implements IExportAdapter {
           },
           isTranscodeNeeded,
         );
+        signal?.throwIfAborted();
 
         if (!mixResult.success) {
           return { success: false, error: mixResult.error };
@@ -203,13 +223,16 @@ export class ExportAdapter implements IExportAdapter {
       } else if (videoPath !== outputPath) {
         // No transcode and no audio — copy temp to final
         const tempData = await this.electronAPI.fs.readFile(videoPath);
+        signal?.throwIfAborted();
         if (!tempData.success || !tempData.data) {
           return {
             success: false,
             error: tempData.error || 'Failed to read temporary video file',
           };
         }
+        finalCopyStarted = true;
         const writeResult = await this.electronAPI.fs.writeFile(outputPath, tempData.data);
+        signal?.throwIfAborted();
         if (!writeResult?.success) {
           return {
             success: false,
@@ -218,11 +241,23 @@ export class ExportAdapter implements IExportAdapter {
         }
       }
 
+      signal?.throwIfAborted();
       onProgress({ phase: 'done', percent: 100 });
 
       return { success: true, outputPath };
     } catch (err: any) {
+      if (signal?.aborted) {
+        await cancellation;
+        return { success: false, cancelled: true };
+      }
       return { success: false, error: err.message || 'Unknown export error' };
+    } finally {
+      signal?.removeEventListener('abort', cancel);
+      removeLogListener?.();
+      if (signal?.aborted) {
+        if (temporaryVideoPath) await this.electronAPI.fs.removeFile(temporaryVideoPath);
+        if (finalCopyStarted) await this.electronAPI.fs.removeFile(config.outputPath);
+      }
     }
   }
 }
