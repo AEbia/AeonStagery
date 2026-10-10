@@ -38,6 +38,7 @@ export interface CollaborativeSessionStartInputV3 {
   onStatusChange?: (status: CollaborationConnectionStatus) => void;
   onError?: (error: unknown) => void;
   onSynchronizedState?: () => void;
+  onInitialDocumentApplied?: () => void;
   allowSeed?: boolean;
   admissionGate?: CollaborativeSceneAdmissionGate;
   compatibleSceneSession?: CompatibleSceneSession;
@@ -86,6 +87,7 @@ export class CollaborativeSessionOrchestratorV3 {
       onStatusChange: input.onStatusChange,
       onError: input.onError,
       onSynchronizedState: input.onSynchronizedState,
+      onInitialDocumentApplied: input.onInitialDocumentApplied,
       allowSeed: input.allowSeed,
     });
     this.layer = layer;

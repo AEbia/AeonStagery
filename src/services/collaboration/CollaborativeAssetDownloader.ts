@@ -4,6 +4,7 @@ import type {
 } from '../../api/types/collaboration';
 import type { IFileAccess } from '../io/IFileAccess';
 import type { ProjectResourceService } from '../io/ProjectResourceService';
+import { ProjectResourceResolutionError } from '../../api/types/project';
 import {
   type CollaborativeAssetFileTransferOptions,
   type CollaborativeAssetTransferOptions,
@@ -168,7 +169,17 @@ export class CollaborativeAssetDownloader {
   }
 
   private async resolveForRead(relativePath: string, fallbackPath: string): Promise<string> {
-    return this.projectResources.resolveForRead?.(relativePath) ?? fallbackPath;
+    try {
+      return await this.projectResources.resolveForRead?.(relativePath) ?? fallbackPath;
+    } catch (error) {
+      // A missing local copy is expected when joining a room. Continue with
+      // the project destination so the server download can materialize it.
+      if (error instanceof ProjectResourceResolutionError
+        && error.resolution.status === 'project-asset-missing') {
+        return fallbackPath;
+      }
+      throw error;
+    }
   }
 
   private async hasMatchingLocalFile(

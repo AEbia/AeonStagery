@@ -133,7 +133,7 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     })),
     ...(currentDialogueTemplateValue === '__current-image-dialogue__' ? [{
       value: '__current-image-dialogue__',
-      label: '当前图片样式 (Image UI)',
+      label: '当前图片样式',
       disabled: true,
     }] : []),
   ];

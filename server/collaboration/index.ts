@@ -10,6 +10,9 @@ function parseArgs(argv: string[]): CollaborationServerOptions {
     host: '127.0.0.1',
     port: 12345,
     dataDir: path.resolve('.aeonstagery-collab'),
+    accessToken: process.env.AEONSTAGERY_COLLAB_TOKEN,
+    password: process.env.AEONSTAGERY_COLLAB_PASSWORD,
+    allowedOrigins: process.env.AEONSTAGERY_COLLAB_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean),
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -50,6 +53,8 @@ void startCollaborationServer(parseArgs(process.argv.slice(2)))
     for (const url of status.lanUrls) {
       if (url !== status.localUrl) console.log(`[collab] LAN: ${url}`);
     }
+    if (status.connectionPassword) console.log(`[collab] password (keep private): ${status.connectionPassword}`);
+    for (const url of status.inviteUrls) console.log(`[collab] invite (keep private): ${url}`);
     console.log(`[collab] data dir: ${status.dataDir}`);
   })
   .catch((error) => {

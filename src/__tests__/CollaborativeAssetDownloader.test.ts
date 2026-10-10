@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CollaborativeAssetManifest } from '../api/types/collaboration';
 import { CollaborativeAssetDownloader } from '../services/collaboration/CollaborativeAssetDownloader';
 import type { IFileAccess } from '../services/io/IFileAccess';
+import { ProjectPathResolver } from '../services/io/ProjectPathResolver';
+import { ProjectResourceService } from '../services/io/ProjectResourceService';
+import { DEFAULT_PROJECT_ASSET_ROOTS, ProjectResourceResolutionError } from '../api/types/project';
 
 const encoder = new TextEncoder();
 
@@ -98,6 +101,66 @@ function makeManifestWithFile(
 }
 
 describe('CollaborativeAssetDownloader', () => {
+  it.each(['background/1.png', '.aeonstagery/mounts/game/background/1.png'])(
+    'downloads a server asset absent from every local readable root: %s',
+    async (relativePath) => {
+      const contentHash = await hashText('bg');
+      const fileAccess = new FakeBinaryFileAccess();
+      const client = { downloadAssetFile: vi.fn(async () => encoder.encode('bg')) };
+      const projectResources = new ProjectResourceService(
+        fileAccess as unknown as IFileAccess,
+        new ProjectPathResolver(null),
+      );
+      projectResources.setCurrentProject({
+        rootPath: 'D:/project',
+        projectFilePath: 'D:/project/project.json',
+        metadata: {
+          projectId: 'demo',
+          name: 'Demo',
+          projectVersion: 2,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          defaultSceneId: 'main',
+          scenes: [{ id: 'main', name: 'Main', path: 'project/main.scene.json' }],
+          assetRoots: { ...DEFAULT_PROJECT_ASSET_ROOTS },
+        },
+      });
+      const downloader = new CollaborativeAssetDownloader({
+        fileAccess: fileAccess as unknown as IFileAccess,
+        projectResources,
+        client,
+      });
+
+      await downloader.downloadManifest(makeManifestWithFile(relativePath, relativePath, contentHash, 2));
+
+      expect(client.downloadAssetFile).toHaveBeenCalledWith(relativePath);
+      expect(fileAccess.writes.get(`D:/project/${relativePath}`)).toEqual(encoder.encode('bg'));
+    },
+  );
+
+  it.each([
+    new Error('Filesystem permission denied'),
+    new ProjectResourceResolutionError({
+      status: 'invalid-reference', reference: 'invalid', reason: 'Invalid asset path',
+    }),
+  ])('preserves local resolution failures unrelated to missing project files: %s', async (error) => {
+    const contentHash = await hashText('bg');
+    const fileAccess = new FakeBinaryFileAccess();
+    const client = { downloadAssetFile: vi.fn() };
+    const downloader = new CollaborativeAssetDownloader({
+      fileAccess: fileAccess as unknown as IFileAccess,
+      projectResources: {
+        resolveForProjectWrite: async (relativePath) => `D:/project/${relativePath}`,
+        resolveForRead: async () => { throw error; },
+      },
+      client,
+    });
+
+    await expect(downloader.downloadManifest(makeManifest(contentHash))).rejects.toBe(error);
+    expect(client.downloadAssetFile).not.toHaveBeenCalled();
+    expect(fileAccess.writes.size).toBe(0);
+  });
+
   it('downloads missing manifest files into the active project', async () => {
     const contentHash = await hashText('bg');
     const fileAccess = new FakeBinaryFileAccess();

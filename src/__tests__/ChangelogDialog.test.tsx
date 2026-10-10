@@ -5,6 +5,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ChangelogDialog } from '../ui/changelog/ChangelogDialog';
 import { ChangelogService } from '../services/announcements/ChangelogService';
+import { settingsManager } from '../ui/SettingsStore';
 import type { ChangelogItem } from '../services/announcements/announcementTypes';
 
 describe('ChangelogDialog', () => {
@@ -34,6 +35,9 @@ describe('ChangelogDialog', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    settingsManager.set('lastReadChangelogId', undefined);
+    settingsManager.set('readAnnouncementIds', []);
+    settingsManager.set('autoShowChangelogOnUpdate', true);
     testService = new ChangelogService(testItems);
   });
 
@@ -75,13 +79,15 @@ describe('ChangelogDialog', () => {
   it('switches viewed item on click and renders markdown content', () => {
     render(<ChangelogDialog isOpen={true} onClose={vi.fn()} changelogService={testService} />);
 
-    // Click on the release item in the sidebar
-    const releaseCard = screen.getByText('v0.6.1 Live2D Update');
-    fireEvent.click(releaseCard);
-
-    // Markdown content should be visible
+    // Initially unread release is selected
     expect(screen.getByText('Added crash screen')).toBeDefined();
-    expect(screen.getByText('Enhanced timeline')).toBeDefined();
+
+    // Click on the announcement in the sidebar
+    const announcementCard = screen.getByRole('button', { name: /Notice for creators/i });
+    fireEvent.click(announcementCard);
+
+    // Announcement markdown content should now be visible
+    expect(screen.getByText('Community Guidelines')).toBeDefined();
   });
 
   it('calls onClose when close button or know button is clicked', () => {
@@ -91,5 +97,23 @@ describe('ChangelogDialog', () => {
     const closeBtn = screen.getByRole('button', { name: '我知道了' });
     fireEvent.click(closeBtn);
     expect(handleClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('prioritizes unread release item over pinned announcement on open', () => {
+    // testItems has pinned announcement and unread release (v0.6.1)
+    render(<ChangelogDialog isOpen={true} onClose={vi.fn()} changelogService={testService} />);
+
+    // Because v0.6.1 is an unread release, its markdown content should be selected by default
+    expect(screen.getByText('Added crash screen')).toBeDefined();
+  });
+
+  it('allows toggling autoShowChangelogOnUpdate setting in footer', () => {
+    render(<ChangelogDialog isOpen={true} onClose={vi.fn()} changelogService={testService} />);
+
+    const checkbox = screen.getByLabelText('新版本启动时自动弹出更新日志') as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(false);
   });
 });

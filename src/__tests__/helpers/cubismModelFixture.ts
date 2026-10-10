@@ -24,7 +24,7 @@ export function createCubismModelFixture(
   };
   const expressionManager: any = {
     stopAllExpressions: vi.fn(), resetExpression: vi.fn(),
-    getExpressionIndex: () => 0,
+    getExpressionIndex: (key: string) => key === 'smile' ? 0 : -1,
     loadExpression: vi.fn(async () => ({})),
     setExpression: vi.fn(async () => true),
     queueManager: { getCubismMotionQueueEntries: () => [] },

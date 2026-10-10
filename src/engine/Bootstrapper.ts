@@ -32,6 +32,7 @@ import {
   PlaybackStoreDurationSink,
   ScriptEngineSemanticRuntimeAdapter,
 } from './ScriptEngineSemanticRuntimeAdapter';
+import { subtitleRenderer } from './SubtitleRenderer';
 import { hookSystem } from '../api/hooks';
 import { eventBus } from '../api/events';
 import {
@@ -65,6 +66,7 @@ import {
 } from '../services/semantic-scene';
 import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
+import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
 import { SemanticVisualCompositionAuthoringService } from '../services/visual-authoring/SemanticVisualCompositionAuthoringService';
 import { ElectronVoiceAuthoringAdapter, VoiceAuthoringService, type VoiceAuthoringElectronPort } from '../services/voice/VoiceAuthoringService';
 import {
@@ -298,6 +300,12 @@ export function bootstrap(options?: {
   const getScriptEngine = options?.getScriptEngine ?? (() => defaultScriptEngine);
   const getLightingSystem = options?.getLightingSystem ?? (() => defaultLightingSystem);
   const getLive2DManager = options?.getLive2DManager ?? (() => live2DManager);
+  const disposeDialogueFontSize = settingsManager.subscribeKey('dialogueFontSize', () => {
+    subtitleRenderer.forceUpdate();
+  });
+  const disposeDialogueTextSpeed = settingsManager.subscribeKey('dialogueTextSpeed', () => {
+    subtitleRenderer.forceUpdate();
+  });
 
   // 1. Stores — reuse existing or create new
   const documentStore = options?.stores?.document ?? new DocumentStore();
@@ -365,7 +373,12 @@ export function bootstrap(options?: {
   const semanticAuthoring = new SemanticAuthoringApplicationService(
     documentStore,
     semanticDocumentCoordinator,
-    undefined,
+    new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({
+        textSpeed: settingsManager.get('dialogueTextSpeed'),
+        entranceAnimation: settingsManager.get('dialogueEntranceAnimation'),
+      }),
+    }),
     resourceAuthoring,
     { getDialogueFlowMode: () => settingsManager.get('workbenchDialogueFlowMode') },
     { getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates },
@@ -861,6 +874,7 @@ export function bootstrap(options?: {
     editorSaveStatusPort,
     semanticDocumentCoordinator,
     sceneMigrationExperience,
+    () => semanticAuthoring.clearHistory(),
   );
 
   const projectWorkspace = new ProjectWorkspaceService(
@@ -951,6 +965,8 @@ export function bootstrap(options?: {
   const playbackAdapter = new PlaybackAdapter(playbackStore, {
     play: () => getScriptEngine()?.play(),
     pause: () => getScriptEngine()?.pause(),
+    isPlaying: () => getScriptEngine()?.isPlaying() ?? false,
+    onPlayingChange: (callback) => getScriptEngine()?.onPlayingChange(callback) ?? (() => undefined),
     seek: (t: number, forceReconstruct?: boolean) => getScriptEngine()?.seek(t, forceReconstruct),
     setLoop: (s: number, e: number) => getScriptEngine()?.setLoopRegion(s, e),
     setLoopEnabled: (v: boolean) => getScriptEngine()?.setLoopEnabled(v),
@@ -1136,6 +1152,8 @@ export function bootstrap(options?: {
       ...(projectAgent ? { projectAgent } : {}),
     },
     dispose: () => {
+      disposeDialogueFontSize();
+      disposeDialogueTextSpeed();
       playbackAdapter.dispose();
       disposeProjectAgentSupplementRelay();
       disposeProjectAgentStartRelay();

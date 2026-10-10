@@ -47,7 +47,7 @@ export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, 
       : actionType === 'resetBlur' ? 'all' : 'global';
     return <BlurTargetSelect key={key} value={val || defaultTarget} onChange={(v) => ctx.action.semanticType === 'lighting' ? ctx.updateAuthoringParam(key, v) : ctx.updateParam(ctx.actionId, key, v)} />;
   }
-  if ((actionType === 'dialogue' || actionType === 'addTextLayer') && key === 'style') return <DialogueStyleSelect key={key} value={val || 'typewriter'} onChange={(v) => ctx.updateParam(ctx.actionId, key, v)} />;
+  if ((actionType === 'dialogue' || actionType === 'addTextLayer') && key === 'style') return <DialogueStyleSelect key={key} value={val || 'typewriter'} onChange={(v) => ctx.updateAuthoringParam(key, v)} />;
   if (ctx.action.semanticType === 'dialogue' && key === 'lipSync') {
     const checkboxId = `action-${ctx.actionId}-param-lipSync`;
     return (

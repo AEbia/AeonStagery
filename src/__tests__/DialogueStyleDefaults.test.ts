@@ -127,6 +127,28 @@ describe('project default dialogue style', () => {
       .toMatchObject({ template: 'minimal' });
   });
 
+  it('preserves subtitle style through source compilation', async () => {
+    const { store, authoring } = await makeServices({ enabledTemplateIds: [], dialoguePresentation: imagePresentation });
+    const receipt = await authoring.author({
+      ...base, kind: 'insert-statement', anchorTime: 1,
+      statement: { type: 'dialogue', params: { text: 'Animated text', durationSeconds: 2, style: 'typewriter' } },
+    });
+    const id = receipt.createdStatementIds[0];
+    expect(store.getCurrentSceneDocumentSnapshot()!.statements.find((statement) => statement.id === id)?.params)
+      .toMatchObject({ style: 'typewriter', presentation: imagePresentation });
+    expect(store.getCompiledSceneSnapshot()?.actions.find((action) => action.source.statementId === id)?.params)
+      .toMatchObject({ style: 'typewriter' });
+  });
+
+  it('prefers the selected default over an outdated materialized builtin renderer', async () => {
+    const { store, authoring } = await makeServices({
+      enabledTemplateIds: [], defaults: { dialogueStyleId: 'minimal' }, dialogueTemplate: 'glass',
+    });
+    const receipt = await authoring.author(insertionCases[0][1]);
+    expect(store.getCurrentSceneDocumentSnapshot()!.statements.find((statement) => statement.id === receipt.createdStatementIds[0])?.params)
+      .toMatchObject({ template: 'minimal' });
+  });
+
   it('applies the default to AI dialogue and returns the committed style', async () => {
     const { store, authoring } = await makeServices({ enabledTemplateIds: [], dialogueTemplate: 'classic' });
     const result = await authoring.authorAiScriptSegment({

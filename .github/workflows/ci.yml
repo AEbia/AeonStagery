@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint / check / build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # `postinstall` stages Live2D runtimes in `auto` mode: with no SDK on the
+      # runner this writes the fallback stub and never fails (ADR-0035 §2), so a
+      # clean clone stays buildable without proprietary runtime code.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Repository hygiene gate, third-party notices gate, Vitest, and tsc.
+      # Both git-dependent gates only need `git ls-files`, hence fetch-depth: 1.
+      - name: Tests and type checks
+        run: npm run check
+
+      - name: Build renderer and Electron bundles
+        run: npm run build
+
+  required-check:
+    # Branch protection requires this stable name; matrix job names include the OS.
+    name: lint / check / build
+    if: always()
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass when every platform succeeds
+        if: needs.verify.result == 'success'
+        run: echo "All platform checks passed."
+
+      - name: Fail if a platform check failed or was cancelled
+        if: needs.verify.result != 'success'
+        run: exit 1

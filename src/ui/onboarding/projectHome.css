@@ -930,23 +930,312 @@
 /* ─── Collaboration Views ───────────────────────────────────── */
 .ph-collab-choice-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: clamp(10px, 1.8vw, 14px);
+}
+
+.ph-action-card--collab .ph-action-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.ph-action-card--collab:hover .ph-action-desc {
+  color: var(--text-secondary);
+}
+
+/* ─── Segmented Mode Tabs ─────────────────────────────────── */
+.ph-collab-mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+}
+
+.ph-collab-mode-tab {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.ph-collab-mode-tab:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ph-collab-mode-tab--active {
+  color: var(--text-primary) !important;
+  background: var(--bg-surface) !important;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.ph-collab-mode-tab:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 1px;
 }
 
 .ph-collab-form-stack {
   display: grid;
-  gap: clamp(12px, 2vw, 16px);
+  gap: clamp(12px, 1.8vw, 16px);
 }
 
+.ph-field-full {
+  grid-column: 1 / -1;
+}
+
+.ph-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ─── Server Credentials & Room Share Card ──────────────────── */
+.ph-server-credentials-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 22%, var(--border-default));
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-secondary);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
+  animation: ph-fade-in 200ms ease-out;
+}
+
+.ph-server-credentials-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ph-server-credentials-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ph-server-credentials-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ph-server-credentials-endpoint {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+.ph-server-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ph-credentials-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+}
+
+.ph-credential-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  box-sizing: border-box;
+}
+
+.ph-credential-item--featured {
+  grid-column: 1 / -1;
+  border-color: color-mix(in srgb, var(--accent-primary) 35%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-surface));
+}
+
+.ph-credential-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ph-credential-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ph-credential-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ph-credential-input {
+  width: 100%;
+  padding-right: 32px;
+  cursor: text;
+  font-size: 12px;
+}
+
+.ph-font-mono {
+  font-family: var(--font-mono) !important;
+}
+
+/* ─── Password Input with Eye Toggle ───────────────────────── */
+.ph-password-input-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.ph-password-input-row .ph-input {
+  padding-right: 34px;
+}
+
+.ph-input-eye-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none !important;
+  border: none !important;
+  padding: 4px 6px;
+  cursor: pointer;
+  color: var(--text-muted) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition-fast);
+}
+
+.ph-input-eye-btn:hover {
+  color: var(--text-primary) !important;
+}
+
+.ph-btn-copy {
+  border-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
+}
+
+.ph-btn-copy:hover {
+  border-color: var(--accent-primary) !important;
+  background: var(--accent-glow) !important;
+  color: var(--accent-primary) !important;
+}
+
+.ph-server-details-panel {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px dashed color-mix(in srgb, var(--success) 25%, transparent);
+  animation: ph-fade-in 180ms ease-out;
+}
+
+/* Backwards-compatibility alias for tests */
+.ph-server-capsule {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 22%, var(--border-default));
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-secondary);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14);
+  box-sizing: border-box;
+  animation: ph-fade-in 200ms ease-out;
+}
+
+.ph-server-capsule-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.ph-server-capsule-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.ph-server-capsule-label {
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ph-server-capsule-url {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+.ph-server-capsule-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Backwards-compatibility alias for tests */
 .ph-server-status {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
-  border-radius: var(--radius-sm);
-  background: var(--success-surface);
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-secondary);
   box-sizing: border-box;
 }
 
@@ -956,22 +1245,20 @@
   align-items: center;
   gap: 8px;
   color: var(--text-primary);
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .ph-server-resource-status {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
   min-width: 0;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 11px;
 }
 
 .ph-server-urls {
-  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -981,25 +1268,33 @@
 }
 
 .ph-server-urls span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  user-select: text;
   padding: 2px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
+/* ─── Collaboration Connection Progress ──────────────────────── */
 .ph-collab-progress {
-  display: grid;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 12px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--border-default));
+  border-radius: var(--radius-md, 12px);
+  background: var(--bg-secondary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   box-sizing: border-box;
 }
 
 .ph-collab-progress-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   color: var(--text-primary);
   font-size: 12.5px;
@@ -1008,30 +1303,57 @@
 .ph-collab-progress-endpoint {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   color: var(--text-secondary);
   font-size: 11px;
   font-family: var(--font-mono);
 }
 
+/* ─── Sleek Safety Reassurance Note ──────────────────────────── */
 .ph-safety-note {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--accent-secondary) 30%, transparent);
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-secondary) 25%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent-secondary) 10%, var(--bg-surface));
+  background: color-mix(in srgb, var(--accent-secondary) 6%, var(--bg-surface));
   color: var(--text-secondary);
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.45;
   box-sizing: border-box;
+}
+
+.ph-safety-note-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 11.5px;
+}
+
+.ph-safety-note-icon {
+  color: var(--accent-secondary);
+  flex-shrink: 0;
 }
 
 .ph-safety-note strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ph-safety-note-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 19px;
+  color: var(--text-muted);
+}
+
+.ph-safety-note-line {
+  color: var(--text-secondary);
 }
 
 /* ─── Utility Buttons ───────────────────────────────────────── */
@@ -1055,6 +1377,27 @@
   padding: 4px 8px;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.ph-btn-micro {
+  min-height: 24px;
+  padding: 2px 7px;
+  font-size: 11px;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.ph-btn-danger-outline {
+  border-color: color-mix(in srgb, var(--error) 40%, transparent) !important;
+  color: var(--error) !important;
+}
+
+.ph-btn-danger-outline:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 12%, transparent) !important;
+  border-color: var(--error) !important;
 }
 
 /* ─── Directional View Stage Transitions ────────────────────── */

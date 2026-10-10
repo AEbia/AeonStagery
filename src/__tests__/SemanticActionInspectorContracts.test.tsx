@@ -112,6 +112,23 @@ describe('Task 2 ActionInspector contracts', () => {
     cleanup();
   });
 
+  it('writes subtitle style into image dialogue source params when the optional style is absent', () => {
+    const presentation = {
+      renderer: 'image-dialogue-v1', styleId: 'pink-nameplate',
+      textbox: { image: 'textbox.svg', x: 100, y: 700, width: 1700, minHeight: 240 },
+      text: { x: 150, y: 750, maxWidth: 1600 },
+    };
+    const statement = { id: 'dialogue_style', time: 0, type: 'dialogue', params: { text: 'hello', durationSeconds: 1, presentation } };
+    const { replaceSourceParams } = renderInspector(baseDocument(statement), {
+      id: 'dialogue_style::primary', time: 0, action: 'dialogue',
+      params: { text: 'hello', duration: 1, presentation },
+      source: { statementId: statement.id, outputKey: 'primary' },
+    });
+    fireEvent.click(screen.getByRole('combobox', { name: '字幕样式' }));
+    fireEvent.click(screen.getByRole('option', { name: '淡入' }));
+    expect(replaceSourceParams).toHaveBeenCalledWith('dialogue_style::primary', { ...statement.params, style: 'fadeIn' });
+  });
+
   it('edits semantic dialogue lipSync as a boolean', () => {
     const statement = {
       id: 'dialogue_1',

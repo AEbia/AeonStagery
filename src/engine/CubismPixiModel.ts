@@ -218,6 +218,8 @@ export function installCubismPixiModelRuntime(model: any): any {
     return true;
   };
   const setExpression = async (key: string | null, elapsedSeconds?: number) => {
+    // The character API and inspector use an empty string to clear expressions.
+    key = key || null;
     const epoch = ++expressionEpoch;
     expressionKey = key;
     if (!expressionManager) return;

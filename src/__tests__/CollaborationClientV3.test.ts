@@ -325,7 +325,9 @@ describe('CollaborationClientV3', () => {
       const statuses: string[] = [];
       client.subscribeRealtimeStatus((status) => statuses.push(status));
 
-      client.connectRealtime();
+      // connectRealtime resolves with the socket dispatched, so the connection
+      // state is deterministic here rather than racing the credential handshake.
+      await client.connectRealtime();
       expect(client.isRealtimeConnected()).toBe(true);
       firstSocket.readyState = 3;
       firstSocket.onclose?.();
@@ -361,12 +363,18 @@ describe('CollaborationClientV3', () => {
       const statuses: string[] = [];
       client.subscribeRealtimeStatus((status) => statuses.push(status));
 
-      client.connectRealtime();
+      await client.connectRealtime();
+      expect(sockets).toHaveLength(1);
       const initialSocket = sockets[0];
       initialSocket.readyState = 3;
       initialSocket.onclose?.();
+      let createdSockets = 1;
       for (const delay of [1000, 2000, 4000, 8000, 16000]) {
         await vi.advanceTimersByTimeAsync(delay);
+        createdSockets += 1;
+        // Automatic retries are timer-driven and expose no promise to await, so
+        // observe the socket factory instead.
+        await vi.waitFor(() => expect(sockets).toHaveLength(createdSockets));
         const socket = sockets[sockets.length - 1];
         socket.readyState = 3;
         socket.onclose?.();
@@ -377,7 +385,7 @@ describe('CollaborationClientV3', () => {
       await vi.advanceTimersByTimeAsync(60000);
       expect(sockets).toHaveLength(6);
 
-      client.reconnectRealtime();
+      await client.reconnectRealtime();
       expect(sockets).toHaveLength(7);
       expect(statuses.at(-1)).toBe('reconnecting');
       client.dispose();
@@ -408,10 +416,12 @@ describe('CollaborationClientV3', () => {
       const statuses: string[] = [];
       client.subscribeRealtimeStatus((status) => statuses.push(status));
 
-      client.connectRealtime();
+      await client.connectRealtime();
+      expect(sockets).toHaveLength(1);
       sockets[0].readyState = 3;
       sockets[0].onclose?.();
       await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(sockets).toHaveLength(2));
       sockets[1].readyState = 1;
       await sockets[1].onopen?.();
 
@@ -419,7 +429,8 @@ describe('CollaborationClientV3', () => {
       await vi.advanceTimersByTimeAsync(60000);
       expect(sockets).toHaveLength(2);
 
-      client.reconnectRealtime();
+      await client.reconnectRealtime();
+      expect(sockets).toHaveLength(3);
       sockets[2].readyState = 1;
       await sockets[2].onopen?.();
       expect(statuses.at(-1)).toBe('error');

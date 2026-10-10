@@ -27,7 +27,11 @@ export class CollaborativeRemoteApplyPipelineV3 {
   async applyWithPreparation(
     state: CollaborativeSceneStateV3,
     previousState: CollaborativeSceneStateV3 | null = null,
-    options: { prepareAssets?: boolean; requireServerSceneAgreement?: boolean } = {},
+    options: {
+      prepareAssets?: boolean;
+      requireServerSceneAgreement?: boolean;
+      onDocumentApplied?: () => void;
+    } = {},
   ): Promise<SceneDocumentV5> {
     const shouldPrepareAssets = !sameAssetManifest(previousState, state)
       && Object.keys(state.assets ?? {}).length > 0;
@@ -49,14 +53,18 @@ export class CollaborativeRemoteApplyPipelineV3 {
     const applyPath = this.options.getApplyScenePath?.(state);
     this.options.onApplyingStateChange?.(true);
     try {
+      let documentApplied = false;
       if (this.options.applyDocument) {
         await this.options.applyDocument(document, applyPath);
+        documentApplied = true;
       } else if (this.options.coordinator) {
         // coalesce:false — a remote state change must always be projected and
         // stored; it can never be absorbed and dropped by the coordinator's
         // latest-wins batch coalescing of concurrent local commits.
         await (this.options.coordinator as any).applyDocument(document, applyPath, { coalesce: false });
+        documentApplied = true;
       }
+      if (documentApplied) options.onDocumentApplied?.();
       await this.options.afterApplyState?.(state, document, applyPath);
       return document;
     } finally {

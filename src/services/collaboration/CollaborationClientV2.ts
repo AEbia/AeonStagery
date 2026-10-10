@@ -12,6 +12,10 @@ import {
 } from './CollaborationRealtimeChannelV2';
 import {
   normalizeCollaborationEndpoint,
+  getCollaborationAccessToken,
+  withCollaborationAccessToken,
+  authorizeCollaborationFetch,
+  collaborationAuthorizationHeaders,
   toCollaborationWebSocketUrl,
   type CollaborationWebSocketLike,
 } from './CollaborationTransport';
@@ -37,7 +41,7 @@ export type CollaborationServerErrorListenerV2 = (error: Error) => void;
 export interface CollaborationClientV2Options {
   endpoint: string;
   fetchImpl?: typeof fetch;
-  webSocketFactory?: (url: string) => CollaborationWebSocketLike;
+  webSocketFactory?: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
   ydoc?: Y.Doc;
   identity?: CollaborationIdentity;
 }
@@ -75,8 +79,10 @@ export class CollaborationClientV2 {
   readonly identity?: CollaborationIdentity;
   readonly ydoc: Y.Doc;
   private readonly fetchImpl: typeof fetch;
+  private readonly rawFetchImpl: typeof fetch;
   private readonly useXhrUpload: boolean;
-  private readonly webSocketFactory: (url: string) => CollaborationWebSocketLike;
+  private readonly accessToken?: string;
+  private readonly webSocketFactory: (url: string, protocols?: string[]) => CollaborationWebSocketLike;
   private readonly listeners = new Set<CollaborationStateListenerV2>();
   private readonly presenceListeners = new Set<CollaborationPresenceListenerV2>();
   private readonly leaseListeners = new Set<CollaborationLeaseListenerV2>();
@@ -86,25 +92,28 @@ export class CollaborationClientV2 {
 
   constructor(options: CollaborationClientV2Options) {
     this.endpoint = normalizeCollaborationEndpoint(options.endpoint);
+    this.accessToken = getCollaborationAccessToken(options.endpoint);
     this.identity = options.identity;
     this.ydoc = options.ydoc ?? new Y.Doc();
     const fetchImpl = options.fetchImpl ?? globalThis.fetch;
     if (!fetchImpl) {
       throw new Error('fetch is not available; provide fetchImpl');
     }
+    this.rawFetchImpl = options.fetchImpl ?? fetchImpl.bind(globalThis);
     this.useXhrUpload = options.fetchImpl === undefined && typeof XMLHttpRequest !== 'undefined';
-    this.fetchImpl = options.fetchImpl ?? fetchImpl.bind(globalThis);
-    this.webSocketFactory = options.webSocketFactory ?? ((url) => {
+    this.fetchImpl = authorizeCollaborationFetch(this.rawFetchImpl, this.accessToken, this.endpoint);
+    this.webSocketFactory = options.webSocketFactory ?? ((url, protocols) => {
       if (typeof WebSocket === 'undefined') {
         throw new Error('WebSocket is not available; provide webSocketFactory');
       }
-      return new WebSocket(url) as CollaborationWebSocketLike;
+      return new WebSocket(url, protocols) as CollaborationWebSocketLike;
     });
     this.realtimeChannel = new CollaborationRealtimeChannelV2({
-      endpoint: this.endpoint,
+      endpoint: withCollaborationAccessToken(this.endpoint, this.accessToken),
       identity: this.identity,
       ydoc: this.ydoc,
       webSocketFactory: this.webSocketFactory,
+      fetchImpl: this.rawFetchImpl,
       applyServerState: async () => {
         await this.applyServerYjsState('join');
       },
@@ -300,6 +309,19 @@ export class CollaborationClientV2 {
 
       xhr.open('PUT', url);
       xhr.setRequestHeader('content-type', 'application/octet-stream');
+      void collaborationAuthorizationHeaders(
+        this.endpoint,
+        this.accessToken,
+        'PUT',
+        `${new URL(url).pathname}${new URL(url).search}`,
+        this.rawFetchImpl,
+      ).then((authHeaders) => {
+        if (settled) return;
+        for (const [name, value] of Object.entries(authHeaders)) xhr.setRequestHeader(name, value);
+        xhr.send(toArrayBuffer(bytes));
+      }).catch((error: unknown) => {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      });
       xhr.upload.onprogress = (event): void => {
         options.onProgress?.({
           loadedBytes: event.loaded,
@@ -324,7 +346,6 @@ export class CollaborationClientV2 {
         options.signal.addEventListener('abort', abort, { once: true });
       }
       options.onProgress?.({ loadedBytes: 0, totalBytes });
-      xhr.send(toArrayBuffer(bytes));
     });
   }
 
@@ -376,8 +397,12 @@ export class CollaborationClientV2 {
     return bytes;
   }
 
-  connectRealtime(): void {
-    this.realtimeChannel.connect();
+  /**
+   * Opens the realtime channel. Resolves once the connection attempt has been
+   * dispatched or has failed; failures are reported through {@link subscribeErrors}.
+   */
+  connectRealtime(): Promise<void> {
+    return this.realtimeChannel.connect();
   }
 
   transactState(
@@ -438,6 +463,9 @@ export class CollaborationClientV2 {
         `Failed to ${operation} collaboration room at ${this.endpoint}: ${message}. `
         + 'Check that the tunnel forwards plain HTTP traffic to the host collaboration port.',
       );
+    }
+    if (response.status === 401) {
+      throw new Error('协作密码或访问凭证缺失或失效，请向主持人确认密码或获取新的邀请链接。');
     }
     if (!response.ok) {
       throw new Error(`Failed to ${operation} collaboration room: HTTP ${response.status}`);

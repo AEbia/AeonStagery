@@ -39,6 +39,7 @@ export interface CollaborativeDocumentLayerV3Options {
   onStatusChange?: (status: CollaborationConnectionStatus) => void;
   onError?: (error: unknown) => void;
   onSynchronizedState?: () => void;
+  onInitialDocumentApplied?: () => void;
   allowSeed?: boolean;
   prepareSeedState?: (
     document: SceneDocumentV5,
@@ -76,6 +77,7 @@ export class CollaborativeDocumentLayerV3 {
         options.onError?.(error);
       },
       onSynchronizedState: options.onSynchronizedState,
+      onInitialDocumentApplied: options.onInitialDocumentApplied,
     });
   }
 
@@ -132,6 +134,8 @@ export class CollaborativeDocumentLayerV3 {
           this.options.onError?.(error);
         }) ?? (() => undefined),
       );
+      // connectRealtime resolves once the attempt has been dispatched, so the
+      // connection status below reflects that attempt rather than racing it.
       await this.options.client.connectRealtime?.();
       if (!subscribeRealtimeStatus) {
         this.setStatus(this.options.client.isRealtimeConnected?.() ? 'connected' : 'offline');

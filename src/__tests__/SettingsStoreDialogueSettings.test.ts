@@ -10,6 +10,32 @@ afterEach(() => {
 });
 
 describe('dialogue settings persistence', () => {
+  it('defaults, clamps and persists dialogue font size', async () => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueFontSize: 'large' }));
+    const { settingsManager, DEFAULT_SETTINGS, DIALOGUE_FONT_SIZE_RANGE } = await import('../ui/SettingsStore');
+    expect(settingsManager.get('dialogueFontSize')).toBe(DEFAULT_SETTINGS.dialogueFontSize);
+    settingsManager.set('dialogueFontSize', 1);
+    expect(settingsManager.get('dialogueFontSize')).toBe(DIALOGUE_FONT_SIZE_RANGE.min);
+    settingsManager.update({ dialogueFontSize: 200 });
+    expect(settingsManager.get('dialogueFontSize')).toBe(DIALOGUE_FONT_SIZE_RANGE.max);
+    settingsManager.set('dialogueFontSize', Number.NaN);
+    expect(settingsManager.get('dialogueFontSize')).toBe(DEFAULT_SETTINGS.dialogueFontSize);
+    settingsManager.set('dialogueFontSize', 64);
+    vi.resetModules();
+    const reloaded = await import('../ui/SettingsStore');
+    expect(reloaded.settingsManager.get('dialogueFontSize')).toBe(64);
+  });
+
+  it('persists the entrance switch and defaults missing or invalid values to enabled', async () => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueEntranceAnimation: 'disabled' }));
+    const { settingsManager } = await import('../ui/SettingsStore');
+    expect(settingsManager.get('dialogueEntranceAnimation')).toBe(true);
+    settingsManager.set('dialogueEntranceAnimation', false);
+    vi.resetModules();
+    const reloaded = await import('../ui/SettingsStore');
+    expect(reloaded.settingsManager.get('dialogueEntranceAnimation')).toBe(false);
+  });
+
   it('clears the legacy built-in glass signature while preserving custom signature text', async () => {
     vi.resetModules();
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({

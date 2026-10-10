@@ -19,7 +19,6 @@ import {
   usePlaybackAdapter,
   useSemanticAuthoringService,
   useTemplatePackageCatalog,
-  useProjectWorkspaceService,
   useCollaborationStatus,
   useCollaborationPresence,
   useCollaborationPresencePublisher,
@@ -172,9 +171,6 @@ export const TrackArea = React.memo(({
   const writableEditorStore = useApp().stores.editor;
   const playbackAdapter = usePlaybackAdapter();
   const semanticAuthoring = useSemanticAuthoringService();
-  const projectWorkspace = useProjectWorkspaceService();
-  const dialoguePresentation = projectWorkspace?.getCurrentProject()?.metadata.templates?.dialoguePresentation;
-  const dialogueTemplate = projectWorkspace?.getCurrentProject()?.metadata.templates?.dialogueTemplate;
   const customMotionEditLeaseGate = useApp().collaboration?.customMotionEditLeaseGate ?? undefined;
   const characterAdapter = useCharacterAdapter();
   const collaborationStatus = useCollaborationStatus();
@@ -1236,8 +1232,6 @@ export const TrackArea = React.memo(({
           correlationPrefix: 'blank_menu_insert',
           lifecycleEndCorrelationPrefix: 'blank_menu_lifecycle_end',
           lifecycleTargetBindingCorrelationPrefix: 'blank_menu_lifecycle_target_binding',
-          dialoguePresentation,
-          dialogueTemplate,
         });
         if (result.kind === 'warning') {
           showToast(result.message, 'warning');

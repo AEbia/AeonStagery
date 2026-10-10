@@ -1344,7 +1344,22 @@ class Live2DManager {
     }
 
     try {
-      if (entry.runtimeHandle) {
+      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
+      if (!this._shouldUpdate
+        && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+        && controls.setExpressionForSeek) {
+        // An explicit inspector preview should show the final expression while
+        // the timeline is paused. Re-evaluate at the same motion timestamp so
+        // displaying it does not advance the scene or accumulate motion fades.
+        const model = entry.model;
+        void controls.setExpressionForSeek(model, expressionName, Number.POSITIVE_INFINITY)
+          .then(() => {
+            if (this.characters.get(id) === entry && entry.model === model && entry.expressionKey === expressionName) {
+              controls.advanceFrame(model, 0);
+            }
+          })
+          .catch((err) => console.error(`[Live2D] Failed to preview expression on "${id}":`, err));
+      } else if (entry.runtimeHandle) {
         entry.runtimeHandle.expression.setExpression(expressionName);
       } else {
         getLive2DRuntimeAdapter(entry.runtime).getControls().setExpression(entry.model, expressionName);

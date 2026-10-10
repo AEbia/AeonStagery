@@ -1,4 +1,5 @@
 import type { LayerName, Vec2 } from './common';
+import type { UpdateSource, UpdateStatus } from './updater';
 import type {
   CameraMoveConfig,
   CameraShakeConfig,
@@ -132,6 +133,7 @@ export interface AeonStageryElectronAPI {
     getUserDataPath(): Promise<string>;
     getDefaultProjectsPath(): Promise<string>;
     restart(): Promise<{ success: boolean }>;
+    openExternal?(url: string): Promise<{ success: boolean }>;
   };
   aiProse: {
     complete(request: AiProseLlmRequest): Promise<AiProseLlmResponse>;
@@ -229,7 +231,7 @@ export interface AeonStageryElectronAPI {
     save(kind: 'experimental-features' | 'first-lesson', value: unknown): Promise<{ success: boolean; error?: string }>;
   };
   collaborationServer: {
-    start(options: { projectId: string; host?: string; port?: number }): Promise<{
+    start(options: { projectId: string; host?: string; port?: number; password?: string }): Promise<{
       success: boolean;
       reused?: boolean;
       status?: {
@@ -239,6 +241,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       };
@@ -254,6 +259,9 @@ export interface AeonStageryElectronAPI {
         dataDir: string;
         localUrl: string;
         lanUrls: string[];
+        connectionPassword?: string;
+        accessToken?: string;
+        inviteUrls?: string[];
         assetRoot: string;
         hasState: boolean;
       } | null;
@@ -291,11 +299,11 @@ export interface AeonStageryElectronAPI {
     isAbsolute(path: string): Promise<boolean>;
   };
   updater: {
-    getState(): Promise<{ enabled: boolean; feedUrlConfigured: boolean; appVersion: string; currentVersion: string }>;
-    checkForUpdates(): Promise<{ success: boolean; updateAvailable?: boolean; version?: string | null; releaseName?: string | null; releaseDate?: string | null; notes?: unknown; error?: string }>;
-    downloadUpdate(): Promise<{ success: boolean; files?: string[]; error?: string }>;
+    getState(): Promise<{ enabled: boolean; feedUrlConfigured: boolean; appVersion: string; currentVersion: string; sources?: UpdateSource[] } & Partial<UpdateStatus>>;
+    checkForUpdates(source?: UpdateSource): Promise<{ success: boolean; source?: UpdateSource; updateAvailable?: boolean; version?: string | null; releaseName?: string | null; releaseDate?: string | null; notes?: unknown; error?: string }>;
+    downloadUpdate(): Promise<{ success: boolean; source?: UpdateSource; files?: string[]; error?: string }>;
     installUpdate(): Promise<{ success: boolean; error?: string }>;
-    onStatus(callback: (status: any) => void): () => void;
+    onStatus(callback: (status: UpdateStatus) => void): () => void;
   };
   gptSovits: {
     status(config: Partial<GptSovitsLocalConfig>): Promise<GptSovitsStatusResult>;
@@ -319,6 +327,9 @@ export interface AeonStageryElectronAPI {
   live2dRuntime?: {
     /** Main-process view of which runtime families were seeded into userData. */
     getAvailability(): Promise<{ cubism2: boolean; cubism3Plus: boolean } | null>;
+    getStatus?(): Promise<import('./live2dRuntime').Live2DRuntimeStatusReport | null>;
+    refreshStatus?(): Promise<import('./live2dRuntime').Live2DRuntimeStatusReport | null>;
+    openDirectory?(type?: 'local' | 'runtime'): Promise<{ success: boolean; path?: string }>;
   };
   workspaceTools?: {
     open(): Promise<{ success: boolean }>;

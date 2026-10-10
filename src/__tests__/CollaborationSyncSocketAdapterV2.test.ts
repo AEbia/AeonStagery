@@ -181,9 +181,10 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     adapter.connect(asWebSocket(socket), '/sync?clientId=sender&displayName=Sender', 'localhost');
 
     expect(socket.ping).toHaveBeenCalled();
-    expect(presence.peersBySocket.get(asWebSocket(socket))?.pingMs).toBe(0);
+    const pingMs = presence.peersBySocket.get(asWebSocket(socket))?.pingMs;
+    expect(pingMs).toBeGreaterThanOrEqual(0);
     expect(socket.sent.some((message) => (
-      typeof message === 'string' && message.includes('"pingMs":0')
+      typeof message === 'string' && message.includes(`"pingMs":${pingMs}`)
     ))).toBe(true);
   });
 

@@ -1,4 +1,5 @@
 import { WebSocket, type RawData } from 'ws';
+import { COLLABORATION_LIMITS, parseCollaborationRequestUrl } from './security';
 import type {
   CollaborationLeaseClientMessageV2,
   CollaborationLeaseClientMessageV3,
@@ -53,6 +54,12 @@ function rawDataToUint8Array(data: RawData): Uint8Array {
   throw new Error('Unsupported WebSocket payload');
 }
 
+function rawDataByteLength(data: RawData): number {
+  if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) return data.byteLength;
+  if (Array.isArray(data)) return data.reduce((total, chunk) => total + chunk.byteLength, 0);
+  throw new Error('Unsupported WebSocket payload');
+}
+
 function rawDataToUtf8(data: RawData): string {
   return Buffer.from(rawDataToUint8Array(data)).toString('utf8');
 }
@@ -79,6 +86,11 @@ export class CollaborationSyncSocketAdapterV2 {
   private readonly expectedProjectId?: string;
   private readonly pingTimers = new Map<WebSocket, ReturnType<typeof setInterval>>();
   private readonly pingStartedAt = new Map<WebSocket, number>();
+  private pendingUpdates = 0;
+  private pendingUpdateBytes = 0;
+  private readonly pendingUpdatesBySocket = new Map<WebSocket, number>();
+  private readonly pendingUpdateBytesBySocket = new Map<WebSocket, number>();
+  private readonly messageRates = new Map<WebSocket, { startedAt: number; count: number }>();
   private readonly leaseExpiryTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: CollaborationSyncSocketAdapterV2Options) {
@@ -102,14 +114,30 @@ export class CollaborationSyncSocketAdapterV2 {
     this.leaseExpiryTimer.unref?.();
   }
 
-  connect(socket: WebSocket, requestUrl: string | undefined, host: string | undefined): void {
+  connect(socket: WebSocket, requestUrl: string | undefined, _host: string | undefined): void {
+    socket.on('error', () => {
+      // ws emits protocol errors (for example maxPayload violations) after it
+      // has started a status-bearing close handshake. Terminating while that
+      // handshake is in flight replaces the intended close code with 1006.
+      if (socket.readyState === WebSocket.OPEN) socket.terminate();
+    });
+    const url = parseCollaborationRequestUrl(requestUrl);
+    let identity;
+    try { identity = createPresenceIdentity(url); }
+    catch {
+      socket.close(1008, 'Invalid collaboration presence identity');
+      return;
+    }
+    if (identity && Array.from(this.presence.peersBySocket.values()).some((peer) => peer.clientId === identity.clientId)) {
+      socket.close(1008, 'Collaboration client identity is already connected');
+      return;
+    }
     this.clients.add(socket);
-    socket.send(Buffer.from(this.room.encodeStateAsUpdate()));
+    this.send(socket, Buffer.from(this.room.encodeStateAsUpdate()));
 
-    const url = new URL(requestUrl ?? '/', `http://${host ?? 'localhost'}`);
-    const connection = connectPresenceSocketV2(this.presence, socket, createPresenceIdentity(url), this.schemaVersion);
+    const connection = connectPresenceSocketV2(this.presence, socket, identity, this.schemaVersion);
     for (const message of connection.socketMessages) {
-      socket.send(JSON.stringify(message));
+      this.send(socket, JSON.stringify(message));
     }
     for (const message of connection.broadcastMessages) {
       this.broadcastJson(message);
@@ -118,12 +146,17 @@ export class CollaborationSyncSocketAdapterV2 {
     this.startPingMonitoring(socket);
 
     socket.on('message', (data, isBinary) => {
-      this.handleMessage(socket, data, isBinary);
+      try {
+        this.handleMessage(socket, data, isBinary);
+      } catch {
+        socket.close(1008, 'Invalid collaboration message');
+      }
     });
 
     socket.on('close', () => {
       this.stopPingMonitoring(socket);
       this.clients.delete(socket);
+      this.messageRates.delete(socket);
       const disconnection = disconnectPresenceSocketV2(this.presence, socket, this.schemaVersion);
       for (const message of disconnection.broadcastMessages) {
         this.broadcastJson(message);
@@ -133,6 +166,21 @@ export class CollaborationSyncSocketAdapterV2 {
         this.broadcastJson({ type: 'lease:released', schemaVersion: this.schemaVersion, target: record.target });
       }
     });
+  }
+
+  dispose(): void {
+    if (this.leaseExpiryTimer) clearInterval(this.leaseExpiryTimer);
+    for (const socket of this.pingTimers.keys()) this.stopPingMonitoring(socket);
+    this.messageRates.clear();
+  }
+
+  private send(socket: WebSocket, data: string | Buffer): void {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    if (socket.bufferedAmount > COLLABORATION_LIMITS.websocketBytes * 2) {
+      socket.terminate();
+      return;
+    }
+    socket.send(data, (error) => { if (error) socket.terminate(); });
   }
 
   private startPingMonitoring(socket: WebSocket): void {
@@ -176,6 +224,22 @@ export class CollaborationSyncSocketAdapterV2 {
   }
 
   private handleMessage(socket: WebSocket, data: RawData, isBinary: boolean): void {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    let rate = this.messageRates.get(socket);
+    if (!rate || now - rate.startedAt >= 1000) {
+      rate = { startedAt: now, count: 0 };
+      this.messageRates.set(socket, rate);
+    }
+    if (++rate.count > 120) {
+      socket.close(1008, 'Collaboration message rate exceeded');
+      return;
+    }
+    const byteLength = rawDataByteLength(data);
+    if (byteLength > (isBinary ? COLLABORATION_LIMITS.websocketBytes : COLLABORATION_LIMITS.textBytes)) {
+      socket.close(1009, 'Collaboration message exceeds limit');
+      return;
+    }
     let message: CollaborationPresenceClientMessageV2 | CollaborationPresenceClientMessageV3 | undefined;
     if (!isBinary) {
       try {
@@ -193,7 +257,7 @@ export class CollaborationSyncSocketAdapterV2 {
       this.schemaVersion,
     );
     for (const socketMessage of presenceResult.socketMessages) {
-      socket.send(JSON.stringify(socketMessage));
+      this.send(socket, JSON.stringify(socketMessage));
     }
     for (const broadcastMessage of presenceResult.broadcastMessages) {
       this.broadcastJson(broadcastMessage);
@@ -210,39 +274,76 @@ export class CollaborationSyncSocketAdapterV2 {
       if (isCollaborationLeaseClientMessage(leaseMessage)) {
         const responses = this.handleLeaseMessage(socket, leaseMessage);
         for (const response of responses) {
-          socket.send(JSON.stringify(response));
+          this.send(socket, JSON.stringify(response));
         }
         return;
       }
     }
 
-    const update = rawDataToUint8Array(data);
-    const applyPromise = this.room instanceof SingleRoomCollaborationRoomV3
-      ? this.room.applyUpdate(
-          update,
-          async (state) => {
-            assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
-            validateCollaborativeSceneCodecV3(state);
-            await validateCollaborativeAssetAvailabilityV3(state, this.assets);
-          },
-        )
-      : this.room.applyUpdate(
-          update,
-          async (state) => {
-            assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
-            validateCollaborativeSceneCodecV2(state);
-            await validateCollaborativeAssetAvailabilityV2(state, this.assets);
-          },
-        );
+    // Unknown text messages must never reach the binary Yjs decoder.
+    if (!isBinary) return;
+    const pendingForSocket = this.pendingUpdatesBySocket.get(socket) ?? 0;
+    const pendingBytesForSocket = this.pendingUpdateBytesBySocket.get(socket) ?? 0;
+    if (
+      pendingForSocket >= COLLABORATION_LIMITS.pendingUpdates
+      || this.pendingUpdates >= COLLABORATION_LIMITS.pendingUpdatesTotal
+      || pendingBytesForSocket + byteLength > COLLABORATION_LIMITS.pendingUpdateBytesPerSocket
+      || this.pendingUpdateBytes + byteLength > COLLABORATION_LIMITS.pendingUpdateBytes
+    ) {
+      socket.close(1008, 'Too many pending collaboration updates');
+      return;
+    }
+    this.pendingUpdates++;
+    this.pendingUpdatesBySocket.set(socket, pendingForSocket + 1);
+    this.pendingUpdateBytes += byteLength;
+    this.pendingUpdateBytesBySocket.set(socket, pendingBytesForSocket + byteLength);
+    const releasePendingUpdate = (): void => {
+      this.pendingUpdates--;
+      const count = (this.pendingUpdatesBySocket.get(socket) ?? 1) - 1;
+      if (count === 0) this.pendingUpdatesBySocket.delete(socket);
+      else this.pendingUpdatesBySocket.set(socket, count);
+      this.pendingUpdateBytes -= byteLength;
+      const bytes = (this.pendingUpdateBytesBySocket.get(socket) ?? byteLength) - byteLength;
+      if (bytes === 0) this.pendingUpdateBytesBySocket.delete(socket);
+      else this.pendingUpdateBytesBySocket.set(socket, bytes);
+    };
+
+    let update: Uint8Array;
+    let applyPromise: Promise<void>;
+    try {
+      // Reserve the queue budget before copying the payload retained by the mutation queue.
+      update = rawDataToUint8Array(data);
+      applyPromise = this.room instanceof SingleRoomCollaborationRoomV3
+        ? this.room.applyUpdate(
+            update,
+            async (state) => {
+              assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
+              validateCollaborativeSceneCodecV3(state);
+              await validateCollaborativeAssetAvailabilityV3(state, this.assets);
+            },
+          )
+        : this.room.applyUpdate(
+            update,
+            async (state) => {
+              assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
+              validateCollaborativeSceneCodecV2(state);
+              await validateCollaborativeAssetAvailabilityV2(state, this.assets);
+            },
+          );
+    } catch (error) {
+      releasePendingUpdate();
+      throw error;
+    }
 
     void applyPromise.then(() => {
       this.broadcastBinary(update, socket);
     }).catch((error: any) => {
-      const message = error?.message || String(error);
+      const message = error && typeof error === 'object' && 'code' in error
+        ? 'Internal collaboration server error' : error?.message || 'Invalid collaboration update';
       if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: 'collaboration:error', message }));
+        this.send(socket, JSON.stringify({ type: 'collaboration:error', message }));
       }
-    });
+    }).finally(releasePendingUpdate);
   }
 
   private handleLeaseMessage(
@@ -254,6 +355,10 @@ export class CollaborationSyncSocketAdapterV2 {
     if (leaseMessage.schemaVersion !== this.schemaVersion) return [];
     const clientId = peer.clientId;
     const { requestId, target } = leaseMessage;
+    if (leaseMessage.type === 'lease:acquire' && (this.leases.leasesBySocket.get(socket)?.size ?? 0) >= 16) {
+      socket.close(1008, 'Too many collaboration leases');
+      return [];
+    }
     const schemaVersion = this.schemaVersion;
 
     switch (leaseMessage.type) {
@@ -281,7 +386,7 @@ export class CollaborationSyncSocketAdapterV2 {
     const json = JSON.stringify(message);
     for (const client of this.clients) {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(json);
+        this.send(client, json);
       }
     }
   }
@@ -289,7 +394,7 @@ export class CollaborationSyncSocketAdapterV2 {
   private broadcastBinary(update: Uint8Array, sender: WebSocket): void {
     for (const client of this.clients) {
       if (client !== sender && client.readyState === WebSocket.OPEN) {
-        client.send(Buffer.from(update));
+        this.send(client, Buffer.from(update));
       }
     }
   }

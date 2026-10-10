@@ -222,10 +222,10 @@ export class SemanticAuthoringApplicationService {
   ): CurrentSceneDocument {
     if (createdStatementIds.length === 0) return document;
     const defaults = this.dialogueDefaults?.getDialogueDefaults();
-    const presentation = defaults?.dialoguePresentation;
     const styleId = defaults?.defaults?.dialogueStyleId;
-    const template = defaults?.dialogueTemplate
-      ?? (styleId === 'glass' || styleId === 'minimal' || styleId === 'classic' ? styleId : undefined);
+    const builtin = styleId === 'glass' || styleId === 'minimal' || styleId === 'classic' ? styleId : undefined;
+    const presentation = builtin ? undefined : defaults?.dialoguePresentation;
+    const template = builtin ?? defaults?.dialogueTemplate;
     if (!presentation && !template) return document;
 
     const createdIds = new Set(createdStatementIds);
@@ -330,6 +330,12 @@ export class SemanticAuthoringApplicationService {
     this.undoStack.push(entry);
     this.notifyHistory();
     return true;
+  }
+
+  clearHistory(): void {
+    this.undoStack.length = 0;
+    this.redoStack.length = 0;
+    this.notifyHistory();
   }
 
   get canUndo(): boolean { return this.undoStack.length > 0; }

@@ -127,15 +127,24 @@ describe('Cubism Pixi runtime controls', () => {
     model.update(0);
     expect(Array.from(drawn())).toEqual([0, 0]);
   });
-  it('cancels an expression load when a newer expression reset takes ownership', async () => {
+  it.each([null, ''])('cancels an expression load when a newer reset (%s) takes ownership', async (resetKey) => {
     const { model, expressionManager } = createCubismModelFixture();
     let resolve!: (value: object) => void;
     expressionManager.loadExpression.mockReturnValue(new Promise((done) => { resolve = done; }));
     const pending = model.setExpressionForSeek('smile');
-    await model.setExpressionForSeek(null);
+    await model.setExpressionForSeek(resetKey);
     resolve({});
     await pending;
     expect(expressionManager.setExpression).not.toHaveBeenCalled();
+    expect(model.captureRuntimeSnapshot('haru').expression.key).toBeNull();
+  });
+  it('clears an active expression when the UI sends an empty string', async () => {
+    const { model, expressionManager } = createCubismModelFixture();
+    await model.setExpressionForSeek('smile');
+    expressionManager.stopAllExpressions.mockClear();
+    model.setExpression('');
+    await Promise.resolve();
+    expect(expressionManager.stopAllExpressions).toHaveBeenCalledOnce();
     expect(model.captureRuntimeSnapshot('haru').expression.key).toBeNull();
   });
   it('cancels in-flight expression writes when the model is disposed', async () => {
