@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { loadCubismEngineModule } from './Live2DEngineBridge';
 import { captureModelSnapshot, type ModelSnapshot } from './Live2DConfig';
-import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestoreResult } from './Live2DRuntimeAdapter';
+import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestoreResult } from './runtime/Live2DRuntimeContracts';
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
 
 function parameterId(id: any): string {

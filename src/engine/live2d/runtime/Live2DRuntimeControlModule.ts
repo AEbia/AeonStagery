@@ -6,7 +6,7 @@ import type {
   Live2DRuntimeModelControls,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
-} from '../../Live2DRuntimeAdapter';
+} from '../../runtime/Live2DRuntimeContracts';
 
 export interface Live2DRuntimeCapabilities {
   readonly runtimeFamily: Live2DRuntimeDescriptor['runtimeFamily'];
