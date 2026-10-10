@@ -22,6 +22,7 @@ import {
   type VisualStyleParams,
   type ZoomIntent,
 } from '../../api/types/semantic-scene';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../api/types/camera';
 import type { SceneVisualBlock } from '../../api/types/visual';
 import {
   resolveAudioFadeIn,
@@ -614,7 +615,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
         duration: params.durationSeconds,
         focus: params.target ? {
           character: params.target,
-          part: params.targetPart ?? 'head',
+          part: params.targetPart ?? DEFAULT_CAMERA_FOCUS_PART,
         } : { point: params.position },
         zoom: lowerZoomValue(params.zoom),
         angle: params.rotation,
