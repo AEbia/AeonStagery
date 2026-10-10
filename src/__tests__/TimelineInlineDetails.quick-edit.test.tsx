@@ -78,6 +78,28 @@ describe('Inline details quick edit', () => {
     expect(detail.getByRole('checkbox', { name: '衰减' })).toBeTruthy();
   });
 
+  it('commits an expanded inspector scrub once when the drag ends', () => {
+    load('camera', { mode: 'shake', intensity: 0.4, durationSeconds: 1, frequency: 10 });
+    const { container } = list();
+    const detail = expand(container);
+    const frequency = detail.getByRole('spinbutton', { name: '震动频率' });
+
+    fireEvent.mouseDown(frequency, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 46, clientY: 10, movementX: 36 });
+    fireEvent.mouseMove(document, { clientX: 82, clientY: 10, movementX: 36 });
+    const intermediateCalls = state.author.mock.calls.length;
+    const finalValue = Number(frequency.querySelector('.scrubbable-badge-value')?.textContent);
+    fireEvent.mouseUp(document, { clientX: 82, clientY: 10 });
+
+    expect(intermediateCalls).toBe(0);
+    expect(finalValue).toBeGreaterThan(10);
+    expect(state.author).toHaveBeenCalledTimes(1);
+    expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'update-statement',
+      patch: { params: { mode: 'shake', intensity: 0.4, durationSeconds: 1, frequency: finalValue } },
+    }));
+  });
+
   it('retains camera zoom type and easing without duplicating its numeric value or endpoint', () => {
     load('camera', { mode: 'move', to: [0.4, 0.6], zoom: { kind: 'absolute', value: 1.5 }, durationSeconds: 1 });
     const { container } = list();

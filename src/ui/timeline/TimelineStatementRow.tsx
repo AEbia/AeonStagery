@@ -45,8 +45,9 @@ function clearStatementRowPress(event: React.SyntheticEvent<HTMLElement>) {
 
 function preserveInlineDraftFocus(event: React.MouseEvent<HTMLElement>) {
   const controls = event.currentTarget.closest('.timeline-item')?.querySelector('.timeline-item__inline-controls');
-  // Opening this row should not blur its draft or interrupt native text composition.
-  if (controls?.contains(document.activeElement)) event.preventDefault();
+  const activeElement = document.activeElement;
+  // Numeric drafts commit on blur; only preserve focus for text composition.
+  if (controls?.contains(activeElement) && !activeElement?.matches('input[type="number"]')) event.preventDefault();
 }
 
 interface TimelineStatementRowProps {
@@ -334,6 +335,8 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
                   return;
                 }
                 event.stopPropagation();
+                // A structural drag leaves text editing so history shortcuts target the scene.
+                event.currentTarget.focus({ preventScroll: true });
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', readModelItem.statementId);
                 setDraggingActionId(readModelItem.statementId);
@@ -456,10 +459,12 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
             presentation="inline"
             selectedActionIds={{ [action._id!]: true }}
             setSelectedIds={setSelectedIds}
-            updateAction={(_id, updates) => {
+            updateAction={(_id, updates, isTransient) => {
+              if (isTransient) return;
               if (updates.params) commitInlineParams(action, updates.params, true);
             }}
-            updateParam={(_id, key, val) => {
+            updateParam={(_id, key, val, isTransient) => {
+              if (isTransient) return;
               commitInlineParams(action, { [key]: val });
             }}
             replaceSourceParams={(_id, params) => { commitInlineParams(action, params, true); }}
