@@ -9,6 +9,7 @@ import { listAvailableLifecycleEndCommandIds } from './insertLifecycleEndCommand
 import { listAvailableLifecycleTargetBindingCommandIds } from './lifecycleTargetBinding';
 import { buildTimelineListGaps, type TimelineListGap } from './timelineListGaps';
 import type { TimelineListEditing } from './useTimelineListEditing';
+import type { TimelineStatementRowCommands } from './TimelineStatementRow';
 
 export function useTimelineListGapMenu(sceneData: TimelineScene, snapshot: SemanticTimelineSnapshot) {
   const documentStore = useDocumentStore();
@@ -91,18 +92,20 @@ export function TimelineListGapMenu({ state, editing, templates }: {
   );
 }
 
-export function TimelineListGapControl({ gap, state, editing }: {
+export function TimelineListGapControl({ gap, active, dragOver, draggingActionId, commands }: {
   gap: TimelineListGap;
-  state: TimelineListGapMenuState;
-  editing: TimelineListEditing;
+  active: boolean;
+  dragOver: boolean;
+  draggingActionId: string | null;
+  commands: Pick<TimelineStatementRowCommands, 'setActiveGapMenu' | 'gapInsertPendingRef'
+    | 'setDragOverGapIndex' | 'setDropTarget' | 'blockOfflineAuthoring' | 'dropRootStatementAt'>;
 }) {
-  const { activeGapMenu, setActiveGapMenu, gapInsertPendingRef } = state;
-  const { draggingActionId, dragOverGapIndex, setDragOverGapIndex, setDropTarget, blockOfflineAuthoring } = editing;
+  const { setActiveGapMenu, gapInsertPendingRef, setDragOverGapIndex, setDropTarget, blockOfflineAuthoring } = commands;
   return (
     <div
-      className={`timeline-list-gap ${dragOverGapIndex === gap.index ? 'timeline-list-gap--drag-over' : ''}`}
+      className={`timeline-list-gap ${dragOver ? 'timeline-list-gap--drag-over' : ''}`}
       data-testid="timeline-list-gap"
-      data-active={activeGapMenu?.gap.index === gap.index}
+      data-active={active}
       onDragOver={(event) => {
         if (!draggingActionId) return;
         event.preventDefault();
@@ -122,7 +125,7 @@ export function TimelineListGapControl({ gap, state, editing }: {
         setDragOverGapIndex(null);
         setDropTarget(null);
         if (!currentDraggingId) return;
-        void editing.dropRootStatementAt(currentDraggingId, gap.index + 1);
+        void commands.dropRootStatementAt(currentDraggingId, gap.index + 1);
       }}
     >
       <button

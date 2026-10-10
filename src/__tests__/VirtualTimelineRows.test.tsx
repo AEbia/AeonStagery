@@ -1,29 +1,34 @@
 /** @vitest-environment jsdom */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useRef } from 'react';
+import { Profiler, useRef } from 'react';
 import { MeasuredTimelineRow, useVirtualTimelineRows } from '../ui/timeline/useVirtualTimelineRows';
 
 const rows = Array.from({ length: 1000 }, (_, index) => ({
   id: `row-${index}`, measurementKey: `row-${index}`, estimatedHeight: 40,
 }));
-let observers: Map<Element, () => void>;
+let observers: Map<Element, (entries?: ResizeObserverEntry[]) => void>;
 let animationFrames: Array<FrameRequestCallback>;
 
-function List({ height = 40 }: { height?: number }) {
+function List({ height = 40, rowSizes = rows }: { height?: number; rowSizes?: typeof rows }) {
   const ref = useRef<HTMLDivElement>(null);
-  const virtual = useVirtualTimelineRows(ref, rows);
+  const virtual = useVirtualTimelineRows(ref, rowSizes);
   return <div ref={ref} data-testid="viewport">
     <button onClick={() => virtual.revealRow('row-500')}>Reveal row 500</button>
-    <div data-testid="list" style={{ height: virtual.totalHeight }}>
-      {virtual.indices.map((index) => <MeasuredTimelineRow key={rows[index].id}
-        measurementKey={rows[index].measurementKey} top={virtual.offsets[index]} gap={0}
-        measure={virtual.measure} onFocus={() => virtual.setFocusedId(rows[index].id)}
+    <div ref={virtual.contentRef} data-testid="list" style={{ height: virtual.totalHeight }}>
+      {virtual.indices.map((index) => <MeasuredTimelineRow key={rowSizes[index].id}
+        id={rowSizes[index].id} registerRow={virtual.registerRow}
+        measurementKey={rowSizes[index].measurementKey} top={virtual.getOffset(index)} gap={0}
+        measure={virtual.measure} onFocus={() => virtual.setFocusedId(rowSizes[index].id)}
         onBlur={() => virtual.setFocusedId(null)}>
         <input aria-label={`Row ${index}`} data-height={height} />
       </MeasuredTimelineRow>)}
     </div>
   </div>;
+}
+
+function flushFrames() {
+  act(() => { animationFrames.splice(0).forEach((callback) => callback(0)); });
 }
 
 function scrollTo(viewport: HTMLElement, top: number) {
@@ -39,6 +44,7 @@ function notifyRowResizes(container: HTMLElement) {
   act(() => {
     container.querySelectorAll('[data-timeline-virtual-row]').forEach((row) => observers.get(row)?.());
   });
+  flushFrames();
 }
 
 beforeEach(() => {
@@ -46,8 +52,11 @@ beforeEach(() => {
   animationFrames = [];
   vi.stubGlobal('ResizeObserver', class {
     private elements: Element[] = [];
-    constructor(private callback: () => void) {}
-    observe(element: Element) { this.elements.push(element); observers.set(element, this.callback); }
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(element: Element) {
+      this.elements.push(element);
+      observers.set(element, (entries = []) => this.callback(entries, this as unknown as ResizeObserver));
+    }
     disconnect() { this.elements.forEach((element) => observers.delete(element)); }
   });
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => animationFrames.push(callback));
@@ -59,6 +68,56 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('variable-height timeline virtualization', () => {
+  it('uses delivered border-box sizes without forcing another row geometry read', () => {
+    render(<List />);
+    const first = screen.getByRole('textbox', { name: 'Row 0' }).closest('[data-timeline-virtual-row]')!;
+    const geometry = vi.spyOn(first, 'getBoundingClientRect');
+    geometry.mockClear();
+    act(() => observers.get(first)?.([{
+      target: first, borderBoxSize: [{ blockSize: 120, inlineSize: 500 }],
+    } as unknown as ResizeObserverEntry]));
+    flushFrames();
+    expect(geometry).not.toHaveBeenCalled();
+    expect((screen.getByRole('textbox', { name: 'Row 1' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement).style.top).toBe('120px');
+  });
+
+  it('coalesces separate resize deliveries into one layout commit with the latest height', () => {
+    const commits = vi.fn();
+    render(<Profiler id="list" onRender={commits}><List /></Profiler>);
+    const first = screen.getByRole('textbox', { name: 'Row 0' }).closest('[data-timeline-virtual-row]')!;
+    commits.mockClear();
+    for (const height of [60, 100, 120]) {
+      act(() => observers.get(first)?.([{
+        target: first, borderBoxSize: [{ blockSize: height, inlineSize: 500 }],
+      } as unknown as ResizeObserverEntry]));
+    }
+    expect(commits).not.toHaveBeenCalled();
+    expect(animationFrames).toHaveLength(1);
+    // Neighbor geometry is current before the deferred React commit.
+    expect((screen.getByRole('textbox', { name: 'Row 1' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement).style.top).toBe('120px');
+    flushFrames();
+    expect(commits).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('textbox', { name: 'Row 1' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement).style.top).toBe('120px');
+  });
+
+  it('does not rescan all row measurement keys on an animation size update', () => {
+    let keyReads = 0;
+    const rowSizes = rows.map((row) => ({ ...row, get measurementKey() { keyReads++; return row.measurementKey; } }));
+    render(<List rowSizes={rowSizes} />);
+    const first = screen.getByRole('textbox', { name: 'Row 0' }).closest('[data-timeline-virtual-row]')!;
+    keyReads = 0;
+    first.querySelector('[data-height]')!.setAttribute('data-height', '120');
+    act(() => observers.get(first)?.([{
+      target: first, borderBoxSize: [{ blockSize: 120, inlineSize: 500 }],
+    } as unknown as ResizeObserverEntry]));
+    flushFrames();
+    expect(keyReads).toBeLessThan(50);
+    expect((screen.getByRole('textbox', { name: 'Row 1' })
+      .closest('[data-timeline-virtual-row]') as HTMLElement).style.top).toBe('120px');
+  });
   it('bounds mounted rows and moves the visible window when scrolling', () => {
     const { container } = render(<List />);
     const viewport = screen.getByTestId('viewport');
@@ -125,6 +184,31 @@ describe('variable-height timeline virtualization', () => {
     expect(screen.getAllByRole('textbox').length).toBeLessThan(20);
   });
 
+  it.each(['rows-first', 'container-first', 'container-only'])(
+    'retains mounted row geometry on a width change with %s notifications', (order) => {
+      render(<List height={120} />);
+      const viewport = screen.getByTestId('viewport');
+      const firstInput = screen.getByRole('textbox', { name: 'Row 0' });
+      const second = screen.getByRole('textbox', { name: 'Row 1' })
+        .closest('[data-timeline-virtual-row]') as HTMLElement;
+      expect(second.style.top).toBe('120px');
+
+      const notifyContainer = observers.get(viewport)!;
+      const notifyRows = [...observers.entries()]
+        .filter(([element]) => element.hasAttribute('data-timeline-virtual-row'))
+        .map(([, notify]) => notify);
+      Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 600 });
+      act(() => {
+        if (order === 'rows-first') notifyRows.forEach((notify) => notify());
+        notifyContainer();
+        if (order === 'container-first') notifyRows.forEach((notify) => notify());
+      });
+
+      expect(second.style.top).toBe('120px');
+      expect(screen.getByRole('textbox', { name: 'Row 0' })).toBe(firstInput);
+    },
+  );
+
   it.each([10, 200])('reveals an unmounted row after neighbors measure %i px, without a scroll event', (height) => {
     const view = render(<List height={height} />);
     const viewport = screen.getByTestId('viewport');
@@ -155,6 +239,7 @@ describe('variable-height timeline virtualization', () => {
     });
 
     act(() => observers.get(previous)?.());
+    flushFrames();
 
     const destination = screen.getByRole('textbox', { name: 'Row 500' })
       .closest('[data-timeline-virtual-row]') as HTMLElement;
@@ -166,6 +251,7 @@ describe('variable-height timeline virtualization', () => {
       return { height: this === previous ? 10 : 200 } as DOMRect;
     });
     act(() => observers.get(previous)?.());
+    flushFrames();
     expect(viewport.scrollTop).toBe(alignedTop);
   });
 });

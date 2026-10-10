@@ -1,20 +1,49 @@
-import React from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useCollaborationPresence } from '../context/AppContext';
 import { IconPlay, IconTrash, IconUsers, IconGripVertical, IconChevronDown } from '../icons';
 import { getPeersEditingLocator, summarizeLocatorEditingPeers } from '../../services/collaboration/CollaborationPresence';
-import { BACKGROUND_LAYER_ID } from '../../engine/environmentLayerModel';
 import { InlineNumericInput } from './FormComponents';
 import { ActionInspector } from './ActionInspector';
 import { StatementQuickControls } from './StatementQuickControls';
 import { InlineStatementDetails } from './InlineStatementDetails';
 import { ActionIcons } from './TimelineConstants';
-import { type collectEnvironmentLayerPresentations, getEnvironmentActionLayerId } from './environmentPresentation';
 import { TimelineListGapControl, type TimelineListGapMenuState } from './TimelineListGapMenu';
 import type { TimelineListEditing } from './useTimelineListEditing';
-import type { TimelineListExpansion } from './useTimelineListExpansion';
 import type { TimelineListViewProps } from './TimelineListView';
 import type { SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
-import type { TimelineAction } from './semanticTimelineTypes';
+import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
+import type { TimelineListGap } from './timelineListGaps';
+
+export type TimelineStatementRowCommands = Pick<TimelineListEditing,
+  'setDropTarget' | 'setDragOverGapIndex' | 'setDraggingActionId' | 'dropRootStatementAt'
+  | 'handleTimeEdit' | 'handleDeleteItem' | 'commitInlineParams' | 'playAction'
+  | 'deleteActions' | 'copyActions' | 'blockOfflineAuthoring'>
+  & Pick<TimelineListGapMenuState, 'setActiveGapMenu' | 'gapInsertPendingRef'>
+  & Pick<TimelineListViewProps, 'handleSelect' | 'setSelectedIds'>
+  & { toggleExpand: (id: string) => void };
+
+/** Events always use the latest committed handlers, without invalidating every row. */
+export function useTimelineStatementRowCommands(commands: TimelineStatementRowCommands): TimelineStatementRowCommands {
+  const latest = useRef(commands);
+  useLayoutEffect(() => { latest.current = commands; });
+  return useMemo(() => {
+    const forward = <K extends Exclude<keyof TimelineStatementRowCommands, 'gapInsertPendingRef'>>(key: K) =>
+      (...args: Parameters<TimelineStatementRowCommands[K]>): ReturnType<TimelineStatementRowCommands[K]> => {
+        const handler = latest.current[key] as (...params: Parameters<TimelineStatementRowCommands[K]>) => ReturnType<TimelineStatementRowCommands[K]>;
+        return handler(...args);
+      };
+    return {
+      handleSelect: forward('handleSelect'), setSelectedIds: forward('setSelectedIds'),
+      toggleExpand: forward('toggleExpand'), setDropTarget: forward('setDropTarget'),
+      setDragOverGapIndex: forward('setDragOverGapIndex'), setDraggingActionId: forward('setDraggingActionId'),
+      dropRootStatementAt: forward('dropRootStatementAt'), handleTimeEdit: forward('handleTimeEdit'),
+      handleDeleteItem: forward('handleDeleteItem'), commitInlineParams: forward('commitInlineParams'),
+      playAction: forward('playAction'), deleteActions: forward('deleteActions'), copyActions: forward('copyActions'),
+      blockOfflineAuthoring: forward('blockOfflineAuthoring'), setActiveGapMenu: forward('setActiveGapMenu'),
+      gapInsertPendingRef: commands.gapInsertPendingRef,
+    };
+  }, [commands.gapInsertPendingRef]);
+}
 
 function getTimelineItemClassForSemanticCategory(category: TimelineAction['semanticCategory']): string {
   switch (category) {
@@ -53,26 +82,45 @@ function preserveInlineDraftFocus(event: React.MouseEvent<HTMLElement>) {
 interface TimelineStatementRowProps {
   action: TimelineAction;
   realIdx: number;
-  view: Pick<TimelineListViewProps, 'sceneData' | 'handleSelect' | 'setSelectedIds' | 'selectedActionIds'>;
+  sceneData: TimelineScene;
   semanticSnapshot: SemanticTimelineSnapshot;
-  environmentLayers: ReturnType<typeof collectEnvironmentLayerPresentations>;
   allowInlineExpand: boolean;
-  searchQuery: string;
-  expansion: TimelineListExpansion;
-  editing: TimelineListEditing;
-  gapMenu: TimelineListGapMenuState;
+  searchActive: boolean;
+  isSelected: boolean;
+  isExpanded: boolean;
+  isRevealed: boolean;
+  animateExpansion: boolean;
+  isOfflineEditingBlocked: boolean;
+  draggingActionId: string | null;
+  dropPlacement?: 'before' | 'after';
+  gap?: TimelineListGap;
+  gapActive: boolean;
+  gapDragOver: boolean;
+  commands: TimelineStatementRowCommands;
 }
 
-export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
-  environmentLayers, allowInlineExpand, searchQuery, expansion, editing, gapMenu }: TimelineStatementRowProps) {
-  const { sceneData, handleSelect, setSelectedIds } = view;
-  const { expandedActionIds, revealedActionId, automaticallyExpandedActionId,
-    manuallyExpandedActionIds, toggleExpand } = expansion;
-  const { draggingActionId, dropTarget, setDropTarget, setDragOverGapIndex, setDraggingActionId,
-    dropRootStatementAt, isOfflineEditingBlocked, handleTimeEdit, handleDeleteItem, commitInlineParams } = editing;
+export const TimelineStatementRow = React.memo(function TimelineStatementRow({ action, realIdx, sceneData, semanticSnapshot,
+  allowInlineExpand, searchActive, isSelected, isExpanded, isRevealed, animateExpansion,
+  isOfflineEditingBlocked, draggingActionId, dropPlacement, gap, gapActive, gapDragOver,
+  commands }: TimelineStatementRowProps) {
+  const { handleSelect, setSelectedIds, toggleExpand, setDropTarget, setDragOverGapIndex, setDraggingActionId,
+    dropRootStatementAt, handleTimeEdit, handleDeleteItem, commitInlineParams } = commands;
   const { peers: collaborationPeers } = useCollaborationPresence();
-  const isSelected = !!action._id && !!view.selectedActionIds[action._id];
-  const isExpanded = !!action._id && !!expandedActionIds[action._id];
+  const selectedActionIds = useMemo(() => ({ [action._id!]: true }), [action._id]);
+  const commitQuickParams = useCallback((patch: Parameters<typeof commitInlineParams>[1]) => {
+    commitInlineParams(action, patch);
+  }, [action, commitInlineParams]);
+  const inspectorCommands = useMemo(() => ({
+    updateAction: (_id: string, updates: any, isTransient?: boolean) => {
+      if (!isTransient && updates.params) commitInlineParams(action, updates.params, true);
+    },
+    updateParam: (_id: string, key: string, val: any, isTransient?: boolean) => {
+      if (!isTransient) commitInlineParams(action, { [key]: val });
+    },
+    replaceSourceParams: (_id: string, params: Record<string, unknown>) => { commitInlineParams(action, params, true); },
+    deleteAction: (id: string) => { void commands.deleteActions([id]); },
+    onClose: () => toggleExpand(action._id!),
+  }), [action, commitInlineParams, commands.deleteActions, toggleExpand]);
   const readModelItem = action._id
     ? semanticSnapshot.itemById.get(action._id)
     : undefined;
@@ -85,10 +133,7 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
     : null;
   let title: string = action.semanticLabel ?? action.action;
   let typeClass = getTimelineItemClassForSemanticCategory(action.semanticCategory);
-  const environmentLayerId = getEnvironmentActionLayerId(action);
-  const environmentLayer = environmentLayerId ? environmentLayers.get(environmentLayerId) : null;
-  const gap = !searchQuery.trim() ? gapMenu.timelineListGapByIndex.get(realIdx) : undefined;
-  const canDragRootStatement = !searchQuery.trim() && readModelItem?.locator.kind === 'statement';
+  const canDragRootStatement = !searchActive && readModelItem?.locator.kind === 'statement';
   const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
 
   if (action.semanticType === 'filterAdd') {
@@ -162,16 +207,13 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
     title = '重置镜头';
     typeClass = 'timeline-item--camera';
   } else if (action.action === 'setEnvironmentLayer') {
-    const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
-    title = layerId === BACKGROUND_LAYER_ID ? '放入背景' : `放入环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
+    title = action.semanticLabel ?? '放入环境画面';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'transformEnvironmentLayer') {
-    const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
-    title = layerId === BACKGROUND_LAYER_ID ? '调整背景' : `调整环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
+    title = action.semanticLabel ?? '调整环境画面';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'removeEnvironmentLayer') {
-    const layerId = action.params.layerId || BACKGROUND_LAYER_ID;
-    title = layerId === BACKGROUND_LAYER_ID ? '收起背景' : `收起环境画面 · ${environmentLayer?.displayLabel || '环境层'}`;
+    title = action.semanticLabel ?? '收起环境画面';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'setCompositeRecipe') {
     title = action.params.slot === 'grounding' ? '设置角色明暗融入' : action.params.slot === 'integration' ? '设置角色色彩融入' : '设置角色融入';
@@ -260,13 +302,13 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
     draggingActionId === readModelItem?.statementId ||
     (!!action._id && draggingActionId === action._id)
   );
-  const isDropBefore = !isDragging && dropTarget?.index === realIdx && dropTarget.placement === 'before';
-  const isDropAfter = !isDragging && dropTarget?.index === realIdx && dropTarget.placement === 'after';
+  const isDropBefore = !isDragging && dropPlacement === 'before';
+  const isDropAfter = !isDragging && dropPlacement === 'after';
 
   return (
-    <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${action._id === revealedActionId ? 'timeline-item-container--revealed' : ''} ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
+    <div key={action._id ?? `timeline-item:${realIdx}`} className={`timeline-item-container ${isRevealed ? 'timeline-item-container--revealed' : ''} ${!allowInlineExpand ? 'timeline-item-container--compact' : ''}`} style={{ position: 'relative' }}>
       <div
-        className={`timeline-item ${typeClass} ${isSelected && !allowInlineExpand ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${action._id === revealedActionId ? 'timeline-item--revealed' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
+        className={`timeline-item ${typeClass} ${isSelected && !allowInlineExpand ? 'timeline-item--active' : ''} ${isExpanded && allowInlineExpand ? 'timeline-item--expanded' : ''} ${isRevealed ? 'timeline-item--revealed' : ''} ${collaborationEditingSummary ? 'timeline-item--collaboration-editing' : ''} ${isDragging ? 'timeline-item--dragging' : ''} ${isDropBefore ? 'timeline-item--drop-before' : ''} ${isDropAfter ? 'timeline-item--drop-after' : ''} ${!allowInlineExpand ? 'timeline-item--compact' : 'timeline-item--authoring'}`}
         onClick={(event) => {
           if (!isStatementRowSurface(event)) return;
           clearStatementRowPress(event);
@@ -284,7 +326,7 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
         onPointerCancel={clearStatementRowPress}
         onPointerLeave={clearStatementRowPress}
         onDragOver={(event) => {
-          if (!draggingActionId || searchQuery.trim()) return;
+          if (!draggingActionId || searchActive) return;
           if (isDragging) {
             setDropTarget(null);
             return;
@@ -310,7 +352,7 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
           const currentDraggingId = draggingActionId;
           setDropTarget(null);
           setDragOverGapIndex(null);
-          if (!currentDraggingId || searchQuery.trim()) return;
+          if (!currentDraggingId || searchActive) return;
           const rect = event.currentTarget.getBoundingClientRect();
           const insertAfter = event.clientY >= rect.top + rect.height / 2;
           void dropRootStatementAt(currentDraggingId, realIdx + (insertAfter ? 1 : 0));
@@ -407,13 +449,6 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
               </span>
             )}
           </div>
-          {environmentLayer && (
-            <div className="timeline-item__layer-label" style={allowInlineExpand ? { display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' } : undefined}>
-              <span className="timeline-item__layer-tag">
-                {environmentLayer.isBackground ? '主背景' : environmentLayer.displayLabel}
-              </span>
-            </div>
-          )}
         </button>
 
         {allowInlineExpand && (
@@ -421,7 +456,7 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
             {readModelItem && (
               <StatementQuickControls item={readModelItem} sceneData={sceneData} timelineActions={semanticSnapshot.actions}
                 expanded={isExpanded}
-                disabled={isOfflineEditingBlocked} onChange={(patch) => commitInlineParams(action, patch)} />
+                disabled={isOfflineEditingBlocked} onChange={commitQuickParams} />
             )}
           </div>
         )}
@@ -431,7 +466,7 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
             className="timeline-item__action-btn timeline-item__action-btn--play"
             onClick={(event) => {
               event.stopPropagation();
-              editing.playAction(action.time || 0);
+              commands.playAction(action.time || 0);
             }}
             title="播放到此句"
             aria-label="播放到此句"
@@ -450,33 +485,23 @@ export function TimelineStatementRow({ action, realIdx, view, semanticSnapshot,
       </div>
 
       {allowInlineExpand && (
-        <InlineStatementDetails expanded={isExpanded}
-          animateExpansion={automaticallyExpandedActionId !== action._id || !!manuallyExpandedActionIds[action._id!]}>
+        <InlineStatementDetails expanded={isExpanded} animateExpansion={animateExpansion}>
           <ActionInspector
             key={action._id}
             semanticSnapshot={semanticSnapshot}
             sceneData={sceneData}
             presentation="inline"
-            selectedActionIds={{ [action._id!]: true }}
+            selectedActionIds={selectedActionIds}
             setSelectedIds={setSelectedIds}
-            updateAction={(_id, updates, isTransient) => {
-              if (isTransient) return;
-              if (updates.params) commitInlineParams(action, updates.params, true);
-            }}
-            updateParam={(_id, key, val, isTransient) => {
-              if (isTransient) return;
-              commitInlineParams(action, { [key]: val });
-            }}
-            replaceSourceParams={(_id, params) => { commitInlineParams(action, params, true); }}
-            deleteAction={(id) => { void editing.deleteActions([id]); }}
-            copyActions={editing.copyActions}
-            onClose={() => toggleExpand(action._id!)}
+            {...inspectorCommands}
+            copyActions={commands.copyActions}
             closeMode="close"
           />
         </InlineStatementDetails>
       )}
 
-      {gap && <TimelineListGapControl gap={gap} state={gapMenu} editing={editing} />}
+      {gap && <TimelineListGapControl gap={gap} active={gapActive} dragOver={gapDragOver}
+        draggingActionId={draggingActionId} commands={commands} />}
     </div>
   );
-}
+});

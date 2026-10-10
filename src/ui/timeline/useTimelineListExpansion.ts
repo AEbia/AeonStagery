@@ -9,28 +9,37 @@ export function useTimelineListExpansion(
   allowInlineExpand: boolean,
 ) {
   const listContainerRef = useRef<HTMLDivElement>(null);
-  const [manuallyExpandedActionIds, setManuallyExpandedActionIds] = useState<Record<string, boolean>>({});
-  const [automaticallyExpandedActionId, setAutomaticallyExpandedActionId] = useState<string | null>(null);
+  const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
+  const selectedSingleId = selectedIdsList.length === 1 ? selectedIdsList[0] : undefined;
+  const selectionId = allowInlineExpand ? selectedSingleId ?? null : null;
+  const [expansionState, setExpansionState] = useState({
+    selectionId, suppressAutomatic: false, manual: {} as Record<string, boolean>,
+  });
+  if (expansionState.selectionId !== selectionId) {
+    // Reset selection ownership before rendering children, rather than mounting
+    // the old inspector and correcting it in a subsequent passive effect.
+    setExpansionState({ ...expansionState, selectionId, suppressAutomatic: false });
+  }
+  const manuallyExpandedActionIds = expansionState.manual;
+  const automaticallyExpandedActionId = expansionState.selectionId === selectionId && expansionState.suppressAutomatic
+    ? null : selectionId;
   const expandedActionIds = useMemo(() => automaticallyExpandedActionId
     ? { ...manuallyExpandedActionIds, [automaticallyExpandedActionId]: true }
     : manuallyExpandedActionIds, [automaticallyExpandedActionId, manuallyExpandedActionIds]);
   const [revealedActionId, setRevealedActionId] = useState<string | null>(null);
   const toggleExpand = useCallback((id: string) => {
-    const expandedBySelection = automaticallyExpandedActionId === id;
-    setManuallyExpandedActionIds((prev) => ({ ...prev, [id]: !(prev[id] || expandedBySelection) }));
-    setAutomaticallyExpandedActionId((current) => current === id ? null : current);
-  }, [automaticallyExpandedActionId]);
-
-  const selectedIdsList = useMemo(() => Object.keys(selectedActionIds), [selectedActionIds]);
-  const selectedSingleId = selectedIdsList.length === 1 ? selectedIdsList[0] : undefined;
+    setExpansionState((current) => ({
+      ...current,
+      manual: { ...current.manual, [id]: !(current.manual[id]
+        || (current.selectionId === id && !current.suppressAutomatic)) },
+      suppressAutomatic: current.suppressAutomatic || current.selectionId === id,
+    }));
+  }, []);
   useEffect(() => {
     if (!revealedActionId) return;
     const timeout = window.setTimeout(() => setRevealedActionId(null), 250);
     return () => window.clearTimeout(timeout);
   }, [revealedActionId, selectedSingleId]);
-  useEffect(() => {
-    setAutomaticallyExpandedActionId(allowInlineExpand && selectedSingleId ? selectedSingleId : null);
-  }, [allowInlineExpand, selectedSingleId]);
   const virtualRowSizes = useMemo(() => filteredActions.map((action, index) => {
     const id = action._id ?? `timeline-item:${index}`;
     const expanded = allowInlineExpand && !!expandedActionIds[id];
@@ -65,14 +74,12 @@ export function useTimelineListExpansion(
     filteredActions.forEach((action) => {
       if (action._id) next[action._id] = true;
     });
-    setManuallyExpandedActionIds(next);
-    setAutomaticallyExpandedActionId(null);
+    setExpansionState((current) => ({ ...current, manual: next, suppressAutomatic: true }));
   }, [filteredActions, virtualRows.cancelReveal]);
 
   const handleCollapseAll = useCallback(() => {
     virtualRows.cancelReveal();
-    setManuallyExpandedActionIds({});
-    setAutomaticallyExpandedActionId(null);
+    setExpansionState((current) => ({ ...current, manual: {}, suppressAutomatic: true }));
   }, [virtualRows.cancelReveal]);
 
   return {

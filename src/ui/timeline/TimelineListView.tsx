@@ -5,7 +5,7 @@ import type { WorkspaceToolTab } from '../workspace-tools/types';
 import type { SourcedSemanticAuthoringCombo } from '../../services/template-package';
 import { InspectorViewPicker } from './InspectorViewPicker';
 import { MeasuredTimelineRow } from './useVirtualTimelineRows';
-import { TimelineStatementRow } from './TimelineStatementRow';
+import { TimelineStatementRow, useTimelineStatementRowCommands } from './TimelineStatementRow';
 import { TimelineListGapMenu, useTimelineListGapMenu } from './TimelineListGapMenu';
 import { useTimelineListEditing } from './useTimelineListEditing';
 import { useTimelineListExpansion } from './useTimelineListExpansion';
@@ -110,6 +110,19 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
     handleExpandAll, handleCollapseAll } = expansion;
   const { setDropTarget, setDragOverGapIndex, handleSelectLeft, handleSelectRight,
     handleUndo, handleRedo, collaborationUndoDisabled, isOfflineEditingBlocked } = editing;
+  // Geometry and row-local state change frequently; command identities do not.
+  const rowCommands = useTimelineStatementRowCommands({
+    handleSelect: props.handleSelect, setSelectedIds: props.setSelectedIds,
+    toggleExpand: expansion.toggleExpand,
+    setDropTarget, setDragOverGapIndex, setDraggingActionId: editing.setDraggingActionId,
+    dropRootStatementAt: editing.dropRootStatementAt,
+    handleTimeEdit: editing.handleTimeEdit, handleDeleteItem: editing.handleDeleteItem,
+    commitInlineParams: editing.commitInlineParams, playAction: editing.playAction,
+    deleteActions: editing.deleteActions, copyActions: editing.copyActions,
+    blockOfflineAuthoring: editing.blockOfflineAuthoring,
+    setActiveGapMenu: gapMenu.setActiveGapMenu, gapInsertPendingRef: gapMenu.gapInsertPendingRef,
+  });
+  const searchActive = !!searchQuery.trim();
 
   return (
     <div className={`timeline-list-view${allowInlineExpand ? '' : ' timeline-list-view--outline'}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -278,18 +291,31 @@ export const TimelineListView: React.FC<TimelineListViewProps> = (props) => {
               position: 'relative', minHeight: 0, isolation: 'isolate', overflowAnchor: 'none'
             }}
           >
-            <div className="timeline-list-items" style={{ position: 'relative', height: virtualRows.totalHeight }}>
+            <div ref={virtualRows.contentRef} className="timeline-list-items" style={{ position: 'relative', height: virtualRows.totalHeight }}>
               {virtualRows.indices.map((realIdx) => (
                 <MeasuredTimelineRow key={virtualRowSizes[realIdx].id}
+                  id={virtualRowSizes[realIdx].id} registerRow={virtualRows.registerRow}
                   measurementKey={virtualRowSizes[realIdx].measurementKey}
-                  top={virtualRows.offsets[realIdx]} gap={allowInlineExpand ? 6 : 4}
+                  top={virtualRows.getOffset(realIdx)} gap={allowInlineExpand ? 6 : 4}
                   measure={virtualRows.measure}
                   onFocus={() => virtualRows.setFocusedId(virtualRowSizes[realIdx].id)}
                   onBlur={() => virtualRows.setFocusedId(null)}>
                   <TimelineStatementRow action={filteredActions[realIdx]} realIdx={realIdx}
-                    view={props} semanticSnapshot={semanticSnapshot} environmentLayers={environmentLayers}
+                    sceneData={sceneData} semanticSnapshot={semanticSnapshot}
                     allowInlineExpand={allowInlineExpand}
-                    searchQuery={searchQuery} expansion={expansion} editing={editing} gapMenu={gapMenu} />
+                    searchActive={searchActive}
+                    isSelected={!!props.selectedActionIds[virtualRowSizes[realIdx].id]}
+                    isExpanded={!!expansion.expandedActionIds[virtualRowSizes[realIdx].id]}
+                    isRevealed={expansion.revealedActionId === virtualRowSizes[realIdx].id}
+                    animateExpansion={expansion.automaticallyExpandedActionId !== virtualRowSizes[realIdx].id
+                      || !!expansion.manuallyExpandedActionIds[virtualRowSizes[realIdx].id]}
+                    isOfflineEditingBlocked={isOfflineEditingBlocked}
+                    draggingActionId={editing.draggingActionId}
+                    dropPlacement={editing.dropTarget?.index === realIdx ? editing.dropTarget.placement : undefined}
+                    gap={searchActive ? undefined : gapMenu.timelineListGapByIndex.get(realIdx)}
+                    gapActive={gapMenu.activeGapMenu?.gap.index === realIdx}
+                    gapDragOver={editing.dragOverGapIndex === realIdx}
+                    commands={rowCommands} />
                 </MeasuredTimelineRow>
               ))}
             </div>
