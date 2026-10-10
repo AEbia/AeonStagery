@@ -238,10 +238,14 @@ afterEach(() => {
 });
 
 /** Mount with a conversation record + context so the thread surface shows. */
-function renderWithConversation(record?: ProjectAgentJournalRecord) {
+async function renderWithConversation(record?: ProjectAgentJournalRecord) {
   mocks.journalListByProject.mockResolvedValue([record ?? journalRecord()]);
   mocks.getProjectContext.mockResolvedValue(CONTEXT);
-  render(<AgentWindow />);
+  // Settle context loading, journal loading, selection and its reset effects
+  // before tests publish statuses or interact with the selected conversation.
+  await act(async () => {
+    render(<AgentWindow />);
+  });
   return {
     pushStatus: (next: ProjectAgentTaskStatusPayload) => act(() => mocks.publish(next)),
   };
@@ -249,7 +253,7 @@ function renderWithConversation(record?: ProjectAgentJournalRecord) {
 
 describe('AgentWindow conversation thread', () => {
   it('shows the conversation title, scene and running badge when a status arrives', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     expect(await screen.findAllByText('Verify the scene')).not.toHaveLength(0);
     expect(screen.getAllByText('Main Scene').length).toBeGreaterThanOrEqual(1);
@@ -260,7 +264,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('renders user messages as bubbles and assistant replies directly on the page', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '请检查场景' },
         { role: 'assistant', text: '已检查，场景没有语义错误。' },
@@ -277,7 +281,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('interleaves tool activities at their chronological flow position', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '检查背景资源' },
         { role: 'assistant', text: '背景资源已就绪。' },
@@ -314,7 +318,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('keeps tool anchors matched to their own activities after a context compaction', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -360,7 +364,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('renders tool activities directly on the page, without bubbles', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -377,7 +381,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('decodes the conversation log from the journal record when no live status exists', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'suspended',
       conversationBlob: conversationBlob([
         { role: 'user', text: '历史问题' },
@@ -391,7 +395,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows undelivered supplements from the record as queued bubbles', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       supplements: [
         { id: 's1', text: '排队中的补充', enqueuedAt: 1000, deliveredToModel: false },
       ],
@@ -402,7 +406,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('hides host-injected recovery notes decoded from the journal record', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '请检查场景' },
         { role: 'assistant', text: '已检查。' },
@@ -420,7 +424,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('hides host-injected recovery notes from a live status flow', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -440,7 +444,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('does not duplicate a message already visible in the live flow from a stale record supplement', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       supplements: [
         { id: 's1', text: '继续之前的工作', enqueuedAt: 1000, deliveredToModel: false },
       ],
@@ -459,7 +463,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('removes the pending queued bubble once the message appears in the flow', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({ lifecycle: 'idle', phase: 'settled' }));
     mocks.getTaskStatus.mockImplementation(async () => status({
       lifecycle: 'idle',
@@ -541,7 +545,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the running status strip with phase, model and read count', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({ lifecycle: 'running', phase: 'tools_executed' }));
     expect(await screen.findByText('工具执行完成')).toBeTruthy();
     expect(screen.getAllByText('agent-model').length).toBeGreaterThan(0);
@@ -549,7 +553,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('counts terminal command success separately from related reads in the status strip', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'running',
       phase: 'tools_executed',
@@ -570,7 +574,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('keeps the ended-round status line when reopening from the journal record', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'idle',
       lastSettledRound: { startedAt: 0, endedAt: 12_500, kind: 'settled' },
       conversationBlob: conversationBlob([
@@ -585,7 +589,7 @@ describe('AgentWindow conversation thread', () => {
   it('shows connection then elapsed model work, and clears the timer outside model requests', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      renderWithConversation();
+      await renderWithConversation();
       const startedAt = Date.now();
       await act(async () => {
         mocks.publish(status({
@@ -627,7 +631,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('keeps the settled turn status with its duration after the round completes', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     const startedAt = Date.now() - 12_000;
     await act(async () => {
       mocks.publish(status({
@@ -649,7 +653,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the failed turn state with the provider detail on a provider suspension', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'suspended',
@@ -664,7 +668,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('collapses and expands the collapsible tool group', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'idle',
@@ -688,7 +692,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('collapses only the clicked tool group and leaves other groups expanded', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'idle',
@@ -724,7 +728,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('renders legacy json activity content as readable lines instead of raw JSON', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -754,7 +758,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the think disclosure for reasoning content and toggles it', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'idle',
@@ -772,7 +776,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the reply placeholder while running and replaces it with the final reply', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({ lifecycle: 'running', phase: 'model_request' }));
     });
@@ -793,7 +797,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('streams live assistant text while the model works and hands off to the final reply', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'running',
@@ -835,7 +839,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('streams live reasoning into the think disclosure while running', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'running',
@@ -851,7 +855,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('hides the live stream when the phase leaves the model exchange (tool progress)', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'running',
@@ -874,7 +878,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('does not surface redundant idle state hints', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({ lifecycle: 'idle', phase: 'settled' }));
     });
@@ -884,7 +888,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the back-to-bottom chip when the user scrolls up during a run', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({ lifecycle: 'running', phase: 'model_request' }));
     });
@@ -902,7 +906,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('detaches auto-scroll immediately when user wheels up, even within 64px from bottom', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await act(async () => {
       mocks.publish(status({ lifecycle: 'running', phase: 'model_request' }));
     });
@@ -940,7 +944,7 @@ describe('AgentWindow conversation thread', () => {
   it('does not auto-scroll to bottom or collapse activities when records update for the same conversation while scrolled up', async () => {
     const record = journalRecord();
     mocks.journalListByProject.mockResolvedValue([record]);
-    renderWithConversation(record);
+    await renderWithConversation(record);
     await act(async () => {
       mocks.publish(status({
         lifecycle: 'running',
@@ -998,7 +1002,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('expands structured activity facts and leaves old activities as static text', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -1030,7 +1034,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('expands a read activity to the actual content returned by the tool', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -1060,7 +1064,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('shows the context-used indicator with token usage and percentage', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       contextUsed: {
         estimatedTokens: 118000,
@@ -1076,7 +1080,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('renders a successful context compaction in the activity log', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'idle',
       phase: 'settled',
@@ -1091,7 +1095,7 @@ describe('AgentWindow conversation thread', () => {
   });
 
   it('does not show the context-used indicator without usage data', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     expect(await screen.findAllByText('Verify the scene')).not.toHaveLength(0);
     expect(screen.queryByText(/Context used/)).toBeNull();
@@ -1117,7 +1121,7 @@ describe('AgentWindow composer', () => {
   });
 
   it('sends the supplement text to the running conversation', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     const input = await screen.findByPlaceholderText(/追加指令/);
     fireEvent.change(input, { target: { value: 'also verify asset roots' } });
@@ -1128,7 +1132,7 @@ describe('AgentWindow composer', () => {
   });
 
   it('replaces stop button with send button when input is non-empty while running, queues at bottom, and reconciles into flow on next turn', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({
       lifecycle: 'running',
       phase: 'model_request',
@@ -1195,7 +1199,7 @@ describe('AgentWindow composer', () => {
   });
 
   it('starts a new execution round when sending to an idle conversation', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({ lifecycle: 'idle', phase: 'settled' }));
     mocks.getTaskStatus.mockImplementation(async () => status({
       lifecycle: 'idle',
@@ -1216,7 +1220,7 @@ describe('AgentWindow composer', () => {
     expect(mocks.requestContinue).toHaveBeenCalledWith('task-1');
   });
   it('switches to, queues text into and continues a suspended conversation on send', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'suspended',
       pauseReason: 'window_closed',
       conversationBlob: conversationBlob([{ role: 'user', text: '旧对话' }]),
@@ -1243,7 +1247,7 @@ describe('AgentWindow composer', () => {
   });
 
   it('sends a user pause request while the round runs', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     await screen.findByRole('button', { name: /暂停/i });
     // Re-query synchronously at click time: the find* result can already be a
@@ -1258,7 +1262,7 @@ describe('AgentWindow composer', () => {
   });
 
   it('sends a cancel request through the composer stop button while the round runs', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     await screen.findByRole('button', { name: /停止生成/i });
     // Same detached-node race as the pause test above: click the currently
@@ -1291,7 +1295,7 @@ describe('AgentWindow composer', () => {
 
 describe('AgentWindow suspended conversations', () => {
   it('shows the pause reason with continue and delete actions', async () => {
-    renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'provider_unavailable' }));
+    await renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'provider_unavailable' }));
     mocks.publish(status({ lifecycle: 'suspended', phase: 'suspended', pauseReason: 'provider_unavailable' }));
     mocks.getTaskStatus.mockImplementation(async () => status({
       lifecycle: 'suspended',
@@ -1310,7 +1314,7 @@ describe('AgentWindow suspended conversations', () => {
   });
 
   it('offers no continue action for target_scene_unavailable', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'suspended',
       pauseReason: 'target_scene_unavailable',
     }));
@@ -1324,7 +1328,7 @@ describe('AgentWindow suspended conversations', () => {
   });
 
   it('shows the structured provider failure detail on a provider suspension', async () => {
-    renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'provider_configuration_required' }));
+    await renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'provider_configuration_required' }));
     mocks.publish(status({
       lifecycle: 'suspended',
       phase: 'suspended',
@@ -1340,7 +1344,7 @@ describe('AgentWindow suspended conversations', () => {
   });
 
   it('deletes a suspended conversation through the card action and clears the surface', async () => {
-    renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'user_requested' }));
+    await renderWithConversation(journalRecord({ lifecycle: 'suspended', pauseReason: 'user_requested' }));
     mocks.publish(status({ lifecycle: 'suspended', phase: 'suspended', pauseReason: 'user_requested' }));
     const thread = await screen.findByRole('log');
     const deleteButton = await within(thread).findByRole('button', { name: /删除对话/i });
@@ -1419,7 +1423,7 @@ describe('AgentWindow conversation list', () => {
   });
 
   it('auto-selects the freshly started conversation when its first status arrives', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     await screen.findByRole('button', { name: /Verify the scene/ });
     fireEvent.click(screen.getByRole('button', { name: /新对话/i }));
     const input = await screen.findByLabelText('任务描述');
@@ -1539,7 +1543,7 @@ describe('AgentWindow conversation list', () => {
   });
 
   it('returns to the welcome surface via the new conversation button', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status({ lifecycle: 'idle', phase: 'settled' }));
     await screen.findByRole('button', { name: /Verify the scene/ });
     fireEvent.click(screen.getByRole('button', { name: /新对话/i }));
@@ -1547,7 +1551,7 @@ describe('AgentWindow conversation list', () => {
   });
 
   it('provides no scene switcher and no second-task entry point', async () => {
-    renderWithConversation();
+    await renderWithConversation();
     mocks.publish(status());
     await screen.findByRole('button', { name: /Verify the scene/ });
     expect(screen.queryByText(/场景切换|切换场景/i)).toBeNull();
@@ -1680,7 +1684,7 @@ describe('AgentWindow welcome surface', () => {
 
 describe('AgentWindow markdown replies', () => {
   it('renders assistant replies as markdown', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '总结' },
         {
@@ -1702,7 +1706,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('escapes raw HTML in assistant replies instead of injecting elements', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '检查' },
         { role: 'assistant', text: '<script>alert(1)</script> 正常文本' },
@@ -1715,7 +1719,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('renders differentiated icons for distinct tool activities and agent features in the feed', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       conversationBlob: conversationBlob([
         { role: 'user', text: '多项操作' },
         { role: 'assistant', text: '全部完成。' },
@@ -1754,7 +1758,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('renders thinking disclosure and streaming reply strictly below older assistant messages when continuing', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'idle',
       conversationBlob: conversationBlob([
         { role: 'user', text: '第一轮问题' },
@@ -1784,7 +1788,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('does not show interrupted card or paused message on routine application exit', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'suspended',
       pauseReason: 'application_exit',
       // The host persists the aborted round's timing as a suspended
@@ -1825,7 +1829,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('keeps a single continue affordance for a real pause with a suspended round', async () => {
-    renderWithConversation(journalRecord({
+    await renderWithConversation(journalRecord({
       lifecycle: 'suspended',
       pauseReason: 'user_requested',
       lastSettledRound: { startedAt: 0, endedAt: 5_000, kind: 'suspended' },
