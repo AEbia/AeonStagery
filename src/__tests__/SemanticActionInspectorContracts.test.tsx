@@ -9,6 +9,9 @@ const state = vi.hoisted(() => ({
   document: null as any,
   compiledScene: null as any,
   validationIssues: [] as any[],
+  customMotionSnapshot: { state: 'closed', target: null, session: null } as any,
+  customMotionEditing: { open: vi.fn() },
+  customMotionConversion: { convert: vi.fn() },
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: [], expressions: [] })),
     playMotion: vi.fn(),
@@ -39,7 +42,7 @@ const EXPECTED_BLEND_OPTION_LABELS = [
 vi.mock('../ui/context/AppContext', () => ({
   useApp: () => ({
     stores: { editor: { setCopyBuffer: vi.fn(), pixelsPerSecond: 50 } },
-    services: { semanticAuthoring: state.semanticAuthoring },
+    services: { semanticAuthoring: state.semanticAuthoring, customMotionEditing: state.customMotionEditing, customMotionConversion: state.customMotionConversion },
   }),
   useCharacterAdapter: () => state.characterAdapter,
   useCollaborationPresence: () => ({ peers: [] }),
@@ -55,7 +58,7 @@ vi.mock('../ui/context/AppContext', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: state.validationIssues, loading: false }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => state.customMotionSnapshot,
 }));
 
 function renderInspector(document: any, compiledAction: any): {
@@ -105,6 +108,7 @@ describe('Task 2 ActionInspector contracts', () => {
     state.document = null;
     state.compiledScene = null;
     state.validationIssues = [];
+    state.customMotionSnapshot = { state: 'closed', target: null, session: null };
     vi.clearAllMocks();
   });
 
@@ -1231,6 +1235,50 @@ describe('Task 2 ActionInspector contracts', () => {
     expect(regenerationDialog).toBeTruthy();
     expect(screen.getByText('当前全部关键帧和手工调整都会被替换。')).toBeTruthy();
     expect(regenerationDialog.textContent).toContain('wave.mtn');
+  });
+
+  it.each([false, true])('opens and converts the source target, with companion=%s', async (companion) => {
+    const motion = {
+      kind: 'custom', durationSeconds: 1, fadeInSeconds: 0,
+      derivedFrom: { key: 'wave.mtn' },
+      tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 0 }] }],
+    };
+    const performance = { id: 'motion', time: 0, type: 'characterPerformance', params: { target: 'hero', motion } };
+    const parent = companion ? {
+      id: 'dialogue', time: 0, type: 'dialogue', params: { text: 'Hello', durationSeconds: 1 },
+      companions: [{ ...performance, anchor: 'start', offset: 0 }],
+    } : performance;
+    const target = companion ? { statementId: 'dialogue', companionId: 'motion' } : { statementId: 'motion' };
+    state.customMotionConversion.convert.mockResolvedValue({ motion });
+    renderInspector(baseDocument(parent, [{ id: 'hero', name: 'Hero' }]), {
+      id: 'compiled-motion', time: 0, action: 'playMotion', params: { id: 'hero' },
+      sourceParams: performance.params, semanticType: 'characterPerformance',
+      source: { ...target, outputKey: 'motion' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '编辑关键帧' }));
+    expect(state.customMotionEditing.open).toHaveBeenCalledExactlyOnceWith(target);
+    fireEvent.click(screen.getByRole('button', { name: '重新转换…' }));
+    expect(state.customMotionConversion.convert).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: '从源动作重新生成' });
+    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: '重新生成' })));
+    expect(state.customMotionConversion.convert).toHaveBeenCalledExactlyOnceWith(target, 'standard');
+    // The conversion service owns the lease handoff and opens its own result.
+    expect(state.customMotionEditing.open).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses the active editor through its session handle', () => {
+    const motion = { kind: 'custom', durationSeconds: 1, fadeInSeconds: 0, derivedFrom: { key: 'wave.mtn' }, tracks: [] };
+    const statement = { id: 'motion', time: 0, type: 'characterPerformance', params: { target: 'hero', motion } };
+    const close = vi.fn();
+    state.customMotionSnapshot = { state: 'held', target: { actionId: 'compiled-motion' }, session: { close } };
+    renderInspector(baseDocument(statement), {
+      id: 'compiled-motion', time: 0, action: 'playMotion', params: { id: 'hero' },
+      sourceParams: statement.params, semanticType: 'characterPerformance',
+      source: { statementId: statement.id, outputKey: 'motion' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '收起关键帧编辑器' }));
+    expect(close).toHaveBeenCalledExactlyOnceWith('closed');
+    expect(state.customMotionEditing.open).not.toHaveBeenCalled();
   });
 
   it('renders both motion and expression fields on characterPerformance, allows clearing them from params, and does not render fadeInSeconds', () => {

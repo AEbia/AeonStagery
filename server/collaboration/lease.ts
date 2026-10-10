@@ -58,8 +58,8 @@ export type CollaborationLeaseGrantResultV2 =
   | { granted: false; heldByClientId: CollaborationClientId };
 
 /**
- * Atomically request the lease for a target. The current holder (even if it
- * is the same client) keeps the lease; a different client is denied.
+ * Atomically request the lease for a target. A different client is denied;
+ * the same client may replace its ownership with a new acquisition request.
  */
 export function acquireCollaborationLeaseV2<SocketKey>(
   registry: CollaborationLeaseRegistryV2<SocketKey>,
@@ -117,10 +117,11 @@ export function releaseCollaborationLeaseV2<SocketKey>(
   socket: SocketKey,
   clientId: CollaborationClientId,
   target: CollaborationLeaseTargetV2,
+  requestId: string,
 ): boolean {
   const key = encodeCollaborationLeaseTargetV2(target);
   const record = registry.leasesByTarget.get(key);
-  if (!record || record.clientId !== clientId) return false;
+  if (!record || record.clientId !== clientId || record.requestId !== requestId) return false;
   registry.leasesByTarget.delete(key);
   registry.leasesBySocket.get(socket)?.delete(key);
   return true;

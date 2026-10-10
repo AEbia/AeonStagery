@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject, PointerEvent as ReactPointerEvent } from 'react';
 import type { CharacterMotionOutput, CustomMotionTrack } from '../../api/types/semantic-scene';
-import { applyCustomMotionKeyframeEdits, customMotionFingerprint, type CustomMotionKeyframeEdit, type CustomMotionKeyframeRef } from '../../services/timeline-authoring/customMotionKeyframeEdits';
+import type { CustomMotionEditIntent, CustomMotionKeyframeIdentity } from '../../services/timeline-authoring/CustomMotionEditingTypes';
+interface SelectionRef { parameterId: string; time: number }
 import { createGroupMoveResolver, edgeScrollSpeed, keyframeKey, keyframesInRect, selectionRect, type SelectionRect } from './customMotionSelection';
 
 type Motion = Extract<CharacterMotionOutput, { kind: 'custom' }>;
@@ -14,7 +15,9 @@ interface Options {
   root: RefObject<HTMLDivElement | null>;
   scrollContainer?: HTMLElement | null;
   busy: boolean;
-  commit: (edits: readonly CustomMotionKeyframeEdit[]) => Promise<void>;
+  commit: (intent: CustomMotionEditIntent) => Promise<void>;
+  preview: (intent: CustomMotionEditIntent | null) => Motion;
+  keyframeRef: (parameterId: string, time: number) => CustomMotionKeyframeIdentity;
   pause: () => void;
   selectParam: (id: string) => void;
   range: (track: CustomMotionTrack) => { min: number; max: number; bounded?: boolean };
@@ -31,8 +34,8 @@ interface Gesture {
   startY: number;
   originX: number;
   originY: number;
-  baseline: readonly CustomMotionKeyframeRef[];
-  refs: readonly CustomMotionKeyframeRef[];
+  baseline: readonly SelectionRef[];
+  refs: readonly SelectionRef[];
   moved: boolean;
   dirty?: boolean;
   deselectOnClick: boolean;
@@ -40,17 +43,17 @@ interface Gesture {
   range?: { min: number; max: number; bounded?: boolean };
   axis?: 'x' | 'y';
   panPixels?: number;
-  edit?: CustomMotionKeyframeEdit;
+  edit?: CustomMotionEditIntent;
   pointer: { x: number; y: number; shift: boolean };
 }
 
 export function useCustomMotionSelection(options: Options) {
   const latest = useRef(options);
   latest.current = options;
-  const [selection, setSelection] = useState<readonly CustomMotionKeyframeRef[]>([]);
+  const [selection, setSelection] = useState<readonly SelectionRef[]>([]);
   const selectionRef = useRef(selection);
   const [preview, setPreview] = useState<Motion | null>(null);
-  const [previewSelection, setPreviewSelection] = useState<readonly CustomMotionKeyframeRef[] | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<readonly SelectionRef[] | null>(null);
   const [graphRange, setGraphRange] = useState<{ min: number; max: number } | null>(null);
   const [marquee, setMarquee] = useState<SelectionRect | null>(null);
   const [viewport, setViewport] = useState<{ left: number; right: number } | null>(() => options.scrollContainer?.clientWidth ? { left: Math.max(0, options.scrollContainer.scrollLeft - 190), right: options.scrollContainer.scrollLeft + options.scrollContainer.clientWidth + 40 } : null);
@@ -59,9 +62,7 @@ export function useCustomMotionSelection(options: Options) {
   const committing = useRef(false);
   const generation = useRef(0);
   const environment = useRef({ motion: options.motion, fps: options.fps });
-  const candidate = useRef(preview);
-  candidate.current = preview;
-  const updateSelection = useCallback((refs: readonly CustomMotionKeyframeRef[]) => {
+  const updateSelection = useCallback((refs: readonly SelectionRef[]) => {
     const current = selectionRef.current;
     if (current.length === refs.length && current.every((ref, index) => ref.parameterId === refs[index].parameterId && ref.time === refs[index].time)) return;
     selectionRef.current = refs;
@@ -72,6 +73,7 @@ export function useCustomMotionSelection(options: Options) {
     gesture.current = null;
     if (raf.current !== null) cancelAnimationFrame(raf.current);
     raf.current = null;
+    if (!committing.current) latest.current.preview(null);
     setPreview(null);
     setPreviewSelection(null);
     setMarquee(null);
@@ -126,12 +128,12 @@ export function useCustomMotionSelection(options: Options) {
       const pan = (g.panPixels ?? 0) / 122 * (g.range.max - g.range.min);
       setGraphRange((current) => current?.min === g.range!.min + pan && current.max === g.range!.max + pan ? current : { min: g.range!.min + pan, max: g.range!.max + pan });
     }
-    const edit: CustomMotionKeyframeEdit = { type: 'move-keyframes', keyframes: g.refs, deltaTime: deltaFrames / o.fps, deltaValue };
-    if (g.edit?.type === 'move-keyframes' && g.edit.deltaTime === edit.deltaTime && g.edit.deltaValue === edit.deltaValue) return;
+    const edit: Extract<CustomMotionEditIntent, { type: 'move-keyframes' }> = { type: 'move-keyframes', keyframes: g.refs.map((ref) => o.keyframeRef(ref.parameterId, ref.time)), deltaFrames, deltaValue };
+    if (g.edit?.type === 'move-keyframes' && g.edit.deltaFrames === edit.deltaFrames && g.edit.deltaValue === edit.deltaValue) return;
     g.edit = edit;
     try {
-      setPreview(applyCustomMotionKeyframeEdits(g.motion, [edit]));
-      setPreviewSelection(g.refs.map((ref) => ({ ...ref, time: ref.time + edit.deltaTime })));
+      setPreview(o.preview(edit));
+      setPreviewSelection(g.refs.map((ref) => ({ ...ref, time: edit.deltaFrames === 0 ? ref.time : Math.round(ref.time * o.fps + edit.deltaFrames) / o.fps })));
     }
     catch (error) { cancel(); o.onError(error instanceof Error ? error.message : '无法移动关键帧'); }
   }, [cancel, updateSelection]);
@@ -185,13 +187,13 @@ export function useCustomMotionSelection(options: Options) {
         setGraphRange(null);
         return;
       }
-      if (g.kind !== 'move' || !g.edit || (g.edit.type === 'move-keyframes' && g.edit.deltaTime === 0 && !g.edit.deltaValue)) { setPreview(null); setPreviewSelection(null); setGraphRange(null); return; }
+      if (g.kind !== 'move' || !g.edit || (g.edit.type === 'move-keyframes' && g.edit.deltaFrames === 0 && !g.edit.deltaValue)) { latest.current.preview(null); setPreview(null); setPreviewSelection(null); setGraphRange(null); return; }
       committing.current = true;
       const edit = g.edit;
       const ticket = generation.current;
-      void latest.current.commit([edit]).then(() => {
-        if (ticket === generation.current && edit.type === 'move-keyframes') updateSelection(g.refs.map((ref) => ({ ...ref, time: ref.time + edit.deltaTime })));
-      }).catch(() => { if (ticket === generation.current) updateSelection(g.refs); }).finally(() => { committing.current = false; setPreview(null); setPreviewSelection(null); setGraphRange(null); });
+      void latest.current.commit(edit).then(() => {
+        if (ticket === generation.current && edit.type === 'move-keyframes') updateSelection(g.refs.map((ref) => ({ ...ref, time: edit.deltaFrames === 0 ? ref.time : Math.round(ref.time * latest.current.fps + edit.deltaFrames) / latest.current.fps })));
+      }).catch(() => { if (ticket === generation.current) updateSelection(g.refs.filter((ref) => latest.current.motion.tracks.some((track) => track.parameterId === ref.parameterId && track.keyframes.some((point) => point.time === ref.time)))); }).finally(() => { committing.current = false; setPreview(null); setPreviewSelection(null); setGraphRange(null); });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -210,8 +212,7 @@ export function useCustomMotionSelection(options: Options) {
     const previous = environment.current;
     environment.current = { motion: options.motion, fps: options.fps };
     const changedFps = previous.fps !== options.fps;
-    const externalMotionChange = previous.motion !== options.motion && (!candidate.current || customMotionFingerprint(options.motion) !== customMotionFingerprint(candidate.current));
-    if (committing.current && !changedFps && !externalMotionChange) return;
+    if (committing.current && !changedFps) return;
     cancel();
     updateSelection(selectionRef.current.filter((ref) => options.motion.tracks.some((track) => track.parameterId === ref.parameterId && track.keyframes.some((kf) => kf.time === ref.time))));
   }, [options.motion, options.fps, options.busy, cancel, updateSelection]);

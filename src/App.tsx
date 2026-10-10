@@ -65,7 +65,6 @@ import type {
   CollaborationPresencePatchV2,
   CollaborationPresencePeerV2,
 } from './api/types/collaboration';
-import type { CustomMotionEditLeaseGate } from './services/timeline-authoring/CustomMotionEditLeaseGate';
 import { CollaborationConnectPanel } from './ui/CollaborationConnectPanel';
 import { useSemanticCollaborationSession } from './ui/useSemanticCollaborationSession';
 import {
@@ -162,10 +161,22 @@ const VoiceWorkbench = React.lazy(() => import('./ui/voice/VoiceWorkbench').then
 
 export default function App() {
   const contextValue = useMemo(() => bootstrap(), []);
+  const bootstrapLifecycleRef = useRef(0);
+  useEffect(() => {
+    const generation = ++bootstrapLifecycleRef.current;
+    return () => {
+      // Effect replay in StrictMode must keep the same bootstrap alive. Actual
+      // unmount has no following setup and disposes after child cleanup starts.
+      queueMicrotask(() => {
+        if (bootstrapLifecycleRef.current === generation) {
+          void contextValue.dispose().catch((error) => appLogger.error('Application disposal failed', error));
+        }
+      });
+    };
+  }, [contextValue]);
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationConnectionStatus>('disconnected');
   const [collaborationSelf, setCollaborationSelf] = useState<CollaborationIdentity | null>(null);
   const [collaborationPeers, setCollaborationPeers] = useState<CollaborationPresencePeerV2[]>([]);
-  const [customMotionEditLeaseGate, setCustomMotionEditLeaseGate] = useState<CustomMotionEditLeaseGate | null>(null);
   const collaborationPresencePublisherRef = useRef<(patch?: Partial<CollaborationPresencePatchV2>) => void>(() => {});
   const publishCollaborationPresence = useCallback((patch?: Partial<CollaborationPresencePatchV2>) => {
     collaborationPresencePublisherRef.current(patch);
@@ -186,7 +197,6 @@ export default function App() {
         self: collaborationSelf,
         peers: collaborationPeers,
         publishPresence: publishCollaborationPresence,
-        customMotionEditLeaseGate,
       }}
     >
       <AppContent
@@ -197,7 +207,6 @@ export default function App() {
         setCollaborationSelf={setCollaborationSelf}
         setCollaborationPeers={setCollaborationPeers}
         setCollaborationPresencePublisher={setCollaborationPresencePublisher}
-        setCustomMotionEditLeaseGate={setCustomMotionEditLeaseGate}
       />
     </AppProvider>
   );
@@ -211,7 +220,6 @@ function AppContent({
   setCollaborationSelf,
   setCollaborationPeers,
   setCollaborationPresencePublisher,
-  setCustomMotionEditLeaseGate,
 }: {
   contextValue: BootstrapContext;
   collaborationStatus: CollaborationConnectionStatus;
@@ -220,7 +228,6 @@ function AppContent({
   setCollaborationSelf: (self: CollaborationIdentity | null) => void;
   setCollaborationPeers: (peers: CollaborationPresencePeerV2[]) => void;
   setCollaborationPresencePublisher: (publisher: ((patch?: Partial<CollaborationPresencePatchV2>) => void) | null) => void;
-  setCustomMotionEditLeaseGate: (gate: CustomMotionEditLeaseGate | null) => void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
@@ -297,7 +304,6 @@ function AppContent({
     onSelfChange: setCollaborationSelf,
     onPeersChange: setCollaborationPeers,
     onPresencePublisherChange: setCollaborationPresencePublisher,
-    onLeaseGateChange: setCustomMotionEditLeaseGate,
   });
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 

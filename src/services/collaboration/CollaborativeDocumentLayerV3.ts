@@ -47,6 +47,7 @@ export interface CollaborativeDocumentLayerV3Options {
 
 export class CollaborativeDocumentLayerV3 {
   private status: CollaborationConnectionStatus = 'disconnected';
+  private disposed = false;
   private readonly syncLoop: CollaborativeDocumentSyncLoopV3;
   private readonly unsubscribes: Array<() => void> = [];
 
@@ -80,9 +81,11 @@ export class CollaborativeDocumentLayerV3 {
   }
 
   async connect(): Promise<void> {
+    this.assertActive();
     this.setStatus('connecting');
     try {
       const remote = await this.options.client.join();
+      this.assertActive();
       if (!remote) {
         if (this.options.allowSeed === false) {
           throw new Error('Collaboration room does not exist');
@@ -100,11 +103,13 @@ export class CollaborativeDocumentLayerV3 {
 
         this.setStatus('seeding');
         const prepared = await this.options.prepareSeedState?.(document);
+        this.assertActive();
         await this.options.client.seed(createCollaborativeSceneStateV3FromDocument(prepared?.document ?? document, {
           collaborationProjectId: this.options.collaborationProjectId,
           roomId: this.options.roomId,
           assets: prepared?.assets ?? this.options.initialAssets,
         }));
+        this.assertActive();
         const seeded = this.options.client.getState();
         if (seeded) {
           await this.syncLoop.synchronizeRemote(seeded, {
@@ -115,6 +120,7 @@ export class CollaborativeDocumentLayerV3 {
       } else {
         await this.syncLoop.synchronizeRemote(remote);
       }
+      this.assertActive();
       this.syncLoop.start();
       const subscribeRealtimeStatus = this.options.client.subscribeRealtimeStatus;
       this.unsubscribes.push(
@@ -133,22 +139,31 @@ export class CollaborativeDocumentLayerV3 {
         }) ?? (() => undefined),
       );
       await this.options.client.connectRealtime?.();
+      this.assertActive();
       if (!subscribeRealtimeStatus) {
         this.setStatus(this.options.client.isRealtimeConnected?.() ? 'connected' : 'offline');
       }
     } catch (error) {
       this.syncLoop.dispose();
-      this.setStatus('error');
-      this.options.onError?.(error);
+      if (!this.disposed) {
+        this.setStatus('error');
+        this.options.onError?.(error);
+      }
       throw error;
     }
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.syncLoop.dispose();
     this.unsubscribes.splice(0).forEach((unsubscribe) => unsubscribe());
     this.options.client.dispose?.();
     this.setStatus('disconnected');
+  }
+
+  private assertActive(): void {
+    if (this.disposed) throw new Error('Collaboration session was closed');
   }
 
   getStatus(): CollaborationConnectionStatus { return this.status; }

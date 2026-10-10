@@ -8,6 +8,7 @@ import {
   CustomMotionConversionCommand,
   CustomMotionConversionError,
 } from '../services/timeline-authoring/CustomMotionConversionCommand';
+import type { CustomMotionEditAuthority, HeldCustomMotionLease, LeaseDecision } from '../services/timeline-authoring/CustomMotionEditAuthority';
 import type { CustomMotionConversionSampler } from '../services/timeline-authoring/CustomMotionConversionCommand';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
 import { DocumentStore } from '../ui/store/DocumentStore';
@@ -102,11 +103,23 @@ function paramsOf(document: CurrentSceneDocument | null, statementId: string): C
   return statement.params as CharacterPerformanceParams;
 }
 
-function makeGate(acquired: boolean) {
+function makeAuthority(granted: boolean) {
+  const lease = Object.freeze({}) as HeldCustomMotionLease;
   return {
-    acquire: vi.fn(async () => acquired),
-    release: vi.fn(),
+    lease,
+    acquire: vi.fn<CustomMotionEditAuthority['acquire']>(async () => granted
+      ? { status: 'granted', lease }
+      : { status: 'denied', reason: 'lease-denied' }),
+    release: vi.fn<CustomMotionEditAuthority['release']>(async () => {}),
+    onLoss: vi.fn<CustomMotionEditAuthority['onLoss']>(() => () => {}),
+    dispose: vi.fn(),
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
 }
 
 describe('CustomMotionConversionCommand', () => {
@@ -396,24 +409,24 @@ describe('CustomMotionConversionCommand', () => {
     const { store, coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
 
-    const gate = makeGate(false);
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), leaseGate: gate });
+    const gate = makeAuthority(false);
+    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority: gate });
     await expect(command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
       density: 'standard',
       origin: 'collaboration',
     })).rejects.toMatchObject({ name: 'CustomMotionConversionError', code: 'lease-denied' });
-    expect(gate.acquire).toHaveBeenCalledWith({ kind: 'statement', statementId: 'perf-1' });
+    expect(gate.acquire).toHaveBeenCalledWith({ kind: 'statement', statementId: 'perf-1' }, expect.any(AbortSignal));
     expect(gate.release).not.toHaveBeenCalled();
     const deniedMotion = paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion;
     expect(typeof deniedMotion === 'object' ? deniedMotion.kind : undefined).toBe('resource');
 
-    const granted = makeGate(true);
+    const granted = makeAuthority(true);
     const command2 = new CustomMotionConversionCommand({
       authoring,
       samplerTargets,
       sampler: makeSampler(),
-      leaseGate: granted,
+      authority: granted,
     });
     const result = await command2.convert({
       locator: { kind: 'companion', statementId: 'dialogue-1', companionId: 'perf-2' },
@@ -425,12 +438,108 @@ describe('CustomMotionConversionCommand', () => {
       kind: 'companion',
       statementId: 'dialogue-1',
       companionId: 'perf-2',
+    }, expect.any(AbortSignal));
+    expect(granted.release).toHaveBeenCalledExactlyOnceWith(granted.lease);
+  });
+
+  it('keeps sampling and pending authority read-only, then commits one undoable conversion', async () => {
+    const { store, coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const authority = makeAuthority(true);
+    const sampleEntered = deferred<void>();
+    const finishSampling = deferred<void>();
+    const acquireEntered = deferred<void>();
+    const decision = deferred<LeaseDecision>();
+    const sampler = makeSampler();
+    const sample = sampler.sample;
+    sampler.sample = vi.fn<CustomMotionConversionSampler['sample']>(async (...args) => {
+      sampleEntered.resolve();
+      await finishSampling.promise;
+      return sample(...args);
     });
-    expect(granted.release).toHaveBeenCalledWith({
-      kind: 'companion',
-      statementId: 'dialogue-1',
-      companionId: 'perf-2',
+    authority.acquire.mockImplementationOnce(async () => {
+      acquireEntered.resolve();
+      return decision.promise;
     });
+    const signal = new AbortController().signal;
+    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler, authority });
+    const pending = command.convert({
+      locator: { kind: 'statement', statementId: 'perf-1' },
+      density: 'standard', origin: 'timeline-editor', signal,
+    });
+    await sampleEntered.promise;
+    expect(authority.acquire).not.toHaveBeenCalled();
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    finishSampling.resolve();
+    await acquireEntered.promise;
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    expect(await authoring.undo()).toBe(false);
+    decision.resolve({ status: 'granted', lease: authority.lease });
+    const result = await pending;
+    expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion).toEqual(result.motion);
+    expect(authority.acquire).toHaveBeenCalledExactlyOnceWith({ kind: 'statement', statementId: 'perf-1' }, signal);
+    expect(authority.release).toHaveBeenCalledExactlyOnceWith(authority.lease);
+    expect(await authoring.undo()).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    expect(await authoring.undo()).toBe(false);
+  });
+
+  it.each(['authority loss', 'cancellation'] as const)('drops a queued conversion after %s and releases ownership', async (cause) => {
+    const { store, coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const authority = makeAuthority(true);
+    let notifyLoss: ((reason: string) => void) | undefined;
+    const unsubscribe = vi.fn();
+    authority.onLoss.mockImplementation((_lease, listener) => {
+      notifyLoss = listener;
+      return unsubscribe;
+    });
+    const transactionEntered = deferred<void>();
+    const resumeTransaction = deferred<void>();
+    const authorTransaction = authoring.authorTransaction.bind(authoring);
+    vi.spyOn(authoring, 'authorTransaction').mockImplementationOnce(async (...args) => {
+      transactionEntered.resolve();
+      await resumeTransaction.promise;
+      return authorTransaction(...args);
+    });
+    const controller = new AbortController();
+    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority });
+    const pending = command.convert({
+      locator: { kind: 'statement', statementId: 'perf-1' },
+      density: 'standard', origin: 'timeline-editor', signal: controller.signal,
+    });
+    await transactionEntered.promise;
+    if (cause === 'authority loss') notifyLoss?.('disconnected');
+    else controller.abort();
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'CustomMotionConversionError', code: 'entity-changed' });
+    resumeTransaction.resolve();
+    await rejected;
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    expect(await authoring.undo()).toBe(false);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(authority.release).toHaveBeenCalledExactlyOnceWith(authority.lease);
+  });
+
+  it.each([true, false])('hands committed ownership to the editor without another acquire (accepted: %s)', async (accepted) => {
+    const { store, coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const authority = makeAuthority(true);
+    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority });
+    const handoff = vi.fn(async (lease: HeldCustomMotionLease) => {
+      expect(lease).toBe(authority.lease);
+      expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion).toMatchObject({ kind: 'custom' });
+      return accepted;
+    });
+    await command.convert({
+      locator: { kind: 'statement', statementId: 'perf-1' },
+      density: 'standard', origin: 'timeline-editor',
+    }, handoff);
+    expect(handoff).toHaveBeenCalledExactlyOnceWith(authority.lease);
+    expect(authority.acquire).toHaveBeenCalledTimes(1);
+    if (accepted) expect(authority.release).not.toHaveBeenCalled();
+    else expect(authority.release).toHaveBeenCalledExactlyOnceWith(authority.lease);
   });
 
   it('grows meta.durationSeconds when the converted motion extends past the scene end', async () => {
@@ -525,7 +634,7 @@ describe('CustomMotionConversionCommand', () => {
   it('releases the lease when the commit fails after it was acquired', async () => {
     const { coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
-    const gate = makeGate(true);
+    const gate = makeAuthority(true);
     const sampler = makeSampler({
       sample: vi.fn(async () => {
         const statement = authoring.getDocumentSnapshot()?.statements[0];
@@ -551,7 +660,7 @@ describe('CustomMotionConversionCommand', () => {
       authoring,
       samplerTargets,
       sampler,
-      leaseGate: gate,
+      authority: gate,
     });
 
     await expect(command.convert({
@@ -559,8 +668,8 @@ describe('CustomMotionConversionCommand', () => {
       density: 'standard',
       origin: 'collaboration',
     })).rejects.toMatchObject({ name: 'CustomMotionConversionError', code: 'entity-changed' });
-    expect(gate.acquire).toHaveBeenCalledWith({ kind: 'statement', statementId: 'perf-1' });
-    expect(gate.release).toHaveBeenCalledWith({ kind: 'statement', statementId: 'perf-1' });
+    expect(gate.acquire).toHaveBeenCalledWith({ kind: 'statement', statementId: 'perf-1' }, expect.any(AbortSignal));
+    expect(gate.release).toHaveBeenCalledExactlyOnceWith(gate.lease);
   });
 
   it('keeps the original document when the authoring pipeline rejects the result', async () => {

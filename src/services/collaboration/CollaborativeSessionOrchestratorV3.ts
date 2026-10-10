@@ -38,6 +38,8 @@ export interface CollaborativeSessionStartInputV3 {
   onStatusChange?: (status: CollaborationConnectionStatus) => void;
   onError?: (error: unknown) => void;
   onSynchronizedState?: () => void;
+  /** Drain entered authoring transactions and release leases before transport disposal. */
+  beforeDispose?: () => Promise<void>;
   allowSeed?: boolean;
   admissionGate?: CollaborativeSceneAdmissionGate;
   compatibleSceneSession?: CompatibleSceneSession;
@@ -94,7 +96,11 @@ export class CollaborativeSessionOrchestratorV3 {
       return layer;
     } catch (error) {
       if (this.layer === layer) this.layer = null;
-      layer.dispose();
+      try {
+        await input.beforeDispose?.();
+      } finally {
+        layer.dispose();
+      }
       throw error;
     }
   }

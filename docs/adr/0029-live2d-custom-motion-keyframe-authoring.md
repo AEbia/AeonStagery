@@ -1,6 +1,6 @@
 ---
 status: accepted
-implementation_status: architecture-decided; editor-session-implementation-pending
+implementation_status: implemented
 last_updated: 2026-09-04
 supersedes_product_scope: ADR-0027
 extends: ADR-0028
@@ -438,7 +438,7 @@ extends: ADR-0028
 关键帧编辑采用 ADR-0028 定义的应用级 `CustomMotionEditing` 深模块。它是关键帧
 写入的唯一 UI seam：轨道区、曲线区、Inspector 和动作菜单只提交会话内的编辑意图，
 不直接调用 `CustomMotionEditLeaseGate`、`CustomMotionKeyframeEditCommand` 或
-`SemanticAuthoringApplicationService`。`CustomMotionAuthoring` 只可作为转换流程的
+`SemanticAuthoringApplicationService`。`CustomMotionConversion` 作为转换流程的
 内部协调器，不能继续承担一层“每批 acquire、finally release”的公开 facade。
 
 会话有一个不透明代际句柄和四种可观察阶段：`pending`、`held`、`readonly`、

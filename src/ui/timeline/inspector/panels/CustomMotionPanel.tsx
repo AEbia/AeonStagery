@@ -4,19 +4,17 @@ import { DiamondIcon } from '../../CustomMotionEditor';
 
 export interface CustomMotionPanelProps {
   customMotionValue: Extract<CharacterMotionOutput, { kind: 'custom' }> | null;
-  actionId: string;
-  expandedCustomMotionActionId: string | null;
-  editorStore: { setCustomMotionEditorActionId: (id: string | null) => void };
+  editorOpen: boolean;
+  onToggleEditor: () => void;
   openConversionDialog: () => void;
 }
 
 export function CustomMotionPanel(props: CustomMotionPanelProps) {
-  const { customMotionValue, actionId, expandedCustomMotionActionId, editorStore, openConversionDialog } = props;
+  const { customMotionValue, editorOpen, onToggleEditor, openConversionDialog } = props;
 
   if (!customMotionValue) return null;
   const { derivedFrom, tracks } = customMotionValue;
   const totalKeyframes = tracks.reduce((sum, track) => sum + track.keyframes.length, 0);
-  const editorOpen = expandedCustomMotionActionId === actionId;
   return (
     <div className="inspector-section" data-testid="custom-motion-panel">
       <div className="inspector-section-title">自定义动作</div>
@@ -52,7 +50,7 @@ export function CustomMotionPanel(props: CustomMotionPanelProps) {
             type="button"
             className="btn btn--sm btn--primary"
             title="在下方轨道区展开/收起关键帧编辑器"
-            onClick={() => editorStore.setCustomMotionEditorActionId(editorOpen ? null : actionId)}
+            onClick={onToggleEditor}
           >
             {editorOpen ? '收起关键帧编辑器' : '编辑关键帧'}
           </button>

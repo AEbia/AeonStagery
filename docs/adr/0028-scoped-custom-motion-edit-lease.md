@@ -2,7 +2,7 @@
 status: accepted
 extends: ADR-0012
 last_updated: 2026-09-04
-implementation_status: decision-updated; implementation-pending
+implementation_status: implemented
 ---
 
 # Scoped Lease for Collaborative Custom Motion Editing
@@ -134,3 +134,18 @@ port 的租约；成功且紧接着打开关键帧编辑器时把不透明 lease
 release-before-acquire、晚到授权、目标删除和 Motion 版本冲突、24/30/60/默认 fps、
 子帧保真、fps 变化、关闭与提交竞态，以及转换不重复申请。React 只保留打开、快照
 渲染和关闭三类薄集成测试。
+
+### Implementation alignment（2026-10-04）
+
+- `src/services/timeline-authoring/CustomMotionEditing.ts` 持有应用级会话、候选、代际、
+  opaque keyframe refs 和提交边界；`CustomMotionEditingTypes.ts` 是 UI 接口。
+- `CustomMotionEditAuthority.ts` 提供内存与 Collaboration Client 生产 Adapter；
+  `CustomMotionConversion.ts` 管理确认式转换及 lease handoff，保留转换命令实现。
+- `src/engine/Bootstrapper.ts` 创建单例并处理项目切换与销毁；
+  `src/ui/useSemanticCollaborationSession.ts` 在协作退出前等待提交与 release。
+- `src/engine/ScriptEngine.ts` 投影临时候选、排除候选快照，并在清除时恢复 canonical pose。
+- `TrackArea` 与 Inspector 通过会话快照打开、渲染和关闭编辑器；旧 EditorStore 展开
+  状态、逐次关键帧命令、lease gate 和 UI facade 已移除。
+- 契约与边界测试位于 `CustomMotionEditing.test.ts`、`CustomMotionEditAuthority.test.ts`、
+  `CustomMotionConversionCommand.test.ts`、`ScriptEngineCustomMotionPreview.test.ts`；
+  React 测试继续验证用户手势与薄桥接。

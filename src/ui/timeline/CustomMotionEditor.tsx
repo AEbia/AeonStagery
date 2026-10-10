@@ -5,10 +5,9 @@ import type {
   CustomMotionSegment,
   CustomMotionTrack,
 } from '../../api/types/semantic-scene';
-import type { CustomMotionKeyframeEdit, CustomMotionKeyframeRef } from '../../services/timeline-authoring/customMotionKeyframeEdits';
-import type { CustomMotionLeaseState } from '../../services/timeline-authoring/CustomMotionEditLeaseGate';
+import type { CustomMotionEditIntent, CustomMotionEditSessionSnapshot, CustomMotionKeyframeIdentity } from '../../services/timeline-authoring/CustomMotionEditingTypes';
 import { evaluateCustomMotionTrack } from '../../engine/live2d/customMotion';
-import { buildCurvePresetSegment, CURVE_PRESETS, resolveCurvePresetId } from './curvePresets';
+import { CURVE_PRESETS, resolveCurvePresetId } from './curvePresets';
 import { useOptionalApp } from '../context/AppContext';
 import { showToast } from '../Toast';
 import { InlineNumericInput } from './FormComponents';
@@ -17,6 +16,7 @@ import './CustomMotionEditor.css';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
 import { useCustomMotionSelection } from './useCustomMotionSelection';
 import { lowerBound, resolveParameterRange, createGroupMoveResolver } from './customMotionSelection';
+interface SelectionRef { parameterId: string; time: number }
 
 export function isTrackAnimated(track: CustomMotionTrack): boolean {
   if (track.keyframes.length <= 1) return false;
@@ -28,12 +28,9 @@ export type CustomMotionEditorView = 'lanes' | 'graph';
 export type CustomMotionEditorLayout = 'panel' | 'timeline';
 
 export interface CustomMotionEditorProps {
-  motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
-  fps?: number;
+  snapshot: CustomMotionEditSessionSnapshot;
   parameterMetadata?: readonly Live2DParameterMetadata[];
   scrollContainer?: HTMLElement | null;
-  /** Block start time in the scene (used to align with the scene ruler/playhead). */
-  blockTime: number;
   /** Timeline pixels-per-second for ruler alignment. */
   pixelsPerSecond: number;
   /**
@@ -49,13 +46,8 @@ export interface CustomMotionEditorProps {
   viewportWidth?: number;
   /** Current scene playhead time. */
   playheadTime: number;
-  /** Callback that persists a batch of keyframe edits through the command layer. */
-  onCommit: (edits: readonly CustomMotionKeyframeEdit[], expectedMotion?: CustomMotion) => Promise<void> | void;
   /** Optional scene seek (playhead jump). */
   onSeek?: (sceneTime: number) => void;
-  /** Collaboration lease busy flag (read-only hint). */
-  busy?: boolean;
-  leaseState?: CustomMotionLeaseState;
   /** Hide the close button when embedded in a fixed host. */
   hideClose?: boolean;
   onClose?: () => void;
@@ -70,37 +62,49 @@ const EMPTY_KEYFRAMES: readonly CustomMotionKeyframe[] = [];
 type CustomMotion = Extract<CharacterMotionOutput, { kind: 'custom' }>;
 
 export function CustomMotionEditor({
-  motion,
-  fps: suppliedFps = 60,
+  snapshot,
   parameterMetadata = EMPTY_PARAMETER_METADATA,
   scrollContainer,
-  blockTime,
   pixelsPerSecond,
   layout = 'panel',
   gutterWidth = 100,
   minContentWidth = 0,
   viewportWidth = 0,
   playheadTime,
-  onCommit,
   onSeek,
-  busy = false,
-  leaseState = 'unavailable',
   hideClose = false,
   onClose,
 }: CustomMotionEditorProps) {
+  const motion = snapshot.canonicalMotion!;
+  const fps = snapshot.fps;
+  const blockTime = snapshot.target?.blockTime ?? 0;
+  const session = snapshot.session!;
+  const busy = snapshot.state === 'readonly' || snapshot.state === 'closed';
+  const leaseState = snapshot.state;
+  const latestSnapshot = useRef(snapshot);
+  latestSnapshot.current = snapshot;
+  const keyframeRef = useCallback((parameterId: string, time: number): CustomMotionKeyframeIdentity => {
+    const point = latestSnapshot.current.keyframes.find((candidate) => candidate.parameterId === parameterId && candidate.time === time);
+    if (!point) throw new Error('关键帧已发生变化，请重新选择');
+    return point.ref;
+  }, []);
+  const preview = useCallback((intent: CustomMotionEditIntent | null): CustomMotion => {
+    const result = session.preview(intent);
+    if (result.status === 'rejected') {
+      if (intent) throw new Error(result.reason ?? '编辑会话已失效');
+      return latestSnapshot.current.canonicalMotion!;
+    }
+    return result.status === 'previewed' ? result.motion : latestSnapshot.current.canonicalMotion!;
+  }, [session]);
   const [view, setView] = useState<CustomMotionEditorView>('lanes');
   const [filterMode, setFilterMode] = useState<'all' | 'animated'>('all');
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedParam, setSelectedParam] = useState<string>(motion.tracks[0]?.parameterId ?? '');
-  const fps = Number.isFinite(suppliedFps) && suppliedFps > 0 ? suppliedFps : 60;
   const [pendingCommit, setPendingCommit] = useState(false);
-  const writeBlocked = busy || pendingCommit;
+  const writeBlocked = busy || snapshot.committing || pendingCommit;
   const pendingCommitRef = useRef(false);
   const [readout, setReadout] = useState<{ text: string; x: number; y: number } | null>(null);
   const [tooltip, setTooltip] = useState<{ param: string; detail: string; x: number; y: number } | null>(null);
-  /** Optimistic preview of the dragged track's keyframes while a pointer drag is in flight. */
-  const [previewKeyframes, setPreviewKeyframes] = useState<readonly CustomMotionKeyframe[] | null>(null);
-  const [previewTrackIndex, setPreviewTrackIndex] = useState<number | null>(null);
   const dragRef = useRef<{
     motion: CustomMotion;
     track: CustomMotionTrack;
@@ -114,7 +118,7 @@ export function CustomMotionEditor({
     range: { min: number; max: number; bounded?: boolean };
     moved: boolean;
   } | null>(null);
-  const previewKeyframesRef = useRef<readonly CustomMotionKeyframe[] | null>(null);
+
   const curveCanvasRef = useRef<SVGSVGElement | null>(null);
 
   const motionRef = useRef(motion);
@@ -143,28 +147,29 @@ export function CustomMotionEditor({
   const firstTrackParam = tracks[0]?.parameterId ?? '';
   const selectedTrackExists = tracks.some((track) => track.parameterId === selectedParam);
 
-  const commitAsync = useCallback(async (edits: readonly CustomMotionKeyframeEdit[]) => {
+  const commitAsync = useCallback(async (intent: CustomMotionEditIntent) => {
     if (busy || pendingCommitRef.current) throw new Error('编辑器当前不可写');
     playback?.pause?.();
     pendingCommitRef.current = true;
     setPendingCommit(true);
     try {
-      const result = onCommit(edits, motionRef.current);
-      if (result) await result;
+      preview(intent);
+      const result = await session.commit();
+      if (result.status === 'dropped') throw new Error(result.reason ?? '编辑会话已失效');
     }
     catch (error) {
       toastError(error instanceof Error ? error.message : '关键帧修改失败，请重试');
       throw error;
     } finally { pendingCommitRef.current = false; setPendingCommit(false); }
-  }, [busy, onCommit, playback]);
-  const commit = useCallback((edits: readonly CustomMotionKeyframeEdit[]) => {
-    void commitAsync(edits).catch(() => {});
+  }, [busy, preview, session, playback]);
+  const commit = useCallback((intent: CustomMotionEditIntent) => {
+    void commitAsync(intent).catch(() => {});
   }, [commitAsync]);
   const metadataByParameter = useMemo(() => new Map(parameterMetadata.map((metadata) => [metadata.id, metadata])), [parameterMetadata]);
   const renderValueRange = useCallback((track: CustomMotionTrack | undefined) => resolveParameterRange(track, track ? metadataByParameter.get(track.parameterId) : undefined), [metadataByParameter]);
   const selectionState = useCustomMotionSelection({
     motion, view, fps, blockTime, pps: pixelsPerSecond, root: rootRef, scrollContainer,
-    busy: writeBlocked, commit: commitAsync, pause: () => playback?.pause?.(),
+    busy: writeBlocked, commit: commitAsync, preview, keyframeRef, pause: () => playback?.pause?.(),
     selectParam: setSelectedParam, range: renderValueRange, onError: (message) => toastError(message),
   });
   const { selection, updateSelection, clear: clearSelection, startMove, startMarquee } = selectionState;
@@ -280,12 +285,12 @@ export function CustomMotionEditor({
         toastError('首帧 (0.0s) 受保护，不能删除');
         return;
       }
-      commit([{ type: 'remove-keyframe', trackParameterId: activeTrack.parameterId, time: activeTrack.keyframes[index].time }]);
+      commit({ type: 'remove-keyframe', keyframe: keyframeRef(activeTrack.parameterId, activeTrack.keyframes[index].time) });
       setSelectedKfTime(null);
       return;
     }
     const value = round2(samplePlayheadTrackValue(activeTrack, blockTime + localTime, blockTime, duration));
-    commit([{ type: 'insert-keyframe', trackParameterId: activeTrack.parameterId, time: localTime, value }]);
+    commit({ type: 'insert-keyframe', parameterId: activeTrack.parameterId, frame: Math.round(localTime * fps), value });
     setSelectedKfTime(localTime);
   }, [activeTrack, blockTime, busy, commit, duration, getLocalPlayheadTime, setSelectedKfTime]);
 
@@ -316,19 +321,17 @@ export function CustomMotionEditor({
   // 全局快捷键（如 Delete 删除动作块）会被忽略，避免与关键帧编辑冲突。
   const cancelControlPointDrag = useCallback(() => {
     dragRef.current = null;
-    previewKeyframesRef.current = null;
-    setPreviewKeyframes(null);
-    setPreviewTrackIndex(null);
+    preview(null);
     setReadout(null);
-  }, []);
+  }, [preview]);
   const deleteSelection = useCallback(() => {
     if (writeBlocked) return;
     const removable = selection.filter((ref) => ref.time !== 0);
     if (removable.length !== selection.length) toastError('F0 起点受保护，仅删除其他选中关键帧');
     if (!removable.length) return;
-    commit(removable.map((ref) => ({ type: 'remove-keyframe', trackParameterId: ref.parameterId, time: ref.time })));
+    commit({ type: 'batch', intents: removable.map((ref) => ({ type: 'remove-keyframe', keyframe: keyframeRef(ref.parameterId, ref.time) })) });
     clearSelection();
-  }, [selection, writeBlocked, commit, clearSelection]);
+  }, [selection, writeBlocked, commit, clearSelection, keyframeRef]);
   const handleRootKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement | null;
     if (event.defaultPrevented || target?.closest('input, select, textarea, [contenteditable="true"], [role="spinbutton"]')) return;
@@ -367,15 +370,10 @@ export function CustomMotionEditor({
     const time = clampValue(frameTime, minTime, maxTime);
     const rawValue = drag.startValue + (drag.startY - event.clientY) / 122 * (drag.range.max - drag.range.min);
     const value = drag.range.bounded ? clampValue(rawValue, drag.range.min, drag.range.max) : rawValue;
-    const points = [...drag.track.keyframes];
-    points[drag.keyframeIndex] = { ...point, segment: { type: 'bezier', controlPoints: [
-      drag.cpIndex === 0 ? { time, value } : segment.controlPoints[0],
-      drag.cpIndex === 1 ? { time, value } : segment.controlPoints[1],
-    ] } };
-    previewKeyframesRef.current = points;
-    setPreviewKeyframes(points);
+    try { preview({ type: 'set-control-point', keyframe: keyframeRef(drag.track.parameterId, point.time), index: drag.cpIndex, frame: Math.round(time * fps), value }); }
+    catch (error) { cancelControlPointDrag(); toastError(error instanceof Error ? error.message : '控制点修改失败'); return; }
     setReadout({ text: `${formatFrame(time, fps)} 帧 · ${round2(value)}`, x: event.clientX, y: event.clientY });
-  }, [writeBlocked, cancelControlPointDrag, contentWidth, pixelsPerSecond, blockTime, fps]);
+  }, [writeBlocked, cancelControlPointDrag, contentWidth, pixelsPerSecond, blockTime, fps, preview, keyframeRef]);
 
   useEffect(() => {
     let frame: number | null = null;
@@ -391,10 +389,10 @@ export function CustomMotionEditor({
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
       if (Number.isFinite(event.clientX)) applyDragMove(event);
-      const segment = previewKeyframesRef.current?.[drag.keyframeIndex]?.segment;
+      const segment = latestSnapshot.current.motion?.tracks[drag.trackIndex]?.keyframes[drag.keyframeIndex]?.segment;
       dragRef.current = null;
       if (drag.moved && segment && motionRef.current === drag.motion) {
-        void commitAsync([{ type: 'set-segment', trackParameterId: drag.track.parameterId, time: drag.track.keyframes[drag.keyframeIndex].time, segment }]).catch(() => {}).finally(cancelControlPointDrag);
+        void session.commit().then((result) => { if (result.status === 'dropped') toastError(result.reason ?? '编辑会话已失效'); }).catch((error) => toastError(error instanceof Error ? error.message : '控制点修改失败')).finally(cancelControlPointDrag);
       } else cancelControlPointDrag();
     };
     const cancel = () => { if (frame !== null) cancelAnimationFrame(frame); frame = null; cancelControlPointDrag(); };
@@ -409,21 +407,9 @@ export function CustomMotionEditor({
       window.removeEventListener('pointercancel', cancel);
       window.removeEventListener('blur', cancel);
     };
-  }, [applyDragMove, commitAsync, cancelControlPointDrag]);
+  }, [applyDragMove, session, cancelControlPointDrag]);
 
-  // ─── view model with optimistic preview applied ───
-  const displayMotion = useMemo<CustomMotion>(() => {
-    if (selectionState.preview) return selectionState.preview;
-    if (!previewKeyframes) return motion;
-    const trackIndex = previewTrackIndex ?? dragRef.current?.trackIndex;
-    if (trackIndex === null || trackIndex === undefined) return motion;
-    return {
-      ...motion,
-      tracks: motion.tracks.map((track, index) => (
-        index === trackIndex ? { ...track, keyframes: previewKeyframes } : track
-      )),
-    };
-  }, [motion, previewKeyframes, previewTrackIndex, selectionState.preview]);
+  const displayMotion = snapshot.motion ?? motion;
 
   const animatedTrackIds = useMemo(() => {
     const set = new Set<string>();
@@ -483,9 +469,6 @@ export function CustomMotionEditor({
       range: renderValueRange(activeTrack), moved: false,
     };
     updateSelection([{ parameterId: activeTrack.parameterId, time: point.time }]);
-    previewKeyframesRef.current = activeTrack.keyframes;
-    setPreviewKeyframes(activeTrack.keyframes);
-    setPreviewTrackIndex(tracks.indexOf(activeTrack));
   }, [writeBlocked, activeTrack, clearSelection, playback, motion, tracks, renderValueRange, updateSelection]);
 
   const handleKeyframeTimeChange = useCallback((track: CustomMotionTrack, index: number, value: number) => {
@@ -495,7 +478,7 @@ export function CustomMotionEditor({
     const resolve = createGroupMoveResolver(tracks, refs, duration, fps, true);
     const nextTime = point.time + resolve((value - point.time) * fps) / fps;
     if (nextTime === point.time) return;
-    commit([{ type: 'update-keyframe', trackParameterId: track.parameterId, time: point.time, value: point.value, newTime: nextTime }]);
+    commit({ type: 'update-keyframe', keyframe: keyframeRef(track.parameterId, point.time), value: point.value, frame: Math.round(nextTime * fps) });
     updateSelection([{ parameterId: track.parameterId, time: nextTime }]);
   }, [duration, fps, commit, updateSelection, writeBlocked, tracks]);
 
@@ -503,60 +486,42 @@ export function CustomMotionEditor({
     const keyframe = track.keyframes[index];
     if (!Number.isFinite(value) || writeBlocked) return;
     const range = renderValueRange(track);
-    commit([{ type: 'update-keyframe', trackParameterId: track.parameterId, time: keyframe.time, value: range.bounded ? clampValue(value, range.min, range.max) : value }]);
-  }, [commit, writeBlocked, renderValueRange]);
+    commit({ type: 'update-keyframe', keyframe: keyframeRef(track.parameterId, keyframe.time), value: range.bounded ? clampValue(value, range.min, range.max) : value });
+  }, [commit, writeBlocked, renderValueRange, keyframeRef]);
 
   const handleSegmentChange = useCallback((track: CustomMotionTrack, index: number, segmentType: CustomMotionSegment['type']) => {
     const keyframe = track.keyframes[index];
     const nextKeyframe = track.keyframes[index + 1];
-    let segment: CustomMotionSegment;
-    if (segmentType === 'bezier' && nextKeyframe) {
-      const dx = nextKeyframe.time - keyframe.time;
-      segment = {
-        type: 'bezier',
-        controlPoints: [
-          { time: round2(keyframe.time + dx * 0.35), value: round2(keyframe.value) },
-          { time: round2(keyframe.time + dx * 0.65), value: round2(nextKeyframe.value) },
-        ],
-      };
-    } else if (segmentType === 'stepped') {
-      segment = { type: 'stepped' };
-    } else if (segmentType === 'inverseStepped') {
-      segment = { type: 'inverseStepped' };
-    } else {
-      segment = { type: 'linear' };
-    }
-    commit([{ type: 'set-segment', trackParameterId: track.parameterId, time: keyframe.time, segment }]);
-  }, [commit]);
+    if (!nextKeyframe) return;
+    commit({ type: 'set-curve', keyframe: keyframeRef(track.parameterId, keyframe.time), curve: segmentType });
+  }, [commit, keyframeRef]);
 
   const handleApplyCurvePreset = useCallback((track: CustomMotionTrack, index: number, presetId: string) => {
     const keyframe = track.keyframes[index];
     const nextKeyframe = track.keyframes[index + 1];
     if (!keyframe || !nextKeyframe) return;
-    const segment = buildCurvePresetSegment(presetId, keyframe, nextKeyframe);
-    if (!segment) return;
-    commit([{ type: 'set-segment', trackParameterId: track.parameterId, time: keyframe.time, segment }]);
-  }, [commit]);
+    commit({ type: 'set-curve-preset', keyframe: keyframeRef(track.parameterId, keyframe.time), presetId });
+  }, [commit, keyframeRef]);
 
   const handleDeleteKeyframe = useCallback((track: CustomMotionTrack, index: number) => {
     const keyframe = track.keyframes[index];
     if (index === 0) { toastError('首帧 (0.0s) 受保护，不能删除'); return; }
-    commit([{ type: 'remove-keyframe', trackParameterId: track.parameterId, time: keyframe.time }]);
+    commit({ type: 'remove-keyframe', keyframe: keyframeRef(track.parameterId, keyframe.time) });
     setSelectedKfTime(null);
-  }, [commit, setSelectedKfTime]);
+  }, [commit, setSelectedKfTime, keyframeRef]);
 
   const handleDurationChange = useCallback((value: number) => {
-    const next = round2(Math.max(0.1, value));
+    const next = Math.max(1, Math.round(value * fps)) / fps;
     if (next < fadeIn) {
       toastError('时长不能短于淡入时长');
       return;
     }
-    commit([{ type: 'set-duration', durationSeconds: next }]);
-  }, [fadeIn, commit]);
+    commit({ type: 'set-duration', frames: Math.round(next * fps) });
+  }, [fadeIn, commit, fps]);
 
   const handleFadeChange = useCallback((value: number) => {
-    commit([{ type: 'set-fade-in', fadeInSeconds: round2(clampValue(value, 0, duration)) }]);
-  }, [duration, commit]);
+    commit({ type: 'set-fade-in', frames: Math.round(clampValue(value, 0, duration) * fps) });
+  }, [duration, commit, fps]);
 
   const handleTrackValueChange = useCallback((track: CustomMotionTrack, value: number, isTransient?: boolean) => {
     if (!Number.isFinite(value) || writeBlocked) return;
@@ -566,28 +531,18 @@ export function CustomMotionEditor({
     const keyframeIndex = track.keyframes.findIndex((candidate) => Math.abs(candidate.time - localTime) < F0_EPSILON);
     const valueRange = renderValueRange(track);
     const nextValue = valueRange.bounded ? clampValue(value, valueRange.min, valueRange.max) : value;
-    const previewKeyframes = keyframeIndex >= 0
-      ? track.keyframes.map((candidate, index) => (
-        index === keyframeIndex ? { ...candidate, value: nextValue } : candidate
-      ))
-      : insertPreviewKeyframe(track, localTime, nextValue);
+    const intent: CustomMotionEditIntent = keyframeIndex >= 0
+      ? { type: 'update-keyframe', keyframe: keyframeRef(track.parameterId, track.keyframes[keyframeIndex].time), value: nextValue }
+      : { type: 'insert-keyframe', parameterId: track.parameterId, frame: Math.round(localTime * fps), value: nextValue };
     if (isTransient) {
       playback?.pause?.();
-      setPreviewTrackIndex(trackIndex);
-      setPreviewKeyframes(previewKeyframes);
+      try { preview(intent); } catch (error) { toastError(error instanceof Error ? error.message : '预览失败'); }
       return;
     }
-    if (keyframeIndex >= 0) {
-      const keyframe = track.keyframes[keyframeIndex];
-      commit([{ type: 'update-keyframe', trackParameterId: track.parameterId, time: keyframe.time, value: nextValue }]);
-    } else {
-      commit([{ type: 'insert-keyframe', trackParameterId: track.parameterId, time: localTime, value: nextValue }]);
-      updateSelection([{ parameterId: track.parameterId, time: localTime }]);
-    }
+    commit(intent);
+    if (keyframeIndex < 0) updateSelection([{ parameterId: track.parameterId, time: Math.round(localTime * fps) / fps }]);
     setSelectedParam(track.parameterId);
-    setPreviewKeyframes(null);
-    setPreviewTrackIndex(null);
-  }, [commit, getLocalPlayheadTime, tracks, writeBlocked, renderValueRange, playback, updateSelection]);
+  }, [commit, getLocalPlayheadTime, tracks, writeBlocked, renderValueRange, playback, updateSelection, keyframeRef, fps, preview]);
 
   const isF0Selected = selectedKfIndex === 0;
 
@@ -632,13 +587,13 @@ export function CustomMotionEditor({
               <span className="cme__src-sep">·</span>
               {motion.tracks.length} 条轨道
             </span>
-            {leaseState !== 'unavailable' && (
+            {leaseState !== 'closed' && (
               <span className={`cme__lease${busy ? ' cme__lease--busy' : ''}`}>
                 {leaseState === 'held'
                   ? '已获得编辑权'
                   : leaseState === 'pending'
                     ? '正在获取编辑权'
-                    : '协作者编辑中'}
+                    : '只读，请重新打开编辑器'}
               </span>
             )}
           </div>
@@ -744,10 +699,10 @@ export function CustomMotionEditor({
           </div>
           <div className="cme__motion-settings" aria-label="Motion 设置">
             <label className="cme__num" title="动作时长（秒）">
-              时长 <MotionNumberInput value={duration} min={0.1} step={0.05} disabled={writeBlocked} ariaLabel="动作时长（秒）" onCommit={handleDurationChange} />
+              时长 <MotionNumberInput value={duration} min={1 / fps} step={1 / fps} disabled={writeBlocked} ariaLabel="动作时长（秒）" onCommit={handleDurationChange} />
             </label>
             <label className="cme__num" title="动作淡入（秒）">
-              淡入 <MotionNumberInput value={fadeIn} min={0} max={duration} step={0.05} disabled={writeBlocked} ariaLabel="动作淡入（秒）" onCommit={handleFadeChange} />
+              淡入 <MotionNumberInput value={fadeIn} min={0} max={duration} step={1 / fps} disabled={writeBlocked} ariaLabel="动作淡入（秒）" onCommit={handleFadeChange} />
             </label>
           </div>
           <div className="cme__toggle" role="group" aria-label="视图切换">
@@ -1560,35 +1515,10 @@ function finiteOr(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-/**
- * Build the optimistic shape used while editing a value at a playhead that
- * does not yet have a keyframe. The authoring command performs the canonical
- * Bezier split on commit; the UI only needs a stable preview point here.
- */
-function insertPreviewKeyframe(
-  track: CustomMotionTrack,
-  time: number,
-  value: number,
-): readonly CustomMotionKeyframe[] {
-  const keyframes = [...track.keyframes];
-  const insertionIndex = keyframes.findIndex((keyframe) => keyframe.time > time);
-  const index = insertionIndex < 0 ? keyframes.length : insertionIndex;
-  const inserted: CustomMotionKeyframe = {
-    time,
-    value,
-    ...(index < keyframes.length ? { segment: { type: 'linear' as const } } : {}),
-  };
-  keyframes.splice(index, 0, inserted);
-  if (index > 0 && index === keyframes.length - 1 && !keyframes[index - 1].segment) {
-    keyframes[index - 1] = { ...keyframes[index - 1], segment: { type: 'linear' } };
-  }
-  return keyframes;
-}
-
 function formatFrame(time: number, fps: number): string {
   return String(Math.round(time * fps * 1000) / 1000);
 }
-function selectionValueRange(motion: CustomMotion, refs: readonly CustomMotionKeyframeRef[]): string {
+function selectionValueRange(motion: CustomMotion, refs: readonly SelectionRef[]): string {
   const times = new Set(refs.map((ref) => ref.time));
   const values = motion.tracks.find((track) => track.parameterId === refs[0].parameterId)?.keyframes.filter((kf) => times.has(kf.time)).map((kf) => kf.value) ?? [];
   return `${round2(Math.min(...values))} – ${round2(Math.max(...values))}`;

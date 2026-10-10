@@ -4,9 +4,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppProvider } from '../ui/context/AppContext';
-import { CustomMotionEditor, isTrackAnimated, type CustomMotionEditorProps } from '../ui/timeline/CustomMotionEditor';
+import { isTrackAnimated } from '../ui/timeline/CustomMotionEditor';
+import { CustomMotionEditor, createEditorFixture, type CustomMotionEditorProps } from './fixtures/CustomMotionEditorHarness';
 import { TrackArea } from '../ui/timeline/TrackArea';
-import type { CustomMotionEditLeaseGate } from '../services/timeline-authoring/CustomMotionEditLeaseGate';
 import type { LooseTimelineAction as SceneAction } from './fixtures/TimelineTestTypes';
 
 const CUSTOM_MOTION = {
@@ -18,7 +18,7 @@ const CUSTOM_MOTION = {
     {
       parameterId: 'ParamAngleX',
       keyframes: [
-        { time: 0, value: 0 },
+        { time: 0, value: 0, segment: { type: 'linear' } },
         { time: 0.5, value: 5 },
       ],
     },
@@ -42,12 +42,28 @@ function renderTrackAreaWithCustomMotion(options: {
   expandedActionId: string | null;
   actions?: Array<{ id: string; action: SceneAction }>;
   selectedIds?: Record<string, boolean>;
-  collaboration?: { status: 'disconnected'; customMotionEditLeaseGate?: CustomMotionEditLeaseGate };
   document?: unknown;
 } = { expandedActionId: null }) {
   const actions = options.actions ?? [createCustomMotionAction('cm1', 2)];
   void actions;
-  const setCustomMotionEditorActionId = vi.fn();
+  const closeSession = vi.fn(async () => {});
+  const expandedAction = actions.find((item) => item.id === options.expandedActionId);
+  const expandedMotion = expandedAction?.action.params?.motion as CustomMotionEditorProps['motion'] | undefined;
+  const fixture = expandedMotion?.kind === 'custom' ? createEditorFixture(expandedMotion, 60, expandedAction!.action.time) : null;
+  const snapshot = fixture ? { ...fixture.snapshot(), session: { ...fixture.session, close: closeSession },
+    target: { ...fixture.snapshot().target!, actionId: options.expandedActionId! } } : {
+      state: 'closed' as const, target: null, session: null, fps: 60, canonicalMotion: null, motion: null, keyframes: [], committing: false,
+    };
+  class SnapshotModule {
+    current = snapshot;
+    listeners = new Set<() => void>();
+    getSnapshot() { return this.current; }
+    subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+    open = vi.fn();
+    dispose = vi.fn();
+    publish(next: typeof snapshot) { this.current = next; for (const listener of this.listeners) listener(); }
+  }
+  const customMotionEditing = new SnapshotModule();
   const onDrag = vi.fn();
   const onBatchDrag = vi.fn();
 
@@ -101,8 +117,6 @@ function renderTrackAreaWithCustomMotion(options: {
     } as any,
     editor: {
       copyBuffer: [],
-      customMotionEditorActionId: options.expandedActionId,
-      setCustomMotionEditorActionId,
       subscribe: () => () => {},
     } as any,
     validation: {
@@ -117,7 +131,7 @@ function renderTrackAreaWithCustomMotion(options: {
   };
 
   const view = render(
-    <AppProvider adapters={adapters} stores={stores} collaboration={options.collaboration}>
+    <AppProvider adapters={adapters} stores={stores} services={{ customMotionEditing } as any}>
       <TrackArea
         tracks={[{ id: 'char:hina', label: 'Hina', actions }]}
         pps={10}
@@ -137,7 +151,7 @@ function renderTrackAreaWithCustomMotion(options: {
     </AppProvider>,
   );
 
-  return { ...view, setCustomMotionEditorActionId, onDrag, onBatchDrag };
+  return { ...view, closeSession, customMotionEditing, onDrag, onBatchDrag };
 }
 
 describe('TrackArea 自定义动作关键帧展开带', () => {
@@ -304,7 +318,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(editor.querySelector('.cme__identity')).not.toBeNull();
     expect(editor.querySelector('.cme__toolbar')).toBeNull();
     expect(editor.textContent).not.toContain('点击菱形编辑');
-    expect(editor.querySelector('.cme__lease')).toBeNull();
+    expect(editor.textContent).toContain('已获得编辑权');
     expect(editor.textContent).not.toContain('未连接编辑租约');
   });
 
@@ -329,9 +343,9 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
   });
 
   it('点击关闭按钮收起展开带', () => {
-    const { setCustomMotionEditorActionId } = renderTrackAreaWithCustomMotion({ expandedActionId: 'cm1' });
+    const { closeSession } = renderTrackAreaWithCustomMotion({ expandedActionId: 'cm1' });
     fireEvent.click(screen.getByLabelText('收起关键帧编辑器'));
-    expect(setCustomMotionEditorActionId).toHaveBeenCalledWith(null);
+    expect(closeSession).toHaveBeenCalledWith('closed');
   });
 
   it('目标动作不是自定义动作时自动收起', () => {
@@ -341,12 +355,12 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
         _id: 'plain1', action: 'dialogue', time: 1, params: { duration: 0.5, text: 'hi' },
       } as unknown as SceneAction,
     };
-    const { setCustomMotionEditorActionId } = renderTrackAreaWithCustomMotion({
+    const { closeSession } = renderTrackAreaWithCustomMotion({
       expandedActionId: 'plain1',
       actions: [plainAction],
     });
     expect(screen.queryByTestId('custom-motion-editor')).toBeNull();
-    expect(setCustomMotionEditorActionId).toHaveBeenCalledWith(null);
+    expect(closeSession).not.toHaveBeenCalled();
   });
 
   it('点击关键帧只高亮活动轨道上的同一时刻菱形，其它轨道同时刻不误选', () => {
@@ -493,7 +507,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     fireEvent.mouseUp(document, { clientX: 20, clientY: 10 });
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'update-keyframe', trackParameterId: 'ParamAngleX', time: 0.5, value: 5.5 },
+      { type: 'update-keyframe', keyframe: 'ParamAngleX:0.5', value: 5.5 },
     ], expect.any(Object));
   });
 
@@ -558,7 +572,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '在当前播放头添加关键帧' }));
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'insert-keyframe', trackParameterId: 'ParamAngleX', time: 0.25, value: 2.5 },
+      { type: 'insert-keyframe', parameterId: 'ParamAngleX', frame: 15, value: 2.5 },
     ], expect.any(Object));
     engineTime = 2.25;
   });
@@ -588,7 +602,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(screen.getByTestId('custom-motion-editor').querySelector('.cme__playhead')?.getAttribute('style')).toContain('left: 23px');
     fireEvent.click(screen.getByRole('button', { name: '在当前播放头添加关键帧' }));
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'insert-keyframe', trackParameterId: 'ParamAngleX', time: 0.3, value: 3 },
+      { type: 'insert-keyframe', parameterId: 'ParamAngleX', frame: 18, value: 3 },
     ], expect.any(Object));
   });
 
@@ -619,7 +633,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '在当前播放头添加关键帧' }));
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'insert-keyframe', trackParameterId: 'ParamAngleX', time: 0.25, value: 2.5 },
+      { type: 'insert-keyframe', parameterId: 'ParamAngleX', frame: 15, value: 2.5 },
     ], expect.any(Object));
   });
 
@@ -661,7 +675,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(marker?.getAttribute('d')).toContain('M 22.5');
   });
 
-  it('插帧保留播放头的精确秒数，不用两位小数把标尺位置改掉', () => {
+  it('插帧以整数场景帧吸附播放头', () => {
     const onCommit = vi.fn();
     render(
       <CustomMotionEditor
@@ -675,11 +689,11 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '在当前播放头添加关键帧' }));
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'insert-keyframe', trackParameterId: 'ParamAngleX', time: 0.256, value: 2.56 },
+      { type: 'insert-keyframe', parameterId: 'ParamAngleX', frame: 15, value: 2.56 },
     ], expect.any(Object));
   });
 
-  it('播放头没有关键帧时修改当前值会插帧，已有关键帧时只更新该帧', () => {
+  it('播放头没有关键帧时修改当前值会插帧，已有关键帧时只更新该帧', async () => {
     const onCommit = vi.fn();
     const { rerender } = render(
       <CustomMotionEditor
@@ -694,9 +708,10 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(control).not.toBeNull();
     fireEvent.keyDown(control, { key: 'ArrowUp' });
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'insert-keyframe', trackParameterId: 'ParamAngleX', time: 0.25, value: 2.55 },
+      { type: 'insert-keyframe', parameterId: 'ParamAngleX', frame: 15, value: 2.55 },
     ], expect.any(Object));
 
+    await act(async () => {});
     onCommit.mockClear();
     rerender(
       <CustomMotionEditor
@@ -709,7 +724,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     );
     fireEvent.keyDown(screen.getByTestId('custom-motion-editor').querySelector('.cme__navigator [role="spinbutton"]') as HTMLElement, { key: 'ArrowUp' });
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'update-keyframe', trackParameterId: 'ParamAngleX', time: 0.5, value: 5.05 },
+      { type: 'update-keyframe', keyframe: 'ParamAngleX:0.5', value: 5.05 },
     ], expect.any(Object));
   });
 
@@ -732,7 +747,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(screen.getByRole('spinbutton', { name: '动作时长（秒）' }).textContent).toBe('1');
   });
 
-  it('数值调整器保存关键帧后保留编辑栏并可继续输入', () => {
+  it('数值调整器保存关键帧后保留编辑栏并可继续输入', async () => {
     const onCommit = vi.fn();
     const editorProps = {
       blockTime: 2,
@@ -753,9 +768,10 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.blur(valueInput);
     expect(onCommit).toHaveBeenCalledWith([
-      { type: 'update-keyframe', trackParameterId: 'ParamAngleX', time: 0.5, value: 12 },
+      { type: 'update-keyframe', keyframe: 'ParamAngleX:0.5', value: 12 },
     ], expect.any(Object));
 
+    await act(async () => {});
     const updatedMotion = {
       ...CUSTOM_MOTION,
       tracks: [{
@@ -869,24 +885,24 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(editor.querySelector(':scope > .cme__toolbar')).toBeNull();
   });
 
-  it('租约门的 subscribe 作为 useSyncExternalStore 回调时不丢失 this 绑定', () => {
-    // 回归：此前直接把 gate.subscribe 方法引用传给 useSyncExternalStore，
-    // 回调以普通函数调用导致 this 为 undefined（this.listeners 崩溃）。
-    class FakeLeaseGate {
-      private readonly listeners = new Set<() => void>();
-      acquire(): Promise<boolean> { return Promise.resolve(true); }
-      release(): void {}
-      getState(): 'unavailable' { return 'unavailable'; }
-      subscribe(listener: () => void): () => void {
-        this.listeners.add(listener);
-        return () => this.listeners.delete(listener);
-      }
-    }
-    expect(() => renderTrackAreaWithCustomMotion({
-      expandedActionId: null,
-      collaboration: { status: 'disconnected', customMotionEditLeaseGate: new FakeLeaseGate() },
-    })).not.toThrow();
+  it('subscribes to the singleton snapshot with its method receiver and hides a closed session', () => {
+    const { customMotionEditing } = renderTrackAreaWithCustomMotion({ expandedActionId: 'cm1' });
+    expect(screen.getByTestId('custom-motion-editor')).toBeTruthy();
+    expect(customMotionEditing.listeners.size).toBe(1);
+    act(() => customMotionEditing.publish({ state: 'closed', session: null, target: null, fps: 60,
+      canonicalMotion: null, motion: null, keyframes: [], committing: false }));
     expect(screen.queryByTestId('custom-motion-editor')).toBeNull();
+  });
+
+  it('opens a custom Motion through the application module from its context menu', () => {
+    const { customMotionEditing } = renderTrackAreaWithCustomMotion({ expandedActionId: null, document: {
+      schemaVersion: 5, sceneId: 'scene', meta: { title: 'Menu' }, statements: [{
+        id: 'statement-cm1', time: 2, type: 'characterPerformance', params: { target: 'Hina', motion: CUSTOM_MOTION },
+      }],
+    } });
+    fireEvent.contextMenu(screen.getByTestId('timeline-track-block'), { clientX: 20, clientY: 50 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑关键帧' }));
+    expect(customMotionEditing.open).toHaveBeenCalledExactlyOnceWith({ actionId: 'cm1' });
   });
 
   it('isTrackAnimated 能够准确区分动态轨道与静态恒定轨道', () => {

@@ -38,7 +38,7 @@ export interface SemanticSourcePanelProps {
   activeFilterTemplateOptions: Array<{ value: string; label: string }>;
   semanticInspectorFields: readonly SemanticInspectorField[];
   isResourceMotion: boolean;
-  customMotionAuthoring: ReturnType<typeof import('../useCustomMotionAuthoring').useCustomMotionAuthoring>['customMotionAuthoring'];
+  customMotionConversion: ReturnType<typeof import('../useCustomMotionAuthoring').useCustomMotionAuthoring>['customMotionConversion'];
   characterAdapter: InspectorParamContext['characterAdapter'];
   openConversionDialog: () => void;
   updateParam: ActionInspectorProps['updateParam'];
@@ -52,7 +52,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
     action, actionType, actionId, actionParams, sourceParams, sceneData,
     isIntegrationVisualAction, isLensFilterSourceAction, isRimLightVisualAction,
     visualTargetOptions, rimLightTargetOptions, characterVisualTargetOptions, filterTemplateOptions, activeFilterTemplateOptions,
-    semanticInspectorFields, isResourceMotion, customMotionAuthoring, characterAdapter, openConversionDialog,
+    semanticInspectorFields, isResourceMotion, customMotionConversion, characterAdapter, openConversionDialog,
     updateParam, replaceSourceParams, updateSemanticSourceParam, renderParam,
   } = props;
 
@@ -523,7 +523,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
   if (isResourceMotion) {
     const charId = actionParams.id || actionParams.target;
     const cubism2Loaded = !!charId && (characterAdapter.getCubism2SamplerTargets?.(charId)?.length ?? 0) > 0;
-    const canConvert = !!customMotionAuthoring && !!charId && cubism2Loaded;
+    const canConvert = !!customMotionConversion && !!charId && cubism2Loaded;
     return (
       <div className="inspector-section" data-testid="resource-motion-conversion">
         <div className="inspector-section-title">

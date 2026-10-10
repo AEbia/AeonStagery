@@ -271,7 +271,7 @@ export class CollaborationSyncSocketAdapterV2 {
           : [];
       }
       case 'lease:release': {
-        releaseCollaborationLeaseV2(this.leases, socket, clientId, target);
+        releaseCollaborationLeaseV2(this.leases, socket, clientId, target, requestId);
         return [];
       }
     }

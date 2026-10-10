@@ -56,6 +56,33 @@ function makeStateV3(): CollaborativeSceneStateV3 {
 }
 
 describe('CollaborativeDocumentLayerV3', () => {
+  it('does not resume seeding or realtime connection after a pending join is disposed', async () => {
+    let finishJoin!: (state: null) => void;
+    const client = {
+      join: vi.fn(() => new Promise<null>((resolve) => { finishJoin = resolve; })),
+      seed: vi.fn(async () => {}),
+      getState: vi.fn(() => null),
+      publishState: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+      connectRealtime: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const layer = new CollaborativeDocumentLayerV3({
+      client, getSceneDocument: makeDocV5, collaborationProjectId: 'proj_v3', roomId: 'proj_v3:main',
+    });
+    const connecting = layer.connect();
+    const rejected = expect(connecting).rejects.toThrow('Collaboration session was closed');
+    layer.dispose();
+    layer.dispose();
+    finishJoin(null);
+    await rejected;
+    expect(client.seed).not.toHaveBeenCalled();
+    expect(client.connectRealtime).not.toHaveBeenCalled();
+    expect(client.subscribe).not.toHaveBeenCalled();
+    expect(client.dispose).toHaveBeenCalledOnce();
+    expect(layer.getStatus()).toBe('disconnected');
+  });
+
   it('connects and seeds empty room with canonical SceneDocumentV5', async () => {
     let serverState: CollaborativeSceneStateV3 | null = null;
     const clientStub = {

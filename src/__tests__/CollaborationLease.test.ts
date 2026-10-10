@@ -46,13 +46,43 @@ describe('collaboration lease registry', () => {
     expect(renewCollaborationLeaseV2(registry, 2, 'bob', 'req-1', statementTarget, 2002)).toBe(false);
   });
 
-  it('releases only the holding client', () => {
+  it('releases only the holding client and acquisition request', () => {
     const registry = createCollaborationLeaseRegistryV2<number>();
     acquireCollaborationLeaseV2(registry, 1, 'alice', 'req-1', statementTarget, 1000);
 
-    expect(releaseCollaborationLeaseV2(registry, 2, 'bob', statementTarget)).toBe(false);
-    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget)).toBe(true);
-    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget)).toBe(false);
+    expect(releaseCollaborationLeaseV2(registry, 2, 'bob', statementTarget, 'req-1')).toBe(false);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget, 'wrong-req')).toBe(false);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget, 'req-1')).toBe(true);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget, 'req-1')).toBe(false);
+  });
+
+  it.each([statementTarget, companionTarget])('keeps a new request held after a cancelled request releases late: %j', (target) => {
+    const registry = createCollaborationLeaseRegistryV2<number>();
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-A', target, 1000);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', target, 'request-A')).toBe(true);
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-B', target, 2000);
+
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', target, 'request-A')).toBe(false);
+    expect(renewCollaborationLeaseV2(registry, 1, 'alice', 'request-A', target, 3000)).toBe(false);
+    const key = encodeCollaborationLeaseTargetV2(target);
+    expect(registry.leasesByTarget.get(key)).toMatchObject({ requestId: 'request-B', lastRenewedAt: 2000 });
+    expect(registry.leasesBySocket.get(1)?.has(key)).toBe(true);
+    expect(acquireCollaborationLeaseV2(registry, 2, 'bob', 'request-C', target, 3001))
+      .toEqual({ granted: false, heldByClientId: 'alice' });
+    expect(renewCollaborationLeaseV2(registry, 1, 'alice', 'request-B', target, 4000)).toBe(true);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', target, 'request-B')).toBe(true);
+  });
+
+  it('updates ownership when the same client supersedes its acquisition request', () => {
+    const registry = createCollaborationLeaseRegistryV2<number>();
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-A', statementTarget, 1000);
+    const next = acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-B', statementTarget, 2000);
+    expect(next.granted).toBe(true);
+    expect(registry.leasesByTarget.get(encodeCollaborationLeaseTargetV2(statementTarget)))
+      .toMatchObject({ requestId: 'request-B', lastRenewedAt: 2000 });
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget, 'request-A')).toBe(false);
+    expect(renewCollaborationLeaseV2(registry, 1, 'alice', 'request-A', statementTarget, 3000)).toBe(false);
+    expect(renewCollaborationLeaseV2(registry, 1, 'alice', 'request-B', statementTarget, 4000)).toBe(true);
   });
 
   it('releases all leases held by a disconnected socket', () => {
@@ -65,6 +95,47 @@ describe('collaboration lease registry', () => {
 
     const retry = acquireCollaborationLeaseV2(registry, 2, 'bob', 'req-3', statementTarget, 1001);
     expect(retry.granted).toBe(true);
+  });
+
+  it.each([statementTarget, companionTarget])('transfers socket ownership so an old disconnect cannot release the replacement: %j', (target) => {
+    const registry = createCollaborationLeaseRegistryV2<number>();
+    const other = target.kind === 'statement' ? companionTarget : statementTarget;
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-A', target, 1000);
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'other-request', other, 1000);
+    acquireCollaborationLeaseV2(registry, 2, 'alice', 'request-B', target, 2000);
+    const key = encodeCollaborationLeaseTargetV2(target);
+    expect(registry.leasesBySocket.get(1)?.has(key)).toBe(false);
+    expect(registry.leasesBySocket.get(2)?.has(key)).toBe(true);
+
+    expect(releaseAllCollaborationLeasesV2(registry, 1).map((record) => record.target)).toEqual([other]);
+    expect(registry.leasesByTarget.get(key)).toMatchObject({ requestId: 'request-B', lastRenewedAt: 2000 });
+    expect(acquireCollaborationLeaseV2(registry, 3, 'bob', 'request-C', target, 3000))
+      .toEqual({ granted: false, heldByClientId: 'alice' });
+    expect(releaseAllCollaborationLeasesV2(registry, 2).map((record) => record.target)).toEqual([target]);
+  });
+
+  it('ignores stale socket-index entries when releasing all leases', () => {
+    const registry = createCollaborationLeaseRegistryV2<number>();
+    acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-A', statementTarget, 1000);
+    acquireCollaborationLeaseV2(registry, 2, 'alice', 'request-B', statementTarget, 2000);
+    const key = encodeCollaborationLeaseTargetV2(statementTarget);
+    registry.leasesBySocket.set(1, new Set([key]));
+    expect(releaseAllCollaborationLeasesV2(registry, 1)).toEqual([]);
+    expect(registry.leasesByTarget.get(key)).toMatchObject({ requestId: 'request-B' });
+    expect(registry.leasesBySocket.get(2)?.has(key)).toBe(true);
+  });
+
+  it('rejects acquire, renew and release from a different socket even with matching client and request IDs', () => {
+    const registry = createCollaborationLeaseRegistryV2<number>();
+    acquireCollaborationLeaseV2(registry, 2, 'alice', 'request-B', statementTarget, 2000);
+    expect(acquireCollaborationLeaseV2(registry, 1, 'alice', 'request-B', statementTarget, 3000))
+      .toEqual({ granted: false, heldByClientId: 'alice' });
+    expect(renewCollaborationLeaseV2(registry, 1, 'alice', 'request-B', statementTarget, 4000)).toBe(false);
+    expect(releaseCollaborationLeaseV2(registry, 1, 'alice', statementTarget, 'request-B')).toBe(false);
+    expect(registry.leasesByTarget.get(encodeCollaborationLeaseTargetV2(statementTarget)))
+      .toMatchObject({ requestId: 'request-B', lastRenewedAt: 2000 });
+    expect(renewCollaborationLeaseV2(registry, 2, 'alice', 'request-B', statementTarget, 5000)).toBe(true);
+    expect(releaseCollaborationLeaseV2(registry, 2, 'alice', statementTarget, 'request-B')).toBe(true);
   });
 
   it('expires leases after the disconnect timeout and keeps fresh ones', () => {

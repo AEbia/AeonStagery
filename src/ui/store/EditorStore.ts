@@ -14,7 +14,6 @@ export class EditorStore implements IEditorStore {
   private _gizmosVisible: boolean = false;
   private _collapsedTracks: Set<string> = new Set();
   private _saveStatus: SaveStatus = 'idle';
-  private _customMotionEditorActionId: string | null = null;
   readonly _listeners: Set<EditorListener> = new Set();
 
   get selectedActionIds(): Record<string, boolean> {
@@ -30,7 +29,6 @@ export class EditorStore implements IEditorStore {
   get gizmosVisible(): boolean { return this._gizmosVisible; }
   get collapsedTracks(): Set<string> { return this._collapsedTracks; }
   get saveStatus(): SaveStatus { return this._saveStatus; }
-  get customMotionEditorActionId(): string | null { return this._customMotionEditorActionId; }
 
   /** Check if an action is selected. O(1). */
   isSelected(id: string): boolean {
@@ -89,12 +87,6 @@ export class EditorStore implements IEditorStore {
     this._notify();
   }
 
-  _setCustomMotionEditorActionId(id: string | null): void {
-    if (this._customMotionEditorActionId === id) return;
-    this._customMotionEditorActionId = id;
-    this._notify();
-  }
-
   private _notify(): void {
     for (const fn of this._listeners) fn();
   }
@@ -126,9 +118,5 @@ export class EditorStore implements IEditorStore {
 
   setSaveStatus(status: SaveStatus): void {
     this._setSaveStatus(status);
-  }
-
-  setCustomMotionEditorActionId(id: string | null): void {
-    this._setCustomMotionEditorActionId(id);
   }
 }

@@ -12,6 +12,7 @@ import {
   isCollaborationUndoDisabled
 } from '../context/AppContext';
 import { showToast } from '../Toast';
+import type { CustomMotionEditSessionSnapshot } from '../../services/timeline-authoring/CustomMotionEditingTypes';
 import type { SaveResult } from '../../services/io/SceneFileService';
 
 export function useSemanticDocument() {
@@ -180,19 +181,17 @@ export function useGizmosVisible() {
   };
 }
 
-// ── useCustomMotionEditorActionId ─────────────────────────────────
-/** 当前在轨道区展开关键帧编辑器的动作 id（null 表示未展开）。 */
-export function useCustomMotionEditorActionId() {
-  const store = useEditorStore();
-  const getActionId = useCallback(
-    () => store.customMotionEditorActionId ?? null,
-    [store],
-  );
+const closedCustomMotionSnapshot: CustomMotionEditSessionSnapshot = {
+  state: 'closed', session: null, target: null, fps: 60,
+  canonicalMotion: null, motion: null, keyframes: [], committing: false,
+};
 
-  return useSyncExternalStore(
-    (listener) => store.subscribe(listener),
-    getActionId,
-  );
+/** Thin React bridge to the singleton editing module. */
+export function useCustomMotionEditingSnapshot() {
+  const editing = useApp().services?.customMotionEditing;
+  const subscribe = useCallback((listener: () => void) => editing?.subscribe(listener) ?? (() => {}), [editing]);
+  const getSnapshot = useCallback(() => editing?.getSnapshot() ?? closedCustomMotionSnapshot, [editing]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 // ── useEditorSaveStatus ───────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
 const mocks = vi.hoisted(() => {
   const state = {
     selectedActionIds: new Set<string>(),
+    missingLeaseMethods: false,
     clients: [] as Array<Record<string, any>>,
     layers: [] as Array<Record<string, any>>,
     gates: [] as Array<Record<string, any>>,
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => {
 
     constructor(options: { endpoint: string }) {
       this.endpoint = options.endpoint;
+      if (state.missingLeaseMethods) this.subscribeLease = undefined as any;
       state.clients.push(this);
     }
 
@@ -214,6 +216,11 @@ function createContext(playback: PlaybackHarness, sceneOverride?: unknown): Boot
       sceneAssets: {},
       sceneFile: { saveCurrentSceneDocument: vi.fn(async () => ({ success: true })) },
       semanticDocument: {},
+      customMotionEditing: {
+        closeActive: vi.fn(async () => undefined),
+        replaceAuthority: vi.fn(async () => undefined),
+      },
+      customMotionConversion: { cancel: vi.fn(async () => undefined) },
     },
     dispose: vi.fn(),
   } as unknown as BootstrapContext;
@@ -241,7 +248,6 @@ function renderController(input: {
   currentProject?: ProjectState | null;
   playback?: PlaybackHarness;
   context?: BootstrapContext;
-  onLeaseGateChange?: (gate: unknown) => void;
 } = {}) {
   const playback = input.playback ?? createPlaybackHarness();
   const context = input.context ?? createContext(playback);
@@ -251,7 +257,6 @@ function renderController(input: {
     onSelfChange: vi.fn(),
     onPeersChange: vi.fn(),
     onPresencePublisherChange: vi.fn(),
-    onLeaseGateChange: input.onLeaseGateChange ?? vi.fn(),
   };
   const hook = renderHook(() => useSemanticCollaborationSession({
     contextValue: context,
@@ -274,6 +279,7 @@ function renderController(input: {
 beforeEach(() => {
   window.localStorage.clear();
   mocks.state.selectedActionIds = new Set();
+  mocks.state.missingLeaseMethods = false;
   mocks.state.clients.length = 0;
   mocks.state.layers.length = 0;
   mocks.state.gates.length = 0;
@@ -486,7 +492,7 @@ describe('semantic collaboration session controller', () => {
     controller.onPeersChange.mockClear();
     controller.onPresencePublisherChange.mockClear();
 
-    act(() => controller.result.current.disconnect());
+    await act(async () => { await controller.result.current.disconnect(); });
 
     expect(controller.result.current.selfIdentity).toBeNull();
     expect(controller.result.current.resourceAgreement).toBeNull();
@@ -522,7 +528,7 @@ describe('semantic collaboration session controller', () => {
     const layer = mocks.state.layers[0];
     const unsubscribe = mocks.state.presenceUnsubscribes[0];
 
-    controller.unmount();
+    await act(async () => { controller.unmount(); });
 
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(layer.dispose).toHaveBeenCalledOnce();
@@ -655,29 +661,132 @@ describe('semantic collaboration session controller', () => {
     });
   });
 
-  describe('custom motion edit lease gate integration', () => {
-    it('initializes and provides the lease gate during connection and cleans it up on disconnect', async () => {
-      const onLeaseGateChange = vi.fn();
-      const controller = renderController({
-        currentProject: createProject(),
-        onLeaseGateChange,
-      });
-
+  describe('custom motion authority integration', () => {
+    it('injects production authorization and returns to singleplayer after draining edits', async () => {
+      const context = createContext(createPlaybackHarness());
+      const controller = renderController({ currentProject: createProject(), context });
       await act(async () => {
-        expect(await controller.result.current.hostCurrentScene({
-          endpoint: 'server.example:1234',
-        })).toBe(true);
+        expect(await controller.result.current.hostCurrentScene()).toBe(true);
       });
-
-      expect(onLeaseGateChange).toHaveBeenCalledWith(expect.objectContaining({
-        acquire: expect.any(Function),
-        release: expect.any(Function),
+      const editing = context.services.customMotionEditing;
+      expect(editing.replaceAuthority).toHaveBeenLastCalledWith(expect.objectContaining({
+        acquire: expect.any(Function), release: expect.any(Function), onLoss: expect.any(Function),
       }));
-
-      act(() => controller.result.current.disconnect());
-
-      expect(onLeaseGateChange).toHaveBeenLastCalledWith(null);
+      const authority = vi.mocked(editing.replaceAuthority).mock.calls.at(-1)![0];
+      const client = mocks.state.clients[0];
+      const decision = authority.acquire({ kind: 'statement', statementId: 'statement-1' }, new AbortController().signal);
+      expect(client.acquireLease).toHaveBeenCalledOnce();
+      await act(async () => { await controller.result.current.disconnect(); });
+      // The real module disposes the adapter after draining. This lightweight
+      // editing fixture only records injection, so finish its pending request here.
+      authority.dispose();
+      await decision;
+      expect(editing.closeActive).toHaveBeenCalledWith('authority-changed');
+      expect(context.services.customMotionConversion.cancel).toHaveBeenCalled();
+      expect(client.dispose).toHaveBeenCalledOnce();
     });
+
+    it('invalidates and cancels synchronously but waits for entered writes before disposing transports', async () => {
+      const context = createContext(createPlaybackHarness());
+      const controller = renderController({ currentProject: createProject(), context });
+      await act(async () => { await controller.result.current.hostCurrentScene(); });
+      let finishWrite!: () => void;
+      const enteredWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+      vi.mocked(context.services.customMotionEditing.closeActive).mockReturnValueOnce(enteredWrite);
+      const client = mocks.state.clients[0];
+      const layer = mocks.state.layers[0];
+      let cleanupTask!: Promise<void>;
+      act(() => { cleanupTask = controller.result.current.disconnect(); });
+      expect(context.services.customMotionEditing.closeActive).toHaveBeenLastCalledWith('authority-changed');
+      expect(context.services.customMotionConversion.cancel).toHaveBeenCalled();
+      expect(client.dispose).not.toHaveBeenCalled();
+      expect(layer.dispose).not.toHaveBeenCalled();
+      await act(async () => { finishWrite(); await cleanupTask; });
+      expect(layer.dispose).toHaveBeenCalledOnce();
+      expect(client.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('does not start a room when its client lacks lease authorization', async () => {
+      mocks.state.missingLeaseMethods = true;
+      const context = createContext(createPlaybackHarness());
+      const controller = renderController({ currentProject: createProject(), context });
+      const previousStarts = mocks.orchestratorStart.mock.calls.length;
+      await act(async () => { expect(await controller.result.current.hostCurrentScene()).toBe(false); });
+      expect(mocks.orchestratorStart.mock.calls).toHaveLength(previousStarts);
+      expect(controller.result.current.lastError).toBe('协作客户端缺少自定义动作租约能力');
+      expect(mocks.state.clients[0].dispose).toHaveBeenCalledOnce();
+      expect(context.services.customMotionEditing.replaceAuthority).toHaveBeenCalledTimes(2);
+    });
+
+    it('drains an entered write before disposing a transport on unmount', async () => {
+      const context = createContext(createPlaybackHarness());
+      const controller = renderController({ currentProject: createProject(), context });
+      await act(async () => { await controller.result.current.hostCurrentScene(); });
+      let finishWrite!: () => void;
+      vi.mocked(context.services.customMotionEditing.closeActive).mockReturnValueOnce(new Promise((resolve) => { finishWrite = resolve; }));
+      const client = mocks.state.clients[0];
+      controller.unmount();
+      expect(context.services.customMotionConversion.cancel).toHaveBeenCalled();
+      expect(client.dispose).not.toHaveBeenCalled();
+      await act(async () => { finishWrite(); });
+      expect(client.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('ignores an old connection failure after a newer connection has succeeded', async () => {
+      const controller = renderController({ currentProject: createProject() });
+      let failOld!: (error: Error) => void;
+      mocks.orchestratorStart.mockImplementationOnce(() => new Promise((_resolve, reject) => { failOld = reject; }));
+      let oldStart!: Promise<boolean>;
+      await act(async () => { oldStart = controller.result.current.hostCurrentScene(); });
+      await act(async () => { expect(await controller.result.current.hostCurrentScene()).toBe(true); });
+      const newClient = mocks.state.clients[1];
+      controller.onStatusChange.mockClear();
+      await act(async () => { failOld(new Error('old connection failed')); expect(await oldStart).toBe(false); });
+      expect(controller.onStatusChange).not.toHaveBeenCalledWith('error');
+      expect(controller.result.current.lastError).toBeNull();
+      expect(newClient.dispose).not.toHaveBeenCalled();
+    });
+
+    it('waits for draining edits before disposing a layer returned after disconnect', async () => {
+      const context = createContext(createPlaybackHarness());
+      const controller = renderController({ currentProject: createProject(), context });
+      let finishStart!: (layer: any) => void;
+      const layer = { dispose: vi.fn() };
+      mocks.orchestratorStart.mockImplementationOnce(() => new Promise((resolve) => { finishStart = resolve; }));
+      let starting!: Promise<boolean>;
+      await act(async () => { starting = controller.result.current.hostCurrentScene(); });
+      let finishWrite!: () => void;
+      vi.mocked(context.services.customMotionEditing.closeActive).mockReturnValueOnce(new Promise((resolve) => { finishWrite = resolve; }));
+      let disconnecting!: Promise<void>;
+      act(() => { disconnecting = controller.result.current.disconnect(); });
+      await act(async () => { finishStart(layer); });
+      expect(layer.dispose).not.toHaveBeenCalled();
+      await act(async () => { finishWrite(); await disconnecting; expect(await starting).toBe(false); });
+      expect(layer.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('prevents an old late connection from replacing or disposing the new session', async () => {
+      const controller = renderController({ currentProject: createProject() });
+      let finishOld!: (layer: any) => void;
+      const oldLayer = { dispose: vi.fn(), publishCurrentSceneNow: vi.fn() };
+      mocks.orchestratorStart.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }));
+      let oldStart!: Promise<boolean>;
+      await act(async () => { oldStart = controller.result.current.hostCurrentScene(); });
+      const oldClient = mocks.state.clients[0];
+      await act(async () => {
+        expect(await controller.result.current.hostCurrentScene({ endpoint: 'new.example:1234' })).toBe(true);
+      });
+      const newClient = mocks.state.clients[1];
+      const newLayer = mocks.state.layers[0];
+      await act(async () => { finishOld(oldLayer); expect(await oldStart).toBe(false); });
+      expect(oldLayer.dispose).toHaveBeenCalledOnce();
+      expect(oldClient.dispose).toHaveBeenCalledOnce();
+      expect(newLayer.dispose).not.toHaveBeenCalled();
+      expect(newClient.dispose).not.toHaveBeenCalled();
+      await act(async () => { await controller.result.current.disconnect(); });
+      expect(newLayer.dispose).toHaveBeenCalledOnce();
+    });
+
   });
 
   describe('server version incompatibility and connection failure', () => {

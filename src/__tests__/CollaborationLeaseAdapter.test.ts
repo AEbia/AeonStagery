@@ -5,6 +5,7 @@ import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COLLABORATION_SCHEMA_VERSION_V2,
+  COLLABORATION_SCHEMA_VERSION_V3,
   type CollaborativeSceneStateV2,
 } from '../api/types/collaboration';
 import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
@@ -13,7 +14,7 @@ import { CollaborationPersistence } from '../../server/collaboration/persistence
 import { createPresenceRegistryV2 } from '../../server/collaboration/presence';
 import { SingleRoomCollaborationRoomV2 } from '../../server/collaboration/room';
 import { CollaborationSyncSocketAdapterV2 } from '../../server/collaboration/syncSocketAdapter';
-import { createCollaborationLeaseRegistryV2 } from '../../server/collaboration/lease';
+import { createCollaborationLeaseRegistryV2, encodeCollaborationLeaseTargetV2 } from '../../server/collaboration/lease';
 
 type MessageHandler = (data: Buffer, isBinary: boolean) => void;
 type CloseHandler = () => void;
@@ -195,6 +196,84 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
     acquire(bob, 'req-bob', target);
     expect(findMessage(bob, 'lease:acquired')).toBeTruthy();
   });
+
+  it.each([COLLABORATION_SCHEMA_VERSION_V2, COLLABORATION_SCHEMA_VERSION_V3])(
+    'keeps new ownership when late cancellation releases the previous request in protocol V%s',
+    (schemaVersion) => {
+      const leases = createCollaborationLeaseRegistryV2<WebSocket>();
+      const correlatedAdapter = new CollaborationSyncSocketAdapterV2({
+        clients: new Set<WebSocket>(), room, assets, schemaVersion,
+        presence: createPresenceRegistryV2<WebSocket>(), leases,
+      });
+      const alice = connect(correlatedAdapter, 'alice');
+      const bob = connect(correlatedAdapter, 'bob');
+      const target = { kind: 'statement' as const, statementId: 'perf_1' };
+      const send = (socket: FakeSocket, type: string, requestId: string) => socket.emitMessage(
+        JSON.stringify({ type, schemaVersion, requestId, target }), false,
+      );
+
+      send(alice, 'lease:acquire', 'request-A');
+      expect(findMessage(alice, 'lease:acquired')?.requestId).toBe('request-A');
+      send(alice, 'lease:release', 'request-A');
+      send(alice, 'lease:acquire', 'request-B');
+      // The client receives A's grant late and sends another cleanup release for A.
+      send(alice, 'lease:release', 'request-A');
+      const record = leases.leasesByTarget.get(encodeCollaborationLeaseTargetV2(target));
+      expect(record?.requestId).toBe('request-B');
+      const renewedAt = record?.lastRenewedAt;
+      alice.sent = [];
+      send(alice, 'lease:renew', 'request-A');
+      expect(findMessage(alice, 'lease:acquired')).toBeUndefined();
+      expect(record?.lastRenewedAt).toBe(renewedAt);
+      send(bob, 'lease:acquire', 'request-C');
+      expect(findMessage(bob, 'lease:denied')).toMatchObject({ requestId: 'request-C', heldByClientId: 'alice' });
+      send(alice, 'lease:renew', 'request-B');
+      expect(findMessage(alice, 'lease:acquired')?.requestId).toBe('request-B');
+      send(alice, 'lease:release', 'request-B');
+      send(bob, 'lease:acquire', 'request-D');
+      expect(findMessage(bob, 'lease:acquired')?.requestId).toBe('request-D');
+      alice.emitClose();
+      bob.emitClose();
+    },
+  );
+
+  it.each([COLLABORATION_SCHEMA_VERSION_V2, COLLABORATION_SCHEMA_VERSION_V3])(
+    'preserves the replacement socket lease when the same client old socket disconnects in protocol V%s',
+    (schemaVersion) => {
+      const leases = createCollaborationLeaseRegistryV2<WebSocket>();
+      const correlatedAdapter = new CollaborationSyncSocketAdapterV2({
+        clients: new Set<WebSocket>(), room, assets, schemaVersion,
+        presence: createPresenceRegistryV2<WebSocket>(), leases,
+      });
+      const oldSocket = connect(correlatedAdapter, 'alice');
+      const newSocket = connect(correlatedAdapter, 'alice');
+      const bob = connect(correlatedAdapter, 'bob');
+      const target = { kind: 'statement' as const, statementId: 'perf_1' };
+      const send = (socket: FakeSocket, type: string, requestId: string) => socket.emitMessage(
+        JSON.stringify({ type, schemaVersion, requestId, target }), false,
+      );
+      send(oldSocket, 'lease:acquire', 'request-A');
+      send(newSocket, 'lease:acquire', 'request-B');
+      oldSocket.sent = [];
+      send(oldSocket, 'lease:renew', 'request-B');
+      expect(findMessage(oldSocket, 'lease:acquired')).toBeUndefined();
+      send(oldSocket, 'lease:release', 'request-B');
+      oldSocket.emitClose();
+      expect(findMessage(newSocket, 'lease:released')).toBeUndefined();
+      expect(findMessage(bob, 'lease:released')).toBeUndefined();
+      expect(leases.leasesByTarget.get(encodeCollaborationLeaseTargetV2(target))?.requestId).toBe('request-B');
+      send(bob, 'lease:acquire', 'request-C');
+      expect(findMessage(bob, 'lease:denied')).toMatchObject({ heldByClientId: 'alice' });
+      send(newSocket, 'lease:renew', 'request-B');
+      expect(jsonMessages(newSocket).filter((message) => (message as Record<string, unknown>).type === 'lease:acquired'))
+        .toHaveLength(2);
+      newSocket.emitClose();
+      expect(findMessage(bob, 'lease:released')).toBeTruthy();
+      send(bob, 'lease:acquire', 'request-D');
+      expect(findMessage(bob, 'lease:acquired')?.requestId).toBe('request-D');
+      bob.emitClose();
+    },
+  );
 
   it('releases all leases when a client disconnects', () => {
     const alice = connect(adapter, 'alice');

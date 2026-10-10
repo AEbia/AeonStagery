@@ -37,7 +37,8 @@ import type {
 } from '../../api/types/collaboration';
 
 import type { ValidationStore } from '../store/ValidationStore';
-import type { CustomMotionEditLeaseGate } from '../../services/timeline-authoring/CustomMotionEditLeaseGate';
+import type { CustomMotionEditingModule } from '../../services/timeline-authoring/CustomMotionEditingTypes';
+import type { CustomMotionConversion } from '../../services/timeline-authoring/CustomMotionConversion';
 
 interface AppContextValue {
   adapters: {
@@ -69,6 +70,8 @@ interface AppContextValue {
     sceneAssets?: SceneAssetService;
     voiceAuthoring?: VoiceAuthoringService;
     semanticAuthoring?: SemanticAuthoringApplicationService;
+    customMotionEditing?: CustomMotionEditingModule;
+    customMotionConversion?: CustomMotionConversion;
     aiProse?: AiProseAuthoringComposition;
     projectAgent?: ProjectAgentService;
   };
@@ -77,7 +80,6 @@ interface AppContextValue {
     self?: CollaborationIdentity | null;
     peers?: CollaborationPresencePeerV2[];
     publishPresence?: (patch?: Partial<CollaborationPresencePatchV2>) => void;
-    customMotionEditLeaseGate?: CustomMotionEditLeaseGate | null;
   };
 }
 
