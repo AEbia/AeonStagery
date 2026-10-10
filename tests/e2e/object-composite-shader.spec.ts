@@ -130,8 +130,9 @@ test('four-corner gradient is independent of pooled texture dimensions', async (
 
 test('four-corner gradient keeps top and bottom colors on their visual sides', async ({ page }) => {
   const data = await render(page, { gradient: true, verticalGradient: true, strength: 0.5 });
-  const visualTop = pixel(data, 16, 13);
-  const visualBottom = pixel(data, 16, 2);
+  // For Pixi's offscreen filter target, readPixels row 0 maps to the visual top.
+  const visualTop = pixel(data, 16, 2);
+  const visualBottom = pixel(data, 16, 13);
   expect(visualTop[2]).toBeGreaterThan(visualTop[0]);
   expect(visualBottom[0]).toBeGreaterThan(visualBottom[2]);
 });
