@@ -16,7 +16,6 @@ export interface InspectorMutationsDeps {
   sourceParams: Record<string, any>;
   usesSourceParamForm: boolean;
   sceneData: TimelineScene;
-  updateAction: ActionInspectorProps['updateAction'];
   updateParam: ActionInspectorProps['updateParam'];
   replaceSourceParams: ActionInspectorProps['replaceSourceParams'];
 }
@@ -24,7 +23,7 @@ export interface InspectorMutationsDeps {
 export function createInspectorMutations(deps: InspectorMutationsDeps) {
   const {
     appContext, action, actionId, actionParams, sourceParams, usesSourceParamForm, sceneData,
-    updateAction, updateParam, replaceSourceParams,
+    updateParam, replaceSourceParams,
   } = deps;
 
   const projectWorkspace = appContext.services?.projectWorkspace;
@@ -175,29 +174,6 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     );
   };
 
-  const commitEnvironmentLayerReference = (layerId: string, label?: string | null) => {
-    const currentLayerId = actionParams.layerId || 'background';
-    const currentLabel = sourceParams.label;
-    if (currentLayerId === layerId && (label === undefined || currentLabel === (label ?? undefined))) {
-      return;
-    }
-
-    const nextParams: Record<string, any> = {
-      ...sourceParams,
-      layerId,
-    };
-    if (label === null || (label === undefined && layerId === 'background')) {
-      delete nextParams.label;
-    } else if (label !== undefined) {
-      nextParams.label = label;
-    }
-    if (usesSourceParamForm && action.semanticType) {
-      replaceSourceParams(actionId, nextParams);
-      return;
-    }
-    updateAction(actionId, { params: nextParams });
-  };
-
   return {
     updateResourceParam,
     updateSemanticSourceParam,
@@ -208,6 +184,5 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     customDialogueTemplateOptions,
     updateDialogueTemplate,
     updateVisualSemanticOverride,
-    commitEnvironmentLayerReference,
   };
 }

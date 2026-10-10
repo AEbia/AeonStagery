@@ -93,9 +93,9 @@ export const PlayheadLifecycleTargetCommands = React.memo(({
 
   if (availableBlocks.length === 0) return null;
   return (
-    <div className="inspector-section" data-testid="lifecycle-target-commands">
-      <div className="inspector-section-title">在播放头添加变化 · {playheadTime.toFixed(1)}s</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div className="inspector-lifecycle-commands" data-testid="lifecycle-target-commands">
+      <span className="inspector-lifecycle-commands__label">在播放头添加变化 · {playheadTime.toFixed(1)}s</span>
+      <div className="inspector-lifecycle-commands__actions">
         {availableBlocks.map((block) => (
           <button key={block.id} type="button" className="btn btn--sm" onClick={() => { void addDependency(block); }}>
             <IconPlus width={13} height={13} />

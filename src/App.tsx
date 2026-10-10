@@ -49,6 +49,7 @@ import { useSceneMigrationDialog } from './ui/hooks/useSceneMigrationDialog';
 import { SceneMigrationConfirmationDialog } from './ui/SceneMigrationConfirmationDialog';
 import { AppProvider, isCollaborationUndoDisabled, useTimelineAdapter } from './ui/context/AppContext';
 import type { InspectorPanelView } from './ui/timeline/InspectorViewPicker';
+import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { scriptEngine } from './engine/ScriptEngine';
 import { cameraController } from './engine/CameraController';
@@ -211,6 +212,24 @@ export default function App() {
       />
     </AppProvider>
   );
+}
+
+export function computeSidePanelWidth(params: {
+  isTracksMode: boolean;
+  panelWidth: number;
+  inspectorNavigatorWidth: number;
+  inspectorLayout: 'split' | 'replace';
+  isInspectorDetailVisible: boolean;
+  detailWidth: number;
+  timelineLayoutMode?: 'tracks' | 'list';
+}): number {
+  if (params.isTracksMode) {
+    return params.panelWidth;
+  }
+  // In list mode, inspector detail is embedded directly inside TimelineListView,
+  // so sidePanelWidth remains fixed at the panel width (inspectorNavigatorWidth)
+  // rather than splitting or popping out a separate side column.
+  return params.inspectorNavigatorWidth;
 }
 
 function AppContent({
@@ -376,14 +395,37 @@ function AppContent({
   });
   const sceneMigrationDialog = useSceneMigrationDialog(contextValue.services.sceneMigration);
 
-  const layoutOptions = useMemo(() => ({
-    initialPanelWidth: settings.workbenchPanelWidth,
-    initialDetailWidth: settings.workbenchDetailWidth,
-    initialTimelineHeight: settings.workbenchTimelineHeight,
-    onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
-    onDetailWidthCommit: (width: number) => setSetting('workbenchDetailWidth', width),
-    onTimelineHeightCommit: (height: number) => setSetting('workbenchTimelineHeight', height),
-  }), [
+  const isListMode = settings.workbenchTimelineLayoutMode === 'list';
+  const [initialLeftPanelWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('aeonstagery:left-panel-width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!Number.isNaN(parsed)) return Math.min(420, Math.max(320, parsed));
+      }
+    } catch {}
+    return 340;
+  });
+  const layoutOptions = useMemo(() => {
+    const defaultWidth = isListMode ? 600 : 400;
+    const initialWidth = (!settings.workbenchPanelWidth || settings.workbenchPanelWidth === 380 || (isListMode && (settings.workbenchPanelWidth === 400 || settings.workbenchPanelWidth < 560)))
+      ? defaultWidth
+      : settings.workbenchPanelWidth;
+    return {
+      initialPanelWidth: initialWidth,
+      initialLeftPanelWidth,
+      onLeftPanelWidthCommit: (width: number) => {
+        try { localStorage.setItem('aeonstagery:left-panel-width', String(width)); } catch {}
+      },
+      initialDetailWidth: settings.workbenchDetailWidth,
+      initialTimelineHeight: settings.workbenchTimelineHeight,
+      onPanelWidthCommit: (width: number) => setSetting('workbenchPanelWidth', width),
+      onDetailWidthCommit: (width: number) => setSetting('workbenchDetailWidth', width),
+      onTimelineHeightCommit: (height: number) => setSetting('workbenchTimelineHeight', height),
+    };
+  }, [
+    initialLeftPanelWidth,
+    isListMode,
     settings.workbenchDetailWidth,
     settings.workbenchPanelWidth,
     settings.workbenchTimelineHeight,
@@ -391,13 +433,25 @@ function AppContent({
   ]);
   const {
     panelWidth,
+    setPanelWidth,
+    leftPanelWidth,
+    handleLeftResizeMouseDown,
+    handleLeftResizeKeyDown,
     detailWidth,
     timelineHeight,
     handleMouseDown,
-    handleDetailMouseDown,
-    handleDetailKeyDown,
     handleHeightMouseDown,
   } = useResizableLayout(layoutOptions);
+  const panelWidthsByModeRef = useRef({ list: 600, tracks: 400 });
+  const previousPanelModeRef = useRef(isListMode);
+  useEffect(() => {
+    if (previousPanelModeRef.current === isListMode) return;
+    panelWidthsByModeRef.current[previousPanelModeRef.current ? 'list' : 'tracks'] = panelWidth;
+    previousPanelModeRef.current = isListMode;
+    const next = panelWidthsByModeRef.current[isListMode ? 'list' : 'tracks'];
+    setPanelWidth(next);
+    setSetting('workbenchPanelWidth', next);
+  }, [isListMode, panelWidth, setPanelWidth, setSetting]);
   const { issues: globalIssues, errorsCount, warningsCount } = useValidationIssues();
 
   useEffect(() => {
@@ -454,31 +508,33 @@ function AppContent({
     handleSelectWorkspaceView(view);
   }, [handleSelectWorkspaceView, handleSetSidePanelView]);
 
+  const isTracksMode = settings.workbenchTimelineLayoutMode === 'tracks';
   const workspaceToolsPanelWidth = Math.max(panelWidth, 400);
   const inspectorNavigatorWidth = sidePanelView === 'workspace-tools'
     ? workspaceToolsPanelWidth
     : panelWidth;
-  const inspectorLayout = windowWidth - inspectorNavigatorWidth - detailWidth >= 720
+  const availableStageWidth = windowWidth - (isTracksMode ? leftPanelWidth : 0) - inspectorNavigatorWidth - detailWidth;
+  const inspectorLayout = availableStageWidth >= 720
     ? 'split'
     : 'replace';
-  const sidePanelWidth = inspectorNavigatorWidth + (
-    inspectorLayout === 'split' && isInspectorDetailVisible
-      ? detailWidth + 4
-      : 0
-  );
-  const navigatorReplacedByDetail = sidePanelView === 'inspector'
-    && inspectorLayout === 'replace'
-    && isInspectorDetailVisible
-    && selectedActionCount > 0;
-  const navigatorPriorityActive = settings.workbenchTimelineLayoutMode === 'list'
-    && hasLoadedScene
-    && !navigatorReplacedByDetail;
-  const timelinePanelWidth = navigatorPriorityActive
-    ? 'auto'
-    : '100%';
-  const timelinePanelMarginRight = navigatorPriorityActive
-    ? inspectorNavigatorWidth
-    : 0;
+  const sidePanelWidth = computeSidePanelWidth({
+    isTracksMode,
+    panelWidth,
+    inspectorNavigatorWidth,
+    inspectorLayout,
+    isInspectorDetailVisible,
+    detailWidth,
+    timelineLayoutMode: settings.workbenchTimelineLayoutMode,
+  });
+  const navigatorPriorityActive = !isTracksMode
+    && settings.workbenchTimelineLayoutMode === 'list'
+    && hasLoadedScene;
+  const timelinePanelWidth = isTracksMode
+    ? '100%'
+    : (navigatorPriorityActive ? 'auto' : '100%');
+  const timelinePanelMarginRight = isTracksMode
+    ? 0
+    : (navigatorPriorityActive ? inspectorNavigatorWidth : 0);
 
   const handleInspectorDetailVisibilityChange = useCallback((visible: boolean) => {
     if (inspectorDetailVisibleRef.current === visible) return;
@@ -1673,6 +1729,25 @@ function AppContent({
       </div>
 
       <div className="main-content" data-navigator-extended={navigatorPriorityActive}>
+        {isTracksMode && (
+          <>
+            <ErrorBoundary name="左侧面板">
+              <LeftSidebarPanel width={leftPanelWidth} />
+            </ErrorBoundary>
+            <div
+              className="resize-handle resize-handle--left"
+              role="separator"
+              aria-label="调整左侧面板宽度"
+              aria-orientation="vertical"
+              aria-valuemin={320}
+              aria-valuemax={420}
+              aria-valuenow={leftPanelWidth}
+              tabIndex={0}
+              onMouseDown={handleLeftResizeMouseDown}
+              onKeyDown={handleLeftResizeKeyDown}
+            />
+          </>
+        )}
         <ErrorBoundary name="舞台">
           <div className="stage-area" ref={stageAreaRef}>
             <div
@@ -1819,12 +1894,8 @@ function AppContent({
                 {hasLoadedScene ? (
                   <LazyTimelineEditor
                     mode="inspector"
-                    inspectorLayout={inspectorLayout}
                     inspectorNavigatorWidth={inspectorNavigatorWidth}
-                    inspectorDetailWidth={detailWidth}
                     inspectorView={sidePanelView === 'workspace-tools' ? contextTab : 'actions'}
-                    onInspectorDetailResizeStart={handleDetailMouseDown}
-                    onInspectorDetailResizeKeyDown={handleDetailKeyDown}
                     onInspectorDetailVisibilityChange={handleInspectorDetailVisibilityChange}
                     onSelectInspectorView={handleSelectInspectorView}
                     onDetachWorkspaceTools={() => void handleOpenWorkspaceTools()}
@@ -1862,6 +1933,7 @@ function AppContent({
       <ErrorBoundary name="时间轴">
         <div
           className="bottom-panel"
+          data-timeline-layout={settings.workbenchTimelineLayoutMode}
           style={{
             width: timelinePanelWidth,
             height: timelineHeight,

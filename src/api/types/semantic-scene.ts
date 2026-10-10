@@ -457,6 +457,8 @@ export type CameraParams =
 export interface EnvironmentLayerParams {
   mode: 'set' | 'transform' | 'remove';
   layerId: string;
+  /** Author-facing name; layerId remains the stable reference. */
+  label?: string;
   file?: string;
   image?: string;
   position?: Vec2;

@@ -81,7 +81,7 @@ describe('Task 2 semantic timeline summaries', () => {
     };
   });
 
-  it('renders semantic look-at points and blink intervals in author-facing units', () => {
+  it('renders semantic look-at and blink timeline items without item descriptions', () => {
     render(
       <TimelineListView
         sceneData={{ sceneId: state.document.sceneId, meta: state.document.meta, timeline: [] }}
@@ -94,7 +94,9 @@ describe('Task 2 semantic timeline summaries', () => {
       />,
     );
 
-    expect(screen.getByText('对焦位置: (0.2, -0.4)')).toBeTruthy();
-    expect(screen.getByText('启用:否 间隔:2.5秒')).toBeTruthy();
+    expect(screen.getByText('Tomori · 角色对焦')).toBeTruthy();
+    expect(screen.getByText('Tomori · 角色眨眼')).toBeTruthy();
+    expect(screen.queryByText('对焦位置: (0.2, -0.4)')).toBeNull();
+    expect(screen.queryByText('启用:否 间隔:2.5秒')).toBeNull();
   });
 });

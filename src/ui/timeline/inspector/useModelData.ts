@@ -15,9 +15,6 @@ export function useModelData(args: {
 }) {
   const { characterAdapter, sceneData, selectedIdsList, action, performanceTargetSpeakerId, timelineActions } = args;
 
-  const [modelData, setModelData] = useState<{ motions: string[], expressions: string[] }>({ motions: [], expressions: [] });
-  const [isModelDataLoading, setIsModelDataLoading] = useState(false);
-
   const targetModelPath = React.useMemo(() => {
     if (selectedIdsList.length !== 1 || !action) return undefined;
     const charId = action.params.id || action.params.speakerId || action.params.targetCharacter
@@ -29,24 +26,33 @@ export function useModelData(args: {
       : undefined;
   }, [action, performanceTargetSpeakerId, sceneData, selectedIdsList.length, timelineActions]);
 
+  return { targetModelPath, ...useCharacterModelData(characterAdapter, targetModelPath) };
+}
+
+const EMPTY_MODEL_DATA = { motions: [] as string[], expressions: [] as string[] };
+
+export function useCharacterModelData(
+  characterAdapter: ReturnType<typeof useCharacterAdapter>,
+  targetModelPath: string | undefined,
+) {
+  const [loaded, setLoaded] = useState<{ path: string; data: typeof EMPTY_MODEL_DATA } | null>(null);
+
   useEffect(() => {
     let cancelled = false;
 
     if (!targetModelPath) {
-      setModelData({ motions: [], expressions: [] });
-      setIsModelDataLoading(false);
       return;
     }
 
-    setIsModelDataLoading(true);
     void characterAdapter.getModelDataFromPath(targetModelPath)
-      .then((data: any) => {
+      .then((data) => {
         if (cancelled) return;
-        setModelData(data);
-        setIsModelDataLoading(false);
+        setLoaded({ path: targetModelPath, data });
       })
       .catch(() => {
-        if (!cancelled) setIsModelDataLoading(false);
+        if (!cancelled) {
+          setLoaded({ path: targetModelPath, data: EMPTY_MODEL_DATA });
+        }
       });
 
     return () => {
@@ -54,5 +60,8 @@ export function useModelData(args: {
     };
   }, [characterAdapter, targetModelPath]);
 
-  return { targetModelPath, modelData, isModelDataLoading };
+  return {
+    modelData: loaded && loaded.path === targetModelPath ? loaded.data : EMPTY_MODEL_DATA,
+    isModelDataLoading: Boolean(targetModelPath && loaded?.path !== targetModelPath),
+  };
 }

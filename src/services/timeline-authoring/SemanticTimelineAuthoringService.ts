@@ -183,6 +183,7 @@ export class SemanticTimelineAuthoringService {
           intent.orderedDialogueIds,
           intent.movedStatementId,
           flow,
+          intent.beforeStatementId,
         );
     }
   }
@@ -954,15 +955,16 @@ export class SemanticTimelineAuthoringService {
     orderedDialogueIds: readonly string[],
     movedStatementId?: string,
     flow: boolean = false,
+    beforeStatementId?: string | null,
   ): SemanticMutation {
     const reordered = flow
       ? (() => {
           if (!movedStatementId) {
             throw new Error('Reorder-dialogue-chain flow requires movedStatementId');
           }
-          return reorderDialogueFlow(document, orderedDialogueIds, movedStatementId, scenePaceTierOf(document));
+          return reorderDialogueFlow(document, orderedDialogueIds, movedStatementId, scenePaceTierOf(document), beforeStatementId);
         })()
-      : reorderDialogueManual(document, orderedDialogueIds, movedStatementId ?? '');
+      : reorderDialogueManual(document, orderedDialogueIds, movedStatementId ?? '', beforeStatementId);
     if (reordered === document) return { document };
     const originalById = new Map(
       document.statements.map((candidate) => [candidate.id, candidate]),

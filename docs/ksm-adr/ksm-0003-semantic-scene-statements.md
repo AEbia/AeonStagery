@@ -247,7 +247,7 @@ camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须�
 
 #### Environment State Contract
 
-`environmentLayer` 沿用 ADR-0009：`layerId` 是稳定身份，`background` 只是一条保留 ID。transform/remove 必须引用已经存在或在同时间更早创建的 layer；同一 layer 的 transition 不得重叠；set/transform/remove 的中间态必须在 seek、scrub、preview 和 bake 中一致。
+`environmentLayer` 沿用 ADR-0009：`layerId` 是稳定身份，`background` 只是一条保留 ID；可选 `label` 保存作者可读名称，并随编译产物提供给 UI，不改变层的寻址身份。transform/remove 必须引用已经存在或在同时间更早创建的 layer；同一 layer 的 transition 不得重叠；set/transform/remove 的中间态必须在 seek、scrub、preview 和 bake 中一致。
 
 #### Visual And Lighting Contract
 

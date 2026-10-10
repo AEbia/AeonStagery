@@ -13,6 +13,7 @@ import type { StatementFamily } from '../api/types/semantic-scene';
 
 const state = vi.hoisted(() => ({
   document: null as any,
+  pickedAssetPath: "",
   compiledScene: null as any,
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: [], expressions: [] })),
@@ -43,6 +44,14 @@ vi.mock('../ui/context/AppContext', () => ({
   }),
   usePlaybackAdapter: () => state.playbackAdapter,
   useSceneAssetService: () => state.sceneAssetService,
+}));
+
+vi.mock('../ui/AssetBrowserModal', () => ({
+  AssetBrowserModal: ({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) => (
+    <div role="dialog" aria-label="资源浏览器">
+      <button onClick={() => { onSelect(state.pickedAssetPath); onClose(); }}>使用选中资源</button>
+    </div>
+  ),
 }));
 
 vi.mock('../ui/store/storeHooks', () => ({
@@ -490,12 +499,11 @@ describe('semantic Inspector field catalog contracts', () => {
     });
 
     expect(screen.getByText('动画资源')).toBeTruthy();
-    const input = screen.getByLabelText('动画资源');
-    fireEvent.change(input, { target: { value: 'animation/intro.html' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'animation/intro.html';
+    fireEvent.click(screen.getByRole('button', { name: '动画资源' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('animation/intro.html', 'animation');
       expect(replaceSourceParams).toHaveBeenCalledWith(actionId, {
         target: 'hero',
         durationSeconds: 1,

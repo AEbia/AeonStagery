@@ -48,6 +48,85 @@ describe('Live2DModelLoader', () => {
     );
   });
 
+  it.each([
+    { motions: { idle: [{}] }, expressions: [{ name: 'smile' }] },
+    {},
+  ])('shares in-flight and cached model reads, including empty catalogs: %j', async (json) => {
+    let finishRead!: (result: { success: boolean; data: string }) => void;
+    const pendingRead = new Promise<{ success: boolean; data: string }>((resolve) => { finishRead = resolve; });
+    const readTextFile = vi.fn(() => pendingRead);
+    (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
+    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+
+    const requests = Array.from({ length: 4 }, () => loader.getModelDataFromPath('figure/model.json'));
+    await vi.waitFor(() => expect(readTextFile).toHaveBeenCalledTimes(1));
+    finishRead({ success: true, data: JSON.stringify(json) });
+    const results = await Promise.all(requests);
+    const expected = 'motions' in json
+      ? { motions: ['idle'], expressions: ['smile'] }
+      : { motions: [], expressions: [] };
+    results.forEach((data) => expect(data).toEqual(expected));
+
+    expect(await loader.getModelDataFromPath('figure/model.json')).toEqual(expected);
+    expect(await loader.getModelDataFromPath('asset://localhost/D:/projects/demo/figure/model.json')).toEqual(expected);
+    expect(readTextFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps relative model catalogs separate across project roots', async () => {
+    let basePath = 'D:/projects/first';
+    const readTextFile = vi.fn(async (path: string) => ({
+      success: true,
+      data: JSON.stringify({ motions: { [path.includes('/first/') ? 'idle' : 'wave']: [{}] } }),
+    }));
+    (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
+    const loader = new Live2DModelLoader(() => basePath);
+
+    expect(await loader.getModelDataFromPath('figure/model.json')).toEqual({ motions: ['idle'], expressions: [] });
+    basePath = 'D:/projects/second';
+    expect(await loader.getModelDataFromPath('figure/model.json')).toEqual({ motions: ['wave'], expressions: [] });
+    basePath = 'D:/projects/first';
+    expect(await loader.getModelDataFromPath('figure/model.json')).toEqual({ motions: ['idle'], expressions: [] });
+    expect(readTextFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the new resolved catalog when an external library mount changes', async () => {
+    let resolvedPath = 'E:/first/model.json';
+    const resolveForRead = vi.fn(async () => resolvedPath);
+    const readTextFile = vi.fn(async (path: string) => ({
+      success: true,
+      data: JSON.stringify({ motions: { [path.includes('/first/') ? 'idle' : 'wave']: [{}] } }),
+    }));
+    (global as any).window = {
+      aeonStageryAPI: { fs: { readTextFile } },
+      AeonStagery: { services: { projectResources: {
+        getCurrentProject: () => ({ rootPath: 'D:/projects/demo' }), resolveForRead,
+      } } },
+    };
+    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+
+    expect(await loader.getModelDataFromPath('@mount/library/model.json')).toEqual({ motions: ['idle'], expressions: [] });
+    resolvedPath = 'E:/second/model.json';
+    expect(await loader.getModelDataFromPath('@mount/library/model.json')).toEqual({ motions: ['wave'], expressions: [] });
+    expect(readTextFile).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { success: false, data: '' },
+    { success: true, data: 'invalid JSON' },
+  ])('retries model reads after an unsuccessful read or parse: %j', async (failure) => {
+    const readTextFile = vi.fn()
+      .mockResolvedValueOnce(failure)
+      .mockResolvedValue({ success: true, data: JSON.stringify({ motions: { idle: [{}] } }) });
+    (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
+    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+    const path = 'D:/projects/demo/figure/model.json';
+
+    expect(await loader.getModelDataFromPath(path)).toEqual({ motions: [], expressions: [] });
+    expect(await loader.getModelDataFromPath(path)).toEqual({ motions: ['idle'], expressions: [] });
+    expect(await loader.getModelDataFromPath(path)).toEqual({ motions: ['idle'], expressions: [] });
+    expect(readTextFile).toHaveBeenCalledTimes(2);
+  });
+
   it('preserves POSIX roots when converting resolved model paths to asset URLs', () => {
     const loader = new Live2DModelLoader(
       () => '/home/gamma/project',

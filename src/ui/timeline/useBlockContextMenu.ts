@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   usePlaybackAdapter,
   useDocumentStore,
@@ -8,15 +8,14 @@ import {
 } from '../context/AppContext';
 import { showToast } from '../Toast';
 import {
-  buildSemanticCopyBufferForTimelineActions,
-  buildSemanticDeleteTimelineIntents,
-  buildSemanticDuplicateTimelineIntent,
-  buildSemanticPasteTimelineIntent,
   buildSemanticSplitTimelineIntents,
 } from './semanticTimelineEditing';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 
 interface BlockContextMenuOptions {
+  semanticSnapshot?: SemanticTimelineSnapshot;
+  selectAfterCommit?: (ids: Record<string, boolean>) => void;
   onCopyActions?: (ids: readonly string[]) => void;
   onDuplicateActions?: (ids: readonly string[]) => void | Promise<void>;
   onDeleteActions?: (ids: readonly string[]) => void | Promise<void>;
@@ -29,7 +28,14 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
   const playbackAdapter = usePlaybackAdapter();
   const documentStore = useDocumentStore();
   const semanticAuthoring = useSemanticAuthoringService();
-  const editorStore = useApp().stores.editor;
+  const app = useApp();
+  const editorStore = app.stores.editor;
+  const selectAfterCommit = useCallback((ids: Record<string, boolean>) => {
+    if (options.selectAfterCommit) options.selectAfterCommit(ids);
+    else app.adapters.timeline.select(ids);
+  }, [app, options.selectAfterCommit]);
+  const commands = useSemanticTimelineCommands(selectAfterCommit);
+  const semanticSnapshot = useSemanticTimelineSnapshot(options.semanticSnapshot);
   const collaborationStatus = useCollaborationStatus();
 
   const [menuState, setMenuState] = useState<{
@@ -56,10 +62,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
   const handleBlockContextMenu = (e: React.MouseEvent, id: string, isStateSpan = false) => {
     e.preventDefault();
     e.stopPropagation();
-    const semanticItem = buildSemanticTimelineReadModel(
-      documentStore.getCurrentSceneDocumentSnapshot(),
-      documentStore.getCompiledSceneSnapshot(),
-    ).find((item) => item.id === id);
+    const semanticItem = semanticSnapshot.itemById.get(id);
     const menuPadding = 20;
     const menuHeight = semanticItem?.locator.kind === 'companion' ? 280 : 240;
     const x = Math.min(e.clientX, window.innerWidth - 200 - menuPadding);
@@ -88,11 +91,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
     }
 
     const id = menuState.targetId;
-    const semanticItems = buildSemanticTimelineReadModel(
-      documentStore.getCurrentSceneDocumentSnapshot(),
-      documentStore.getCompiledSceneSnapshot(),
-    );
-    const semanticItem = semanticItems.find((item) => item.id === id);
+    const semanticItem = semanticSnapshot.itemById.get(id);
     if (!semanticItem) return;
     const timelineAction = semanticItem.displayAction;
 
@@ -103,7 +102,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
           options.onCopyActions([id]);
           return;
         }
-        const statements = buildSemanticCopyBufferForTimelineActions(documentStore, [id]);
+        const statements = commands.copy([id]);
         if (statements.length > 0) editorStore.setCopyBuffer(statements);
       },
       // 1: Paste
@@ -112,10 +111,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
         if (buffer.length === 0) return;
         const insertTime = semanticItem.time
           + (semanticItem.durationSeconds || timelineAction.params.duration || 1);
-        if (!semanticAuthoring) return;
-        const intent = buildSemanticPasteTimelineIntent(buffer, insertTime);
-        if (!intent) return;
-        await semanticAuthoring.author(intent);
+        await commands.paste(buffer, insertTime, 'block-context-menu');
       },
       // 2: Duplicate / Copy action
       async () => {
@@ -123,10 +119,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
           await options.onDuplicateActions([id]);
           return;
         }
-        if (!semanticAuthoring) return;
-        const intent = buildSemanticDuplicateTimelineIntent(documentStore, [id]);
-        if (!intent) return;
-        await semanticAuthoring.author(intent);
+        await commands.duplicate([id]);
       },
       // 3: Split at playhead
       async () => {
@@ -146,9 +139,7 @@ export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
           await options.onDeleteActions([id]);
           return;
         }
-        if (!semanticAuthoring) return;
-        const intents = buildSemanticDeleteTimelineIntents(documentStore, [id]);
-        if (intents.length > 0) await semanticAuthoring.authorTransaction(intents);
+        await commands.delete([id]);
       },
       ...(options.getMotionActions ? options.getMotionActions(id).map((motionAction) => (
         async () => { await motionAction.run(); }

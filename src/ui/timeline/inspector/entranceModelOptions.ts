@@ -20,25 +20,24 @@ export function resolveActiveModelPath(
 
 export function buildCharacterEntranceModelOptions(
   character: NonNullable<TimelineScene['meta']['characters']>[number],
-  currentModel?: string,
 ): Array<{
   value: string;
   label: string;
   title?: string;
   disabled?: boolean;
 }> {
+  const mainModel = character.model?.trim() || '';
   const options: Array<{
     value: string;
     label: string;
     title?: string;
     disabled?: boolean;
-  }> = [{
-    value: '',
-    label: '默认模型',
-    title: character.model ? `默认模型: ${character.model}` : '角色尚未设置默认模型',
-    disabled: !character.model,
-  }];
-  const seenModels = new Set<string>();
+  }> = mainModel ? [{
+    value: mainModel,
+    label: '主模型',
+    title: `主模型: ${mainModel}`,
+  }] : [];
+  const seenModels = new Set<string>(mainModel ? [mainModel] : []);
 
   for (const [index, variant] of (character.variants ?? []).entries()) {
     const model = variant.model.trim();
@@ -48,15 +47,6 @@ export function buildCharacterEntranceModelOptions(
       value: model,
       label: variant.name || `副模型 ${index + 1}`,
       title: `${variant.name || `副模型 ${index + 1}`}: ${model}`,
-    });
-  }
-
-  const normalizedCurrentModel = currentModel?.trim();
-  if (normalizedCurrentModel && !seenModels.has(normalizedCurrentModel)) {
-    options.push({
-      value: normalizedCurrentModel,
-      label: '当前模型文件',
-      title: normalizedCurrentModel,
     });
   }
 

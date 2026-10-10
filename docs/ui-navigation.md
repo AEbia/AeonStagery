@@ -37,13 +37,18 @@ flowchart TD
     StageArea --> Playback["播放控制条 PlaybackControls.tsx"]
     StageArea --> BakeOverlay["烘焙进度蒙层 BakeProgressOverlay.tsx"]
     
+    MainContent --> LeftSidebar["轨道优先左栏 LeftSidebarPanel.tsx"]
+    LeftSidebar --> CompactOutline["剧本大纲 / 角色管理"]
     MainContent --> SidePanel["右侧检查器 (side-panel)"]
     SidePanel --> InspectorEditor["LazyTimelineEditor (mode='inspector')"]
     InspectorEditor --> InspectorArea["InspectorArea.tsx"]
-    InspectorArea --> ViewPicker["视图选择器 InspectorViewPicker.tsx"]
-    InspectorArea --> ActionsList["剧本动作流 SequentialFlowPanel / TimelineListView"]
-    InspectorArea --> ActionDetail["动作检查器 ActionInspector.tsx / ActionInspectorTabs.tsx"]
-    InspectorArea --> BlockLibrary["语句块库 StatementBlockLibrary.tsx"]
+    InspectorArea --> FixedInspector["轨道优先 PropertyInspectorShell.tsx"]
+    FixedInspector --> ActionDetail["固定属性 ActionInspector.tsx"]
+    InspectorArea --> ActionsList["剧本动作优先 TimelineListView.tsx"]
+    ActionsList --> QuickFields["基本属性 StatementQuickControls.tsx"]
+    ActionsList --> InlineDetail["行内展开 ActionInspector.tsx"]
+    ActionsList --> ViewPicker["视图选择器 InspectorViewPicker.tsx"]
+    InspectorArea --> ToolViews["JSON / 运行快照 / 诊断"]
 
     App --> BottomPanel["底部时间轴 (bottom-panel)"]
     BottomPanel --> TrackEditor["LazyTimelineEditor (mode='tracks')"]
@@ -139,6 +144,11 @@ flowchart TD
 * **主入口**: [`src/ui/TimelineEditor.tsx`](../src/ui/TimelineEditor.tsx) (`mode="inspector"`)
 * **核心容器**: [`src/ui/timeline/InspectorArea.tsx`](../src/ui/timeline/InspectorArea.tsx)
 * **样式文件**: [`src/ui/timeline/Inspector.css`](../src/ui/timeline/Inspector.css)
+
+两种布局的入口由 `InspectorArea` 分流：轨道优先使用 `LeftSidebarPanel` 的剧本/角色双 Tab 和右侧固定 `PropertyInspectorShell`，左侧大纲以紧凑单行展示语句，不混入对白与动作摘要，底部轨道占满全宽；未选中语句时右栏显示空态。剧本动作优先仅使用右侧 `TimelineListView`，`StatementQuickControls` 在折叠行中使用 `InlineNumericInput` 等软件控件编辑语句源参数，完整 `ActionInspector` 以 `presentation="inline"` 在语句下展开，但不再渲染 `.selected-action-header`——标题、时间、播放与删除已由语句行承担，展开区只剩属性表单与协作提醒。JSON、运行快照和诊断视图替换右栏内容；选择和展开语句不改变舞台区域的尺寸。
+
+两种布局的语句列表均由 [`useVirtualTimelineRows`](../src/ui/timeline/useVirtualTimelineRows.tsx) 测量行高并按视口挂载，保留正在编辑的焦点行；内联检查器复用列表的 semantic read model。快捷文本控件复用 `FormComponents` 的远端感知草稿，失焦提交、Escape 取消，避免逐字符重建场景。左栏拖拽由 `useResizableLayout` 管理，宽度在拖拽结束时持久化。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |

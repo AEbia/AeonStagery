@@ -11,8 +11,8 @@ import type { SemanticAuthoringApplicationService } from '../../services/timelin
 import type { ReadonlyDocumentStore } from '../store/DocumentStore';
 import {
   createSemanticTimelineCorrelationId,
-  selectCompiledActionsForStatements,
 } from './semanticTimelineEditing';
+import { selectCreatedTimelineStatements } from './semanticTimelineCommands';
 import {
   createSemanticStatementDraftForBlock,
   getSemanticStatementBlock,
@@ -158,13 +158,14 @@ export function buildSemanticStatementLibraryInsert(
 
 export async function submitSemanticStatementLibraryInsert(options: {
   readonly semanticAuthoring: Pick<SemanticAuthoringApplicationService, 'author'>;
-  readonly documentStore: Pick<ReadonlyDocumentStore, 'getCompiledSceneSnapshot'>;
+  readonly documentStore: Pick<ReadonlyDocumentStore, 'getCompiledSceneSnapshot'>
+    & Partial<Pick<ReadonlyDocumentStore, 'getCurrentSceneDocumentSnapshot'>>;
   readonly intent: InsertStatementAuthorIntent;
   readonly onSelect: (ids: string[]) => void;
 }): Promise<SemanticAuthorReceipt> {
   const receipt = await options.semanticAuthoring.author(options.intent);
-  const nextSelected = selectCompiledActionsForStatements(
-    options.documentStore.getCompiledSceneSnapshot(),
+  const nextSelected = selectCreatedTimelineStatements(
+    options.documentStore,
     receipt.createdStatementIds,
   );
   const selectedIds = Object.keys(nextSelected);

@@ -762,7 +762,7 @@ describe('ActionInspector', () => {
     });
   });
 
-  it('persists environment layer label when creating or updating an environment layer', async () => {
+  it('updates an environment layer using the exact ID entered without generating a label', async () => {
     testState.semanticDocument = {
       schemaVersion: 4,
       sceneId: 'scene_1',
@@ -801,19 +801,19 @@ describe('ActionInspector', () => {
       />,
     );
 
-    const input = screen.getByLabelText('环境层名称');
+    const input = screen.getByRole('textbox', { name: '环境图层 ID' }) as HTMLInputElement;
+    expect(input.value).toBe('background');
     fireEvent.mouseDown(input);
     fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: '夕阳天空' } });
+    fireEvent.change(input, { target: { value: 'custom-sky' } });
     fireEvent.blur(input);
 
     expect(replaceSourceParams).toHaveBeenCalledWith('compiled_env_1', {
-      layerId: 'environment-layer-1',
-      label: '夕阳天空',
+      layerId: 'custom-sky',
     });
   });
 
-  it('clears label when switching an environment layer back to background', async () => {
+  it('shows the literal environment layer ID instead of its display label', async () => {
     testState.semanticDocument = {
       schemaVersion: 4,
       sceneId: 'scene_1',
@@ -852,15 +852,15 @@ describe('ActionInspector', () => {
       />,
     );
 
-    const input = screen.getByLabelText('环境层名称') as HTMLInputElement;
-    expect(input.value).toBe('夕阳天空');
+    const input = screen.getByRole('textbox', { name: '环境图层 ID' }) as HTMLInputElement;
+    expect(input.value).toBe('custom-sky');
     fireEvent.mouseDown(input);
     fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: '背景' } });
+    fireEvent.change(input, { target: { value: 'other-layer' } });
     fireEvent.blur(input);
 
     expect(replaceSourceParams).toHaveBeenCalledWith('compiled_env_1', {
-      layerId: 'background',
+      layerId: 'other-layer', label: '夕阳天空',
     });
   });
 
@@ -914,5 +914,29 @@ describe('ActionInspector', () => {
     );
 
     expect(screen.getByText('power4.inOut (自定义)')).toBeTruthy();
+  });
+
+  it('renders the action header only in the docked panel, not in script-action priority', async () => {
+    const props = {
+      sceneData: { sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] },
+      selectedActionIds: { dialogue_1: true },
+      setSelectedIds: vi.fn(),
+      updateAction: vi.fn(),
+      updateParam: vi.fn(),
+      replaceSourceParams: vi.fn(),
+      deleteAction: vi.fn(),
+      onClose: vi.fn(),
+    };
+
+    const panel = render(<ActionInspector {...props} />);
+    expect(panel.container.querySelector('.selected-action-header')).toBeTruthy();
+    await act(async () => { panel.unmount(); });
+
+    const inline = render(<ActionInspector {...props} presentation="inline" closeMode="close" />);
+    // 剧本动作优先模式：语句行本身已提供标题/时间/播放/删除，头部不再渲染。
+    expect(inline.container.querySelector('.selected-action-header')).toBeNull();
+    // The property form still expands under the statement row.
+    expect(inline.container.querySelector('.selected-action-inspector__content')).toBeTruthy();
+    await act(async () => { inline.unmount(); });
   });
 });

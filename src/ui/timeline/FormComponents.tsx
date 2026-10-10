@@ -25,7 +25,7 @@ if (typeof document !== 'undefined' && !draftMouseDownTargetListenerAttached) {
   }, true);
 }
 
-function useRemoteAwareStringDraft(value: string, onChange: (val: string) => void) {
+export function useRemoteAwareStringDraft(value: string, onChange: (val: string) => void) {
   const incomingValue = normalizeStringDraftValue(value);
   const [localValue, setLocalValue] = useState(incomingValue);
   const [isFocused, setIsFocused] = useState(false);
@@ -179,7 +179,7 @@ function useRemoteAwareStringDraft(value: string, onChange: (val: string) => voi
   };
 }
 
-function CollaborativeDraftNotice({ visible }: { visible: boolean }) {
+export function CollaborativeDraftNotice({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
     <div className="collaborative-draft-notice" role="status">
@@ -211,6 +211,7 @@ export interface NumericInputProps {
 
 export interface InlineNumericInputProps {
   value: number;
+  disabled?: boolean;
   onChange: (val: number, isTransient?: boolean) => void;
   step?: string;
   min?: string;
@@ -240,7 +241,7 @@ function getTickInterval(span: number): number {
   return nice * magnitude;
 }
 
-export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
+export const InlineNumericInput = React.memo(({ value, disabled = false, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
   const safeValue = value ?? 0;
   const [localValue, setLocalValue] = useState(safeValue.toString());
   const [isEditing, setIsEditing] = useState(false);
@@ -980,6 +981,7 @@ export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", m
     return (
       <input
         type="number"
+        disabled={disabled}
         className={`scrubbable-input-mode ${className || ''}`}
         step={step}
         min={hasMin ? minVal : undefined}
@@ -996,6 +998,7 @@ export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", m
         onChange={(e) => setLocalValue(e.target.value)}
         onBlur={() => {
           setIsEditing(false);
+          if (disabled) { setLocalValue(safeValue.toString()); return; }
           const parsed = parseFloat(localValue);
           if (!isNaN(parsed)) {
             let clamped = parsed;
@@ -1027,7 +1030,7 @@ export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", m
     );
   }
 
-  const popoverElement = showPopover && popoverPos && hasPopoverRange && !isDraggingState && !isEditing && typeof document !== 'undefined' ? createPortal(
+  const popoverElement = !disabled && showPopover && popoverPos && hasPopoverRange && !isDraggingState && !isEditing && typeof document !== 'undefined' ? createPortal(
     <div
       className={`scrubbable-popover scrubbable-popover--${popoverPos.placement}`}
       data-testid="scrubbable-popover"
@@ -1111,16 +1114,17 @@ export const InlineNumericInput = React.memo(({ value, onChange, step = "0.1", m
         ref={badgeRef}
         className={`scrubbable-badge ${isDraggingState ? 'is-dragging' : ''} ${className || ''}`}
         role="spinbutton"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
         aria-label={ariaLabel ?? (ariaLabelledBy ? undefined : dragLabel ?? '数值')}
         aria-labelledby={ariaLabelledBy}
         aria-valuenow={safeValue}
         aria-valuemin={hasMin ? minVal : undefined}
         aria-valuemax={hasMax ? maxVal : undefined}
         data-testid={dataTestId}
-        onMouseDown={handleMouseDown}
-        onKeyDown={handleKeyboardAdjustment}
-        onMouseEnter={handleMouseEnter}
+        onMouseDown={disabled ? undefined : handleMouseDown}
+        onKeyDown={disabled ? undefined : handleKeyboardAdjustment}
+        onMouseEnter={disabled ? undefined : handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={style}
       >
@@ -1371,6 +1375,7 @@ export interface FileInputProps {
   placeholder?: string;
   importKind?: ResourceImportKind;
   initialDir?: string;
+  presentation?: 'input' | 'asset' | 'button';
 }
 
 export const FileInput = React.memo(({
@@ -1381,6 +1386,7 @@ export const FileInput = React.memo(({
   placeholder,
   importKind,
   initialDir,
+  presentation = 'input',
 }: FileInputProps) => {
   const inputId = useId();
   return (
@@ -1388,6 +1394,7 @@ export const FileInput = React.memo(({
       {label && <label className="inspector-label" htmlFor={inputId}>{label}</label>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <InlineFilePicker
+          presentation={presentation}
           value={value || ''}
           onChange={onChange}
           filters={filters}

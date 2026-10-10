@@ -9,6 +9,7 @@ import {
 import { CharacterDirectoryPanel } from './CharacterDirectoryPanel';
 import type { WorkspaceToolTab } from '../workspace-tools/types';
 import { InspectorViewPicker } from './InspectorViewPicker';
+import type { SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 
 const RawScriptTab = React.lazy(async () => {
   const module = await import('./RawScriptTab');
@@ -16,6 +17,7 @@ const RawScriptTab = React.lazy(async () => {
 });
 
 export interface ContextPanelProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneMeta: SceneMeta;
   actionCount: number;
   globalIssues: any[];
@@ -31,6 +33,7 @@ export interface ContextPanelProps {
 }
 
 export const ContextPanel: React.FC<ContextPanelProps> = ({
+  semanticSnapshot,
   sceneMeta,
   actionCount,
   globalIssues,
@@ -89,10 +92,10 @@ export const ContextPanel: React.FC<ContextPanelProps> = ({
         {activeTab === 'snapshot' && <EngineSnapshotTab action={action} sceneMeta={sceneMeta} />}
         {activeTab === 'script' && (
           <React.Suspense fallback={<div style={{ padding: 16, color: 'var(--text-muted)' }}>正在加载代码编辑器...</div>}>
-            <RawScriptTab action={action} />
+            <RawScriptTab action={action} semanticSnapshot={semanticSnapshot} />
           </React.Suspense>
         )}
-        {activeTab === 'diagnostics' && <DiagnosticsTab globalIssues={globalIssues} />}
+        {activeTab === 'diagnostics' && <DiagnosticsTab globalIssues={globalIssues} semanticSnapshot={semanticSnapshot} />}
       </div>
     </aside>
   );

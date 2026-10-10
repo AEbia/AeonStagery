@@ -27,8 +27,8 @@ export function useInspectorOptions(args: {
   const { sceneData, action, timelineActions, semanticDocument, semanticItem } = args;
 
   const environmentLayers = React.useMemo(
-    () => listAuthorFacingEnvironmentLayers(sceneData),
-    [sceneData],
+    () => listAuthorFacingEnvironmentLayers({ ...sceneData, timeline: timelineActions }),
+    [sceneData, timelineActions],
   );
   const visualTargetOptions = React.useMemo(() => {
     const entries = new Map<string, string>();

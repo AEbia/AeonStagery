@@ -1308,6 +1308,92 @@ describe('SemanticTimelineAuthoringService reorder-dialogue-chain flow', () => {
       flow: true,
     })).toThrow(/movedStatementId/);
   });
+
+  it.each([
+    { movedStatementId: 'dlg_2', beforeStatementId: 'cam_1', ids: ['dlg_1', 'dlg_2', 'cam_1', 'dlg_3'], times: [0, 2, 5.5, 11] },
+    { movedStatementId: 'dlg_1', beforeStatementId: 'dlg_2', ids: ['cam_1', 'dlg_1', 'dlg_2', 'dlg_3'], times: [1, 1.5, 6, 11] },
+  ])('honours an exact root anchor $beforeStatementId even when dialogue order is unchanged', ({ movedStatementId, beforeStatementId, ids, times }) => {
+    const result = service.author(documentToReorder(), {
+      version: AUTHORING_SCHEMA_VERSION,
+      correlationId: 'reorder_root_anchor',
+      origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain',
+      orderedDialogueIds: ['dlg_1', 'dlg_2', 'dlg_3'],
+      movedStatementId,
+      flow: true,
+      beforeStatementId,
+    });
+
+    expect(result.document.statements.map((statement) => statement.id)).toEqual(ids);
+    expect(result.document.statements.map((statement) => statement.time)).toEqual(times);
+    expect(getSceneDocumentCanonicalOrder(result.document)).toEqual(ids);
+  });
+
+  it.each([
+    { name: 'before a simultaneous camera', cameraTime: 0, dialogueTime: 0, cameraFirst: true, beforeStatementId: 'camera', ids: ['dialogue', 'camera'], times: [0, 1.5] },
+    { name: 'after a simultaneous camera', cameraTime: 0, dialogueTime: 0, cameraFirst: false, beforeStatementId: null, ids: ['camera', 'dialogue'], times: [0, 0.5] },
+    { name: 'after a camera inside the old dialogue slot', cameraTime: 0.2, dialogueTime: 0, cameraFirst: false, beforeStatementId: null, ids: ['camera', 'dialogue'], times: [0, 0.5] },
+  ])('keeps root and compiled timing valid $name', ({ cameraTime, dialogueTime, cameraFirst, beforeStatementId, ids, times }) => {
+    const camera = {
+      id: 'camera', time: cameraTime, type: 'camera' as const,
+      params: { mode: 'focus' as const, position: [0, 0] as [number, number], durationSeconds: 0.5 },
+    };
+    const dialogue = {
+      id: 'dialogue', time: dialogueTime, type: 'dialogue' as const,
+      params: { text: 'Line', durationSeconds: 1 },
+      companions: [{
+        id: 'companion', anchor: 'end' as const, offset: 0.2, type: 'camera' as const,
+        params: { mode: 'focus' as const, position: [1, 1] as [number, number], durationSeconds: 0.5 },
+      }],
+    };
+    const document = makeDocument({ statements: cameraFirst ? [camera, dialogue] : [dialogue, camera] });
+    const result = service.author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_overlap', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['dialogue'], movedStatementId: 'dialogue',
+      beforeStatementId, flow: true,
+    });
+
+    expect(result.document.statements.map((statement) => statement.id)).toEqual(ids);
+    expect(result.document.statements.map((statement) => statement.time)).toEqual(times);
+    expect(getSceneDocumentCanonicalOrder(result.document)).toEqual(ids);
+    const moved = result.document.statements.find((statement) => statement.id === 'dialogue')!;
+    expect(moved.companions).toEqual(dialogue.companions);
+    const compiled = sceneStatementCompiler.compile(result.document);
+    expect(compiled.actions.filter((action) => !action.source.companionId).map((action) => action.source.statementId)).toEqual(ids);
+    expect(compiled.actions.find((action) => action.source.companionId === 'companion')?.time).toBeCloseTo(moved.time + 1.2);
+    expect(result.document.meta.durationSeconds).toBeCloseTo(Math.max(cameraFirst ? 2 : 0.5, moved.time + 1.7));
+  });
+
+  it('opens enough room at a root anchor inside an overlapping preceding dialogue', () => {
+    const document = makeDocument({ statements: [
+      { id: 'previous', time: 0, type: 'dialogue', params: { text: 'Long line', durationSeconds: 5 } },
+      { id: 'camera', time: 1, type: 'camera', params: { mode: 'focus', position: [0, 0], durationSeconds: 0.5 } },
+      { id: 'moved', time: 3, type: 'dialogue', params: { text: 'Moved line', durationSeconds: 1 } },
+    ] });
+    const result = service.author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_overlap_anchor', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['previous', 'moved'], movedStatementId: 'moved',
+      beforeStatementId: 'camera', flow: true,
+    });
+    expect(result.document.statements.map((statement) => [statement.id, statement.time])).toEqual([
+      ['previous', 0], ['moved', 5.5], ['camera', 7],
+    ]);
+    expect(sceneStatementCompiler.compile(result.document).actions.map((action) => action.source.statementId))
+      .toEqual(['previous', 'moved', 'camera']);
+  });
+
+  it.each(['dlg_3', 'missing', 'dlg_2'])(
+    'does not change timing for an unchanged or invalid root anchor %s', (beforeStatementId) => {
+      const document = documentToReorder();
+      const result = service.author(document, {
+        version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_no_change', origin: 'sequential-flow',
+        kind: 'reorder-dialogue-chain', orderedDialogueIds: ['dlg_1', 'dlg_2', 'dlg_3'], movedStatementId: 'dlg_2',
+        beforeStatementId, flow: true,
+      });
+      expect(result.document).toBe(document);
+      expect(result.receipt.updatedStatementIds).toEqual([]);
+    },
+  );
 });
 
 describe('SemanticTimelineAuthoringService delete-statements flow', () => {

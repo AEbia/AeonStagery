@@ -7,6 +7,7 @@ import { ActionInspector } from '../ui/timeline/ActionInspector';
 
 const state = vi.hoisted(() => ({
   document: null as any,
+  pickedAssetPath: "",
   compiledScene: null as any,
   validationIssues: [] as any[],
   characterAdapter: {
@@ -50,6 +51,14 @@ vi.mock('../ui/context/AppContext', () => ({
   usePlaybackAdapter: () => state.playbackAdapter,
   useSceneAssetService: () => state.sceneAssetService,
   useSemanticAuthoringService: () => state.semanticAuthoring,
+}));
+
+vi.mock('../ui/AssetBrowserModal', () => ({
+  AssetBrowserModal: ({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) => (
+    <div role="dialog" aria-label="资源浏览器">
+      <button onClick={() => { onSelect(state.pickedAssetPath); onClose(); }}>使用选中资源</button>
+    </div>
+  ),
 }));
 
 vi.mock('../ui/store/storeHooks', () => ({
@@ -294,9 +303,9 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'enter_missing_model', outputKey: 'primary' },
     });
 
-    const input = screen.getByPlaceholderText('选择 Live2D 模型文件');
-    fireEvent.change(input, { target: { value: 'figure/new/model.json' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'figure/new/model.json';
+    fireEvent.click(screen.getByRole('button', { name: '模型文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => expect(replaceSourceParams).toHaveBeenCalledWith(
       'enter_missing_model::primary',
@@ -328,7 +337,7 @@ describe('Task 2 ActionInspector contracts', () => {
     });
 
     const modelSelect = screen.getByRole('combobox', { name: '模型文件' });
-    expect(modelSelect.textContent).toContain('默认模型');
+    expect(modelSelect.textContent).toContain('主模型');
     expect(screen.queryByPlaceholderText('选择 Live2D 模型文件')).toBeNull();
 
     await act(async () => {
@@ -336,6 +345,8 @@ describe('Task 2 ActionInspector contracts', () => {
     });
     expect(screen.getByRole('option', { name: '冬装' })).toBeTruthy();
     expect(screen.getByRole('option', { name: '夏装' })).toBeTruthy();
+    // Only registered models are selectable; the ad-hoc current path is not a catalog entry.
+    expect(screen.queryByRole('option', { name: '当前模型文件' })).toBeNull();
     await act(async () => {
       fireEvent.click(screen.getByRole('option', { name: '夏装' }));
     });
@@ -361,9 +372,9 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'environment_missing_file', outputKey: 'primary' },
     });
 
-    const input = screen.getByPlaceholderText('选择背景图片...');
-    fireEvent.change(input, { target: { value: 'images/classroom.png' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'images/classroom.png';
+    fireEvent.click(screen.getByRole('button', { name: '背景图片' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => expect(replaceSourceParams).toHaveBeenCalledWith(
       'environment_missing_file::primary',
@@ -1116,12 +1127,11 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'sfx_picker', outputKey: 'primary' },
     });
 
-    const input = screen.getByLabelText('音频文件');
-    fireEvent.change(input, { target: { value: 'sfx/chime.ogg' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'sfx/chime.ogg';
+    fireEvent.click(screen.getByRole('button', { name: '音频文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('sfx/chime.ogg', 'generic');
       expect(updateParam).toHaveBeenCalledWith('sfx_picker::primary', 'file', 'sfx/chime.ogg');
     });
   });
@@ -1148,12 +1158,11 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: 'dialogue_with_sfx', outputKey: 'primary' },
     });
 
-    const input = screen.getByLabelText('音效文件');
-    fireEvent.change(input, { target: { value: 'sfx/hit-2.wav' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'sfx/hit-2.wav';
+    fireEvent.click(screen.getByRole('button', { name: '音效文件' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('sfx/hit-2.wav', 'generic');
       expect(state.semanticAuthoring.author).toHaveBeenCalledWith(expect.objectContaining({
         kind: 'update-dialogue-companion',
         locator: { statementId: 'dialogue_with_sfx', companionId: 'sfx' },
@@ -1272,7 +1281,7 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: statement.id, outputKey: 'motion' },
     });
 
-    // 动作名与表情名都应展示在基础属性中
+    // 动作名与表情名都应展示在独立的资源选择区域
     const motionField = document.querySelector('[data-testid="action-param-motion"]');
     expect(motionField).toBeTruthy();
     expect(motionField?.textContent).toContain('nod.mtn');
@@ -1303,7 +1312,7 @@ describe('Task 2 ActionInspector contracts', () => {
     });
   });
 
-  it('exposes lookAt and blink panels on characterPerformance and allows adding/removing them', () => {
+  it('exposes lookAt and blink panels on characterPerformance and allows adding lookAt only', () => {
     const statement = {
       id: 'performance_controls',
       time: 0,
@@ -1311,7 +1320,7 @@ describe('Task 2 ActionInspector contracts', () => {
       params: {
         target: 'hero',
         motion: { kind: 'resource', key: 'idle.mtn' },
-        lookAt: { point: [0.3, 0.4], intensity: 0.8, enabled: true },
+        blink: { enabled: true, interval: 4 },
       },
     };
     const actionId = 'performance_controls::motion';
@@ -1325,18 +1334,19 @@ describe('Task 2 ActionInspector contracts', () => {
       source: { statementId: statement.id, outputKey: 'motion' },
     });
 
-    // 已有 lookAt 应展示视线控制面板，且有移除按钮
-    expect(screen.getByText('视线控制')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '移除视线' })).toBeTruthy();
+    // 已有 blink 应展示眨眼控制面板，且有移除按钮
+    expect(screen.getByText('眨眼控制')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '移除眨眼' })).toBeTruthy();
 
-    // 未配置 blink 应提供添加眨眼控制按钮
-    const addBlinkBtn = screen.getByRole('button', { name: '+ 添加眨眼控制' });
-    expect(addBlinkBtn).toBeTruthy();
+    // 不再提供添加眨眼控制按钮，未配置 lookAt 时仅提供添加视线控制
+    expect(screen.queryByRole('button', { name: '+ 添加眨眼控制' })).toBeNull();
+    const addLookAtBtn = screen.getByRole('button', { name: '+ 添加视线控制' });
+    expect(addLookAtBtn).toBeTruthy();
 
-    fireEvent.click(addBlinkBtn);
+    fireEvent.click(addLookAtBtn);
     expect(replaceSourceParams).toHaveBeenCalledWith(
       actionId,
-      expect.objectContaining({ blink: { enabled: true, interval: 4 } }),
+      expect.objectContaining({ lookAt: { point: [0, 0], intensity: 1, enabled: true } }),
     );
   });
 });

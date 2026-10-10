@@ -15,6 +15,8 @@ export interface SearchableSelectProps {
   options: string[] | Option[];
   onChange: (val: string) => void;
   placeholder?: string;
+  /** Action text for supplemental pickers whose value is already edited elsewhere. */
+  triggerLabel?: string;
   label?: string;
   loading?: boolean;
   header?: string;
@@ -25,7 +27,6 @@ export interface SearchableSelectProps {
   clearable?: boolean;
   clearLabel?: string;
   preferredGroup?: string;
-  costumeHint?: string;
 }
 
 const MAX_SEARCH_RESULTS = 100;
@@ -35,6 +36,7 @@ export const SearchableSelect = ({
   options,
   onChange,
   placeholder = "搜索…",
+  triggerLabel,
   label,
   loading,
   header,
@@ -372,7 +374,7 @@ export const SearchableSelect = ({
   }, [isOpen]);
 
   const selectedOption = normalizedOptions.find(opt => opt.value === value);
-  const displayValue = selectedOption ? selectedOption.label : (value || placeholder);
+  const displayValue = triggerLabel ?? (selectedOption ? selectedOption.label : (value || placeholder));
   const selectOption = (nextValue: string) => {
     previewActiveRef.current = false;
     onChange(nextValue);
@@ -421,7 +423,7 @@ export const SearchableSelect = ({
   const hasGroups = primaryGroups.length > 1 || (primaryGroups.length === 1 && primaryGroups[0] !== '默认');
 
   return (
-    <div className="inspector-row" ref={containerRef} style={{ position: 'relative' }}>
+    <div className="inspector-row searchable-select" ref={containerRef} style={{ position: 'relative' }}>
       {label && <label id={labelId} htmlFor={controlId} className="inspector-label">{label}</label>}
       <button
         ref={triggerRef}
@@ -464,7 +466,7 @@ export const SearchableSelect = ({
           minHeight: '32px'
         }}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: value ? 1 : 0.5, display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1 }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: value || triggerLabel ? 1 : 0.5, display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1 }}>
           {loading ? <><IconRefresh width={12} height={12} /> 加载中…</> : displayValue}
         </span>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: '8px' }}>
@@ -592,7 +594,7 @@ export const SearchableSelect = ({
             {!search && hasGroups && (
               <div
                 style={{
-                  width: hasSecondary ? '74px' : '120px',
+                  width: hasSecondary ? 'clamp(64px, 18%, 140px)' : 'clamp(80px, 25%, 160px)',
                   borderRight: '1px solid var(--border-subtle)',
                   overflowY: 'auto',
                   background: 'rgba(0,0,0,0.1)',
@@ -654,7 +656,7 @@ export const SearchableSelect = ({
             {!search && hasSecondary && (
               <div
                 style={{
-                  width: '74px',
+                  width: 'clamp(64px, 18%, 140px)',
                   borderRight: '1px solid var(--border-subtle)',
                   overflowY: 'auto',
                   background: 'rgba(0,0,0,0.06)',

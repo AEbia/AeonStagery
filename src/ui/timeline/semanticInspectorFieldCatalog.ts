@@ -497,7 +497,7 @@ export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
   ],
   environmentLayer: [
     field('mode', '图层操作', { surface: 'semantic' }),
-    field('layerId', '环境层名称', { surface: 'semantic', defaultValue: inspectorDefault('background') }),
+    field('layerId', '环境图层 ID', { surface: 'semantic' }),
     field('file', '资源路径', { when: (params) => params.mode === 'set' && hasOwn(params, 'file') }),
     field('image', '背景图片', { when: (params) => params.mode === 'set' && environmentImageField(params) }),
     field('position', '空间坐标', { when: modeIsOneOf('set', 'transform'), defaultValue: (params) => params.mode === 'transform' ? [0.5, 0.5] : undefined }),
