@@ -198,6 +198,8 @@ export interface ReorderDialogueChainAuthorIntent extends BaseSemanticAuthorInte
   orderedDialogueIds: string[];
   /** 被拖拽的对白 id(客户端拖拽时知道)。 */
   movedStatementId?: string;
+  /** 精确的 root 语句落点；null 表示末尾，缺省时沿用对白链定位。 */
+  beforeStatementId?: string | null;
   /** 全自动重排:旧槽位之后回移、新槽位之前移,被拖对白落在新槽位。缺省为 false(只动被拖句)。 */
   flow?: boolean;
 }
