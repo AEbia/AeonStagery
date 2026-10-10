@@ -197,6 +197,19 @@ flowchart TD
 
 ## 4. UI 状态管理与数据流
 
+[`src/App.tsx`](../src/App.tsx) 负责主编辑器的界面组合；应用协调逻辑集中在以下 hooks，订阅、异步流程与清理由各自模块管理：
+
+| 协调职责 | 代码入口 |
+| --- | --- |
+| Provider 协作状态与 presence 发布器 | [`useAppCollaborationState`](../src/ui/hooks/useAppCollaborationState.ts) |
+| 本机协作服务器、房间加入/主持与主页锁定 | [`useAppCollaborationRoom`](../src/ui/hooks/useAppCollaborationRoom.ts) |
+| 项目打开/创建、模板配置与外部素材库 | [`useAppProjectWorkspace`](../src/ui/hooks/useAppProjectWorkspace.ts) |
+| 工具独立窗口的快照、运行时同步与命令处理 | [`useWorkspaceToolsBridge`](../src/ui/hooks/useWorkspaceToolsBridge.ts) |
+| 设置关闭动画、未保存提示、语音/公告/Live2D 弹窗 | [`useAppDialogs`](../src/ui/hooks/useAppDialogs.ts) |
+| 舞台初始化、默认项目位置与调试日志订阅 | [`useAppInitialization`](../src/ui/hooks/useAppInitialization.ts) |
+| 面板尺寸、布局切换与检查器导航 | [`useAppLayout`](../src/ui/hooks/useAppLayout.ts) |
+| 播放、保存、撤销/重做等全局快捷键协调 | [`useAppShortcuts`](../src/ui/hooks/useAppShortcuts.ts) |
+
 AeonStagery 的 UI 状态分为四层：
 
 1. **服务容器与核心上下文**:

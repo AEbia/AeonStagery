@@ -58,6 +58,8 @@ describe('timeline structural write guard', () => {
   it('keeps v2 raw source wiring out of legacy reverse compilation', () => {
     const files = [
       path.join(ROOT, 'App.tsx'),
+      path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
+      path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
       path.join(UI_ROOT, 'AiScriptSegmentPanel.tsx'),
       path.join(UI_ROOT, 'timeline', 'RawScriptTab.tsx'),
       path.join(ROOT, 'services', 'io', 'SceneFileService.ts'),
@@ -70,7 +72,11 @@ describe('timeline structural write guard', () => {
   });
 
   it('keeps raw editing and AI script generation wired to CurrentSceneDocument source', () => {
-    const app = fs.readFileSync(path.join(ROOT, 'App.tsx'), 'utf8');
+    const app = [
+      path.join(ROOT, 'App.tsx'),
+      path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
+      path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
+    ].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
     const rawScriptTab = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'RawScriptTab.tsx'), 'utf8');
     const aiPanel = fs.readFileSync(path.join(UI_ROOT, 'AiScriptSegmentPanel.tsx'), 'utf8');
     const sceneFileService = fs.readFileSync(path.join(ROOT, 'services', 'io', 'SceneFileService.ts'), 'utf8');
@@ -125,7 +131,11 @@ describe('timeline structural write guard', () => {
   });
 
   it('keeps character directory product writes on semantic authoring', () => {
-    const app = fs.readFileSync(path.join(ROOT, 'App.tsx'), 'utf8');
+    const app = [
+      path.join(ROOT, 'App.tsx'),
+      path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
+      path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
+    ].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
     const characterDirectory = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'CharacterDirectoryPanel.tsx'), 'utf8');
 
     expect(app).toContain('semanticAuthoring.applyCharacterCommand');
@@ -349,7 +359,11 @@ describe('timeline structural write guard', () => {
   it('keeps detached workspace snapshot off projected scene data', () => {
     const workspaceTypes = fs.readFileSync(path.join(UI_ROOT, 'workspace-tools', 'types.ts'), 'utf8');
     const workspaceWindow = fs.readFileSync(path.join(ROOT, 'WorkspaceToolsWindow.tsx'), 'utf8');
-    const app = fs.readFileSync(path.join(ROOT, 'App.tsx'), 'utf8');
+    const app = [
+      path.join(ROOT, 'App.tsx'),
+      path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
+      path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
+    ].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
     const storeHooks = fs.readFileSync(path.join(UI_ROOT, 'store', 'storeHooks.ts'), 'utf8');
 
     expect(workspaceTypes).toContain('sceneMeta: SceneMeta | null');
@@ -472,7 +486,11 @@ describe('timeline structural write guard', () => {
   });
 
   it('keeps character directory product writes on semantic authoring', () => {
-    const app = fs.readFileSync(path.join(ROOT, 'App.tsx'), 'utf8');
+    const app = [
+      path.join(ROOT, 'App.tsx'),
+      path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
+      path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
+    ].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
     const characterDirectory = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'CharacterDirectoryPanel.tsx'), 'utf8');
 
     expect(app).toContain('semanticAuthoring.applyCharacterCommand');
