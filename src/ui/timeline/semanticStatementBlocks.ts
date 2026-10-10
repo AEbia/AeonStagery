@@ -184,6 +184,20 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
     },
   },
   {
+    id: 'dialogue.hide',
+    label: '隐藏字幕框',
+    icon: 'dialogue',
+    category: 'dialogue',
+    createDraft: () => ({ type: 'dialogueVisibility', params: { visible: false, durationSeconds: 0.3 } }),
+  },
+  {
+    id: 'dialogue.show',
+    label: '显示字幕框',
+    icon: 'dialogue',
+    category: 'dialogue',
+    createDraft: () => ({ type: 'dialogueVisibility', params: { visible: true, durationSeconds: 0.3 } }),
+  },
+  {
     id: 'character.enter',
     label: '角色登场',
     icon: 'addCharacter',

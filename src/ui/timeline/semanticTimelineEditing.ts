@@ -732,6 +732,8 @@ function applyTimelineParam(
   value: unknown,
 ): boolean {
   switch (item.type) {
+    case 'dialogueVisibility':
+      return setMappedParam(params, key === 'duration' ? 'durationSeconds' : key, value, ['visible', 'durationSeconds']);
     case 'dialogue':
       return setMappedParam(params, key === 'duration' ? 'durationSeconds' : key, value, [
         'speakerId',
@@ -1169,6 +1171,7 @@ function paramsWithDuration(
       params.motion = { ...motion, durationSeconds };
       return params as SceneStatement['params'] | DialogueCompanion['params'];
     }
+    case 'dialogueVisibility':
     case 'characterPresence':
     case 'characterTransform':
     case 'environmentLayer':

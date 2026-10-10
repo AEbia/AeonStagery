@@ -4,6 +4,7 @@ import {
   type SceneDocumentV5,
 } from '../../api/types/semantic-scene';
 import { SceneDocumentCodec, sceneDocumentCodec } from './SceneDocumentCodec';
+import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
 import { migrateSceneV3ToV4, repairLegacyV4CustomMotionSegments } from './SceneV3ToV4Migration';
 
 export function migrateSceneV4ToV5(
@@ -23,6 +24,7 @@ export function migrateSceneV4ToV5(
   const document = cloneJson(input) as Record<string, unknown>;
   const { document: repaired, warnings } = repairLegacyV4CustomMotionSegments(document);
   const v5Document = repaired as Record<string, unknown>;
+  validateV4Stage(v5Document, codec);
   v5Document.schemaVersion = SCENE_SCHEMA_VERSION_V5;
 
   // Validate detached v5 stage
@@ -60,11 +62,18 @@ export function validateV4Stage(document: unknown, codec: SceneDocumentCodec): v
   if (!isRecord(document)) {
     throw new Error('Detached v4 stage validation expects an object');
   }
-  // v4 and v5 share the same typed document shape, so a detached v4 stage can
-  // be validated through the current version's known-projection parser.
+  // Derive a typed view, then reject families introduced after v4 before
+  // upgrading the detached source. Do not backport new families into v4.
   const working = cloneJson(document) as Record<string, unknown>;
   working.schemaVersion = SCENE_SCHEMA_VERSION;
-  codec.parseKnownProjection(working);
+  const projection = codec.parseKnownProjection(working);
+  for (const [index, statement] of projection.statements.entries()) {
+    const path = `scene.statements[${index}]`;
+    sceneStatementDefinitionRegistry.assertSupportedInSchema(statement.type, 4, `${path}.type`);
+    for (const [companionIndex, companion] of (statement.companions ?? []).entries()) {
+      sceneStatementDefinitionRegistry.assertSupportedInSchema(companion.type, 4, `${path}.companions[${companionIndex}].type`);
+    }
+  }
 }
 
 export function validateV5Stage(document: unknown, codec: SceneDocumentCodec): SceneDocumentV5 {

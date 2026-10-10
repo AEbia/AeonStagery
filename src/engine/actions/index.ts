@@ -45,6 +45,8 @@ export const actionSchedulers: Record<string, ActionScheduler> = {
   playMotion: schedulePlayMotion,
   setExpression: scheduleSetExpression,
   dialogue: scheduleDialogue,
+  // Visibility is reconstructed by RuntimeSceneState on playback and seek.
+  setDialogueVisibility: () => {},
   cameraPath: scheduleCameraPath,
   cameraShake: scheduleCameraShake,
   cameraReset: scheduleCameraReset,

@@ -39,6 +39,7 @@ function createMockSubtitle() {
     seek: vi.fn(),
   };
   return {
+    setDialogueVisibility: vi.fn(),
     ensureDialogueOnStage: vi.fn(),
     getCurrentTimeline: vi.fn().mockReturnValue(mockTimeline),
     forceUpdate: vi.fn(),
@@ -64,6 +65,39 @@ describe('DialogueCoordinator', () => {
     subtitle = createMockSubtitle();
     lipSync = createMockLipSync();
     coordinator = new DialogueCoordinator(subtitle as any, lipSync as any);
+  });
+
+  it('keeps text lip sync and dialogue progress running while the box is hidden', () => {
+    const dialogue = { _id: 'hidden', text: 'Hello', startTime: 1, duration: 3, speakerId: 'hero' };
+    coordinator.sync(1.5, dialogue, false, () => new Audio(), (path) => path, vi.fn(), false);
+    coordinator.sync(2, dialogue, false, () => new Audio(), (path) => path, vi.fn(), false);
+    expect(subtitle.setDialogueVisibility).toHaveBeenLastCalledWith(false, 0);
+    expect(lipSync.setTextMouthAt).toHaveBeenLastCalledWith('hero', 'Hello', 3, 1);
+    expect(subtitle._mockTimeline.seek).toHaveBeenLastCalledWith(1);
+    expect(subtitle.hideDialogue).not.toHaveBeenCalled();
+    coordinator.sync(2.5, dialogue, true, () => new Audio(), (path) => path, vi.fn(), true);
+    expect(subtitle.setDialogueVisibility).toHaveBeenLastCalledWith(true, 1);
+    expect(subtitle.ensureDialogueOnStage).toHaveBeenCalledTimes(1);
+  });
+
+  it('schedules hidden voice dialogue once and keeps audio lip sync active', () => {
+    const dialogue = { _id: 'voice-hidden', text: 'Hello', startTime: 0, duration: 3, speakerId: 'hero', voice: 'voice.wav' };
+    const audio = new Audio();
+    const createAudio = vi.fn(() => audio);
+    const scheduleVoice = vi.fn();
+    coordinator.sync(1, dialogue, false, createAudio, (path) => path, scheduleVoice, false);
+    coordinator.sync(2, dialogue, false, createAudio, (path) => path, scheduleVoice, true);
+    expect(scheduleVoice).toHaveBeenCalledTimes(1);
+    expect(scheduleVoice).toHaveBeenCalledWith('voice-voice-hidden', audio, 0, 3);
+    expect(lipSync.startAudioDrivenLipSync).toHaveBeenCalledWith('hero', audio);
+    expect(lipSync.stop).not.toHaveBeenCalled();
+  });
+
+  it('passes scene-time opacity through while the dialogue and lip sync continue', () => {
+    const dialogue = { _id: 'fading', text: 'Hello', startTime: 1, duration: 3, speakerId: 'hero' };
+    coordinator.sync(2, dialogue, false, () => new Audio(), (path) => path, vi.fn(), false, 0.5);
+    expect(subtitle.setDialogueVisibility).toHaveBeenLastCalledWith(false, 0.5);
+    expect(lipSync.setTextMouthAt).toHaveBeenLastCalledWith('hero', 'Hello', 3, 1);
   });
 
   it('sync with no dialogue hides active dialogue if one was showing', () => {

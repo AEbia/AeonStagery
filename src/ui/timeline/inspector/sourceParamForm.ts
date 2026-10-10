@@ -1,6 +1,7 @@
 // Source-param form applicability sets for the inspector (ADR-0022 statement families).
 export const SOURCE_PARAM_FORM_SEMANTIC_TYPES = new Set<string>([
   'dialogue',
+  'dialogueVisibility',
   'characterPresence',
   'characterTransform',
   'characterPerformance',

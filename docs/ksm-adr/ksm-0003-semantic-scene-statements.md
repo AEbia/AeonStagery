@@ -214,6 +214,7 @@ PreparedCompiledScene
 | Family | Discriminator and invariant | Replaces current facts |
 |---|---|---|
 | `dialogue` | 说话人、文本、语音、样式、必需的 `durationSeconds` 与可见 companions | `dialogue` |
+| `dialogueVisibility` (v5 新增) | 必需的 `visible: boolean`、可选非负 `durationSeconds`（默认 0）；字幕框全局持久显示状态与淡入淡出，不改变语音、口型或对白进度 | `setDialogueVisibility` runtime directive (`durationSeconds` → `duration`) |
 | `characterPresence` | `mode: enter \| exit`；稳定 character id、模型/variant 与入退场过渡 | `addCharacter`, `removeCharacter` |
 | `characterTransform` | position、scale、rotation、opacity、z、duration、easing；省略字段表示保持当前值 | `moveCharacter`, `transformCharacter` |
 | `characterPerformance` | motion、expression、lookAt、blink 的 typed partial，至少一项；一次 authoring transaction 可 lower 为多个 named outputs | `playMotion`, `setExpression`, `characterLookAt`, `characterBlink` |
@@ -229,6 +230,12 @@ PreparedCompiledScene
 | `customAnimation` | 声明式 animation resource、稳定 target layer 与 duration | `playCustomAnimation` |
 
 `custom` 被删除。未来扩展必须由单独的 plugin/permission ADR 定义签名、权限、sandbox 和 versioning，不能接受任意 JSON 再在 runtime 打印 unknown action。
+
+#### Dialogue Visibility Contract (Scene v5)
+
+`dialogueVisibility` 是 v5 epoch 内新增的独立 root family，不可附着为对白 companion。它控制对白正文、姓名和框体，默认 `visible = true`，最后一条生效的显示语句持续到下一条显示语句；新对白不重置状态。同时间按 source order 求值。`durationSeconds` 定义线性透明度过渡及语句时长，未指定或为 0 时瞬时生效；新插入动作默认 0.3 秒。属性面板仅提供过渡时长，显示方向由语句库动作决定。过渡中发生新显示语句时从当前透明度继续。`RuntimeSceneState` 统一重建播放、seek 和导出透明度，`SubtitleRenderer` 将其与对白入场透明度相乘，不停止时间轴或修改语音与口型，也不隐藏独立文字图层。场景清理恢复默认状态。
+
+按 ADR-0031，新 family 不提升 scene epoch，也不改变既有 source shape 的语义；未使用该 family 的场景不补写字段。不认识它的旧 v5 reader 按 Unknown Discriminator 拒绝加载。历史 v3/v4 场景不得包含它，迁移不得将这种错误版本标记静默升级为合法新语句。
 
 #### Character Performance Atomicity
 
