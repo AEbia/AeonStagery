@@ -1363,12 +1363,14 @@ export const TrackArea = React.memo(({
     />
   );
 
+  const contentWidth = Math.max(1000, containerWidth, maxTime * pps + 200);
+
   return (
     <div
       ref={areaRef}
       data-testid="timeline-track-area"
       style={{
-        width: `${Math.max(1000, maxTime * pps + 200)}px`,
+        width: `${contentWidth}px`,
         position: 'relative',
         minHeight: '100%',
         cursor: 'default',
@@ -1384,7 +1386,7 @@ export const TrackArea = React.memo(({
       }}
     >
       <Ruler
-        maxTime={maxTime}
+        maxTime={Math.max(maxTime, (contentWidth - 100) / pps)}
         pps={pps}
         onSeek={onSeek}
         scrollLeft={scrollLeft}

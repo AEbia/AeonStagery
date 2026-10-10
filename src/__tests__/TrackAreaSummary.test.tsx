@@ -42,6 +42,7 @@ function createValidationStore(issueIds: string[]) {
 function renderTrackArea(options: {
   actions?: Array<{ id: string; action: SceneAction }>;
   pps?: number;
+  containerWidth?: number;
   selectedIds?: Record<string, boolean>;
   repeatIndexMap?: Map<string, string>;
   validationIssueIds?: string[];
@@ -143,7 +144,7 @@ function renderTrackArea(options: {
         onSeek={onSeek}
         sceneData={{ sceneId: 'summary-test', meta: { title: 'Summary Test', markers: [] }, timeline: actions.map((item) => item.action) }}
         scrollLeft={0}
-        containerWidth={1000}
+        containerWidth={options.containerWidth ?? 1000}
         repeatIndexMap={options.repeatIndexMap ?? new Map([['a2', 'dup']])}
         onBatchDrag={vi.fn()}
         viewWindow={{ start: 0, end: 20 }}
@@ -170,6 +171,23 @@ describe('TrackArea summary mode', () => {
       Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { value: vi.fn(), configurable: true });
       Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { value: vi.fn(), configurable: true });
     }
+  });
+
+  it.each([1200, 1600])('fills a %ipx viewport with the ruler when zoomed out', (containerWidth) => {
+    const { container } = renderTrackArea({ actions: [], pps: 10, containerWidth });
+    const trackArea = screen.getByTestId('timeline-track-area');
+    expect(parseFloat(trackArea.style.width)).toBeGreaterThanOrEqual(containerWidth);
+
+    const ruler = container.querySelector('.timeline-ruler')!;
+    const tickPositions = Array.from(ruler.querySelectorAll<HTMLElement>('.ruler-tick'))
+      .map(tick => parseFloat(tick.style.left));
+    // Tick coordinates start after the 100px track-label column.
+    expect(Math.max(...tickPositions)).toBeGreaterThanOrEqual(containerWidth - 100 - 100);
+  });
+
+  it('preserves horizontal scrolling when the scene is wider than the viewport', () => {
+    renderTrackArea({ actions: [], pps: 100, containerWidth: 1600 });
+    expect(screen.getByTestId('timeline-track-area').style.width).toBe('2200px');
   });
 
   it('aligns the motion insertion target with the character entrance', () => {
