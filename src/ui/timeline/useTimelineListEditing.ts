@@ -12,7 +12,6 @@ import { useSettings } from '../SettingsStore';
 import { createSemanticTimelineCorrelationId } from './semanticTimelineEditing';
 import { buildSemanticStatementLibraryInsert } from './semanticStatementInsertion';
 import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
-import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
 import type { SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import type { QuickParamPatch } from './StatementQuickControls';
 import type { TimelineAction } from './semanticTimelineTypes';
@@ -21,10 +20,6 @@ import type { TimelineListGapMenuState } from './TimelineListGapMenu';
 
 function createTimelineListCorrelationId(): string {
   return `timeline_list_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function isRootDialogueItem(item: SemanticTimelineReadModelItem | undefined): boolean {
-  return item?.locator.kind === 'statement' && item.source.type === 'dialogue';
 }
 
 /** List-specific commands reuse the shared semantic command and selection contract. */
@@ -179,35 +174,18 @@ export function useTimelineListEditing(
     const moved = sceneDocument.statements.find((statement) => statement.id === movedStatementId);
     if (!moved) return;
     if (moved.type === 'dialogue') {
-      const orderedDialogueIds = sceneDocument.statements
-        .filter((statement) => statement.type === 'dialogue')
-        .map((statement) => statement.id);
-      const fromIndex = orderedDialogueIds.indexOf(movedStatementId);
-      if (fromIndex < 0) return;
-
-      const afterDialogue = semanticTimelineItems
+      const rootItems = semanticTimelineItems.filter((item) => item.locator.kind === 'statement');
+      const nextRoot = semanticTimelineItems
         .slice(insertionIndex)
-        .find((item) => isRootDialogueItem(item) && item.statementId !== movedStatementId);
-      const beforeDialogue = semanticTimelineItems
-        .slice(0, insertionIndex)
-        .reverse()
-        .find((item) => isRootDialogueItem(item) && item.statementId !== movedStatementId);
-
-      const remaining = orderedDialogueIds.filter((id) => id !== movedStatementId);
-      let targetIndex = remaining.length;
-
-      if (afterDialogue) {
-        const idx = remaining.indexOf(afterDialogue.statementId);
-        if (idx >= 0) targetIndex = idx;
-      } else if (beforeDialogue) {
-        const prevIdx = remaining.indexOf(beforeDialogue.statementId);
-        if (prevIdx >= 0) targetIndex = prevIdx + 1;
-      }
-
+        .find((item) => item.locator.kind === 'statement' && item.statementId !== movedStatementId);
+      const remaining = rootItems.filter((item) => item.statementId !== movedStatementId);
+      const targetIndex = nextRoot ? remaining.findIndex((item) => item.statementId === nextRoot.statementId) : remaining.length;
       const reordered = [...remaining];
-      reordered.splice(targetIndex, 0, movedStatementId);
+      const movedItem = rootItems.find((item) => item.statementId === movedStatementId);
+      if (!movedItem) return;
+      reordered.splice(targetIndex, 0, movedItem);
 
-      if (reordered.every((id, index) => id === orderedDialogueIds[index])) {
+      if (reordered.every((item, index) => item.statementId === rootItems[index].statementId)) {
         setDraggingActionId(null);
         setDropTarget(null);
         setDragOverGapIndex(null);
@@ -220,8 +198,9 @@ export function useTimelineListEditing(
           kind: 'reorder-dialogue-chain',
           origin: 'sequential-flow',
           correlationId: createSemanticTimelineCorrelationId('timeline_list_dialogue_reorder'),
-          orderedDialogueIds: reordered,
+          orderedDialogueIds: reordered.filter((item) => item.source.type === 'dialogue').map((item) => item.statementId),
           movedStatementId,
+          beforeStatementId: nextRoot?.statementId ?? null,
           flow: dialogueFlowEnabled,
         });
       } catch (error) {
