@@ -2,6 +2,9 @@
 import { setupInlineDetailsFixture, state, load, list, expand } from './fixtures/timelineInlineDetails';
 import { act, createEvent, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import type { SemanticAuthorIntent } from '../api/types/authoring';
+import { sceneStatementCompiler } from '../services/semantic-scene';
+import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
 
 setupInlineDetailsFixture();
 
@@ -111,6 +114,42 @@ describe('Inline details quick edit', () => {
     expect(detail.getByText('移动缓动')).toBeTruthy();
   });
 
+  it.each([undefined, [0.4, 0.6]])('clears a camera focus target with position %j to use fixed coordinates', async (position) => {
+    const params = {
+      mode: 'focus', target: 'alice', ...(position ? { position } : {}),
+      zoom: { kind: 'absolute', value: 1.2 }, durationSeconds: 1,
+    };
+    load('camera', params);
+    const { container } = list();
+    const detail = expand(container);
+    expect(detail.queryByRole('combobox', { name: '目标角色' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('combobox', { name: '跟随目标' }));
+    const fixedCoordinates = screen.getByRole('option', { name: '固定坐标' });
+    await act(async () => { fireEvent.click(fixedCoordinates); });
+
+    const fixedParams = {
+      mode: 'focus', position: position ?? [0.5, 0.5],
+      zoom: { kind: 'absolute', value: 1.2 }, durationSeconds: 1,
+    };
+    expect(state.author).toHaveBeenCalledTimes(1);
+    expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'update-statement', patch: { params: fixedParams },
+    }));
+    const result = new SemanticTimelineAuthoringService().author(
+      state.document, state.author.mock.calls[0][0] as SemanticAuthorIntent,
+    );
+    expect(sceneStatementCompiler.compile(result.document).actions[0].params.focus)
+      .toEqual({ point: fixedParams.position });
+  });
+
+  it('keeps a character target required for camera following', () => {
+    load('camera', { mode: 'follow', operation: 'start', target: 'alice' });
+    list();
+    fireEvent.click(screen.getByRole('combobox', { name: '跟随目标' }));
+    expect(screen.queryByRole('option', { name: '固定坐标' })).toBeNull();
+  });
+
   it.each([
     ['characterTransform', { id: 'alice', position: [0.5, 1], scale: 1, durationSeconds: 1 }, ['空间坐标', '缩放比例', '时长'], '深度 (Z)'],
     ['environmentLayer', { mode: 'set', layerId: 'background', file: 'background.png', opacity: 1 }, ['不透明度', '时长'], '过渡方式'],
@@ -124,20 +163,21 @@ describe('Inline details quick edit', () => {
     expect(container.querySelectorAll('.inspector-section-title').length).toBeGreaterThan(0);
   });
 
-  it('keeps background layer editing in the row without an extra layer creation selector', () => {
+  it('edits the literal environment layer ID in the row without a duplicate detail control', () => {
     load('environmentLayer', { mode: 'set', layerId: 'background', file: 'background.png' });
     const { container } = list();
     const detail = expand(container);
     expect(detail.queryByRole('combobox', { name: '选择或新建环境层' })).toBeNull();
     expect(detail.queryByRole('combobox', { name: '环境层名称' })).toBeNull();
-    expect((screen.getByRole('textbox', { name: '环境层名称' }) as HTMLInputElement).value).toBe('background');
+    expect(detail.queryByRole('textbox', { name: '环境图层 ID' })).toBeNull();
+    expect((screen.getByRole('textbox', { name: '环境图层 ID' }) as HTMLInputElement).value).toBe('background');
   });
 
-  it('omits integration basics while retaining color controls', () => {
+  it('retains integration target selection and color controls without duplicating numeric fields', () => {
     load('visualStyle', { scope: 'object', target: 'alice', slot: 'integration', mode: 'set', recipeId: 'builtin:integration-soft', intensity: 0.8, durationSeconds: 0.5 });
     const { container } = list();
     const detail = expand(container);
-    expect(detail.queryByText('角色')).toBeNull();
+    expect(detail.getByRole('combobox', { name: '角色' })).toBeTruthy();
     expect(detail.queryByRole('spinbutton', { name: '染色强度' })).toBeNull();
     expect(detail.queryByRole('spinbutton', { name: '过渡时长' })).toBeNull();
     expect(detail.getByRole('spinbutton', { name: '亮度' })).toBeTruthy();

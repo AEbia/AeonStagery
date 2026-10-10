@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
+import { useTimelineTextareaSize } from './useTimelineTextareaSize';
 import type { SemanticTimelineReadModelItem } from './semanticTimelineReadModel';
 import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
 import { useCharacterAdapter } from '../context/AppContext';
@@ -26,42 +27,7 @@ function QuickTextInput({ value, label, multiline = false, expanded = false, rea
 }) {
   const draft = useRemoteAwareStringDraft(value, onChange);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const sizing = useRef({ expanded, height: '', manualMinimum: 0 });
-  const resize = useCallback(() => {
-    const element = textareaRef.current;
-    if (!element) return;
-    const previous = sizing.current;
-    if (previous.expanded !== expanded) previous.manualMinimum = 0;
-    else if (element.style.height !== previous.height) {
-      previous.manualMinimum = Number.parseFloat(element.style.height) || 0;
-    }
-    previous.expanded = expanded;
-    if (!expanded) {
-      element.style.height = '';
-      previous.height = '';
-      return;
-    }
-    const style = window.getComputedStyle(element);
-    const lineHeight = Number.parseFloat(style.lineHeight) || (Number.parseFloat(style.fontSize) || 12) * 1.4;
-    const padding = (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
-    const borders = (Number.parseFloat(style.borderTopWidth) || 0) + (Number.parseFloat(style.borderBottomWidth) || 0);
-    element.style.height = 'auto';
-    element.style.height = `${Math.min(lineHeight * 10 + padding + borders,
-      Math.max(lineHeight * 5 + padding + borders, element.scrollHeight + borders, previous.manualMinimum))}px`;
-    previous.height = element.style.height;
-  }, [expanded]);
-  useLayoutEffect(resize, [resize, draft.localValue]);
-  useLayoutEffect(() => {
-    const element = textareaRef.current;
-    if (!element || !expanded) return;
-    let width = element.getBoundingClientRect().width;
-    const observer = new ResizeObserver(() => {
-      const nextWidth = element.getBoundingClientRect().width;
-      if (nextWidth !== width) { width = nextWidth; resize(); }
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [expanded, resize]);
+  useTimelineTextareaSize(textareaRef, expanded, draft.localValue);
   const inputProps = {
     value: draft.localValue,
     'aria-label': label,
@@ -145,7 +111,7 @@ function QuickPerformanceResourceSelect({ item, fieldKey, sceneData, timelineAct
   );
 }
 
-export function StatementQuickControls({ item, sceneData, timelineActions, expanded = false, disabled, onChange }: {
+export const StatementQuickControls = memo(function StatementQuickControls({ item, sceneData, timelineActions, expanded = false, disabled, onChange }: {
   item: SemanticTimelineReadModelItem;
   sceneData: TimelineScene;
   timelineActions: readonly TimelineAction[];
@@ -207,20 +173,26 @@ export function StatementQuickControls({ item, sceneData, timelineActions, expan
           || (field.key === 'target' && ['characterPerformance', 'camera'].includes(item.source.type));
         if (characterField) {
           const current = typeof value === 'string' ? value : '';
+          const isCameraFocus = item.source.type === 'camera' && source.mode === 'focus';
           const label = isDialogue ? '选择说话角色' : item.source.type === 'camera' ? '跟随目标' : '选择角色';
           return (
             <label key={field.key} className="timeline-item__inline-field">
               {!isDialogue && <span className="timeline-item__inline-label">{field.label}</span>}
               <FormSelect className="timeline-item__inline-select" value={current} aria-label={label}
                 disabled={disabled}
-                placeholder={isDialogue ? '(旁白)' : '未绑定角色'}
+                placeholder={isDialogue ? '(旁白)' : isCameraFocus ? '固定坐标' : '未绑定角色'}
                 options={[
                   ...(isDialogue ? [{ value: '', label: '(旁白)' }] : []),
+                  ...(isCameraFocus ? [{ value: '', label: '固定坐标' }] : []),
                   ...(current && !characters.some((character) => character.id === current)
                     ? [{ value: current, label: current }] : []),
                   ...characters.map((character) => ({ value: character.id, label: character.name })),
                 ]}
                 onChange={(id) => {
+                  if (isCameraFocus && !id) {
+                    onChange((current) => ({ target: undefined, position: current.position ?? [0.5, 0.5] }));
+                    return;
+                  }
                   if (!isDialogue) { onChange({ [field.key]: id }); return; }
                   const character = characters.find((candidate) => candidate.id === id);
                   onChange({ speakerId: id || undefined, speaker: character?.name, speakerColor: character?.color });
@@ -332,4 +304,4 @@ export function StatementQuickControls({ item, sceneData, timelineActions, expan
       })}
     </fieldset>
   );
-}
+});

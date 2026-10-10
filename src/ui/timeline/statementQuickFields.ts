@@ -14,6 +14,8 @@ export function getStatementQuickFields(item: SemanticTimelineReadModelItem, sce
   const source = item.source.params as Record<string, unknown>;
   return getSemanticInspectorFields(item.source.type, source, sceneVisual).filter((field) => {
     if (!quickKeys.has(field.key)) return false;
+    // Keep visual targets and recipes in their dedicated detail selectors.
+    if (item.source.type === 'visualStyle' && ['target', 'recipeId'].includes(field.key)) return false;
     // Integration overrides replace the top-level values; their editor remains in details.
     if (item.source.type === 'visualStyle' && source.slot === 'integration'
       && field.key === 'intensity' && source.semanticOverride && typeof source.semanticOverride === 'object') return false;

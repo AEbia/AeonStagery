@@ -9,6 +9,18 @@ setupInlineDetailsFixture();
 
 describe('Inline details layout', () => {
   it('grows from five to ten lines, retains a manual height and resets on collapse', () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++frameId, callback);
+      return frameId;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const flushSize = () => act(() => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback(0));
+    });
     list();
     const text = screen.getByRole('textbox', { name: '编辑台词内容' }) as HTMLTextAreaElement;
     // jsdom has no text layout; model the native metrics consumed by autosizing.
@@ -21,11 +33,14 @@ describe('Inline details layout', () => {
     fireEvent.mouseDown(text);
     fireEvent.focus(text);
     fireEvent.change(text, { target: { value: Array(8).fill('台词').join('\n') } });
+    flushSize();
     expect(text.style.height).toBe('174px');
     fireEvent.change(text, { target: { value: Array(15).fill('台词').join('\n') } });
+    flushSize();
     expect(text.style.height).toBe('214px');
     text.style.height = '194px';
     fireEvent.change(text, { target: { value: '较短的台词' } });
+    flushSize();
     expect(text.style.height).toBe('194px');
     fireEvent.click(screen.getByRole('button', { name: '折叠详情' }));
     expect(text.style.height).toBe('');
