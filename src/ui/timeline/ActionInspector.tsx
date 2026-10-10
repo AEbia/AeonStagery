@@ -72,7 +72,7 @@ import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './us
 import { getStatementQuickFields } from './statementQuickFields';
 
 // These fields retain supplemental browsing/preview tools, without displaying their value again.
-const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression', 'layerId']);
+const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression']);
 
 export interface ActionInspectorProps {
   semanticSnapshot?: SemanticTimelineSnapshot;
@@ -89,7 +89,7 @@ export interface ActionInspectorProps {
   presentation?: 'panel' | 'inline';
 }
 
-export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
+export const ActionInspector = React.memo(function ActionInspector(props: ActionInspectorProps) {
   const {
     sceneData,
     selectedActionIds, setSelectedIds,
@@ -119,7 +119,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     actionId,
     semanticItem,
     performanceTargetSpeakerId,
-  } = useActionSelection({ selectedActionIds, items: semanticSnapshot.items });
+  } = useActionSelection({ selectedActionIds, snapshot: semanticSnapshot });
   const { targetModelPath, modelData, isModelDataLoading } = useModelData({
     characterAdapter,
     sceneData,
@@ -202,9 +202,6 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const rimLightTargetOptions = computeRimLightTargetOptions(actionParams, characterVisualTargetOptions);
   const displayAction = withAuthorFacingEnvironmentLabel(sceneData, action);
   const isEnvironmentLayerAuthoringAction = ['setEnvironmentLayer', 'transformEnvironmentLayer', 'removeEnvironmentLayer'].includes(actionType);
-  const currentEnvironmentLayer = isEnvironmentLayerAuthoringAction
-    ? environmentLayers.find((layer) => layer.layerId === (actionParams.layerId || 'background')) || environmentLayers[0]
-    : undefined;
   const actionIssues = validationIssues.filter((issue) => (
     issue.actionId === actionId ||
     issue.actionId === semanticItem?.statementId
@@ -249,10 +246,10 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     updateResourceParam, updateSemanticSourceParam, updateAuthoringParam,
     canRemoveCharacterPerformanceField, updateDialogueSpeaker,
     currentDialogueTemplateValue, customDialogueTemplateOptions, updateDialogueTemplate,
-    updateVisualSemanticOverride, commitEnvironmentLayerReference,
+    updateVisualSemanticOverride,
   } = createInspectorMutations({
     appContext, action, actionId, actionParams, sourceParams, usesSourceParamForm, sceneData,
-    updateAction, updateParam, replaceSourceParams,
+    updateParam, replaceSourceParams,
   });
 
   const customMotionValue = typeof actionParams.motion === 'object' && actionParams.motion !== null && actionParams.motion.kind === 'custom'
@@ -287,12 +284,12 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     showVisualAdvanced, isPrimaryVisualIntentBlock, isCharacterEntranceAction,
     isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     isLensFilterSourceAction, isEnvironmentLayerAuthoringAction,
-    visualSlot, currentEnvironmentLayer, displayAction, performanceTargetSpeakerId,
+    visualSlot, displayAction, performanceTargetSpeakerId,
     customMotionValue, environmentLayers, visualTargetOptions, recipeOptions,
     modelData, isModelDataLoading, targetModelPath, currentDialogueTemplateValue, customDialogueTemplateOptions,
     updateParam, replaceSourceParams, updateResourceParam, updateSemanticSourceParam,
     updateAuthoringParam, updateDialogueSpeaker, updateDialogueTemplate,
-    updateVisualSemanticOverride, commitEnvironmentLayerReference, characterAdapter, semanticAuthoring,
+    updateVisualSemanticOverride, characterAdapter, semanticAuthoring,
   };
 
   const renderParam = (key: string) => {
@@ -466,4 +463,4 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
       </div>
     </div>
   );
-};
+});
