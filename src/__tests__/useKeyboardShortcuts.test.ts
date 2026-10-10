@@ -3,6 +3,12 @@ import { cleanup, fireEvent, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getShortcutSurface, shouldIgnoreGlobalShortcut, useKeyboardShortcuts } from '../ui/hooks/useKeyboardShortcuts';
 import type { KeyboardShortcutsSettings } from '../ui/shortcuts/types';
+import { AUTHORING_SCHEMA_VERSION } from '../api/types/authoring';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument } from '../api/types/semantic-scene';
+import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
+import { getSceneDocumentCanonicalOrder, SemanticScenePipeline } from '../services/semantic-scene';
+import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
+import { DocumentStore } from '../ui/store/DocumentStore';
 
 const shortcutState = vi.hoisted(() => ({
   settings: { activeProfileId: 'premiere', overrides: {} } as KeyboardShortcutsSettings,
@@ -151,5 +157,64 @@ describe('keyframe editor history shortcuts', () => {
     unmount();
     fireEvent.keyDown(editor, { key: 'z', code: 'KeyZ', ctrlKey: true });
     expect(onUndo).not.toHaveBeenCalled();
+  });
+});
+
+describe('timeline reorder history shortcuts', () => {
+  it('undoes a multi-statement reorder when Ctrl+Z arrives before its commit finishes', async () => {
+    const store = new DocumentStore();
+    const runtime = { projectPreparedScene: vi.fn(async () => undefined) };
+    const coordinator = new SemanticDocumentCoordinator(store, new SemanticScenePipeline({
+      resolveAsset: async (source) => source,
+    }), runtime);
+    const documentToReorder: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'shortcut-reorder',
+      meta: { title: 'Shortcut reorder' },
+      statements: [
+        { id: 'a', type: 'dialogue', time: 0, params: { text: 'A', durationSeconds: 1 } },
+        { id: 'x', type: 'camera', time: 2, params: { mode: 'focus', position: [0, 0], durationSeconds: 0.5 } },
+        { id: 'y', type: 'camera', time: 3, params: { mode: 'focus', position: [1, 1], durationSeconds: 0.5 } },
+      ],
+    };
+    await coordinator.applyDocument(documentToReorder);
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const beforeOrder = getSceneDocumentCanonicalOrder(before);
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    let undo!: Promise<boolean>;
+    const onUndo = vi.fn(() => { undo = authoring.undo(); });
+    renderHook(() => useKeyboardShortcuts({
+      initialized: true, onUndo, onRedo: vi.fn(), onPlayPause: vi.fn(),
+      onStageReset: vi.fn(), onFrameStep: vi.fn(),
+    }));
+    const editor = document.createElement('div');
+    editor.className = 'timeline-editor-root';
+    editor.innerHTML = '<div class="timeline-list-view"><button class="timeline-item__drag-handle">Drag</button></div>';
+    document.body.appendChild(editor);
+    const dragHandle = editor.querySelector('button')!;
+    dragHandle.focus();
+
+    let releaseProjection!: () => void;
+    let projectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    const projection = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    runtime.projectPreparedScene.mockImplementationOnce(async () => {
+      projectionStarted();
+      await projection;
+    });
+    const reorder = authoring.author({
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'shortcut-reorder', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['a'], movedStatementId: 'a',
+      beforeStatementId: null, flow: true,
+    });
+    await started;
+    fireEvent.keyDown(document.activeElement!, { key: 'z', code: 'KeyZ', ctrlKey: true });
+    releaseProjection();
+    await reorder;
+
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(await undo).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    expect(getSceneDocumentCanonicalOrder(store.getCurrentSceneDocumentSnapshot())).toEqual(beforeOrder);
   });
 });
