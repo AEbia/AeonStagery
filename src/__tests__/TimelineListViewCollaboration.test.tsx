@@ -8,6 +8,7 @@ import { AppProvider } from '../ui/context/AppContext';
 import type { LooseTimelineScene as SceneScript } from './fixtures/TimelineTestTypes';
 import type { TimelineListViewProps } from '../ui/timeline/TimelineListView';
 import type { WorkspaceToolTab } from '../ui/workspace-tools/types';
+import { settingsManager } from '../ui/SettingsStore';
 
 let TimelineListView: React.FC<TimelineListViewProps>;
 
@@ -178,6 +179,7 @@ describe('TimelineListView collaboration undo exclusion', () => {
   });
 
   beforeEach(() => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
     (globalThis as any).ResizeObserver = class {
       observe() {}
       disconnect() {}
@@ -214,6 +216,7 @@ describe('TimelineListView collaboration undo exclusion', () => {
   });
 
   it('selects a contextual workspace view from the timeline title', () => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'list');
     const onSelectWorkspaceView = vi.fn();
     renderTimeline('disconnected', scene, [], onSelectWorkspaceView, 2, 1);
 
@@ -233,11 +236,18 @@ describe('TimelineListView collaboration undo exclusion', () => {
   });
 
   it('uses warning severity when there are no errors', () => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'list');
     renderTimeline('disconnected', sceneWithAction, [], undefined, 0, 2);
 
     const alert = screen.getByTitle('2 个警告');
 
     expect(alert.getAttribute('data-severity')).toBe('warning');
+  });
+
+  it('hides the workspace view picker in tracks mode', () => {
+    renderTimeline('disconnected');
+
+    expect(screen.queryByLabelText(/切换侧栏视图/)).toBeNull();
   });
 
   it('marks a timeline action currently edited by a collaboration peer', () => {
