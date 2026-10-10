@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import * as motionEvaluator from '../engine/live2d/customMotion';
 import { AppProvider } from '../ui/context/AppContext';
-import { CustomMotionEditor, type CustomMotionEditorProps } from '../ui/timeline/CustomMotionEditor';
+import { CustomMotionEditor, type CustomMotionEditorProps } from './fixtures/CustomMotionEditorHarness';
 import { buildCurvePresetSegment, CURVE_PRESETS } from '../ui/timeline/curvePresets';
 
 const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
@@ -41,10 +41,10 @@ describe('custom motion marquee interactions', () => {
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.mouseUp(document);
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'update-keyframe', trackParameterId: 'ParamAngleY', time: 1, value: 2 }]);
+    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'update-keyframe', keyframe: 'ParamAngleY:1', value: 2 }]);
   });
 
-  it('selects an inactive row for keyboard adjustment and inserts at the exact playhead time', () => {
+  it('selects an inactive row for keyboard adjustment and inserts at the nearest scene frame', () => {
     const { editor, onCommit } = setup('panel', false, vi.fn(), { playheadTime: 0.256 });
     const row = editor.querySelectorAll('.cme__lane')[1];
     const control = row.querySelector<HTMLElement>('[role="spinbutton"]')!;
@@ -52,7 +52,7 @@ describe('custom motion marquee interactions', () => {
     expect(row.classList.contains('is-active')).toBe(true);
     fireEvent.keyDown(control, { key: 'ArrowUp' });
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'insert-keyframe', trackParameterId: 'ParamAngleY', time: 0.256, value: 0.31 }]);
+    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'insert-keyframe', parameterId: 'ParamAngleY', frame: 15, value: 0.31 }]);
   });
 
   it('accepts typed values on an inactive row through the shared adjuster', () => {
@@ -66,7 +66,7 @@ describe('custom motion marquee interactions', () => {
     fireEvent.change(input, { target: { value: '7' } });
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.blur(input);
-    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'update-keyframe', trackParameterId: 'ParamAngleY', time: 1, value: 7 }]);
+    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'update-keyframe', keyframe: 'ParamAngleY:1', value: 7 }]);
   });
 
   it('keeps all row values readonly while editing is blocked', () => {
@@ -89,7 +89,7 @@ describe('custom motion marquee interactions', () => {
     expect(editor.querySelector('input[type="number"]')).toBeNull();
     fireEvent.keyDown(screen.getByRole('spinbutton', { name: '值' }), { key: 'ArrowRight' });
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'update-keyframe', time: 1, value: 1.05 });
+    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'update-keyframe', keyframe: 'ParamAngleX:1', value: 1.05 });
     expect(screen.getByRole('spinbutton', { name: '值' })).toBeTruthy();
   });
 
@@ -103,7 +103,7 @@ describe('custom motion marquee interactions', () => {
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.mouseUp(document);
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'update-keyframe', trackParameterId: 'ParamAngleX', time: 1 });
+    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'update-keyframe', keyframe: 'ParamAngleX:1' });
     expect(onCommit.mock.calls[0][0][0].value).toBeGreaterThan(1);
   });
 
@@ -140,7 +140,8 @@ describe('custom motion marquee interactions', () => {
     const control = screen.getByRole('combobox', { name: '动画曲线预设' }) as HTMLSelectElement;
     expect(control.value).toBe('linear');
     fireEvent.change(control, { target: { value: 'easeOut' } });
-    const segment = onCommit.mock.calls[0][0][0].segment;
+    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'set-curve-preset', keyframe: 'ParamAngleX:1', presetId: 'easeOut' });
+    const segment = buildCurvePresetSegment('easeOut', motion.tracks[0].keyframes[1], motion.tracks[0].keyframes[2])!;
     const changed = { ...motion, tracks: [{ ...motion.tracks[0], keyframes: [motion.tracks[0].keyframes[0], { ...motion.tracks[0].keyframes[1], segment }, motion.tracks[0].keyframes[2]] }, motion.tracks[1]] };
     const props = { blockTime: 0, pixelsPerSecond: 100, playheadTime: 0, onCommit };
     rerender(<CustomMotionEditor motion={changed} {...props} />);
@@ -177,7 +178,7 @@ describe('custom motion marquee interactions', () => {
     pointer(canvases[1].querySelector('[data-kf="1"]')!, 'pointerdown', 0, 0, true);
     expect(editor.querySelectorAll('[data-selected="true"]')).toHaveLength(2);
     fireEvent.keyDown(editor, { key: 'Delete' });
-    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'remove-keyframe', trackParameterId: 'ParamAngleY', time: 1 }]);
+    expect(onCommit.mock.calls[0][0]).toEqual([{ type: 'remove-keyframe', keyframe: 'ParamAngleY:1' }]);
   });
   it('allows marquee selection when readonly but blocks deletion and movement', () => {
     const { canvases, editor, onCommit } = setup('panel', true);
@@ -209,7 +210,7 @@ describe('custom motion marquee interactions', () => {
     expect(onCommit).not.toHaveBeenCalled();
     await act(async () => pointer(window, 'pointerup', 150, 24));
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'move-keyframes', deltaTime: 0.5, deltaValue: 0 });
+    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ type: 'move-keyframes', deltaFrames: 30, deltaValue: 0 });
     expect(editor.querySelector('[data-testid="cme-marquee"]')).toBeNull();
   });
   it('appends a reverse marquee with Shift and keeps points outside the rectangle', () => {
@@ -240,7 +241,7 @@ describe('custom motion marquee interactions', () => {
     pointer(canvas.querySelector('[data-kf="1"]')!, 'pointerdown', 100, 77);
     await act(async () => pointer(window, 'pointerup', 150, 67));
     const edit = onCommit.mock.calls[0][0][0];
-    expect(edit.deltaTime).toBe(0.5);
+    expect(edit.deltaFrames).toBe(30);
     expect(edit.deltaValue).toBeCloseTo(10 / 122 * 2.72);
     expect(edit.keyframes).toHaveLength(2);
   });
@@ -262,7 +263,7 @@ describe('custom motion marquee interactions', () => {
     vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 600, height: 156, right: 600, bottom: 156, x: 0, y: 0, toJSON: () => ({}) });
     pointer(canvas.querySelector('[data-kf="2"]')!, 'pointerdown', 200, 77);
     await act(async () => pointer(window, 'pointerup', 250, 77));
-    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ deltaTime: 0.5, deltaValue: 0 });
+    expect(onCommit.mock.calls[0][0][0]).toMatchObject({ deltaFrames: 30, deltaValue: 0 });
   });
   it('keeps the candidate while an asynchronous commit is pending and rolls back on failure', async () => {
     let reject!: (reason: Error) => void;

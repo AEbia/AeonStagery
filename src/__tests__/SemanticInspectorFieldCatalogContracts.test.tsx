@@ -57,7 +57,7 @@ vi.mock('../ui/AssetBrowserModal', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: [], loading: false }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({ state: 'closed', target: null, session: null }),
 }));
 
 const FAMILIES: readonly StatementFamily[] = [

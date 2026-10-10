@@ -89,7 +89,7 @@ vi.mock('../ui/context/AppContext', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: testState.semanticDocument, filePath: null }),
   useValidationIssues: () => ({ issues: [], loading: false }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({ state: 'closed', target: null, session: null }),
 }));
 
 describe('ActionInspector', () => {

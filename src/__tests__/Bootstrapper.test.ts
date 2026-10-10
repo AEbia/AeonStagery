@@ -83,10 +83,12 @@ function createScriptEngineMock() {
       listeners.add(callback);
       return () => { listeners.delete(callback); };
     }),
-    previewTransform: vi.fn(), getDuration: vi.fn().mockReturnValue(10),
+    previewTransform: vi.fn(), previewCustomMotion: vi.fn(), clearCustomMotionPreview: vi.fn().mockResolvedValue(undefined),
+    setBasePath: vi.fn(), getDuration: vi.fn().mockReturnValue(10),
     setSilentMode: vi.fn(), getBasePath: vi.fn().mockReturnValue('.'),
     getMasterTimeline: vi.fn().mockReturnValue(null),
     loadScene: vi.fn().mockResolvedValue(undefined),
+    loadPreparedScene: vi.fn().mockResolvedValue(undefined),
     onPause: vi.fn().mockReturnValue(() => undefined),
     onSeekComplete: vi.fn().mockReturnValue(() => undefined),
   };
@@ -121,6 +123,24 @@ describe('Bootstrapper', () => {
     fontSizeSubscription?.[1]();
     expect(subtitleRenderer.forceUpdate).toHaveBeenCalledOnce();
     ctx.dispose();
+  });
+
+  it('closes the application editing session when the project closes and disposes it on teardown', async () => {
+    const ctx = bootstrapCtx();
+    await ctx.services.semanticDocument.applyDocument({
+      schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'motion-preview', meta: { title: 'Motion', fps: 30 },
+      statements: [{ id: 'performance', type: 'characterPerformance', time: 0, params: {
+        target: 'alice', motion: { kind: 'custom', durationSeconds: 1, fadeInSeconds: 0, derivedFrom: { key: 'wave' },
+          tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 0 }] }] },
+      } }],
+    });
+    const session = ctx.services.customMotionEditing.open({ statementId: 'performance' });
+    expect(await session.ready).toEqual({ status: 'held' });
+    ctx.services.projectWorkspace.closeProject();
+    expect(ctx.services.customMotionEditing.getSnapshot().state).toBe('closed');
+    expect(session.preview(null).status).toBe('rejected');
+    await ctx.dispose();
+    expect(await ctx.services.customMotionEditing.open({ statementId: 'performance' }).ready).toEqual({ status: 'invalid-target' });
   });
 
   it('bootstrap() returns adapters, stores, and dispose', () => {

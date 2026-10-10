@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
   document: null as any,
   compiledScene: null as any,
   author: vi.fn(async (_intent: unknown) => ({})),
-  setCustomMotionEditorActionId: vi.fn(),
+  openCustomMotionEditor: vi.fn(),
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: ['wave'], expressions: ['smile'] })),
     playMotion: vi.fn(), stopAllMotions: vi.fn(), setExpression: vi.fn(),
@@ -21,8 +21,8 @@ export { state };
 
 vi.mock('../../ui/context/AppContext', () => ({
   useApp: () => ({
-    stores: { editor: { setCopyBuffer: vi.fn(), setCustomMotionEditorActionId: state.setCustomMotionEditorActionId } },
-    services: { semanticAuthoring: { author: state.author } },
+    stores: { editor: { setCopyBuffer: vi.fn() } },
+    services: { semanticAuthoring: { author: state.author }, customMotionEditing: { open: state.openCustomMotionEditor } },
   }),
   useOptionalApp: () => null,
   useCharacterAdapter: () => state.characterAdapter,
@@ -49,7 +49,10 @@ vi.mock('../../ui/context/AppContext', () => ({
 vi.mock('../../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: [] }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({
+    state: 'closed', session: null, target: null, fps: 60,
+    canonicalMotion: null, motion: null, keyframes: [], committing: false,
+  }),
 }));
 vi.mock('../../ui/SettingsStore', () => ({
   useSettings: () => ({ settings: { workbenchTimelineLayoutMode: 'list', workbenchDialogueFlowMode: 'auto' }, setSetting: vi.fn() }),
@@ -84,7 +87,7 @@ export function setupInlineDetailsFixture() {
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
     vi.stubGlobal('PointerEvent', MouseEvent);
     state.author.mockClear();
-    state.setCustomMotionEditorActionId.mockClear();
+    state.openCustomMotionEditor.mockClear();
     Object.values(state.characterAdapter).forEach((mock) => mock.mockClear());
     load('dialogue', { speakerId: 'alice', text: '第一句台词', durationSeconds: 2 });
   });

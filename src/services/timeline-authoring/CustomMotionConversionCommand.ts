@@ -22,7 +22,8 @@ import {
   type Cubism2MotionSamplingOptions,
 } from '../../engine/live2d/cubism2MotionSampler';
 import { SemanticAuthoringApplicationService } from './SemanticAuthoringApplicationService';
-import { type CustomMotionEditLeaseGate, locatorToLeaseTarget } from './CustomMotionEditLeaseGate';
+import { InMemoryCustomMotionEditAuthority, type CustomMotionEditAuthority, type HeldCustomMotionLease } from './CustomMotionEditAuthority';
+import { customMotionFingerprint } from './customMotionKeyframeEdits';
 import { assertCanonicalCustomMotion, CustomMotionContractError } from '../semantic-scene';
 
 /**
@@ -43,6 +44,7 @@ export interface CustomMotionConversionRequest {
   origin: AuthoringOrigin;
   correlationId?: string;
   scope?: AuthoringScope;
+  signal?: AbortSignal;
 }
 
 export interface CustomMotionConversionReceipt {
@@ -60,8 +62,8 @@ export interface CustomMotionConversionPorts {
    * character is not loaded or is not a Cubism 2.1 runtime.
    */
   samplerTargets: (characterId: string) => readonly Cubism2MotionSamplerTarget[];
-  /** Optional collaboration lease gate; when set, conversion requires the lease. */
-  leaseGate?: CustomMotionEditLeaseGate;
+  /** Shared application authority; standalone callers use in-memory ownership. */
+  authority?: CustomMotionEditAuthority;
   /**
    * Injectable sampler seam (tests substitute fakes here). Defaults to the
    * real Cubism 2.1 sampler implementation.
@@ -112,8 +114,10 @@ interface CharacterPerformanceParamsLike {
  */
 export class CustomMotionConversionCommand {
   private readonly samplerImpl: CustomMotionConversionSampler;
+  private readonly authority: CustomMotionEditAuthority;
 
   constructor(private readonly ports: CustomMotionConversionPorts) {
+    this.authority = ports.authority ?? new InMemoryCustomMotionEditAuthority();
     this.samplerImpl = ports.sampler ?? {
       sample: sampleCubism2MotionCurves,
       merge: mergeCubism2SampledCurves,
@@ -121,7 +125,7 @@ export class CustomMotionConversionCommand {
     };
   }
 
-  async convert(request: CustomMotionConversionRequest): Promise<CustomMotionConversionReceipt> {
+  async convert(request: CustomMotionConversionRequest, handoff?: (lease: HeldCustomMotionLease) => Promise<boolean>): Promise<CustomMotionConversionReceipt> {
     const document = this.ports.authoring.getDocumentSnapshot();
     const entity = resolveCharacterPerformance(document, request.locator);
     const params = entity.params as CharacterPerformanceParamsLike;
@@ -135,7 +139,7 @@ export class CustomMotionConversionCommand {
     }
 
     const motionKey = source.motionKey;
-    const characterId = params.target;
+    const characterId = resolveCharacterId(document, request.locator, params);
     console.log(`[CustomMotionConvert] 开始转换 motion="${motionKey}" character="${characterId}"`);
     const targets = this.ports.samplerTargets(characterId);
     console.log(`[CustomMotionConvert] samplerTargets 数量=${targets.length}`);
@@ -185,17 +189,15 @@ export class CustomMotionConversionCommand {
       samples: curve.samples,
     }));
 
-    const leaseTarget = locatorToLeaseTarget(request.locator);
-    if (this.ports.leaseGate) {
-      const acquired = await this.ports.leaseGate.acquire(leaseTarget);
-      if (!acquired) {
-        throw new CustomMotionConversionError(
-          `Edit lease for character performance "${request.locator.statementId}" is held by another collaborator`,
-          'lease-denied',
-          { statementId: request.locator.statementId },
-        );
-      }
-    }
+    const leaseTarget = request.locator.kind === 'companion'
+      ? { kind: 'companion' as const, statementId: request.locator.statementId, companionId: request.locator.companionId }
+      : { kind: 'statement' as const, statementId: request.locator.statementId };
+    const signal = request.signal ?? new AbortController().signal;
+    const decision = await this.authority.acquire(leaseTarget, signal);
+    if (decision.status !== 'granted') throw new CustomMotionConversionError('Custom motion edit authority refused the conversion', 'lease-denied');
+    let retained = false;
+    let lost = false;
+    const unsubscribeLoss = this.authority.onLoss(decision.lease, () => { lost = true; });
 
     try {
       let conversion: ReturnType<typeof convertSampledMotionToCustomMotion> | undefined;
@@ -203,10 +205,15 @@ export class CustomMotionConversionCommand {
         // Execute the post-sampling read, conversion, and replacement intent
         // inside the application service queue. This preserves sibling output
         // edits that were queued while the lease was pending.
+        if (signal.aborted || lost || currentDocument.sceneId !== document.sceneId || (currentDocument.meta.fps ?? DEFAULT_SCENE_FPS) !== fps) {
+          throw new CustomMotionConversionError('Conversion context changed before commit', 'entity-changed');
+        }
         const currentEntity = resolveCharacterPerformance(currentDocument, request.locator);
         const currentParams = currentEntity.params as CharacterPerformanceParamsLike;
         const currentSource = resolveConversionSource(currentParams.motion);
-        if (!currentSource || currentSource.kind !== source.kind || currentSource.motionKey !== motionKey) {
+        if (!currentSource || currentSource.kind !== source.kind || currentSource.motionKey !== motionKey
+          || resolveCharacterId(currentDocument, request.locator, currentParams) !== characterId
+          || (params.motion?.kind === 'custom' && (currentParams.motion?.kind !== 'custom' || customMotionFingerprint(currentParams.motion) !== customMotionFingerprint(params.motion)))) {
           throw new CustomMotionConversionError(
             `Source motion of "${request.locator.statementId}" changed while sampling; conversion aborted`,
             'entity-changed',
@@ -266,6 +273,7 @@ export class CustomMotionConversionCommand {
         return [buildConversionIntent(request, currentEntity, conversion.motion)];
       });
       if (!conversion) throw new Error('Custom motion conversion did not produce a motion');
+      if (handoff && !lost && !signal.aborted) retained = await handoff(decision.lease);
       return {
         authoring: receipt,
         motion: conversion.motion,
@@ -273,17 +281,19 @@ export class CustomMotionConversionCommand {
         simplifiedTrackIds: conversion.simplifiedTrackIds,
       };
     } finally {
-      // ADR-0029: a conversion either commits atomically or releases the
-      // edit lease immediately, so collaborators are never blocked until the
-      // lease timeout (default ~30s).
-      if (this.ports.leaseGate) {
-        this.ports.leaseGate.release(leaseTarget);
-      }
+      unsubscribeLoss();
+      if (!retained) await this.authority.release(decision.lease);
     }
   }
 }
 
 const DEFAULT_SCENE_FPS = 60 as const;
+
+function resolveCharacterId(document: CurrentSceneDocument, locator: CustomMotionConversionTarget, params: CharacterPerformanceParamsLike): string {
+  if (params.target !== '$speaker') return params.target;
+  const parent = document.statements.find((statement) => statement.id === locator.statementId);
+  return parent?.type === 'dialogue' ? parent.params.speakerId ?? '' : '';
+}
 
 type ResolvedConversionSource =
   | { kind: 'resource'; motionKey: string; fadeInSeconds?: number }

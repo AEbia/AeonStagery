@@ -1086,6 +1086,14 @@ class Live2DManager {
     this.motionController!.playMotion(id, motionKey, priority, offset, sceneTime, skipHardReset);
   }
 
+  /** Preview replacements reuse the block's start pose, never saved fade frames. */
+  getCustomMotionPreviewHandoff(id: string, sceneTime: number): CustomMotionHandoffPose | undefined {
+    const entry = this.characters.get(id);
+    if (entry?.customMotion?.startSceneTime !== sceneTime || !entry.customMotionHandoff) return;
+    return { values: Object.fromEntries(Object.entries(entry.customMotionHandoff.values)
+      .filter(([parameterId]) => !entry.lipSyncParameterIds?.has(parameterId))) };
+  }
+
   /**
    * Start an inline custom motion as the character's motion output. The
    * custom motion fully takes over from any previous motion (resource or
@@ -1109,6 +1117,7 @@ class Live2DManager {
     motion: Extract<CharacterMotionOutput, { kind: 'custom' }>,
     sceneTime: number = 0,
     handoffSnapshot?: ModelSnapshot | null,
+    previewHandoff?: CustomMotionHandoffPose,
   ): void {
     const entry = this.characters.get(id);
     if (!entry) {
@@ -1128,7 +1137,7 @@ class Live2DManager {
       startSceneTime: sceneTime,
       controlledParameterIds: customMotionControlledParameterIds(motion),
     };
-    entry.customMotionHandoff = this.captureCustomMotionHandoff(entry, handoffSnapshot);
+    entry.customMotionHandoff = previewHandoff ?? this.captureCustomMotionHandoff(entry, handoffSnapshot);
     this.takeOverCustomMotion(entry);
   }
 

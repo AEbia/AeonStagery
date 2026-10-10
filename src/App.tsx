@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { eventBus } from './api/events';
+import { getLogger } from './engine/Logger';
 import { registerSceneSummaryProvider } from './services/crash/CrashReporter';
 import { buildRedactedSceneSummary } from './services/crash/sceneSummary';
 import {
@@ -69,6 +70,19 @@ const VoiceWorkbench = React.lazy(() => import('./ui/voice/VoiceWorkbench').then
 
 export default function App() {
   const contextValue = useMemo(() => bootstrap(), []);
+  const bootstrapLifecycleRef = useRef(0);
+  useEffect(() => {
+    const generation = ++bootstrapLifecycleRef.current;
+    return () => {
+      // StrictMode effect replay keeps this bootstrap alive; actual unmount
+      // disposes after child cleanup has started.
+      queueMicrotask(() => {
+        if (bootstrapLifecycleRef.current === generation) {
+          void contextValue.dispose().catch((error) => getLogger('App').error('Application disposal failed', error));
+        }
+      });
+    };
+  }, [contextValue]);
   const { collaboration, sessionBindings } = useAppCollaborationState();
   return (
     <AppProvider
