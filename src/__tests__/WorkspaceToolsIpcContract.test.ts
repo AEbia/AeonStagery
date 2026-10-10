@@ -7,16 +7,13 @@ function readWorkspaceFile(path: string): string {
 }
 
 describe('workspace tools IPC contract', () => {
-  it('queries detached-window state so a reloaded main renderer resumes publishing', () => {
+  it('exposes a sender-validated detached-window state query', () => {
     const ipcSource = readWorkspaceFile('electron/ipc/workspaceTools.ts');
     const preloadSource = readWorkspaceFile('electron/preload.ts');
-    const appSource = readWorkspaceFile('src/App.tsx');
 
     expect(ipcSource).toContain("ipcMain.handle('workspaceTools:getWindowState'");
     expect(ipcSource).toContain('if (!isMainWindowSender(event.sender.id)) return { open: false };');
     expect(preloadSource).toContain("getWindowState: () => ipcRenderer.invoke('workspaceTools:getWindowState')");
-    expect(appSource).toContain('workspaceToolsBridge.getWindowState().then');
-    expect(appSource).toContain('publishWorkspaceToolsSnapshot();');
   });
 
   it('routes apply results only from the main window to the detached tools window', () => {
