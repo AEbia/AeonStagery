@@ -292,12 +292,20 @@ export function computeSceneStateAtTime(
   background: any;
   environmentLayers: Map<string, EnvironmentLayerRenderState>;
   dialogue: any;
+  dialogueVisible: boolean;
+  dialogueOpacity: number;
 } {
   const characters = new Map<string, any>();
   const images = new Map<string, RuntimeImageLayerState>();
   const textLayers = new Map<string, RuntimeTextLayerState>();
   const lookAtStates = new Map<string, RuntimeLookAtState>();
   let dialogue: any = null;
+  let dialogueVisible = true;
+  let visibilityTransition = { startTime: 0, duration: 0, from: 1, to: 1 };
+  const dialogueOpacityAt = (targetTime: number): number => {
+    const { startTime, duration, from, to } = visibilityTransition;
+    return interpolateNumber(from, to, duration > 0 ? clamp01((targetTime - startTime) / duration) : 1);
+  };
   const { background, environmentLayers } = reconstructEnvironmentAtTime(script, time);
 
   const timeline = [...script.timeline].sort((left, right) => (left.time || 0) - (right.time || 0));
@@ -305,6 +313,15 @@ export function computeSceneStateAtTime(
     if ((action.time || 0) > time) break;
     const p = action.params;
     switch (action.action) {
+      case 'setDialogueVisibility': {
+        const startTime = action.time || 0;
+        const from = dialogueOpacityAt(startTime);
+        dialogueVisible = p.visible;
+        visibilityTransition = {
+          startTime, duration: normalizeDuration(p.duration, 0), from, to: dialogueVisible ? 1 : 0,
+        };
+        break;
+      }
       case 'setEnvironmentLayer':
       case 'transformEnvironmentLayer':
       case 'removeEnvironmentLayer':
@@ -654,5 +671,5 @@ export function computeSceneStateAtTime(
     }
   }
 
-  return { characters, images, textLayers, background, environmentLayers, dialogue };
+  return { characters, images, textLayers, background, environmentLayers, dialogue, dialogueVisible, dialogueOpacity: dialogueOpacityAt(time) };
 }

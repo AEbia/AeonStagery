@@ -24,6 +24,7 @@ const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
 
 class SubtitleRenderer {
   private dialogueContainer: PIXI.Container | null = null;
+  private dialogueOpacity = 1;
   private currentTimeline: gsap.core.Timeline | null = null;
   private currentTemplateId: string = 'glass';
   // 彻底解决 Seek 重复创建时间轴/容器导致的打字机消失、画面卡死 Bug
@@ -206,6 +207,7 @@ class SubtitleRenderer {
         }
 
         this.dialogueContainer = container;
+        container.visible = this.dialogueOpacity > 0;
         this.currentTimeline = tl;
         this.activeConfig = config;
         this.activeFontSize = globalFontSize;
@@ -239,7 +241,7 @@ class SubtitleRenderer {
     const syncEntrance = () => {
       if (!container.destroyed) {
         const enabled = settingsManager.get('dialogueEntranceAnimation') !== false;
-        container.alpha = enabled ? entranceProxy.alpha : 1;
+        container.alpha = (enabled ? entranceProxy.alpha : 1) * this.dialogueOpacity;
         container.y = enabled ? entranceProxy.y : 0;
       }
     };
@@ -466,6 +468,7 @@ class SubtitleRenderer {
     }
 
     this.dialogueContainer = container;
+    container.visible = this.dialogueOpacity > 0;
     this.currentTimeline = timeline;
     this.activeConfig = cached.config;
     this.activeFontSize = cached.fontSize;
@@ -486,6 +489,17 @@ class SubtitleRenderer {
     const onUpdate = timeline.eventCallback('onUpdate');
     if (typeof onUpdate === 'function') {
       onUpdate();
+    }
+  }
+
+  /** Apply scene-time opacity without detaching or stopping the dialogue timeline. */
+  setDialogueVisibility(visible: boolean, opacity: number = visible ? 1 : 0): void {
+    const nextOpacity = Math.max(0, Math.min(1, opacity));
+    if (this.dialogueOpacity === nextOpacity) return;
+    this.dialogueOpacity = nextOpacity;
+    if (this.dialogueContainer && !this.dialogueContainer.destroyed) {
+      this.dialogueContainer.visible = this.dialogueOpacity > 0;
+      this.forceUpdate();
     }
   }
 
@@ -599,6 +613,7 @@ class SubtitleRenderer {
   }
 
   clear(): void {
+    this.dialogueOpacity = 1;
     this.hideDialogue(false);
     this.dialogueCache.clear(); // 清理场景时彻底清除缓存以防止内存泄露
     const layer = stageManager.getLayer('subtitle');

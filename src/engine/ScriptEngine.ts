@@ -360,7 +360,9 @@ class ScriptEngine {
           (voiceKey, audio, startTime, duration) => {
             this.audioCoordinator.scheduleAudio(voiceKey, audio, startTime, duration);
             this.audioCoordinator.sync(currentTime, this.playing);
-          }
+          },
+          stateAtTime.dialogueVisible,
+          stateAtTime.dialogueOpacity,
         );
 
         // Only take incremental snapshots when no cached snapshot exists at this time
@@ -1007,6 +1009,8 @@ class ScriptEngine {
       characters: desiredState,
       environmentLayers,
       dialogue: desiredDialogue,
+      dialogueVisible,
+      dialogueOpacity,
     } = this.computeStateAtTime(time);
 
     // 3. Apply the same absolute environment state used during playback.
@@ -1085,7 +1089,9 @@ class ScriptEngine {
       (p) => this.resolvePathAsync(p),
       (voiceKey, audio, startTime, duration) => {
         this.audioCoordinator.scheduleAudio(voiceKey, audio, startTime, duration);
-      }
+      },
+      dialogueVisible,
+      dialogueOpacity,
     );
 
     // 6. Synchronize active audios

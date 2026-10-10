@@ -84,7 +84,7 @@ export function payloadToSemanticIntent(
         kind: 'insert-statement',
         anchorTime: input.anchorTime,
         statement: applyScopePlaceholders(
-          parseTemplateStatementDraft(payload.statement, 'payload.statement'),
+          parseTemplateStatementDraft(payload.statement, 'payload.statement', payload.sceneSchemaVersion),
           input.scope,
         ),
       };
@@ -102,7 +102,7 @@ export function payloadToSemanticIntent(
         anchorTime: input.anchorTime,
         statements: payload.statements.map((statement, index) =>
           applyScopePlaceholders(
-            parseTemplateStatementDraft(statement, `payload.statements[${index}]`),
+            parseTemplateStatementDraft(statement, `payload.statements[${index}]`, payload.sceneSchemaVersion),
             input.scope,
           ),
         ),
@@ -196,12 +196,16 @@ export function parseTemplateDialoguePreset(payload: Extract<TemplateAuthoringCo
   };
 }
 
-export function parseTemplateStatementDraft(input: unknown, path: string): SceneStatementDraft {
+export function parseTemplateStatementDraft(input: unknown, path: string, inheritedSchemaVersion?: 4 | 5): SceneStatementDraft {
   const record = expectRecord(input, path);
   assertNoLegacyStatementShape(record, path);
   expectKeys(record, path, ['id', 'time', 'type', 'params', 'companions', 'sceneSchemaVersion']);
   const type = expectStatementFamily(record.type, `${path}.type`);
   const sceneSchemaVersion = optionalSceneSchemaVersion(record.sceneSchemaVersion, `${path}.sceneSchemaVersion`);
+  sceneStatementDefinitionRegistry.assertSupportedInSchema(type, sceneSchemaVersion ?? SCENE_SCHEMA_VERSION_V5, `${path}.type`);
+  if (inheritedSchemaVersion !== undefined) {
+    sceneStatementDefinitionRegistry.assertSupportedInSchema(type, inheritedSchemaVersion, `${path}.type`);
+  }
   const draft = compact({
     id: optionalString(record.id, `${path}.id`),
     time: optionalNonNegativeNumber(record.time, `${path}.time`),

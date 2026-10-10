@@ -9,6 +9,7 @@ interface DesiredDialogue {
 }
 
 interface SubtitleMuscle {
+  setDialogueVisibility(visible: boolean, opacity: number): void;
   ensureDialogueOnStage(dialogue: any, offset: number): void;
   getCurrentTimeline(): gsap.core.Timeline | null;
   forceUpdate(): void;
@@ -61,8 +62,11 @@ export class DialogueCoordinator {
     isScrubbing: boolean,
     createAudio: (src: string) => HTMLAudioElement,
     resolvePath: (p: string) => string | Promise<string>,
-    scheduleVoice: (voiceKey: string, audio: HTMLAudioElement, startTime: number, duration: number) => void
+    scheduleVoice: (voiceKey: string, audio: HTMLAudioElement, startTime: number, duration: number) => void,
+    visible: boolean = true,
+    opacity: number = visible ? 1 : 0,
   ): void {
+    this.subtitle.setDialogueVisibility(visible, opacity);
     if (dialogue) {
       const offset = time - dialogue.startTime;
 

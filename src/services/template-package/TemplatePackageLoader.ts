@@ -101,9 +101,13 @@ export class TemplatePackageLoader {
     manifest: TemplatePackageManifest,
     packageRoot: string,
   ): Promise<TemplatePackageManifest> {
+    const sceneSchemaVersion = manifest.template.compatibility?.sceneSchemaVersion;
+    const inheritedSceneSchemaVersion = sceneSchemaVersion === 4 || sceneSchemaVersion === 5
+      ? sceneSchemaVersion
+      : undefined;
     const authoringCombos = await Promise.all(
       (manifest.authoringCombos ?? []).map((combo) =>
-        this.loadAuthoringComboDefinition(combo, packageRoot, manifest.manifestSchemaVersion ?? 1),
+        this.loadAuthoringComboDefinition(combo, packageRoot, manifest.manifestSchemaVersion ?? 1, inheritedSceneSchemaVersion),
       ),
     );
     const voiceProfiles = await Promise.all(
@@ -167,6 +171,7 @@ export class TemplatePackageLoader {
     combo: TemplateAuthoringCombo,
     packageRoot: string,
     manifestSchemaVersion: TemplatePackageManifest['manifestSchemaVersion'],
+    inheritedSceneSchemaVersion?: 4 | 5,
   ): Promise<TemplateAuthoringCombo> {
     if (!combo.file) return combo;
 
@@ -179,7 +184,7 @@ export class TemplatePackageLoader {
       name: combo.name,
       category: combo.category,
       file: combo.file,
-    }, `authoringCombo file ${combo.file}`, manifestSchemaVersion ?? 1);
+    }, `authoringCombo file ${combo.file}`, manifestSchemaVersion ?? 1, inheritedSceneSchemaVersion);
     if ((manifestSchemaVersion ?? 1) === 2 && !fileCombo.payload) {
       throw new Error(`manifestSchemaVersion 2 authoring combo file ${combo.file} requires payload`);
     }

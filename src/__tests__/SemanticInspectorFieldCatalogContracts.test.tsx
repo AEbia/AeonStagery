@@ -62,6 +62,7 @@ vi.mock('../ui/store/storeHooks', () => ({
 
 const FAMILIES: readonly StatementFamily[] = [
   'dialogue',
+  'dialogueVisibility',
   'characterPresence',
   'characterTransform',
   'characterPerformance',
@@ -127,10 +128,26 @@ describe('semantic Inspector field catalog contracts', () => {
     cleanup();
   });
 
-  it('covers exactly the current 14 semantic families without legacy statement types', () => {
+  it('covers exactly the current semantic families without legacy statement types', () => {
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG).sort()).toEqual([...FAMILIES].sort());
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG)).not.toContain('wait');
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG)).not.toContain('custom');
+  });
+
+  it.each([false, true])('edits only the subtitle transition duration while preserving visible=%s', (visible) => {
+    const statement = {
+      id: 'subtitle_visibility', time: 1, type: 'dialogueVisibility', params: { visible, durationSeconds: 0.3 },
+    };
+    const actionId = 'subtitle_visibility::primary';
+    const { updateParam } = renderInspector(statement, {
+      id: actionId, time: 1, action: 'setDialogueVisibility', params: { visible, duration: 0.3 },
+      source: { statementId: statement.id, outputKey: 'primary' },
+    });
+    expect(screen.queryByRole('checkbox', { name: '显示字幕框' })).toBeNull();
+    expect(getSemanticInspectorFields('dialogueVisibility', statement.params).map((field) => field.key)).toEqual(['durationSeconds']);
+    const duration = screen.getByRole('spinbutton', { name: '过渡时长' });
+    fireEvent.keyDown(duration, { key: 'ArrowUp' });
+    expect(updateParam).toHaveBeenCalledWith(actionId, 'durationSeconds', 0.4, false);
   });
 
   it('marks raw layer and audio identity fields as advanced while keeping semantic selectors authoring-facing', () => {
