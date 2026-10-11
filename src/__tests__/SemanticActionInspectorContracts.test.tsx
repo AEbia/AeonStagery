@@ -457,6 +457,42 @@ describe('Task 2 ActionInspector contracts', () => {
     expect(updateParam).toHaveBeenLastCalledWith(actionId, 'to', [0.71, 0.8], false);
   });
 
+  it('switches semantic camera focus to fixed coordinates without persisting an empty target', () => {
+    const statement = {
+      id: 'camera_focus',
+      time: 0,
+      type: 'camera',
+      params: {
+        mode: 'focus',
+        target: 'hero',
+        targetPart: 'chest',
+        zoom: { kind: 'absolute', value: 1.2 },
+        durationSeconds: 1,
+      },
+    };
+    const actionId = 'camera_focus::primary';
+    const { replaceSourceParams, updateParam } = renderInspector(baseDocument(statement, [{ id: 'hero', name: 'Hero' }]), {
+      id: actionId,
+      time: 0,
+      action: 'cameraMotion',
+      params: { move: 'pan', focus: { character: 'hero', part: 'chest' }, duration: 1 },
+      source: { statementId: statement.id, outputKey: 'primary' },
+    });
+
+    fireEvent.click(screen.getByRole('combobox', { name: '目标角色' }));
+    fireEvent.click(screen.getByRole('option', { name: '固定坐标' }));
+
+    expect(updateParam).not.toHaveBeenCalled();
+    expect(replaceSourceParams).toHaveBeenCalledWith(actionId, {
+      mode: 'focus',
+      target: undefined,
+      targetPart: undefined,
+      position: [0.5, 0.5],
+      zoom: { kind: 'absolute', value: 1.2 },
+      durationSeconds: 1,
+    });
+  });
+
   it('exposes zoom for legacy camera motion and preserves relative zoom values', () => {
     const statement = {
       id: 'legacy_camera_motion',
