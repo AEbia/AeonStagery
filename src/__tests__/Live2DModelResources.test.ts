@@ -398,6 +398,13 @@ describe('Live2DModelResources', () => {
           supportsSnapshot: true,
           supportsBakeRender: true,
           usesCubism2PrivateControls: false,
+          determinism: {
+            tier: 'native-offset-deterministic',
+            supportsParameterCurves: true,
+            supportsNativeMotionOffset: true,
+            supportsStateReplay: false,
+            diagnostics: ['mock runtime determinism'],
+          },
         },
         lifecycle: {
           getCoreModel: () => null,

@@ -6,14 +6,60 @@ import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-a
 import { getCubismPixiSdkStatus, initCubismPixiSdk } from '../CubismPixiSdk';
 import { createLive2DModelHandle, type Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlModule';
 import { loadCubismEngineModule } from '../Live2DEngineBridge';
+import { installCustomMotionStage, type InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type {
   Live2DModelCreateOptions,
   Live2DRuntimeClock,
   Live2DRuntimeModelControls,
   MutableNumericArrayLike,
   Live2DRuntimeAdapter,
+  Live2DPerformanceMetadata,
+  PerformanceCompatibility,
+  PreparedAssetRef,
 } from './Live2DRuntimeContracts';
 import { finiteOrUndefined, resolveCubismParameterId, resolveHeadAnchorFromSettings } from './modelMetadata';
+
+async function registerExternalPerformance(
+  model: any,
+  kind: 'motion' | 'expression',
+  runtimeKey: string,
+  source: PreparedAssetRef,
+  metadata?: Live2DPerformanceMetadata,
+): Promise<PerformanceCompatibility> {
+  if (metadata?.targetSubmodels?.length) {
+    return {
+      status: 'incompatible',
+      missingParameterIds: [],
+      ignoredParameterIds: [],
+      diagnostics: ['Cubism 3+ submodel identifiers are unavailable; targetSubmodels cannot be resolved safely.'],
+    };
+  }
+  const method = model?.[`registerExternal${kind === 'motion' ? 'Motion' : 'Expression'}`];
+  const generic = model?.registerExternalPerformance;
+  if (typeof method !== 'function' && typeof generic !== 'function') {
+    return {
+      status: 'incompatible',
+      missingParameterIds: [],
+      ignoredParameterIds: [],
+      diagnostics: [`Cubism 3+ model does not expose external ${kind} registration.`],
+    };
+  }
+
+  try {
+    const result = typeof method === 'function'
+      ? await method.call(model, runtimeKey, source, metadata)
+      : await generic.call(model, kind, runtimeKey, source, metadata);
+    if (result && typeof result === 'object' && 'status' in result) return result as PerformanceCompatibility;
+    return { status: 'compatible', missingParameterIds: [], ignoredParameterIds: [], diagnostics: [] };
+  } catch (error) {
+    return {
+      status: 'incompatible',
+      missingParameterIds: [],
+      ignoredParameterIds: [],
+      diagnostics: [`Failed to register external ${kind} "${runtimeKey}": ${String(error)}`],
+    };
+  }
+}
 
 export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
   public readonly id = 'untitled-pixi-live2d-engine-cubism';
@@ -116,6 +162,13 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         });
       }
       return metadata;
+    },
+    registerExternalMotion: (model, runtimeKey, source, metadata) =>
+      registerExternalPerformance(model, 'motion', runtimeKey, source, metadata),
+    registerExternalExpression: (model, runtimeKey, source, metadata) =>
+      registerExternalPerformance(model, 'expression', runtimeKey, source, metadata),
+    unregisterExternalPerformance: (model, runtimeKey) => {
+      model?.unregisterExternalPerformance?.(runtimeKey);
     },
     clearMotionState: (model) => {
       // Stop first: clearing the bookkeeping alone leaves the official runtime's
@@ -326,7 +379,43 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       return { ok: !!started, offsetReplayMs: 0 };
     },
     getMotionSamplingTargets: () => [],
-    installCustomMotionStage: () => null,
+    installCustomMotionStage: (model, input: Omit<InstallCustomMotionStageInput, 'targets'>) => {
+      const targets = this.controls.getConcreteModels(model)
+        .map((concrete) => {
+          const internalModel = concrete?.internalModel;
+          const coreModel = internalModel?.coreModel;
+          if (!internalModel || !coreModel
+            || typeof coreModel.getParameterCount !== 'function'
+            || typeof coreModel.getParameterId !== 'function'
+            || typeof coreModel.setParameterValueByIndex !== 'function') {
+            return null;
+          }
+
+          const parameterIds: string[] = [];
+          const indexById = new Map<string, number>();
+          for (let index = 0; index < coreModel.getParameterCount(); index++) {
+            const rawId = coreModel.getParameterId(index);
+            const id = typeof rawId === 'string' ? rawId : resolveCubismParameterId(rawId);
+            if (!id) continue;
+            parameterIds.push(id);
+            indexById.set(id, index);
+          }
+
+          return {
+            internalModel,
+            parameterTarget: {
+              parameterIds: () => parameterIds,
+              writeParameter: (parameterId: string, value: number) => {
+                const index = indexById.get(parameterId);
+                if (index !== undefined) coreModel.setParameterValueByIndex(index, value);
+              },
+            },
+          };
+        })
+        .filter((target): target is NonNullable<typeof target> => target !== null);
+      if (targets.length === 0) return null;
+      return installCustomMotionStage({ ...input, targets });
+    },
     quiesceModel: (model) => {
       model?.stopAllMotions?.();
       model?.setExpression?.(null);

@@ -3,6 +3,7 @@ import type { Live2DParameterMetadata } from '../../../api/types/live2d-paramete
 import type { ModelSnapshot } from '../../Live2DConfig';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../../Live2DRuntimeResolver';
 import type {
+  Live2DDeterminismCapabilities,
   Live2DRuntimeModelControls,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
@@ -17,6 +18,41 @@ export interface Live2DRuntimeCapabilities {
   readonly supportsSnapshot: boolean;
   readonly supportsBakeRender: boolean;
   readonly usesCubism2PrivateControls: boolean;
+  readonly determinism: Live2DDeterminismCapabilities;
+}
+
+function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeterminismCapabilities {
+  if (adapterId === 'pixi-live2d-display-cubism2') {
+    return {
+      tier: 'native-offset-deterministic',
+      supportsParameterCurves: true,
+      supportsNativeMotionOffset: true,
+      supportsStateReplay: false,
+      diagnostics: [
+        'Cubism 2 native motion offsets use fixed-step SDK clock replay.',
+        'Stateful Physics/Pose replay is not guaranteed by this adapter.',
+      ],
+    };
+  }
+  if (adapterId === 'untitled-pixi-live2d-engine-cubism') {
+    return {
+      tier: 'native-offset-deterministic',
+      supportsParameterCurves: true,
+      supportsNativeMotionOffset: true,
+      supportsStateReplay: false,
+      diagnostics: [
+        'Cubism 3+ native motion offsets restore the vendor motion queue.',
+        'Physics/Pose/LookAt state is not reconstructed from a fixed-step baseline.',
+      ],
+    };
+  }
+  return {
+    tier: 'unsupported',
+    supportsParameterCurves: false,
+    supportsNativeMotionOffset: false,
+    supportsStateReplay: false,
+    diagnostics: ['No runtime adapter can provide deterministic motion evaluation.'],
+  };
 }
 
 export interface Live2DLifecycleInterface {
@@ -95,6 +131,7 @@ export function createLive2DModelHandle({
     supportsSnapshot: runtime.adapterId !== 'unknown',
     supportsBakeRender: runtime.adapterId !== 'unknown',
     usesCubism2PrivateControls: runtime.adapterId === 'pixi-live2d-display-cubism2',
+    determinism: resolveDeterminismCapabilities(runtime.adapterId),
   };
 
   return {

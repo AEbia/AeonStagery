@@ -766,8 +766,8 @@ class Live2DManager {
    *
    * Called from takeOverCustomMotion and lazily re-invoked by updateAll so a
    * motion that started before its model finished loading still gets staged
-   * once the model arrives. A failed install (runtime without the writable Cubism 2
-   * seam, e.g. untitled-pixi-live2d-engine-cubism) is recorded per custom-motion state
+   * once the model arrives. A failed install (runtime without the writable
+   * parameter seam) is recorded per custom-motion state
    * object — otherwise updateAll would retry the (always failing) install
    * every frame.
    */
@@ -785,7 +785,7 @@ class Live2DManager {
    * Install the Motion-stage writer so curve values enter the SDK update pass
    * before saveParam/expression compositing — an active Expression keeps
    * layering above them until the next expression or `default` (ADR-0029).
-   * When the runtime lacks the emitter seam or a writable Cubism 2 core
+   * When the runtime lacks the emitter seam or a writable parameter target
    * the handle stays null and the legacy post-update injection path in
    * updateAll applies instead.
    */
@@ -793,7 +793,7 @@ class Live2DManager {
     entry.customMotionStage?.dispose();
     entry.customMotionStage = null;
     if (!entry.model) return;
-    // Concrete-target resolution and the emitter/core checks live in the
+    // Concrete-target resolution and the emitter/parameter checks live in the
     // runtime adapter; the stage handle type is unchanged.
     entry.customMotionStage = getLive2DRuntimeAdapter(entry.runtime).getControls().installCustomMotionStage(entry.model, {
       getState: () => entry.customMotion && entry.customMotionHandoff

@@ -302,6 +302,38 @@ describe('customMotionStage', () => {
     expect(bareEmitter.on).not.toHaveBeenCalled();
   });
 
+  it('writes through a runtime-neutral parameter target without a Cubism 2 core', () => {
+    const listeners = new Set<() => void>();
+    const values = new Map<string, number>([['PARAM_ANGLE_X', 0]]);
+    const internalModel = {
+      on: (_event: string, handler: () => void) => listeners.add(handler),
+      off: (_event: string, handler: () => void) => listeners.delete(handler),
+      emit: () => listeners.forEach((handler) => handler()),
+    };
+    const handle = installCustomMotionStage({
+      targets: [{
+        internalModel,
+        parameterTarget: {
+          parameterIds: () => ['PARAM_ANGLE_X'],
+          writeParameter: (parameterId, value) => values.set(parameterId, value),
+        },
+      }],
+      getState: () => ({
+        motion: createLinearAngleMotion(),
+        startSceneTime: 10,
+        handoff: { values: {} },
+        controlledParameterIds: ['PARAM_ANGLE_X'],
+      }),
+    });
+
+    expect(handle).not.toBeNull();
+    handle!.setSceneTime(10.5);
+    internalModel.emit();
+    expect(values.get('PARAM_ANGLE_X')).toBe(15);
+    handle!.dispose();
+    expect(listeners).toHaveLength(0);
+  });
+
   it('attaches only capable targets in a mixed-capability composite', () => {
     const capable = createSdkOrderedModel({ params: { PARAM_ANGLE_X: 0 } });
     const inert = {

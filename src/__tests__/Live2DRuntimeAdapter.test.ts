@@ -12,6 +12,7 @@ import * as sdk from '../engine/CubismPixiSdk';
 import { setLive2DCubism2RuntimeAvailable } from '../engine/Live2DRuntimeResolver';
 import { createCubismPixiModel } from '../engine/CubismPixiModel';
 import { applyRenderHook } from '../engine/Live2DModelSetup';
+import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 
 vi.mock('../engine/CubismPixiModel', () => ({
   createCubismPixiModel: vi.fn(async (modelUrl: string) => ({ modelUrl, internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } } })),
@@ -271,6 +272,16 @@ describe('Live2DRuntimeAdapter', () => {
 
     expect(handle.id).toBe('rana');
     expect(handle.capabilities.usesCubism2PrivateControls).toBe(false);
+    expect(handle.capabilities.determinism).toEqual({
+      tier: 'native-offset-deterministic',
+      supportsParameterCurves: true,
+      supportsNativeMotionOffset: true,
+      supportsStateReplay: false,
+      diagnostics: [
+        'Cubism 3+ native motion offsets restore the vendor motion queue.',
+        'Physics/Pose/LookAt state is not reconstructed from a fixed-step baseline.',
+      ],
+    });
     expect(handle.motion.getAvailableMotions()).toEqual(['TapBody']);
     expect(handle.expression.getAvailableExpressions()).toEqual(['smile']);
     expect(handle.diagnostics.describeInvalidState()).toBe('primary param[1] (PARAM_BROKEN)=NaN');
@@ -281,6 +292,51 @@ describe('Live2DRuntimeAdapter', () => {
     expect(setParameterValueByIndex.mock.calls[0][1]).toBeCloseTo(0.2);
     expect(setParameterValueByIndex.mock.calls[1][0]).toBe(1);
     expect(setParameterValueByIndex.mock.calls[1][1]).toBeCloseTo(0.4);
+  });
+
+  it('installs the custom-motion stage through the official Core parameter seam', () => {
+    const values = [0];
+    const listeners = new Set<() => void>();
+    const setParameterValueByIndex = vi.fn((index: number, value: number) => { values[index] = value; });
+    const internalModel = {
+      on: (_event: string, handler: () => void) => listeners.add(handler),
+      off: (_event: string, handler: () => void) => listeners.delete(handler),
+      coreModel: {
+        getParameterCount: () => 1,
+        getParameterId: () => 'ParamAngleX',
+        setParameterValueByIndex,
+      },
+    };
+    const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
+      kind: 'custom',
+      durationSeconds: 1,
+      fadeInSeconds: 0,
+      derivedFrom: { key: 'probe' },
+      tracks: [{
+        parameterId: 'ParamAngleX',
+        keyframes: [{ time: 0, value: 0 }, { time: 1, value: 10 }],
+      }],
+    };
+    const controls = new CubismPixiLive2DAdapter().getControls();
+    const handle = controls.installCustomMotionStage(
+      { internalModel },
+      {
+        getState: () => ({
+          motion,
+          startSceneTime: 0,
+          handoff: { values: {} },
+          controlledParameterIds: ['ParamAngleX'],
+        }),
+      },
+    );
+
+    expect(handle).not.toBeNull();
+    handle!.setSceneTime(0.5);
+    listeners.forEach((listener) => listener());
+    expect(setParameterValueByIndex).toHaveBeenCalledWith(0, 5);
+    expect(values[0]).toBe(5);
+    handle!.dispose();
+    expect(listeners).toHaveLength(0);
   });
 
   it('keeps Cubism 2 expression reset details inside runtime controls', () => {

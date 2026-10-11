@@ -8,6 +8,8 @@ import { CubismPixiLive2DAdapter } from './runtime/CubismPixiLive2DAdapter';
 
 export type {
   Live2DModelCreateOptions,
+  Live2DDeterminismTier,
+  Live2DDeterminismCapabilities,
   Live2DSeekMotionState,
   Live2DSeekExpressionState,
   Live2DSeekRestoreTier,
@@ -22,8 +24,16 @@ export type {
   Live2DFocusInput,
   Live2DFocusOptions,
   Live2DRuntimeModelControls,
+  Live2DPerformanceKind,
+  Live2DPerformanceRuntimeFamily,
+  Live2DPerformanceMetadata,
+  Live2DPerformanceResource,
+  PerformanceCompatibility,
+  PreparedPerformance,
+  Live2DPerformanceModelBinding,
   Live2DRuntimeAdapter,
 } from './runtime/Live2DRuntimeContracts';
+export { Live2DPerformanceRegistry } from './runtime/Live2DPerformanceRegistry';
 export { Cubism2PixiLive2DAdapter } from './runtime/Cubism2PixiLive2DAdapter';
 export { Cubism2PixiLive2DModelControls } from './runtime/Cubism2PixiLive2DModelControls';
 export { CubismPixiLive2DAdapter } from './runtime/CubismPixiLive2DAdapter';

@@ -23,6 +23,13 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     getMotionDebugState: vi.fn(() => null),
     getParameterValues: vi.fn(() => null),
     getParameterMetadata: vi.fn(() => null),
+    registerExternalMotion: vi.fn(async () => ({
+      status: 'compatible' as const, missingParameterIds: [], ignoredParameterIds: [], diagnostics: [],
+    })),
+    registerExternalExpression: vi.fn(async () => ({
+      status: 'compatible' as const, missingParameterIds: [], ignoredParameterIds: [], diagnostics: [],
+    })),
+    unregisterExternalPerformance: vi.fn(),
     clearMotionState: vi.fn(),
     stopAllMotions: vi.fn(),
     preloadMotion: vi.fn(async () => {}),
@@ -83,6 +90,13 @@ export function mockAdapter(overrides: Partial<Live2DRuntimeAdapter> = {}): Live
         supportsSnapshot: true,
         supportsBakeRender: true,
         usesCubism2PrivateControls: runtime?.adapterId === 'pixi-live2d-display-cubism2',
+        determinism: {
+          tier: 'native-offset-deterministic',
+          supportsParameterCurves: true,
+          supportsNativeMotionOffset: true,
+          supportsStateReplay: false,
+          diagnostics: ['mock runtime determinism'],
+        },
       },
       lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
       motion: {

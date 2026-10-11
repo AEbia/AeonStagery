@@ -4,12 +4,74 @@ import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-a
 import type { Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlModule';
 import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../live2d/customMotionStage';
+import type { PreparedAssetRef } from '../../api/types/semantic-scene';
+export type { PreparedAssetRef } from '../../api/types/semantic-scene';
+
+export type Live2DPerformanceKind = 'motion' | 'expression';
+export type Live2DPerformanceRuntimeFamily = 'cubism2' | 'cubism3-plus' | 'wmdl';
+
+export interface Live2DPerformanceMetadata {
+  fadeIn?: number;
+  fadeOut?: number;
+  loop?: boolean;
+  sound?: string;
+  targetSubmodels?: string[];
+  requiredParameterIds?: string[];
+  /** Explicitly allow registration when required parameters are missing. */
+  allowPartial?: boolean;
+}
+
+export interface Live2DPerformanceResource {
+  runtimeKey: string;
+  kind: Live2DPerformanceKind;
+  asset: PreparedAssetRef;
+  runtimeFamily: Live2DPerformanceRuntimeFamily;
+  metadata?: Live2DPerformanceMetadata;
+}
+
+export interface PerformanceCompatibility {
+  status: 'compatible' | 'partial' | 'incompatible';
+  missingParameterIds: string[];
+  ignoredParameterIds: string[];
+  diagnostics: string[];
+}
+
+export interface PreparedPerformance {
+  resource: Live2DPerformanceResource;
+  compatibility: PerformanceCompatibility;
+  registered: boolean;
+}
+
+export interface Live2DPerformanceModelBinding {
+  /** Opaque runtime model object; concrete adapters own its shape. */
+  model: object;
+  runtimeFamily: Live2DPerformanceRuntimeFamily;
+  adapter?: Live2DRuntimeAdapter;
+}
 
 export interface Live2DModelCreateOptions {
   autoHitTest?: boolean;
   autoFocus?: boolean;
   autoUpdate?: boolean;
   idleMotionGroup?: string;
+}
+
+/** Strongest deterministic motion guarantee an adapter can make. */
+export type Live2DDeterminismTier =
+  | 'parameter-deterministic'
+  | 'native-offset-deterministic'
+  | 'state-replay-deterministic'
+  | 'unsupported';
+
+export interface Live2DDeterminismCapabilities {
+  readonly tier: Live2DDeterminismTier;
+  /** Pure parameter curves can be evaluated from absolute scene time. */
+  readonly supportsParameterCurves: boolean;
+  /** Native motion queues can be restored to an authored offset. */
+  readonly supportsNativeMotionOffset: boolean;
+  /** Physics/Pose/LookAt state can be reconstructed from a fixed-step baseline. */
+  readonly supportsStateReplay: boolean;
+  readonly diagnostics: readonly string[];
 }
 
 export interface Live2DSeekMotionState {
@@ -137,6 +199,20 @@ export interface Live2DRuntimeModelControls {
   getMotionDebugState(model: any): Record<string, unknown> | null;
   getParameterValues(model: any): Array<{ index: number; name: string; value: number }> | null;
   getParameterMetadata(model: any): readonly Live2DParameterMetadata[] | null;
+  /** Register a project-prepared performance without exposing SDK internals. */
+  registerExternalMotion(
+    model: any,
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility>;
+  registerExternalExpression(
+    model: any,
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility>;
+  unregisterExternalPerformance(model: any, runtimeKey: string): void;
   clearMotionState(model: any): void;
   stopAllMotions(model: any): void;
   preloadMotion(model: any, motionKey: string): Promise<void>;
@@ -201,7 +277,7 @@ export interface Live2DRuntimeModelControls {
   getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[];
   /**
    * Install the Motion-stage writer on every attachable concrete model.
-   * Returns null when no target has the emitter seam (official runtime).
+   * Returns null when no target has both the emitter and parameter-write seams.
    */
   installCustomMotionStage(
     model: any,

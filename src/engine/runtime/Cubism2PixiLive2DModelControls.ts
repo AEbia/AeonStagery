@@ -42,6 +42,9 @@ import type {
   Live2DFocusOptions,
   Live2DRuntimeModelControls,
   MutableNumericArrayLike,
+  Live2DPerformanceMetadata,
+  PerformanceCompatibility,
+  PreparedAssetRef,
 } from './Live2DRuntimeContracts';
 import {
   finiteOrUndefined,
@@ -49,6 +52,21 @@ import {
   resolveCubism2ParameterId,
   resolveHeadAnchorFromSettings,
 } from './modelMetadata';
+
+function mergePerformanceCompatibility(
+  first: PerformanceCompatibility,
+  second: PerformanceCompatibility,
+): PerformanceCompatibility {
+  const status = first.status === 'incompatible' || second.status === 'incompatible'
+    ? 'incompatible'
+    : first.status === 'partial' || second.status === 'partial' ? 'partial' : 'compatible';
+  return {
+    status,
+    missingParameterIds: Array.from(new Set([...first.missingParameterIds, ...second.missingParameterIds])),
+    ignoredParameterIds: Array.from(new Set([...first.ignoredParameterIds, ...second.ignoredParameterIds])),
+    diagnostics: [...first.diagnostics, ...second.diagnostics],
+  };
+}
 
 export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControls {
   private readonly expressionRequestEpochs = new WeakMap<object, number>();
@@ -303,6 +321,85 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       return motionManager.loadMotion(motionKey, 0);
     });
     await Promise.allSettled(tasks);
+  }
+
+  async registerExternalMotion(
+    model: any,
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility> {
+    return this.registerExternalPerformance(model, 'motion', runtimeKey, source, metadata);
+  }
+
+  async registerExternalExpression(
+    model: any,
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility> {
+    return this.registerExternalPerformance(model, 'expression', runtimeKey, source, metadata);
+  }
+
+  unregisterExternalPerformance(model: any, runtimeKey: string): void {
+    for (const target of this.getConcreteModels(model)) {
+      target?.unregisterExternalPerformance?.(runtimeKey);
+    }
+  }
+
+  private async registerExternalPerformance(
+    model: any,
+    kind: 'motion' | 'expression',
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility> {
+    if (metadata?.targetSubmodels?.length) {
+      return {
+        status: 'incompatible',
+        missingParameterIds: [],
+        ignoredParameterIds: [],
+        diagnostics: ['Cubism 2 composite submodel identifiers are unavailable; targetSubmodels cannot be resolved safely.'],
+      };
+    }
+    const targets = this.getConcreteModels(model);
+    if (targets.length === 0) {
+      return {
+        status: 'incompatible',
+        missingParameterIds: [],
+        ignoredParameterIds: [],
+        diagnostics: ['Cubism 2 model has no concrete submodel for external performance registration.'],
+      };
+    }
+
+    const diagnostics: string[] = [];
+    let registered = 0;
+    let report: PerformanceCompatibility = { status: 'compatible', missingParameterIds: [], ignoredParameterIds: [], diagnostics: [] };
+    for (const target of targets) {
+      const method = target?.[`registerExternal${kind === 'motion' ? 'Motion' : 'Expression'}`];
+      const generic = target?.registerExternalPerformance;
+      if (typeof method !== 'function' && typeof generic !== 'function') {
+        diagnostics.push(`Cubism 2 dynamic ${kind} registration is unavailable for this model.`);
+        continue;
+      }
+      try {
+        const result = typeof method === 'function'
+          ? await method.call(target, runtimeKey, source, metadata)
+          : await generic.call(target, kind, runtimeKey, source, metadata);
+        if (result && typeof result === 'object' && 'status' in result) {
+          report = mergePerformanceCompatibility(report, result as PerformanceCompatibility);
+        }
+        registered += 1;
+      } catch (error) {
+        diagnostics.push(`Failed to register external ${kind} "${runtimeKey}": ${String(error)}`);
+      }
+    }
+
+    report = mergePerformanceCompatibility(report, {
+      status: registered === targets.length ? 'compatible' : registered > 0 ? 'partial' : 'incompatible',
+      missingParameterIds: [], ignoredParameterIds: [], diagnostics,
+    });
+    return report;
   }
 
   setExpression(model: any, expressionName: string | null): void {

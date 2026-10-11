@@ -42,6 +42,16 @@ describe('createLive2DModelHandle', () => {
       supportsSnapshot: true,
       supportsBakeRender: true,
       usesCubism2PrivateControls: true,
+      determinism: {
+        tier: 'native-offset-deterministic',
+        supportsParameterCurves: true,
+        supportsNativeMotionOffset: true,
+        supportsStateReplay: false,
+        diagnostics: [
+          'Cubism 2 native motion offsets use fixed-step SDK clock replay.',
+          'Stateful Physics/Pose replay is not guaranteed by this adapter.',
+        ],
+      },
     });
 
     const unknownHandle = createLive2DModelHandle({
@@ -61,6 +71,13 @@ describe('createLive2DModelHandle', () => {
       supportsSnapshot: false,
       supportsBakeRender: false,
       usesCubism2PrivateControls: false,
+      determinism: {
+        tier: 'unsupported',
+        supportsParameterCurves: false,
+        supportsNativeMotionOffset: false,
+        supportsStateReplay: false,
+        diagnostics: ['No runtime adapter can provide deterministic motion evaluation.'],
+      },
     });
   });
 
