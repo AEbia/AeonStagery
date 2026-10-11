@@ -27,6 +27,11 @@ import {
   type Cubism2MotionSamplerTarget,
 } from './cubism2MotionSampler';
 import {
+  Cubism3MotionSamplingError,
+  loadCubism3Motion,
+  type Cubism3MotionSamplerTarget,
+} from './cubism3MotionSampler';
+import {
   buildCustomMotionTracks,
   type CustomMotionSamplePoint,
   type CustomMotionSampledTrack,
@@ -148,6 +153,7 @@ export const RESOURCE_MOTION_CACHE_MAX_REJECTED_ENTRIES = 96;
  */
 function classifyMissReason(error: unknown, fallback: string): string {
   if (error instanceof Cubism2MotionSamplingError) return error.code;
+  if (error instanceof Cubism3MotionSamplingError) return error.code;
   return fallback;
 }
 
@@ -302,6 +308,12 @@ export class MotionCurveCacheService {
       return null;
     }
 
+    const firstTarget = source.targets[0];
+    const cubism3Target = firstTarget as unknown as Partial<Cubism3MotionSamplerTarget>;
+    if (cubism3Target.kind === 'cubism3-plus') {
+      return this.buildCubism3(source, key, cubism3Target as Cubism3MotionSamplerTarget);
+    }
+
     let meta: Cubism2MotionMeta;
     try {
       meta = await this.sampler.resolveMeta(source.targets[0], source.motionKey);
@@ -392,6 +404,48 @@ export class MotionCurveCacheService {
       motion,
       sourceFadeInSeconds: meta.fadeInSeconds,
       sourceFadeOutSeconds: meta.fadeOutSeconds,
+      isIdle,
+      evaluate(localTime: number): Readonly<Record<string, number>> {
+        const frame = evaluateCustomMotion(motion, localTime);
+        return frame.active ? frame.values : {};
+      },
+    };
+    return entry;
+  }
+
+  private async buildCubism3(
+    source: MotionCurveCacheSource,
+    key: string,
+    target: Cubism3MotionSamplerTarget,
+  ): Promise<CachedResourceMotion | null> {
+    let parsed: Awaited<ReturnType<typeof loadCubism3Motion>>;
+    try {
+      parsed = await loadCubism3Motion(target, source.motionKey);
+    } catch (error) {
+      const reason = classifyMissReason(error, 'sampling-failed');
+      this.logger.warn(`[MotionCurveCache] Cubism 3+ motion load failed for "${source.motionKey}": ${String(error)}`);
+      this.reject(key, reason);
+      return null;
+    }
+
+    // A parameter-only custom motion is the only representation understood by
+    // the runtime-neutral evaluator. Preserve native playback when a source
+    // also changes parts, layout, model opacity, or user data.
+    if (parsed.ignoredCurves.length > 0) {
+      this.logger.warn(
+        `[MotionCurveCache] Cubism 3+ motion "${source.motionKey}" carries unsupported curves; keeping the SDK path`,
+      );
+      this.reject(key, 'unsupported-curve-target');
+      return null;
+    }
+
+    const motion = parsed.motion;
+    const isIdle = isIdleMotionKey(source.motionKey);
+    const entry: CachedResourceMotion = {
+      key,
+      motion,
+      sourceFadeInSeconds: motion.derivedFrom.fadeInSeconds,
+      sourceFadeOutSeconds: motion.derivedFrom.fadeOutSeconds,
       isIdle,
       evaluate(localTime: number): Readonly<Record<string, number>> {
         const frame = evaluateCustomMotion(motion, localTime);

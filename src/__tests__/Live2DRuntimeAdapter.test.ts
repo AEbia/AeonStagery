@@ -273,13 +273,13 @@ describe('Live2DRuntimeAdapter', () => {
     expect(handle.id).toBe('rana');
     expect(handle.capabilities.usesCubism2PrivateControls).toBe(false);
     expect(handle.capabilities.determinism).toEqual({
-      tier: 'native-offset-deterministic',
+      tier: 'state-replay-deterministic',
       supportsParameterCurves: true,
       supportsNativeMotionOffset: true,
-      supportsStateReplay: false,
+      supportsStateReplay: true,
       diagnostics: [
-        'Cubism 3+ native motion offsets restore the vendor motion queue.',
-        'Physics/Pose/LookAt state is not reconstructed from a fixed-step baseline.',
+        'Cubism 3+ parameter motions use the runtime-neutral deterministic curve cache when available.',
+        'Physics/Pose/LookAt state is reset and reconstructed with fixed 60Hz steps during seek replay.',
       ],
     });
     expect(handle.motion.getAvailableMotions()).toEqual(['TapBody']);

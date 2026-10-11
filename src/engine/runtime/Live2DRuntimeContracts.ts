@@ -89,7 +89,7 @@ export interface Live2DSeekExpressionState {
   elapsedSeconds?: number;
 }
 
-export type Live2DSeekRestoreTier = 'native' | 'snapshot-forward' | 'visual-freeze' | 'unsupported';
+export type Live2DSeekRestoreTier = 'native' | 'state-replay' | 'snapshot-forward' | 'visual-freeze' | 'unsupported';
 
 export interface Live2DSeekRestoreInput {
   id: string;
@@ -97,6 +97,8 @@ export interface Live2DSeekRestoreInput {
   /** Pose owned by the previous action at the new motion's start boundary. */
   handoffSnapshot?: ModelSnapshot | null;
   targetSceneTime: number;
+  /** Normalized Cubism focus at the target scene time, restored before state replay. */
+  focus?: readonly [number, number];
   motion?: Live2DSeekMotionState | null;
   expression?: Live2DSeekExpressionState | null;
   idleSnapshot?: Pick<ModelSnapshot, 'params' | 'opacities'> | null;

@@ -10,6 +10,50 @@ function parameterId(id: any): string {
   return typeof value === 'string' ? value : value?.s ?? '';
 }
 
+const CUBISM_STATE_REPLAY_STEP_MS = 1000 / 60;
+const CUBISM_STATE_REPLAY_EPSILON_MS = 1e-6;
+
+/**
+ * Clear stateful Cubism 3+ subsystems before replaying from a scene snapshot.
+ * Parameters/opacities are restored immediately after this reset, so Pose's
+ * authored default selection cannot overwrite the seek handoff pose.
+ */
+function resetCubismStateForReplay(internal: any, core: any): void {
+  const physics = internal?.physics;
+  physics?.initialize?.();
+  if (physics && typeof physics === 'object') {
+    // CubismPhysics.initialize() resets particle positions but intentionally
+    // keeps interpolation history for ordinary runtime use. Seek replay needs
+    // a fresh integrator so the result cannot depend on a previous seek.
+    if ('_currentRemainTime' in physics) physics._currentRemainTime = 0;
+    for (const field of ['_currentRigOutputs', '_previousRigOutputs']) {
+      const outputs = physics[field];
+      const size = outputs?.getSize?.() ?? 0;
+      for (let index = 0; index < size; index++) {
+        const values = outputs.at(index)?.outputs;
+        const valueSize = values?.getSize?.() ?? 0;
+        for (let valueIndex = 0; valueIndex < valueSize; valueIndex++) values.set(valueIndex, 0);
+      }
+    }
+  }
+  internal?.pose?.reset?.(core);
+  const focus = internal?.focusController;
+  focus?.focus?.(0, 0, true);
+  if (focus && typeof focus === 'object') {
+    if ('vx' in focus) focus.vx = 0;
+    if ('vy' in focus) focus.vy = 0;
+  }
+}
+
+function replayCubismState(model: any, durationSeconds: number): void {
+  let remainingMs = Math.max(0, durationSeconds * 1000);
+  while (remainingMs > CUBISM_STATE_REPLAY_EPSILON_MS) {
+    const stepMs = Math.min(CUBISM_STATE_REPLAY_STEP_MS, remainingMs);
+    model.update(stepMs);
+    remainingMs -= stepMs;
+  }
+}
+
 /** The SDK caches native memory views. A second model may grow the shared heap. */
 export function refreshCubismCoreViews(coreModel: any): void {
   const raw = coreModel?.getModel?.();
@@ -466,19 +510,32 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   };
   model.restoreAtSceneTime = async (input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> => {
     model.stopAllMotions();
-    sceneTime = Math.max(0, input.targetSceneTime);
+    const offsetSeconds = input.motion?.offset ?? input.expression?.elapsedSeconds ?? 0;
+    sceneTime = Math.max(0, input.targetSceneTime - (Number.isFinite(offsetSeconds) ? offsetSeconds : 0));
+    resetCubismStateForReplay(internal, core);
     const baseline = input.handoffSnapshot ?? input.idleSnapshot ?? input.snapshot;
     if (baseline) model.applyRuntimeSnapshot(baseline);
-    const started = !input.motion || await model.startMotion(input.motion.key, 0, input.motion.priority ?? 3, input.motion.offset, input.motion.fadeInSeconds);
+    const focus = internal?.focusController;
+    focus?.focus?.(input.focus?.[0] ?? 0, input.focus?.[1] ?? 0, true);
+    const started = !input.motion || await model.startMotion(input.motion.key, 0, input.motion.priority ?? 3, 0, input.motion.fadeInSeconds);
     const key = input.expression !== undefined
       ? input.expression?.key ?? null
       : input.snapshot?.expression?.key ?? null;
-    await setExpression(key, input.expression?.elapsedSeconds ?? Number.POSITIVE_INFINITY);
-    model.update(0);
+    const expressionElapsed = input.expression?.elapsedSeconds;
+    await setExpression(key, expressionElapsed === undefined ? Number.POSITIVE_INFINITY : 0);
+    if (input.motion && Number.isFinite(input.motion.offset) && input.motion.offset > 0) {
+      replayCubismState(model, input.motion.offset);
+    } else if (Number.isFinite(expressionElapsed) && expressionElapsed !== undefined && expressionElapsed > 0) {
+      replayCubismState(model, expressionElapsed);
+    } else {
+      model.update(0);
+    }
     return {
       status: started ? 'restored' : 'fallback',
-      tierUsed: started ? 'native' : 'snapshot-forward',
-      diagnostics: started ? [] : [`Motion "${input.motion?.key}" was not available.`],
+      tierUsed: started ? 'state-replay' : 'snapshot-forward',
+      diagnostics: started
+        ? []
+        : [`Motion "${input.motion?.key}" was not available.`],
     };
   };
   model.renderForBake = (renderer: any, target?: PIXI.RenderTexture) => {

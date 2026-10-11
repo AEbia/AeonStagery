@@ -7,6 +7,7 @@ import { getCubismPixiSdkStatus, initCubismPixiSdk } from '../CubismPixiSdk';
 import { createLive2DModelHandle, type Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlModule';
 import { loadCubismEngineModule } from '../Live2DEngineBridge';
 import { installCustomMotionStage, type InstallCustomMotionStageInput } from '../live2d/customMotionStage';
+import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import type {
   Live2DModelCreateOptions,
   Live2DRuntimeClock,
@@ -385,7 +386,21 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         : await model?.startMotion?.(motionKey, 0, priority, offsetSeconds);
       return { ok: !!started, offsetReplayMs: 0 };
     },
-    getMotionSamplingTargets: () => [],
+    getMotionSamplingTargets: (model): readonly Cubism2MotionSamplerTarget[] => {
+      const targets: Cubism2MotionSamplerTarget[] = [];
+      for (const concrete of this.controls.getConcreteModels(model)) {
+        const internalModel = concrete?.internalModel;
+        const settings = internalModel?.settings;
+        if (!internalModel || !settings?.motions) continue;
+        targets.push({
+          internalModel,
+          motionManager: internalModel.motionManager,
+          kind: 'cubism3-plus',
+          settings,
+        });
+      }
+      return targets;
+    },
     installCustomMotionStage: (model, input: Omit<InstallCustomMotionStageInput, 'targets'>) => {
       const targets = this.controls.getConcreteModels(model)
         .map((concrete) => {

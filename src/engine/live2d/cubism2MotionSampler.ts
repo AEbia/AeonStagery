@@ -19,6 +19,10 @@ export interface Cubism2MotionSamplerTarget {
   readonly internalModel: any;
   /** pixi-live2d-display motion manager (Cubism2MotionManager). */
   readonly motionManager: any;
+  /** Runtime marker used by the shared resource-motion cache. */
+  readonly kind?: 'cubism3-plus';
+  /** Cubism 3+ ModelSettings, present only when `kind` is set. */
+  readonly settings?: unknown;
 }
 
 export interface Cubism2MotionFileOptions {

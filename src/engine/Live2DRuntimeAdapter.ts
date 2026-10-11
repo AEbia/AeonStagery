@@ -37,6 +37,15 @@ export { Live2DPerformanceRegistry } from './runtime/Live2DPerformanceRegistry';
 export { Cubism2PixiLive2DAdapter } from './runtime/Cubism2PixiLive2DAdapter';
 export { Cubism2PixiLive2DModelControls } from './runtime/Cubism2PixiLive2DModelControls';
 export { CubismPixiLive2DAdapter } from './runtime/CubismPixiLive2DAdapter';
+export {
+  parseCubism3MotionBuffer,
+  parseCubism3MotionJson,
+} from './live2d/cubism3MotionParser';
+export {
+  loadCubism3Motion,
+  resolveCubism3MotionMeta,
+  Cubism3MotionSamplingError,
+} from './live2d/cubism3MotionSampler';
 export { resolveHeadAnchorFromSettings } from './runtime/modelMetadata';
 
 export const cubism2Live2DAdapter = new Cubism2PixiLive2DAdapter();

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MotionCurveCacheService,
   motionCurveCacheKey,
@@ -67,7 +67,66 @@ function makeSampler(overrides: Partial<MotionCurveCacheSampler> = {}): MotionCu
   };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('motionCurveCache service', () => {
+  it('builds a Cubism 3+ resource motion from model settings without the Cubism 2 sampler', async () => {
+    const document = {
+      Version: 3,
+      Meta: { Duration: 1, FadeInTime: 0.1, FadeOutTime: 0.2 },
+      Curves: [{ Target: 'Parameter', Id: 'ParamAngleX', Segments: [0, 0, 0, 1, 30] }],
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(document)).buffer;
+    const fetchFile = vi.fn(async (url: string) => {
+      expect(url).toBe('asset://model/wave.motion3.json');
+      return { ok: true, arrayBuffer: async () => bytes };
+    });
+    vi.stubGlobal('fetch', fetchFile);
+    const cubism3Target = {
+      kind: 'cubism3-plus' as const,
+      settings: {
+        motions: { wave: [{ File: 'wave.motion3.json' }] },
+        resolveURL: (file: string) => `asset://model/${file}`,
+      },
+    };
+    const cache = new MotionCurveCacheService();
+    const entry = await cache.ensure(makeSource({
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
+      targets: [cubism3Target as unknown as Cubism2MotionSamplerTarget],
+    }));
+
+    expect(entry?.motion.tracks[0].parameterId).toBe('ParamAngleX');
+    expect(entry?.motion.derivedFrom).toEqual({ key: 'wave', fadeInSeconds: 0.1, fadeOutSeconds: 0.2 });
+    expect(entry?.evaluate(0.5)).toEqual({ ParamAngleX: 15 });
+    expect(fetchFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Cubism 3+ motions with non-parameter curves on native fallback', async () => {
+    const document = {
+      Version: 3,
+      Meta: { Duration: 1 },
+      Curves: [
+        { Target: 'Parameter', Id: 'ParamAngleX', Segments: [0, 0, 0, 1, 30] },
+        { Target: 'PartOpacity', Id: 'PartBody', Segments: [0, 1, 0, 1, 0] },
+      ],
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(document)).buffer;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => bytes })));
+    const cubism3Target = {
+      kind: 'cubism3-plus' as const,
+      settings: { motions: { wave: [{ File: 'wave.motion3.json' }] } },
+    };
+    const source = makeSource({
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
+      targets: [cubism3Target as unknown as Cubism2MotionSamplerTarget],
+    });
+    const cache = new MotionCurveCacheService();
+    await expect(cache.ensure(source)).resolves.toBeNull();
+    expect(cache.missReason(source)).toBe('unsupported-curve-target');
+  });
+
   it('builds a per-frame derived custom motion and caches it', async () => {
     const sampler = makeSampler();
     const cache = new MotionCurveCacheService(sampler);

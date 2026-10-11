@@ -1976,6 +1976,7 @@ class Live2DManager {
       snapshot?: ModelSnapshot | null;
       handoffSnapshot?: ModelSnapshot | null;
       targetSceneTime: number;
+      focus?: readonly [number, number];
       motion?: { key: string; priority?: number; offset: number; sceneTime: number; fadeInSeconds?: number } | null;
       expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
@@ -1993,6 +1994,7 @@ class Live2DManager {
         snapshot: input.snapshot ?? null,
         handoffSnapshot: input.handoffSnapshot ?? null,
         targetSceneTime: input.targetSceneTime,
+        focus: input.focus,
         motion: input.motion ?? null,
         expression: input.expression ?? null,
         idleSnapshot: entry.idleSnapshot ?? null,

@@ -299,6 +299,7 @@ export class CharacterSynchronizer {
       snapshot?: any;
       handoffSnapshot?: any;
       targetSceneTime: number;
+      focus?: readonly [number, number];
       motion?: { key: string; priority?: number; offset: number; sceneTime: number } | null;
       expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
@@ -328,10 +329,17 @@ export class CharacterSynchronizer {
             : {}),
         }
         : null;
+      const focus = state.lookAt
+        ? typeof state.lookAt.target === 'string' && state.lookAt.target.trim()
+          && Array.isArray(state.lookAt.focus)
+          ? state.lookAt.focus as readonly [number, number]
+          : resolveLookAtFocus(state.lookAt, this.live2D.getPoint?.bind(this.live2D), id)
+        : [0, 0] as const;
       nativeSeekInputs.set(id, {
         snapshot: snap?.models.get(id) ?? null,
         handoffSnapshot: nativeMotionHandoffSnapshots.get(id) ?? null,
         targetSceneTime: time,
+        focus,
         motion,
         expression: resolveSeekExpression(state.expression, time),
         isScrubbing,

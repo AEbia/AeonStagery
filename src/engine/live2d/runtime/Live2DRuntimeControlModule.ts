@@ -36,13 +36,13 @@ function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeter
   }
   if (adapterId === 'untitled-pixi-live2d-engine-cubism') {
     return {
-      tier: 'native-offset-deterministic',
+      tier: 'state-replay-deterministic',
       supportsParameterCurves: true,
       supportsNativeMotionOffset: true,
-      supportsStateReplay: false,
+      supportsStateReplay: true,
       diagnostics: [
-        'Cubism 3+ native motion offsets restore the vendor motion queue.',
-        'Physics/Pose/LookAt state is not reconstructed from a fixed-step baseline.',
+        'Cubism 3+ parameter motions use the runtime-neutral deterministic curve cache when available.',
+        'Physics/Pose/LookAt state is reset and reconstructed with fixed 60Hz steps during seek replay.',
       ],
     };
   }
