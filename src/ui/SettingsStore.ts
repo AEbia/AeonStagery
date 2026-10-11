@@ -45,6 +45,7 @@ function normalizeTheme(value: unknown): AppTheme {
 
 export interface AppSettings {
   lowPerformance: boolean;
+  showTimelineSelectionBar: boolean;
   autoSave: boolean;
   theme: AppTheme;
 
@@ -110,6 +111,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   lowPerformance: false,
+  showTimelineSelectionBar: true,
   autoSave: true,
   theme: 'system',
   assetsPath: '',

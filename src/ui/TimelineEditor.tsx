@@ -37,6 +37,7 @@ import { TimelineSelectionBar } from './timeline/TimelineSelectionBar';
 import { pruneSelectedActionIdsForTimeline } from './timeline/selectionHygiene';
 import { getTimelineActionDuration } from './timeline/timelineDensity';
 import { showToast } from './Toast';
+import { useSetting } from './SettingsStore';
 import { deriveCollaborationStatusUx } from '../services/collaboration/CollaborationStatusUxModel';
 import { eventBus } from '../api/events';
 import {
@@ -74,6 +75,7 @@ export function TimelineEditor({
   onDetachWorkspaceTools,
   canDetachWorkspaceTools = false,
 }: TimelineEditorProps) {
+  const showTimelineSelectionBar = useSetting('showTimelineSelectionBar');
   const {
     selectedActionIds,
     setSelectedIds,
@@ -891,26 +893,28 @@ export function TimelineEditor({
               repeatIndexMap={repeatIndexMap}
             />
           </div>
-          <TimelineSelectionBar
-            selectedCount={selectedIdsList.length}
-            action={singleSelectedDisplayAction}
-            trackLabel={singleSelectedAction?._id ? trackLabelByActionId.get(singleSelectedAction._id) : undefined}
-            trackValue={selectedActionTrackValue}
-            trackOptions={quickTrackOptions}
-            issueCount={selectedIssueCount}
-            hasRepeatWarning={!!(singleSelectedAction?._id && repeatIndexMap.get(singleSelectedAction._id))}
-            canSplit={canSplitSelection}
-            onSeek={handleSeekToSelection}
-            onReveal={handleRevealSelection}
-            onClear={() => setSelectedIds({})}
-            onCopy={handleCopySelection}
-            onDuplicate={handleDuplicateSelection}
-            onDelete={handleDeleteSelection}
-            onSplit={handleSplitSelection}
-            onAlignToPlayhead={handleAlignSelectionToPlayhead}
-            onSelectAdjacent={handleSelectAdjacentAction}
-            onChangeTrack={handleChangeSelectionTrack}
-          />
+          {showTimelineSelectionBar && (
+            <TimelineSelectionBar
+              selectedCount={selectedIdsList.length}
+              action={singleSelectedDisplayAction}
+              trackLabel={singleSelectedAction?._id ? trackLabelByActionId.get(singleSelectedAction._id) : undefined}
+              trackValue={selectedActionTrackValue}
+              trackOptions={quickTrackOptions}
+              issueCount={selectedIssueCount}
+              hasRepeatWarning={!!(singleSelectedAction?._id && repeatIndexMap.get(singleSelectedAction._id))}
+              canSplit={canSplitSelection}
+              onSeek={handleSeekToSelection}
+              onReveal={handleRevealSelection}
+              onClear={() => setSelectedIds({})}
+              onCopy={handleCopySelection}
+              onDuplicate={handleDuplicateSelection}
+              onDelete={handleDeleteSelection}
+              onSplit={handleSplitSelection}
+              onAlignToPlayhead={handleAlignSelectionToPlayhead}
+              onSelectAdjacent={handleSelectAdjacentAction}
+              onChangeTrack={handleChangeSelectionTrack}
+            />
+          )}
 
           {/* Zoom Navigator Bar (Replaces default scrollbar) */}
           <div style={{ background: 'var(--timeline-bg)', borderTop: '1px solid var(--border-subtle)', paddingLeft: '100px' }}>
