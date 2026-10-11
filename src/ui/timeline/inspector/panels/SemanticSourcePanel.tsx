@@ -20,6 +20,7 @@ import { normalizeFilterSourceParams, LENS_FILTER_CATEGORY_LABELS } from '../fil
 import type { CameraPoint } from '../cameraMotionZoom';
 import { clampCameraCoordinate, readCameraPoint } from '../cameraMotionZoom';
 import type { InspectorParamContext } from '../paramControls/context';
+import { switchCameraFocusTarget } from '../../semanticTimelineEditing';
 
 export interface SemanticSourcePanelProps {
   rowFieldKeys: ReadonlySet<string>;
@@ -186,15 +187,28 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         />
       </div>
     );
-    const renderCameraTarget = (allowEmpty: boolean) => renderCameraSelect(
-      '目标角色',
-      'target',
-      actionParams.target,
-      [
+    const renderCameraTarget = (allowEmpty: boolean) => {
+      const options = [
         ...(allowEmpty ? [{ value: '', label: '固定坐标' }] : []),
         ...(sceneData.meta.characters ?? []).map((character) => ({ value: character.id, label: character.name })),
-      ],
-    );
+      ];
+      if (!allowEmpty || action.semanticType !== 'camera') {
+        return renderCameraSelect('目标角色', 'target', actionParams.target, options);
+      }
+      if (rowFieldKeys.has('target')) return null;
+      return (
+        <div className="inspector-row" key="target">
+          <label className="inspector-label" htmlFor={`action-${actionId}-camera-target`}>目标角色</label>
+          <FormSelect
+            id={`action-${actionId}-camera-target`}
+            aria-label="目标角色"
+            value={typeof actionParams.target === 'string' ? actionParams.target : ''}
+            options={options}
+            onChange={(nextTarget) => replaceSourceParams(actionId, switchCameraFocusTarget(sourceParams, nextTarget || undefined))}
+          />
+        </div>
+      );
+    };
     const renderCameraTargetPart = () => renderCameraSelect(
       '对焦部位',
       'targetPart',

@@ -112,7 +112,15 @@ export function LegacyCameraMotionSection(props: LegacyCameraMotionProps) {
                   ]}
                   onChange={(char) => {
                     const current = (actionParams.focus && typeof actionParams.focus === 'object') ? actionParams.focus : {};
-                    updateParam(actionId, 'focus', { ...current, character: char || undefined });
+                    if (!char) {
+                      updateParam(actionId, 'focus', {
+                        ...current,
+                        character: undefined,
+                        point: Array.isArray(current.point) ? current.point : [0.5, 0.5],
+                      });
+                      return;
+                    }
+                    updateParam(actionId, 'focus', { ...current, character: char, point: undefined });
                   }}
                 />
 

@@ -12,6 +12,7 @@ import { resolveCharacterPerformanceTargetCharId } from './characterPerformanceP
 import { Live2DResourceSelect } from './inspector/Live2DResourceSelect';
 import { useCharacterModelData } from './inspector/useModelData';
 import { characterPerformanceMotionKey } from './inspector/dialogueCompanionModel';
+import { switchCameraFocusTarget } from './semanticTimelineEditing';
 
 export type QuickParamPatch = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
 
@@ -189,8 +190,8 @@ export const StatementQuickControls = memo(function StatementQuickControls({ ite
                   ...characters.map((character) => ({ value: character.id, label: character.name })),
                 ]}
                 onChange={(id) => {
-                  if (isCameraFocus && !id) {
-                    onChange((current) => ({ target: undefined, position: current.position ?? [0.5, 0.5] }));
+                  if (isCameraFocus) {
+                    onChange((current) => switchCameraFocusTarget(current, id || undefined));
                     return;
                   }
                   if (!isDialogue) { onChange({ [field.key]: id }); return; }
