@@ -21,7 +21,7 @@ import type {
   Live2DParameterMetadata,
 } from '../api/types/live2d-parameter-animation';
 import { resolveVec2 } from './utils/math';
-import { STAGE_WIDTH, STAGE_HEIGHT, isUtSystemLockActive } from './Live2DConfig';
+import { STAGE_WIDTH, STAGE_HEIGHT } from './Live2DConfig';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
 import type { RimLightStyleState } from '../api/types/visual';
 import { setScriptEngineForSetup } from './Live2DSetupState';
@@ -40,24 +40,15 @@ import type { ResolvedRimLightState } from './RimLightResolver';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import {
-  applyCustomMotionValues,
   customMotionControlledParameterIds,
   selectHandoffPoseValues,
-  evaluateCustomMotionRuntime,
   type CustomMotionHandoffPose,
 } from './live2d/customMotionRuntime';
 import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import { motionCurveCache } from './live2d/motionCurveCache';
 import { releaseCustomMotionOwnership, reclaimControlledInjectedParams } from './live2d/customMotionOwnership';
 import { purgeCharacterRuntimeState, resetModelToNeutralPose, restoreNeutralModelPose } from './live2d/characterStatePurge';
-
-function isDefaultLive2DPose(snapshot: ModelSnapshot | null): boolean {
-  if (!snapshot?.params?.length) return true;
-  for (let i = 0; i < snapshot.params.length; i++) {
-    if (snapshot.params[i] !== 0) return false;
-  }
-  return true;
-}
+import { Live2DStageRuntime } from './Live2DStageRuntime';
 
 export interface LookAtOptions {
   fromX?: number;
@@ -121,27 +112,11 @@ class Live2DManager {
     this.modelResources.setWmdlConfigRegistry(registry);
   }
 
-  private characters: Map<string, CharacterEntry> = new Map();
-  private containers: Map<string, PIXI.Container> = new Map();
-  private pendingMotions: Map<string, MotionRequest[]> = new Map();
-  private _characterGenerations: Map<string, number> = new Map();
+  private readonly stageRuntime: Live2DStageRuntime;
   private basePath: string = '';
   private _isExportMode: boolean = false; // Only used by ExportDialog (fast export path). Bake uses BakeEngine with independent models.
-  private _shouldUpdate: boolean = true;
-  private _tickerAdded: boolean = false;
-  private _jumpingCharacters: Set<string> = new Set(); // per-character jump lock (replaces global _isJumping)
-  private _motionMutex: Map<string, Promise<void>> = new Map(); // per-character motion serialization
-  private _hardResetMutex: Map<string, Promise<void>> = new Map(); // per-character hardReset serialization
-  private pendingConfigs: Map<string, any[]> = new Map(); // id -> queue of transform configs
-  private _activeMotionLoads: Set<string> = new Set(); // IDs of characters currently loading motions
   private _initPromise: Promise<void> | null = null;
   private _scriptEngine: any = null;
-  private pendingExpressions = new Map<string, string | null>();
-  private pendingCustomMotions = new Map<string, PendingCustomMotion>();
-  private pendingLookAts = new Map<string, PendingLookAt>();
-  private pendingBlinks = new Map<string, PendingBlink>();
-  private pendingRimLightCommands = new Map<string, PendingRimLightCommand>();
-  private pendingRimLightStates = new Map<string, ResolvedRimLightState>();
 
   /**
    * Current camera state — set by ScriptEngine before each render pass.
@@ -151,21 +126,48 @@ class Live2DManager {
   public currentCamera: { position: Vec2; zoom: number } | null = null;
   private motionController: Live2DMotionController | null = null;
   private readonly modelResources: Live2DModelResources;
-  private _pendingMotionQueue: { id: string; req: any }[] = [];
-  private _pendingMotionCount: number = 0;
   private resourceMotionCacheEnabled = true;
   private readonly logger = getLogger('Live2DManager');
 
   constructor() {
+    this.stageRuntime = new Live2DStageRuntime({
+      dispatchMotion: (id, request) => {
+        this.ensureMotionController();
+        return this.motionController!.dispatchMotion(id, request);
+      },
+      describeInvalidModelState: (entry) => this.describeInvalidModelState(entry),
+      repairCorruptedModel: (entry, reason, waitForRepair) => this.repairCorruptedModel(entry, reason, waitForRepair),
+      maybeInstallCustomMotionStage: (entry) => this.maybeInstallCustomMotionStageOnEntry(entry),
+      resolveCustomMotionSceneTime: (entry, manualTimeMs) => this.resolveCustomMotionSceneTime(entry, manualTimeMs),
+      getScriptEngine: () => this._scriptEngine,
+    });
     this.modelResources = new Live2DModelResources(
       () => this.basePath,
     );
   }
 
+  private get characters(): Map<string, CharacterEntry> { return this.stageRuntime.characters; }
+  private set characters(value: Map<string, CharacterEntry>) { this.stageRuntime.replaceCharacters(value); }
+  private get containers(): Map<string, PIXI.Container> { return this.stageRuntime.containers; }
+  private set containers(value: Map<string, PIXI.Container>) { this.stageRuntime.replaceContainers(value); }
+  private get pendingMotions(): Map<string, MotionRequest[]> { return this.stageRuntime.pendingMotions; }
+  private get pendingConfigs(): Map<string, unknown[]> { return this.stageRuntime.pendingConfigs; }
+  private get pendingExpressions(): Map<string, string | null> { return this.stageRuntime.pendingExpressions; }
+  private get pendingCustomMotions(): Map<string, PendingCustomMotion> { return this.stageRuntime.pendingCustomMotions; }
+  private get pendingLookAts(): Map<string, PendingLookAt> { return this.stageRuntime.pendingLookAts; }
+  private get pendingBlinks(): Map<string, PendingBlink> { return this.stageRuntime.pendingBlinks; }
+  private get pendingRimLightCommands(): Map<string, PendingRimLightCommand> { return this.stageRuntime.pendingRimLightCommands; }
+  private get pendingRimLightStates(): Map<string, ResolvedRimLightState> { return this.stageRuntime.pendingRimLightStates; }
+  private get _jumpingCharacters(): Set<string> { return this.stageRuntime.jumpingCharacters; }
+  private get _motionMutex(): Map<string, Promise<void>> { return this.stageRuntime.motionMutex; }
+  private get _hardResetMutex(): Map<string, Promise<void>> { return this.stageRuntime.hardResetMutex; }
+  private get _activeMotionLoads(): Set<string> { return this.stageRuntime.activeMotionLoads; }
+  private get _shouldUpdate(): boolean { return this.stageRuntime.isUpdating; }
+  private get _tickerAdded(): boolean { return this.stageRuntime.hasTicker; }
+  private set _tickerAdded(value: boolean) { if (value) this.stageRuntime.markTickerAdded(); }
+
   private nextCharacterGeneration(id: string): number {
-    const next = (this._characterGenerations.get(id) ?? 0) + 1;
-    this._characterGenerations.set(id, next);
-    return next;
+    return this.stageRuntime.nextCharacterGeneration(id);
   }
 
   /**
@@ -181,20 +183,7 @@ class Live2DManager {
    * Wait for all characters to finish loading.
    */
   async waitForAllLoaded(): Promise<void> {
-    // Drain ALL async states: loads, motions, hard resets.
-    // Uses polling loop because new promises can be added after Promise.all takes its snapshot.
-    // Mutex entries are deleted on resolution, so empty maps guarantee quiescence.
-    while (this.modelResources.hasPendingLoads ||
-      this._motionMutex.size > 0 ||
-      this._hardResetMutex.size > 0) {
-      const promises: Promise<void>[] = [
-        this.modelResources.waitForLoads(),
-        ...this._motionMutex.values(),
-        ...this._hardResetMutex.values(),
-      ];
-      if (promises.length === 0) break;
-      await Promise.allSettled(promises);
-    }
+    await this.stageRuntime.waitForQuiescence(() => this.modelResources.waitForLoads());
   }
 
   /**
@@ -2159,12 +2148,7 @@ class Live2DManager {
   }
 
   setAutoUpdate(enabled: boolean): void {
-    this._shouldUpdate = enabled;
-    // We explicitly keep entry.model.autoUpdate = false to prevent double-stepping,
-    // and let our updateAll() drive the animation!
-    for (const entry of this.characters.values()) {
-      entry.model.autoUpdate = false;
-    }
+    this.stageRuntime.setAutoUpdate(enabled);
   }
 
   /**
@@ -2173,219 +2157,7 @@ class Live2DManager {
    * @param forceStep If true, bypass the pause-throttle and perform a full update.
    */
   async updateAll(dt: number, forceStep: boolean = false, manualTimeMs?: number): Promise<void> {
-    // Cubism 2 offset replay temporarily owns the process-wide SDK clock.
-    // That lock must not stall official Cubism Web models, whose motion time is
-    // instance-local. During a normal ticker pass, leave Cubism 2 intents and
-    // frames untouched until the lock is released, but keep updating Cubism 3+
-    // entries so mixed-runtime characters can animate concurrently.
-    const sharedClockLocked = isUtSystemLockActive() && !forceStep && manualTimeMs === undefined;
-
-    const targetMap = this.characters;
-
-    // 0. 在任何时间或渲染更新之前，先结算本帧积累的最新动作指令！
-    // 绝对不能在 Ticker 回调中 await —— PixiJS Ticker 是同步触发的，
-    // await 会让当前帧的模型更新被推迟，而下一帧的 Ticker 又进入，
-    // 造成时间步进双倍计算、物理崩溃（NaN）。
-    // 将动作作为后台任务踢出，_motionMutex 负责串行化。
-    this._pendingMotionCount = 0;
-    for (const entry of targetMap.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
-        continue;
-      }
-      if ((entry as any)._pendingPlayMotion) {
-        const req = (entry as any)._pendingPlayMotion as any;
-        (entry as any)._pendingPlayMotion = undefined;
-        // 复用对象池中的对象，避免每帧分配新字面量
-        if (!this._pendingMotionQueue[this._pendingMotionCount]) {
-          this._pendingMotionQueue[this._pendingMotionCount] = { id: '', req: null };
-        }
-        const poolItem = this._pendingMotionQueue[this._pendingMotionCount];
-        poolItem.id = entry.id;
-        poolItem.req = req;
-        this._pendingMotionCount++;
-      }
-    }
-    const motionPromises: Promise<void>[] = [];
-    for (let i = 0; i < this._pendingMotionCount; i++) {
-      const { id, req } = this._pendingMotionQueue[i];
-      const p = this.motionController!.dispatchMotion(id, req)
-        .catch(e => console.error(`[Live2D] Background motion execution failed for ${id}:`, e));
-      motionPromises.push(p);
-    }
-    if (forceStep && motionPromises.length > 0) {
-      await Promise.all(motionPromises);
-    }
-
-    // 1. `dt` is already milliseconds for every production caller. In
-    // particular, PixiJS 8 supplies ticker.deltaMS; multiplying it by the old
-    // frame-factor conversion advanced every runtime (and the Cubism 2 global
-    // clock) about three times per rendered frame after the 50ms safety clamp.
-    let deltaInMs = dt;
-
-    if (!this._shouldUpdate && !forceStep) {
-      deltaInMs = 0.0001;
-    }
-
-    const shouldStepModels = deltaInMs > 0;
-    // 核心物理稳定优化：单帧最高物理增量限制在 50ms（相当于 20FPS 下限），
-    // 并且普通更新绝对禁止 dt 严格等于 0（最低为 0.001ms），彻底隔绝大帧延迟、零帧、系统瞬间卡顿造成的 Euler 物理积分 NaN/Infinity 溢出。
-    // 但 seek 同步会用 updateAll(0, true, manualTimeMs) 只结算 pending motion；
-    // 这个路径必须保持 0ms，不能隐藏推进到 0.001ms，否则暂停 seek 会继续步进动作。
-    deltaInMs = shouldStepModels ? Math.min(50, Math.max(0.001, deltaInMs)) : 0;
-
-    // 2. 每帧将 SDK 时钟单调递增 deltaInMs
-    // 全局时钟一旦被 setUserTimeMSec 设置后就不再自动推进，必须手动驱动。
-    // 物理引擎和动作管理器都依赖时钟的 getUserTimeMSec() 计算 dt 和 elapsed，
-    // 如果时钟冻结：动作不播放、物理引擎看到 dt=0。
-    // 条件：
-    //   - 没有角色正在做锁保护的时钟跳跃（_executePlayMotion）
-    //   - 调用者没有传入 manualTimeMs（传入时表示调用者已在外部管理时钟，如 _doSeek 的 utBaseline 循环）
-    // SDK 时钟经 adapter 的 opaque handle 访问（no Jannchie globals here）。
-    const sdkClock = cubism2Live2DAdapter.getClock();
-    if (sdkClock && !sharedClockLocked && this._jumpingCharacters.size === 0 && manualTimeMs === undefined) {
-      sdkClock.setUserTimeMSec(sdkClock.getUserTimeMSec() + deltaInMs);
-    }
-
-    // 保持 _currentDt 为初始值 0，确保 render 钩子在播放时不重复推进时间
-    for (const entry of this.characters.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') {
-        continue;
-      }
-      if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !this._scriptEngine?.isReconstructing) {
-        entry.filterWarmupFrames = Math.max(0, entry.filterWarmupFrames - 1);
-      }
-      // NaN/Infinity detection before and after stepping. Export capture renders
-      // immediately after updateAll(), so forceStep must wait for repair before capture.
-      if (entry.isCorrupted || entry.corruptionRepairPromise) {
-        await this.repairCorruptedModel(entry, 'previous invalid state', forceStep);
-      } else {
-        const invalidBeforeUpdate = this.describeInvalidModelState(entry);
-        if (invalidBeforeUpdate) {
-          await this.repairCorruptedModel(entry, invalidBeforeUpdate, forceStep);
-        }
-      }
-
-      // 快照修复：如果模型处于损坏状态，绝对禁止步进，防止 NaN 扩散到 WebGL 渲染管线
-      if (!entry.isCorrupted) {
-        try {
-          if (manualTimeMs !== undefined) {
-            entry.lastManualTimeMs = manualTimeMs;
-          }
-
-          // 在 updateAll 中执行更新，确保播放/导出时能立即看到反馈。
-          // 0ms seek flush 只结算动作指令，不推进模型时间。
-          if (entry.customMotion) {
-            // Lazy heal: a motion that took over before its model finished
-            // loading gets staged on the first frame the model exists. No-op
-            // once installed or after a recorded failed attempt.
-            this.maybeInstallCustomMotionStageOnEntry(entry);
-            entry.customMotionStage?.setSceneTime(this.resolveCustomMotionSceneTime(entry, manualTimeMs));
-          }
-          if (entry.pendingSeekBoundarySnapshot) {
-            if (manualTimeMs === undefined) {
-              entry.pendingSeekBoundarySnapshot = undefined;
-              entry.pendingSeekBoundaryMotionStartTime = undefined;
-              entry.pendingSeekBoundaryDuration = undefined;
-            } else {
-              const currentSnapshot = getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(
-                entry.id,
-                entry.model,
-                entry.motionStartTime,
-              );
-              // Keep the handoff only while Cubism is still exposing its
-              // default pose. Once the new motion has produced any pose,
-              // including face parameters, restoring the old full snapshot
-              // would mask the new motion indefinitely during paused seeks.
-              const shouldHoldBoundaryPose = isDefaultLive2DPose(currentSnapshot);
-
-              if (shouldHoldBoundaryPose) {
-                getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, entry.pendingSeekBoundarySnapshot);
-              } else {
-                entry.pendingSeekBoundarySnapshot = undefined;
-                entry.pendingSeekBoundaryMotionStartTime = undefined;
-                entry.pendingSeekBoundaryDuration = undefined;
-              }
-            }
-          }
-
-          // The 0ms seek flush must not advance model time; and when a seek
-          // boundary snapshot was just re-applied above, the step must come
-          // after it so the handoff pose survives into the rendered frame.
-          // Native motion fades blend against the saved pose on every update;
-          // even the legacy pause throttle would accumulate their fade weight.
-          const freezeNativeMotion = !this._shouldUpdate && !forceStep
-            && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
-          if (shouldStepModels && !freezeNativeMotion) {
-            getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
-          }
-
-          const invalidAfterUpdate = this.describeInvalidModelState(entry);
-          if (invalidAfterUpdate) {
-            await this.repairCorruptedModel(entry, invalidAfterUpdate, forceStep);
-          }
-        } catch (err) {
-          // Suppress
-        }
-      }
-
-      if (entry.isCorrupted) {
-        continue;
-      }
-
-      // Evaluate the active custom motion for the current frame and write its
-      // values into the injected parameter map. The custom motion owns the
-      // listed parameters until a later motion takes over — except parameters
-      // owned by the active lip-sync effect channel, which keeps running in
-      // its own stage (ADR-0029) and therefore wins deterministically.
-      //
-      // Motion-stage mode (entry.customMotionStage) already wrote this pass's
-      // curve values inside the SDK update pass via afterMotionUpdate, so the
-      // legacy post-update injection here would wrongly overwrite an active
-      // Expression compositing above them.
-      if (!entry.customMotionStage && entry.customMotion && entry.customMotionHandoff) {
-        const sceneTime = this.resolveCustomMotionSceneTime(entry, manualTimeMs);
-        const state = entry.customMotion;
-        const evaluation = evaluateCustomMotionRuntime(
-          state.motion,
-          state.startSceneTime,
-          sceneTime,
-          entry.customMotionHandoff,
-        );
-        applyCustomMotionValues(entry.injectedParams, state.controlledParameterIds, evaluation.values, entry.lipSyncParameterIds);
-      }
-
-      // Re-apply lip sync and other injected params
-      if (entry.injectedParams) {
-        const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-        for (const key in entry.injectedParams) {
-          const val = entry.injectedParams[key];
-          controls.setInjectedParameter(entry.model, key, val as number);
-        }
-        controls.syncInputParameters(entry.model);
-      }
-
-      // Lip-sync ownership handoff: the released channel's closing values have
-      // now been applied once by the re-injection above. Drop the ids so the
-      // stale values stop being re-written every frame — otherwise a Motion-
-      // stage writer (custom motion mouth track) or a resource motion can
-      // never drive those parameters again (ADR-0029 stage handoff).
-      if (entry.pendingLipSyncRelease && entry.pendingLipSyncRelease.size > 0) {
-        for (const parameterId of entry.pendingLipSyncRelease) {
-          delete entry.injectedParams[parameterId];
-        }
-        entry.pendingLipSyncRelease.clear();
-      }
-    }
-
-    // 刷洗滤镜脏标记：通过数组重赋值触发 PixiJS 感知滤镜变化。
-    // 必须在 updateAll（更新阶段）而非 applyRenderHook（渲染通路）中执行，
-    // 避免 WebGL 状态重校验阻塞渲染导致相机动画卡顿。
-    for (const container of this.containers.values()) {
-      if ((container as any)._filtersDirty) {
-        (container as any)._filtersDirty = false;
-        container.filters = container.filters ? (container.filters as any[]).slice() : null;
-      }
-    }
+    await this.stageRuntime.step(dt, forceStep, manualTimeMs);
   }
 
   /**
@@ -2448,23 +2220,8 @@ class Live2DManager {
     for (const id of Array.from(this.characters.keys())) {
       this.removeCharacter(id);
     }
-    this.characters.clear();
-    this.containers.clear();
-    this.pendingMotions.clear();
-    this.pendingConfigs.clear();
-    this.pendingExpressions.clear();
-    this.pendingCustomMotions.clear();
-    this.pendingLookAts.clear();
-    this.pendingBlinks.clear();
-    this.pendingRimLightCommands.clear();
-    this.pendingRimLightStates.clear();
-    this._motionMutex.clear();
-    this._hardResetMutex.clear();
-    this._characterGenerations.clear();
     this.modelResources.clear();
-
-    this._activeMotionLoads.clear();
-    this._jumpingCharacters.clear();
+    this.stageRuntime.clear();
   }
 }
 

@@ -73,7 +73,7 @@ export class Live2DMotionController {
     private characters: Map<string, CharacterEntry>,
     private containers: Map<string, any>,
     private pendingMotions: Map<string, MotionRequest[]>,
-    private pendingConfigs: Map<string, any[]>,
+    private pendingConfigs: Map<string, unknown[]>,
     private motionMutex: Map<string, Promise<void>>,
     private hardResetMutex: Map<string, Promise<void>>,
     private activeMotionLoads: Set<string>,
