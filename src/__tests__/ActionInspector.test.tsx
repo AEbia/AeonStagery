@@ -864,6 +864,65 @@ describe('ActionInspector', () => {
     });
   });
 
+  it('allows image layer coordinates outside the normalized stage bounds', () => {
+    testState.semanticDocument = {
+      schemaVersion: 4,
+      sceneId: 'scene_1',
+      meta: { title: 'Image layer coordinates', durationSeconds: 20 },
+      statements: [{
+        id: 'image_1',
+        time: 2,
+        type: 'graphicLayer',
+        params: {
+          kind: 'image',
+          mode: 'set',
+          id: 'overlay',
+          file: 'images/overlay.png',
+          position: [-0.5, 1.5],
+        },
+      }],
+    };
+    testState.compiledScene = {
+      sceneId: 'scene_1',
+      meta: testState.semanticDocument.meta,
+      actions: [{
+        _id: 'compiled_image_1',
+        id: 'compiled_image_1',
+        time: 2,
+        action: 'addImage',
+        params: { id: 'overlay', file: 'images/overlay.png', position: [-0.5, 1.5] },
+        source: { statementId: 'image_1', outputKey: 'primary' },
+      }],
+    };
+
+    const updateParam = vi.fn();
+    render(
+      <ActionInspector
+        sceneData={{ sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] }}
+        selectedActionIds={{ compiled_image_1: true }}
+        setSelectedIds={vi.fn()}
+        updateAction={vi.fn()}
+        updateParam={updateParam}
+        replaceSourceParams={vi.fn()}
+        deleteAction={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const x = screen.getByRole('spinbutton', { name: 'X' });
+    const y = screen.getByRole('spinbutton', { name: 'Y' });
+    expect(x.getAttribute('aria-valuemin')).toBeNull();
+    expect(x.getAttribute('aria-valuemax')).toBeNull();
+    expect(y.getAttribute('aria-valuemin')).toBeNull();
+    expect(y.getAttribute('aria-valuemax')).toBeNull();
+
+    fireEvent.keyDown(x, { key: 'Enter' });
+    const input = document.querySelector('input.scrubbable-input-mode') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '-0.75' } });
+    fireEvent.blur(input);
+    expect(updateParam).toHaveBeenCalledWith('compiled_image_1', 'position', [-0.75, 1.5], false);
+  });
+
   it('displays custom ease on camera path keyframe as a custom option', async () => {
     testState.semanticDocument = {
       schemaVersion: 4,

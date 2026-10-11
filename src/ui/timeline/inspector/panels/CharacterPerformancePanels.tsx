@@ -66,8 +66,8 @@ export function CharacterLookAtPanel(props: Omit<CharacterPerformancePanelsProps
         <div className="inspector-row">
           <span className="inspector-label">注视点</span>
           <div className="compound-input">
-            <InlineNumericInput dragLabel="X" step="0.01" min="0" max="1" value={point[0]} onChange={(v, isTransient) => updateLookAt('point', [v, point[1]], isTransient)} />
-            <InlineNumericInput dragLabel="Y" step="0.01" min="0" max="1" value={point[1]} onChange={(v, isTransient) => updateLookAt('point', [point[0], v], isTransient)} />
+            <InlineNumericInput dragLabel="X" step="0.01" inferNormalizedBounds={false} popoverMin="-1" popoverMax="1" value={point[0]} onChange={(v, isTransient) => updateLookAt('point', [v, point[1]], isTransient)} />
+            <InlineNumericInput dragLabel="Y" step="0.01" inferNormalizedBounds={false} popoverMin="-1" popoverMax="1" value={point[1]} onChange={(v, isTransient) => updateLookAt('point', [point[0], v], isTransient)} />
           </div>
         </div>
         <div className="inspector-row">
