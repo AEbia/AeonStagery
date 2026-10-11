@@ -4,6 +4,91 @@ import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { refreshCubismCoreViews } from '../engine/CubismPixiModel';
 
 describe('Cubism Pixi runtime controls', () => {
+  it('registers an external motion from its runtime URI without changing model settings', async () => {
+    const { model, motionManager } = createCubismModelFixture();
+    const originalMotions = model.internalModel.settings.motions;
+    const motion = {
+      _motionData: { duration: 2.5, curves: [] },
+      getFadeInTime: () => 0,
+      setFadeInTime: vi.fn(), setFadeOutTime: vi.fn(), setOffsetTime: vi.fn(),
+      setupMotionQueueEntry: vi.fn(),
+    };
+    const createMotion = vi.fn(() => motion);
+    motionManager.createMotion = createMotion;
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    })));
+    const entries: any[] = [];
+    motionManager.queueManager = {
+      startMotion: vi.fn(() => { entries.push({ _motion: motion }); return 1; }),
+      getCubismMotionQueueEntries: () => entries,
+      stopAllMotions: vi.fn(),
+    };
+
+    try {
+      const result = await model.registerExternalMotion('wave', {
+        source: 'wave.motion3.json', runtimeUri: 'asset://wave.motion3.json',
+      });
+      expect(result.status).toBe('compatible');
+      expect(createMotion).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'wave', expect.objectContaining({ File: 'wave.motion3.json' }));
+      expect(model.internalModel.settings.motions).toBe(originalMotions);
+      await model.preloadMotion('wave');
+      expect(model.getMotionDuration('wave')).toBe(2.5);
+      expect(await model.startMotion('wave')).toBe(true);
+      expect(motionManager.queueManager.startMotion).toHaveBeenCalledWith(motion, false);
+      expect(model.getExternalPerformanceKeys('motion')).toEqual(['wave']);
+      model.unregisterExternalPerformance('wave');
+      expect(model.getExternalPerformanceKeys('motion')).toEqual([]);
+      expect(await model.startMotion('wave')).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('resolves a registered external expression through the normal expression control', async () => {
+    const { model, expressionManager } = createCubismModelFixture();
+    const expression = { getFadeInTime: () => 0, setupMotionQueueEntry: vi.fn() };
+    expressionManager.createExpression = vi.fn(() => expression);
+    const startMotion = vi.fn(() => 1);
+    expressionManager.queueManager = {
+      startMotion,
+      getCubismMotionQueueEntries: () => [{ _motion: expression }],
+      stopAllMotions: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
+
+    try {
+      const result = await model.registerExternalExpression('happy', {
+        source: 'happy.exp3.json', runtimeUri: 'asset://happy.exp3.json',
+      });
+      expect(result.status).toBe('compatible');
+      await model.setExpressionForSeek('happy', 0.4);
+      expect(startMotion).toHaveBeenCalledWith(expression, false);
+      expect(expressionManager.currentExpression).toBe(expression);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('returns structured diagnostics when an external performance cannot be fetched', async () => {
+    const { model } = createCubismModelFixture();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) })));
+    try {
+      const result = await model.registerExternalMotion('missing', {
+        source: 'missing.motion3.json', runtimeUri: 'asset://missing.motion3.json',
+      });
+      expect(result).toEqual(expect.objectContaining({
+        status: 'incompatible', missingParameterIds: [], ignoredParameterIds: [],
+      }));
+      expect(result.diagnostics.join(' ')).toContain('fetch');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('preserves the legacy Core drawable render orders', () => {
     const { core } = createCubismModelFixture();
     const orders = new Int32Array([2, 0, 1]);

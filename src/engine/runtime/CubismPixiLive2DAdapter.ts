@@ -99,10 +99,16 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
 
       return null;
     },
-    getAvailableMotions: (model) => Object.keys(model?.internalModel?.settings?.motions ?? {}),
+    getAvailableMotions: (model) => [...new Set([
+      ...Object.keys(model?.internalModel?.settings?.motions ?? {}),
+      ...(model?.getExternalPerformanceKeys?.('motion') ?? []),
+    ])],
     getAvailableExpressions: (model) => {
       const definitions = model?.internalModel?.settings?.expressions;
-      return Array.isArray(definitions) ? definitions.map((definition: any) => definition.Name).filter(Boolean) : Object.keys(definitions ?? {});
+      const configured = Array.isArray(definitions)
+        ? definitions.map((definition: any) => definition.Name).filter(Boolean)
+        : Object.keys(definitions ?? {});
+      return [...new Set([...configured, ...(model?.getExternalPerformanceKeys?.('expression') ?? [])])];
     },
     getMotionDuration: (model, motionKey) => model?.getMotionDuration?.(motionKey, 0) ?? 0,
     getMotionDebugState: (model) => {
@@ -370,7 +376,8 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       // The timeline explicitly owns motion playback; idle remains stopped here.
     },
     hasMotionGroup: (model, motionKey) => {
-      return !!model?.internalModel?.settings?.motions?.[motionKey];
+      return !!model?.internalModel?.settings?.motions?.[motionKey]
+        || (model?.getExternalPerformanceKeys?.('motion') ?? []).includes(motionKey);
     },
     startMotion: async (model, motionKey, priority, offsetSeconds, options) => {
       const started = options?.fadeInSeconds !== undefined
