@@ -234,6 +234,13 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
   }
 
   private preview(record: SessionRecord, intent: CustomMotionEditIntent | null): CustomMotionPreviewOutcome {
+    // Playhead updates cancel selection on every seek tick. With no candidate,
+    // cancellation must not clone/fingerprint the scene or republish all refs.
+    // Document changes are already validated by the store subscription.
+    if (!intent && !record.candidate && this.isCurrent(record)
+      && record.state !== 'readonly' && !record.committing) {
+      return { status: 'cleared' };
+    }
     this.refresh();
     if (!this.isCurrent(record) || record.state === 'readonly' || record.committing) {
       return { status: 'rejected', reason: record.reason ?? 'session-closed' };

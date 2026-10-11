@@ -61,6 +61,14 @@ const EMPTY_KEYFRAMES: readonly CustomMotionKeyframe[] = [];
 
 type CustomMotion = Extract<CharacterMotionOutput, { kind: 'custom' }>;
 
+function findPlayheadKeyframeIndex(track: CustomMotionTrack, localTime: number, fps: number): number {
+  // Preserve native subframe points before looking for an authored frame.
+  const exactIndex = track.keyframes.findIndex((point) => Math.abs(point.time - localTime) < F0_EPSILON);
+  if (exactIndex >= 0) return exactIndex;
+  const frameTime = Math.round(localTime * fps) / fps;
+  return track.keyframes.findIndex((point) => Math.abs(point.time - frameTime) < 1e-9);
+}
+
 export function CustomMotionEditor({
   snapshot,
   parameterMetadata = EMPTY_PARAMETER_METADATA,
@@ -258,9 +266,8 @@ export function CustomMotionEditor({
       const sceneTime = Number.isFinite(livePlayheadTimeRef.current)
         ? livePlayheadTimeRef.current
         : 0;
-      // Keep the same precision as the scene ruler. Rounding here changes the
-      // persisted local time while the main playhead still renders the raw
-      // scene time, so a newly inserted marker can visibly miss the playhead.
+      // Keep native subframe precision for existing-point lookup. Newly
+      // authored points snap to scene frames at the edit boundary.
       return round6(clampValue(sceneTime - blockTime, 0, duration));
     },
     [blockTime, duration],
@@ -272,14 +279,14 @@ export function CustomMotionEditor({
       ? livePlayheadTimeRef.current
       : livePlayheadTime;
     const localTime = round6(clampValue(sceneTime - blockTime, 0, duration));
-    const index = activeTrack.keyframes.findIndex((keyframe) => Math.abs(keyframe.time - localTime) < F0_EPSILON);
+    const index = findPlayheadKeyframeIndex(activeTrack, localTime, fps);
     return index >= 0 ? index : null;
-  }, [activeTrack, blockTime, duration, livePlayheadTime]);
+  }, [activeTrack, blockTime, duration, livePlayheadTime, fps]);
 
   const togglePlayheadKeyframe = useCallback(() => {
     if (!activeTrack || busy) return;
     const localTime = getLocalPlayheadTime();
-    const index = activeTrack.keyframes.findIndex((keyframe) => Math.abs(keyframe.time - localTime) < F0_EPSILON);
+    const index = findPlayheadKeyframeIndex(activeTrack, localTime, fps);
     if (index >= 0) {
       if (index === 0) {
         toastError('首帧 (0.0s) 受保护，不能删除');
@@ -290,9 +297,10 @@ export function CustomMotionEditor({
       return;
     }
     const value = round2(samplePlayheadTrackValue(activeTrack, blockTime + localTime, blockTime, duration));
-    commit({ type: 'insert-keyframe', parameterId: activeTrack.parameterId, frame: Math.round(localTime * fps), value });
-    setSelectedKfTime(localTime);
-  }, [activeTrack, blockTime, busy, commit, duration, getLocalPlayheadTime, setSelectedKfTime]);
+    const frame = Math.round(localTime * fps);
+    void commitAsync({ type: 'insert-keyframe', parameterId: activeTrack.parameterId, frame, value })
+      .then(() => setSelectedKfTime(frame / fps)).catch(() => {});
+  }, [activeTrack, blockTime, busy, commit, commitAsync, duration, fps, getLocalPlayheadTime, keyframeRef, setSelectedKfTime]);
 
   const jumpToKeyframe = useCallback((dir: -1 | 1) => {
     if (!activeTrack) return;
@@ -303,7 +311,7 @@ export function CustomMotionEditor({
       targetIndex = dir < 0 ? currentIndex - 1 : currentIndex + 1;
     } else {
       const localTime = getLocalPlayheadTime();
-      const exactIndex = activeTrack.keyframes.findIndex((keyframe) => Math.abs(keyframe.time - localTime) < F0_EPSILON);
+      const exactIndex = findPlayheadKeyframeIndex(activeTrack, localTime, fps);
       if (exactIndex >= 0) {
         targetIndex = dir < 0 ? exactIndex - 1 : exactIndex + 1;
       } else {
@@ -315,7 +323,7 @@ export function CustomMotionEditor({
     const target = activeTrack.keyframes[targetIndex];
     setSelectedKfTime(target.time);
     seekToScene(blockTime + target.time);
-  }, [activeTrack, blockTime, getLocalPlayheadTime, seekToScene, selectedKfTime, setSelectedKfTime]);
+  }, [activeTrack, blockTime, fps, getLocalPlayheadTime, seekToScene, selectedKfTime, setSelectedKfTime]);
 
   // 键盘事件由编辑器根节点自己接管（根节点可聚焦）：焦点在编辑器内时，
   // 全局快捷键（如 Delete 删除动作块）会被忽略，避免与关键帧编辑冲突。
@@ -528,7 +536,7 @@ export function CustomMotionEditor({
     const trackIndex = tracks.findIndex((candidate) => candidate.parameterId === track.parameterId);
     if (trackIndex < 0) return;
     const localTime = getLocalPlayheadTime();
-    const keyframeIndex = track.keyframes.findIndex((candidate) => Math.abs(candidate.time - localTime) < F0_EPSILON);
+    const keyframeIndex = findPlayheadKeyframeIndex(track, localTime, fps);
     const valueRange = renderValueRange(track);
     const nextValue = valueRange.bounded ? clampValue(value, valueRange.min, valueRange.max) : value;
     const intent: CustomMotionEditIntent = keyframeIndex >= 0
@@ -539,10 +547,14 @@ export function CustomMotionEditor({
       try { preview(intent); } catch (error) { toastError(error instanceof Error ? error.message : '预览失败'); }
       return;
     }
-    commit(intent);
-    if (keyframeIndex < 0) updateSelection([{ parameterId: track.parameterId, time: Math.round(localTime * fps) / fps }]);
+    if (keyframeIndex < 0) {
+      const time = Math.round(localTime * fps) / fps;
+      // Select only after the canonical revision contains the new point;
+      // selection validation drops references absent from the old revision.
+      void commitAsync(intent).then(() => updateSelection([{ parameterId: track.parameterId, time }])).catch(() => {});
+    } else commit(intent);
     setSelectedParam(track.parameterId);
-  }, [commit, getLocalPlayheadTime, tracks, writeBlocked, renderValueRange, playback, updateSelection, keyframeRef, fps, preview]);
+  }, [commit, commitAsync, getLocalPlayheadTime, tracks, writeBlocked, renderValueRange, playback, updateSelection, keyframeRef, fps, preview]);
 
   const isF0Selected = selectedKfIndex === 0;
 
