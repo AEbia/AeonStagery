@@ -26,12 +26,11 @@ import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
 import type { RimLightStyleState } from '../api/types/visual';
 import { setScriptEngineForSetup } from './Live2DSetupState';
 import { Live2DMotionController, MotionRequest } from './Live2DMotionController';
-import { Live2DModelLoader } from './Live2DModelLoader';
+import { Live2DModelResources, Live2DModelLoadError } from './Live2DModelResources';
 import { RimLightFilter } from './RimLightFilter';
 import { projectToScreen } from './Projection';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
-import { getUnsupportedLive2DRuntimeMessage } from './Live2DRuntimeResolver';
 import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
 import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import {
@@ -106,8 +105,6 @@ type PendingRimLightCommand =
       startTime?: number;
     };
 
-// Lazy reference — resolved at init time
-let Live2DModel: any = null;
 let live2dReady = false;
 let nextLive2DToastId = 0;
 
@@ -120,26 +117,19 @@ function showRuntimeErrorToast(message: string): void {
 }
 
 class Live2DManager {
-  private wmdlConfigRegistry: WmdlConfigRegistry | null = null;
-  private activeModelRefCounts = new Map<string, number>();
-
   public setWmdlConfigRegistry(registry: WmdlConfigRegistry): void {
-    this.wmdlConfigRegistry = registry;
-    this.modelLoader.setWmdlConfigRegistry(registry);
+    this.modelResources.setWmdlConfigRegistry(registry);
   }
 
   private characters: Map<string, CharacterEntry> = new Map();
   private containers: Map<string, PIXI.Container> = new Map();
   private pendingMotions: Map<string, MotionRequest[]> = new Map();
-  private _loadingPromises: Map<string, Promise<void>> = new Map(); // 加载锁
-  private _activeLoadTokens: Map<string, symbol> = new Map();
   private _characterGenerations: Map<string, number> = new Map();
   private basePath: string = '';
   private _isExportMode: boolean = false; // Only used by ExportDialog (fast export path). Bake uses BakeEngine with independent models.
   private _shouldUpdate: boolean = true;
   private _tickerAdded: boolean = false;
   private _jumpingCharacters: Set<string> = new Set(); // per-character jump lock (replaces global _isJumping)
-  private _abortedLoads: Set<string> = new Set(); // IDs whose in-flight loadTask must abort
   private _motionMutex: Map<string, Promise<void>> = new Map(); // per-character motion serialization
   private _hardResetMutex: Map<string, Promise<void>> = new Map(); // per-character hardReset serialization
   private pendingConfigs: Map<string, any[]> = new Map(); // id -> queue of transform configs
@@ -160,14 +150,14 @@ class Live2DManager {
    */
   public currentCamera: { position: Vec2; zoom: number } | null = null;
   private motionController: Live2DMotionController | null = null;
-  private modelLoader!: Live2DModelLoader;
+  private readonly modelResources: Live2DModelResources;
   private _pendingMotionQueue: { id: string; req: any }[] = [];
   private _pendingMotionCount: number = 0;
   private resourceMotionCacheEnabled = true;
   private readonly logger = getLogger('Live2DManager');
 
   constructor() {
-    this.modelLoader = new Live2DModelLoader(
+    this.modelResources = new Live2DModelResources(
       () => this.basePath,
     );
   }
@@ -176,10 +166,6 @@ class Live2DManager {
     const next = (this._characterGenerations.get(id) ?? 0) + 1;
     this._characterGenerations.set(id, next);
     return next;
-  }
-
-  private isActiveLoad(id: string, token: symbol): boolean {
-    return this._activeLoadTokens.get(id) === token && !this._abortedLoads.has(id);
   }
 
   /**
@@ -198,11 +184,11 @@ class Live2DManager {
     // Drain ALL async states: loads, motions, hard resets.
     // Uses polling loop because new promises can be added after Promise.all takes its snapshot.
     // Mutex entries are deleted on resolution, so empty maps guarantee quiescence.
-    while (this._loadingPromises.size > 0 ||
+    while (this.modelResources.hasPendingLoads ||
       this._motionMutex.size > 0 ||
       this._hardResetMutex.size > 0) {
       const promises: Promise<void>[] = [
-        ...this._loadingPromises.values(),
+        this.modelResources.waitForLoads(),
         ...this._motionMutex.values(),
         ...this._hardResetMutex.values(),
       ];
@@ -221,7 +207,6 @@ class Live2DManager {
     this._initPromise = (async () => {
       try {
         await cubism2Live2DAdapter.init();
-        Live2DModel = cubism2Live2DAdapter.getModelClass();
         live2dReady = cubism2Live2DAdapter.isReady();
         console.log('[Live2D] pixi-live2d-display initialized successfully.');
       } catch (err) {
@@ -251,31 +236,6 @@ class Live2DManager {
     setScriptEngineForSetup(engine);
   }
 
-  private resetReusedModelVisualState(model: any): void {
-    if (!model) return;
-    try {
-      model.visible = false;
-      model.alpha = 0;
-      model.filters = null;
-      if ('tint' in model) {
-        model.tint = 0xFFFFFF;
-      }
-
-      if (model instanceof Live2DCompositeModel) {
-        for (const child of model.getAllModels()) {
-          child.visible = true;
-          child.alpha = 1;
-          child.filters = null;
-          if ('tint' in child) {
-            child.tint = 0xFFFFFF;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[Live2D] Failed to reset reused model visual state:', err);
-    }
-  }
-
   private syncCurrentCameraFromScriptEngine(): { position: Vec2; zoom: number } | null {
     const camera = this._scriptEngine?.getCurrentCamera?.();
     if (camera?.position && Number.isFinite(camera.zoom)) {
@@ -301,286 +261,13 @@ class Live2DManager {
    */
   async addCharacter(id: string, modelJsonPath: string, config: CharacterConfig = {}): Promise<void> {
     const targetMap = this.characters;
-
-    // 如果该角色正在加载中，等待完成。但如果等待结束后角色被 abort 了
-    // （比如 removeCharacter 在加载期间被调用），必须重新加载而不是直接 return。
-    // 注意：绝对不能 break！当多个并发的 addCharacter 调用者被同一个锁唤醒时，
-    // break 会导致所有调用者同时跳出循环并各自启动 loadTask（惊群效应）。
-    // 正确的做法是让循环自然重新评估 _loadingPromises.has(id)：
-    // 如果前面的调用者已经加载成功并释放了锁，当前调用者会发现锁已释放并退出循环；
-    // 如果前面的调用者重新加了锁，当前调用者会再次 await 排队。
-    while (this._loadingPromises.has(id)) {
-      await this._loadingPromises.get(id);
-      if (this.characters.has(id) && !this._abortedLoads.has(id)) {
-        return; // 角色已成功加载，无需重复加载
-      }
-      // 继续循环：锁已被 finally 清理。如果锁还在（前面的人重新加了），则再次 await。
-    }
-
-    const loadToken = Symbol(`load:${id}`);
-    const lifecycleGeneration = this.nextCharacterGeneration(id);
-    this._activeLoadTokens.set(id, loadToken);
-    this._abortedLoads.delete(id);
-
-    // 包装加载任务
-    const loadTask = async () => {
-      // 核心修复：强制延迟到下一个微任务执行，确保外部的 _loadingPromises.set(id, promise) 先完成。
-      // 否则在预加载模式下，代码会同步跑完前面的逻辑并触发“生命周期校验”导致模型被意外销毁。
-      await Promise.resolve();
-
-      // Abort if character was removed during microtask yield
-      if (!this.isActiveLoad(id, loadToken)) return;
-
-      // Ensure Live2D is initialized
-      if (!live2dReady) {
-        await this.init();
-      }
-      // Abort if removed during init
-      if (!this.isActiveLoad(id, loadToken)) return;
-
-      if (!Live2DModel) {
-        console.error('[Live2D] Live2D runtime not available. Cannot add character.');
-        return;
-      }
-
-      if (targetMap.has(id)) {
-        console.warn(`[Live2D] Character "${id}" already on stage, removing first.`);
-        this.removeCharacter(id);
-        // Clear abort flag that removeCharacter set — this is an internal replace, not an external removal
-        this._activeLoadTokens.set(id, loadToken);
-        this._characterGenerations.set(id, lifecycleGeneration);
-        this._abortedLoads.delete(id);
-      }
-
-      // Guard against undefined/empty model path — prevents PixiJS Assets resolver crash
-      if (!modelJsonPath) {
-        console.warn(`[Live2D] Cannot add character "${id}" — no model path provided`);
-        return;
-      }
-
-      const modelProbe = await this.modelLoader.probeModelPath(modelJsonPath);
-      if (!this.isActiveLoad(id, loadToken)) return;
-      if (!modelProbe.exists) {
-        console.error(
-          `[Live2D] Cannot add character "${id}" — invalid Live2D model path "${modelJsonPath}"` +
-          (modelProbe.error ? ` (${modelProbe.error})` : ''),
-        );
-        showRuntimeErrorToast(
-          `Live2D 模型加载失败：角色 "${id}" 的模型文件无法读取。\n${modelProbe.fullPath || modelJsonPath}`,
-        );
-        return;
-      }
-      const unsupportedRuntimeMessage = modelProbe.runtime
-        ? getUnsupportedLive2DRuntimeMessage(modelJsonPath, modelProbe.runtime)
-        : null;
-      if (unsupportedRuntimeMessage) {
-        console.error(`[Live2D] Cannot add character "${id}" — ${unsupportedRuntimeMessage}`);
-        showRuntimeErrorToast(unsupportedRuntimeMessage);
-        return;
-      }
-      const runtime = modelProbe.runtime ?? { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true } as const;
-      const adapter = getLive2DRuntimeAdapter(runtime);
-
-      // Resolve path
-      const normalizedModelJsonPath = this.modelLoader.normalizeModelPath(modelJsonPath);
-      let fullPath = (modelProbe.fullPath || normalizedModelJsonPath).replace(/\\/g, '/').trim();
-      // Check if it's already an absolute path or has the asset protocol
-      const isAbsolute = fullPath.startsWith('asset://') || fullPath.startsWith('file://') || /^[a-zA-Z]:[/\\]/.test(fullPath) || fullPath.startsWith('/');
-
-      if (!isAbsolute) {
-        // Relative path — resolve against base
-        fullPath = `${this.basePath}/${normalizedModelJsonPath}`.replace(/\\/g, '/');
-      }
-
-      const modelUrl = this.modelLoader.resolvedPathToUrl(fullPath);
-
-      console.log(`[Live2D] Loading model: ${modelUrl}`);
-
-      try {
-        let model: any = null;
-
-        // Check if this is a composed model (.wmdl) - pure in-memory check
-        let wmdlConfig = this.wmdlConfigRegistry?.get(modelJsonPath);
-        if (!wmdlConfig && modelJsonPath.endsWith('.wmdl')) {
-          const base = this.basePath.replace(/\\/g, '/');
-          const relPath = modelJsonPath.replace(base, '').replace(/^\/+/, '');
-          wmdlConfig = this.wmdlConfigRegistry?.get(relPath);
-        }
-
-        if (wmdlConfig) {
-          if (!wmdlConfig.modelRelativePath) {
-            console.error(`[Live2D] Invalid composed model config for "${modelJsonPath}" — missing modelRelativePath.`);
-            return;
-          }
-          // Composed model! Load constituent models
-          const mainModelPath = wmdlConfig.modelRelativePath;
-          const mainModelUrl = this.modelLoader.pathToUrl(mainModelPath);
-
-          // Increment reference count for main torso model
-          this.activeModelRefCounts.set(mainModelUrl, (this.activeModelRefCounts.get(mainModelUrl) || 0) + 1);
-
-          // Load main model (torso)
-          if (runtime.runtimeFamily === 'cubism3-plus') {
-            console.error(`[Live2D] Composed Cubism 3/4/5 model is not supported yet: ${modelJsonPath}`);
-            showRuntimeErrorToast(`Live2D 模型 "${modelJsonPath}" 已识别为 Cubism 3/4/5 组合模型，但当前仅支持单个 .model3.json 主舞台加载。`);
-            return;
-          }
-          let mainModel: any = null;
-          let mainPool = this.modelLoader.preloadedModels.get(mainModelUrl);
-          if (mainPool && mainPool.length > 0) {
-            mainModel = mainPool.pop();
-            if (mainPool.length === 0) this.modelLoader.preloadedModels.delete(mainModelUrl);
-            console.log(`[Live2D] Using preloaded main model for composed: ${id}`);
-            this.resetReusedModelVisualState(mainModel);
-          } else {
-            mainModel = await adapter.createModel(mainModelUrl, {
-              autoHitTest: false,
-              autoFocus: false,
-              autoUpdate: false,
-              idleMotionGroup: '',
-            });
-          }
-
-          // Abort check
-          if (!this.isActiveLoad(id, loadToken)) {
-            if (mainModel.parent) mainModel.parent.removeChild(mainModel);
-            return;
-          }
-
-          // Load sub-models in parallel
-          const subModels: any[] = [];
-          if (wmdlConfig.subModels && Array.isArray(wmdlConfig.subModels)) {
-            for (const sub of wmdlConfig.subModels) {
-              if (!sub?.modelRelativePath) {
-                console.warn(`[Live2D] Skipping invalid composed sub-model entry for "${modelJsonPath}"`);
-                continue;
-              }
-              const subUrl = this.modelLoader.pathToUrl(sub.modelRelativePath);
-              
-              // Increment reference count for submodel
-              this.activeModelRefCounts.set(subUrl, (this.activeModelRefCounts.get(subUrl) || 0) + 1);
-
-              let subModel: any = null;
-              try {
-                let subPool = this.modelLoader.preloadedModels.get(subUrl);
-                if (subPool && subPool.length > 0) {
-                  subModel = subPool.pop();
-                  if (subPool.length === 0) this.modelLoader.preloadedModels.delete(subUrl);
-                  console.log(`[Live2D] Using preloaded submodel: ${subUrl}`);
-                  this.resetReusedModelVisualState(subModel);
-                  subModel.visible = true;
-                } else {
-                  subModel = await adapter.createModel(subUrl, {
-                    autoHitTest: false,
-                    autoFocus: false,
-                    autoUpdate: false,
-                    idleMotionGroup: '',
-                  });
-                }
-                if (!this.isActiveLoad(id, loadToken)) {
-                  if (subModel?.parent) subModel.parent.removeChild(subModel);
-                  return;
-                }
-              } catch (err) {
-                console.warn(`[Live2D] Failed to load sub-model: ${subUrl}`, err);
-                // Decrement reference count since this load failed
-                const currentCount = this.activeModelRefCounts.get(subUrl) || 1;
-                this.activeModelRefCounts.set(subUrl, Math.max(0, currentCount - 1));
-                continue;
-              }
-
-              // Apply sub-model offsets
-              subModel.x = sub.offsetX ?? 0;
-              subModel.y = sub.offsetY ?? 0;
-
-              // Apply mask isolation to sub-model to prevent multi-model rendering glitches
-              if (runtime.adapterId === 'pixi-live2d-display-cubism2') {
-                adapter.getControls().isolateMask(subModel);
-              }
-
-              // Store URL for clean reference counted recycling/destruction
-              (subModel as any)._modelUrl = subUrl;
-
-              subModels.push(subModel);
-            }
-          }
-
-          // Assemble the Composite Model
-          model = new Live2DCompositeModel(mainModel, subModels);
-          model._modelUrl = modelUrl; // Store the .wmdl URL
-          this.resetReusedModelVisualState(model);
-        } else {
-          // Standard single model load
-          this.activeModelRefCounts.set(modelUrl, (this.activeModelRefCounts.get(modelUrl) || 0) + 1);
-
-          // 优先从预加载池中拾取已加载好的模型实例
-          let pool = this.modelLoader.preloadedModels.get(modelUrl);
-          if (pool && pool.length > 0) {
-            model = pool.pop();
-            if (pool.length === 0) this.modelLoader.preloadedModels.delete(modelUrl);
-            console.log(`[Live2D] Using preloaded instance for: ${id}`);
-            // 立即锁定状态，防止异步过程中的任何闪现
-            this.resetReusedModelVisualState(model);
-          } else {
-            // If a preload is in progress for this URL, wait for it to finish
-            if (this.modelLoader.preloadingModels.has(modelUrl)) {
-              await this.modelLoader.preloadingModels.get(modelUrl);
-              if (!this.isActiveLoad(id, loadToken)) return;
-              // Try the pool again after preload completes
-              pool = this.modelLoader.preloadedModels.get(modelUrl);
-              if (pool && pool.length > 0) {
-                model = pool.pop();
-                if (pool.length === 0) this.modelLoader.preloadedModels.delete(modelUrl);
-                console.log(`[Live2D] Using preloaded instance (after await) for: ${id}`);
-                this.resetReusedModelVisualState(model);
-              }
-            }
-            // Load from scratch if still no model
-            if (!model) {
-              try {
-                model = await adapter.createModel(modelUrl, {
-                  autoHitTest: false,
-                  autoFocus: false,
-                  autoUpdate: false,
-                  idleMotionGroup: '', // 禁用内置自动 idle，防止动作播放完毕后立刻被打断还原为闲置
-                });
-                if (!this.isActiveLoad(id, loadToken)) {
-                  if (model?.parent) model.parent.removeChild(model);
-                  return;
-                }
-              } catch (err) {
-                if (runtime.runtimeFamily !== 'cubism2') {
-                  throw err;
-                }
-                console.warn(`[Live2D] Failed to load model ${modelUrl}, using placeholder`, err);
-                // Adapter-owned placeholder: fabricates the runtime surface the
-                // adapter's own controls call into (no mock shape leaks here).
-                model = adapter.createFallbackModel(stageManager.getApp().renderer);
-              }
-              // Abort if character was removed while loading
-              if (!this.isActiveLoad(id, loadToken)) {
-                if (model.parent) model.parent.removeChild(model);
-                return;
-              }
-              this.resetReusedModelVisualState(model);
-            }
-          }
-        }
-
-        // === 核心修复：捕获“灵魂快照” (Manual Parameters & Opacities) ===
+    if (targetMap.has(id)) this.removeCharacter(id);
+    const staging: { container?: PIXI.Container; entry?: CharacterEntry } = {};
+    try {
+      await this.modelResources.loadCharacter(id, modelJsonPath, async ({ model, modelUrl, runtime, isCurrent }) => {
+        const lifecycleGeneration = this.nextCharacterGeneration(id);
+        const adapter = getLive2DRuntimeAdapter(runtime);
         const isCubism2Runtime = runtime.adapterId === 'pixi-live2d-display-cubism2';
-        if (isCubism2Runtime) {
-          // Pooled instances retain their Cubism clipping mask texture. Renew
-          // it before the first draw of the new lifecycle so a previous exit
-          // seek cannot leave the model rendering as a black silhouette. The
-          // isolation buffer is adapter-owned since the runtime-adapter
-          // centralization; isolateMask destroys the previous isolated
-          // texture and allocates a fresh one for each concrete model.
-          const loadControls = adapter.getControls();
-          for (const concrete of loadControls.getConcreteModels(model)) {
-            loadControls.isolateMask(concrete);
-          }
-        }
         // A pooled instance keeps the motion queue, expression and pose of its
         // previous owner. The idle snapshot captured below is the pose every
         // later hard reset and custom-motion baseline restores to, so it must
@@ -588,7 +275,6 @@ class Live2DManager {
         // pose is the previous scene time's action.
         resetModelToNeutralPose(model, runtime);
         adapter.getControls().advanceFrame(model, 100);
-        let idleSnapshot: any = null;
 
         if (isCubism2Runtime) {
           // === 核心修复：安全地洗刷初始状态遗留的 0 opacity ===
@@ -597,12 +283,14 @@ class Live2DManager {
           await adapter.getControls().flushIdleState(model);
         } else {
           try {
-            model.stopAllMotions?.();
+            adapter.getControls().stopAllMotions(model);
             adapter.getControls().advanceFrame(model, 16);
           } catch {
             // Ignore errors
           }
         }
+
+        if (!isCurrent()) return;
 
         // Idle warmup advances the SDK and can leave its final motion pose
         // in the parameter buffer. The snapshot used for future entrances
@@ -615,7 +303,7 @@ class Live2DManager {
           console.warn(`[Live2D] Failed to neutralise idle baseline for ${id}`, e);
         }
 
-        idleSnapshot = adapter.getControls().captureIdleSnapshot(model);
+        const idleSnapshot = adapter.getControls().captureIdleSnapshot(model);
 
         // Keep hidden during setup to prevent "flashing" at wrong scale/pos
         model.visible = false;
@@ -631,6 +319,7 @@ class Live2DManager {
         const camera = this.syncCurrentCameraFromScriptEngine();
         const pos = config.position ? resolveVec2(config.position) : { x: 0.5, y: 1.15 };
         const container = this.getContainer(id);
+        staging.container = container;
         container.x = pos.x * 1920;
         container.y = pos.y * 1080;
         container.angle = config.rotation ?? 0;
@@ -683,7 +372,7 @@ class Live2DManager {
 
         // --- 核心修复：生命周期校验 ---
         // 如果在 await 加载期间角色已经被删除了（例如连续 Seek），则直接丢弃这个模型
-        if (!this.isActiveLoad(id, loadToken)) {
+        if (!isCurrent()) {
           console.warn(`[Live2D] Model for "${id}" loaded but character was already removed. Skip display.`);
           if (model.parent) model.parent.removeChild(model);
           return;
@@ -705,8 +394,8 @@ class Live2DManager {
           motionEpoch: 0,
           filterWarmupFrames: 6,
           lifecycleGeneration,
-          loadToken,
         };
+        staging.entry = entry;
 
         (model as any)._characterEntry = entry;
 
@@ -734,7 +423,7 @@ class Live2DManager {
         targetMap.set(id, entry);
 
         // Abort if character was removed during async loading / setup
-        if (!this.isActiveLoad(id, loadToken)) {
+        if (!isCurrent()) {
           targetMap.delete(id);
           if (model && model.parent) model.parent.removeChild(model);
           return;
@@ -802,74 +491,21 @@ class Live2DManager {
         hookSystem.execute('character:add', { id, modelPath: modelJsonPath });
 
         console.log(`[Live2D] Character "${id}" added to stage.`);
-      } catch (err) {
-        console.error(`[Live2D] Failed to load model "${modelJsonPath}":`, err);
-        throw err;
+      }, () => stageManager.getApp().renderer);
+    } catch (err) {
+      if (staging.entry && targetMap.get(id) === staging.entry) this.removeCharacter(id);
+      else if (staging.container && this.containers.get(id) === staging.container) {
+        gsap.killTweensOf(staging.container);
+        staging.container.parent?.removeChild(staging.container);
+        staging.container.destroy({ children: true });
+        this.containers.delete(id);
       }
-    }; // loadTask 结束
-
-    // 挂载锁并执行
-    const promise = loadTask();
-    this._loadingPromises.set(id, promise);
-    try {
-      await promise;
-    } finally {
-      if (this._loadingPromises.get(id) === promise) {
-        this._loadingPromises.delete(id);
-        this._activeLoadTokens.delete(id);
-        this._abortedLoads.delete(id);
+      console.error(`[Live2D] Failed to load model "${modelJsonPath}":`, err);
+      if (err instanceof Live2DModelLoadError) {
+        showRuntimeErrorToast(`Live2D 模型加载失败：角色 "${id}"。\n${err.message}\n${err.fullPath}`);
+        return;
       }
-    }
-  }
-
-  /**
-   * Safe destruction of a model (composed or single) with active WebGL texture reference counting.
-   * Decrements active reference counts, then delegates the destroy semantics
-   * (children/texture/baseTexture options, composite teardown) to the runtime
-   * adapter. VRAM refcount bookkeeping stays here (per-URL movie-level policy).
-   */
-  private destroyModelInstance(model: any, controls: import('./Live2DRuntimeAdapter').Live2DRuntimeModelControls): void {
-    if (!model) return;
-
-    if (model instanceof Live2DCompositeModel) {
-      const concrete = controls.getConcreteModels(model);
-      // concrete[0] is the torso; subs follow (matches getAllModels order).
-      // 1. Decrement and safe-destroy sub-models first
-      for (const sub of concrete.slice(1)) {
-        const subUrl = sub._modelUrl;
-        if (subUrl) {
-          const count = Math.max(0, (this.activeModelRefCounts.get(subUrl) || 1) - 1);
-          this.activeModelRefCounts.set(subUrl, count);
-          console.log(`[VRAM] Destroying BaseTexture for model: ${subUrl}`);
-          controls.disposeModel(sub, { mode: 'destroy', keepTextures: count > 0 });
-        }
-      }
-
-      // 2. Decrement and safe-destroy main torso model
-      const mainUrl = model.mainModel?._modelUrl || model.mainModel?.modelUrl || this.modelLoader.pathToUrl(model.mainModel?.modelPath || '');
-      if (mainUrl) {
-        const count = Math.max(0, (this.activeModelRefCounts.get(mainUrl) || 1) - 1);
-        this.activeModelRefCounts.set(mainUrl, count);
-        console.log(`[VRAM] Destroying BaseTexture for model: ${mainUrl}`);
-        controls.disposeModel(model.mainModel, { mode: 'destroy', keepTextures: count > 0 });
-      }
-
-      // 3. Clean up the composite container itself (Live2DCompositeModel.destroy
-      //    re-destroys children with texture:false — safe, matches legacy flow).
-      model.removeChildren();
-      model.destroy();
-    } else {
-      // Standard single model destruction
-      // (isolated mask render buffers are released inside controls.disposeModel)
-      const modelUrl = model._modelUrl || model.modelUrl || this.modelLoader.pathToUrl(model.modelPath || '');
-      if (modelUrl) {
-        const count = Math.max(0, (this.activeModelRefCounts.get(modelUrl) || 1) - 1);
-        this.activeModelRefCounts.set(modelUrl, count);
-        console.log(`[VRAM] Destroying BaseTexture for model: ${modelUrl}`);
-        controls.disposeModel(model, { mode: 'destroy', keepTextures: count > 0 });
-      } else {
-        controls.disposeModel(model, { mode: 'destroy', keepTextures: true });
-      }
+      throw err;
     }
   }
 
@@ -877,12 +513,7 @@ class Live2DManager {
    * Remove a character from the stage.
    */
   removeCharacter(id: string): void {
-    // MUST be outside the entry block: if the model is still loading (no entry yet),
-    // we still need to signal the in-flight loadTask to abort.
-    if (this._loadingPromises.has(id)) {
-      this._abortedLoads.add(id);
-      this._activeLoadTokens.delete(id);
-    }
+    this.modelResources.cancelLoad(id);
     this.nextCharacterGeneration(id);
     this.pendingExpressions.delete(id);
     // A motion intent buffered for a character that never entered must die with
@@ -925,40 +556,7 @@ class Live2DManager {
         this.containers.delete(id);
       }
 
-      // 2. 销毁模型 - 核心原理解析与修复：
-      // 模型销毁由 runtime adapter 统一执行（保留贴图，显式不销毁
-      // texture/baseTexture，只销毁 children 与自有缓冲）。
-      // 注意：必须显式保留 texture 和 baseTexture！
-      // 这样既能完全清理和销毁模型内部独有的 WebGL 顶点缓冲区（Vertex Buffers）、索引缓冲区（Index Buffers）以及顶点数组对象（VAOs），
-      // 彻底解决由于频繁出入场导致的 WebGL 缓冲区/VAO 泄露引起的“角色下半身模型消失、上半身衣服奇怪色块”的 Bug；
-      // 又绝对不会去销毁 PixiJS 全局缓存（TextureCache/BaseTextureCache）中的贴图纹理资源。
-      // 这完美保证了前后台（主渲染线程与后台静默预烘焙线程）共享贴图的引用有效性，彻底消除了“WebGL: no texture bound to target”报错以及角色首入场全黑的问题。
-      if (entry.model) {
-        try {
-          (entry.model as any).autoUpdate = false;
-          // Pre-disposal teardown (motions + expression reset) is adapter-owned.
-          getLive2DRuntimeAdapter(entry.runtime).getControls().quiesceModel(entry.model);
-
-          const modelUrl = entry.modelUrl || entry.modelPath;
-          if (modelUrl) {
-            let pool = this.modelLoader.preloadedModels.get(modelUrl);
-            if (!pool) {
-              pool = [];
-              this.modelLoader.preloadedModels.set(modelUrl, pool);
-            }
-            if (pool.length < 10) {
-              pool.push(entry.model);
-              console.log(`[Live2D] Model recycled to preload pool: ${modelUrl}`);
-            } else {
-              this.destroyModelInstance(entry.model, getLive2DRuntimeAdapter(entry.runtime).getControls());
-            }
-          } else {
-            this.destroyModelInstance(entry.model, getLive2DRuntimeAdapter(entry.runtime).getControls());
-          }
-        } catch (e) {
-          console.warn(`[Live2D] Error during model cleanup for ${id}:`, e);
-        }
-      }
+      this.modelResources.releaseModel(entry.model);
 
       // 3. 清理状态
       targetMap.delete(id);
@@ -1430,19 +1028,17 @@ class Live2DManager {
   matchesLoadedModel(id: string, modelUrl: string): boolean {
     const entry = this.getAllCharacters().get(id);
     if (!entry) return false;
-    const requestedUrl = this.modelLoader.pathToUrl(modelUrl);
+    const requestedUrl = this.modelResources.pathToUrl(modelUrl);
     return entry.modelPath === modelUrl || entry.modelUrl === modelUrl || entry.modelUrl === requestedUrl;
   }
 
   /**
    * Preload a model into browser/SDK cache without adding to stage.
-   * Delegates to Live2DModelLoader after guard checks.
+   * Delegates to Live2DModelResources after guard checks.
    */
   async preloadModel(id: string, modelUrl: string): Promise<void> {
     if (this.matchesLoadedModel(id, modelUrl)) return;
-    // Delegate entirely to the loader — it handles ABA prevention, stale cleanup,
-    // and stores the correct safeTask in preloadingModels internally.
-    await this.modelLoader.preloadModel(modelUrl);
+    await this.modelResources.preloadModel(modelUrl);
   }
 
   /**
@@ -2333,11 +1929,11 @@ class Live2DManager {
    * This works even if the character is not loaded or on stage.
    */
   getModelDataFromPath(modelPath: string): Promise<{ motions: string[], expressions: string[] }> {
-    return this.modelLoader.getModelDataFromPath(modelPath);
+    return this.modelResources.getModelDataFromPath(modelPath);
   }
 
   resolveMotionKeyForModel(modelPath: string, motionKey: string): Promise<string> {
-    return this.modelLoader.resolveMotionKey(modelPath, motionKey);
+    return this.modelResources.resolveMotionKey(modelPath, motionKey);
   }
 
   /**
@@ -2862,27 +2458,10 @@ class Live2DManager {
     this.pendingBlinks.clear();
     this.pendingRimLightCommands.clear();
     this.pendingRimLightStates.clear();
-    this._loadingPromises.clear();
-    this._activeLoadTokens.clear();
-    this._abortedLoads.clear();
     this._motionMutex.clear();
     this._hardResetMutex.clear();
     this._characterGenerations.clear();
-    this.modelLoader.preloadingModels.clear();
-
-    // Completely destroy recycled models to free WebGL memory on scene change
-    // (controls.disposeModel also releases adapter-owned isolated mask buffers).
-    const poolControls = cubism2Live2DAdapter.getControls();
-    for (const pool of this.modelLoader.preloadedModels.values()) {
-      for (const model of pool) {
-        try {
-          poolControls.disposeModel(model, { mode: 'destroy', keepTextures: true });
-        } catch (e) {
-          console.warn('[Live2D] Failed to destroy recycled model during clear:', e);
-        }
-      }
-    }
-    this.modelLoader.preloadedModels.clear();
+    this.modelResources.clear();
 
     this._activeMotionLoads.clear();
     this._jumpingCharacters.clear();

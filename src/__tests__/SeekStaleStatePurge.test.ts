@@ -13,6 +13,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
 import { Cubism2PixiLive2DModelControls } from '../engine/Live2DRuntimeAdapter';
+import { Live2DModelResources } from '../engine/Live2DModelResources';
+import { mockAdapter } from './helpers/mockLive2DRuntimeAdapter';
 import { evaluateCustomMotionRuntime } from '../engine/live2d/customMotionRuntime';
 import ScriptEngine, { resolveExpressionPredecessors } from '../engine/ScriptEngine';
 import { live2DManager } from '../engine/Live2DManager';
@@ -184,6 +186,16 @@ describe('seek to a time before the character entrance', () => {
   it('recycles a neutral model instance into the preload pool', async () => {
     const char = createCubism2Character();
     const manager = makeManager(char);
+    const adapter = mockAdapter({
+      createModel: vi.fn(async () => char.model),
+      getControls: () => new Cubism2PixiLive2DModelControls(),
+    });
+    Reflect.set(window, 'aeonStageryAPI', {
+      fs: { readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }) },
+    });
+    const resources = new Live2DModelResources(() => '/project', () => adapter);
+    await resources.loadCharacter('hero', 'hero.model.json', async () => {});
+    Reflect.set(manager, 'modelResources', resources);
     manager.setScriptEngine({ isReconstructing: false, getCurrentTime: () => 3 } as any);
 
     manager.playMotion('hero', 'wave', 3, 1, 3);
@@ -197,11 +209,15 @@ describe('seek to a time before the character entrance', () => {
     // reveal the previous action's pose.
     manager.removeCharacter('hero');
 
-    const pool = (manager as any).modelLoader.preloadedModels.get('hero.model.json');
-    expect(pool?.length ?? 0).toBe(1);
+    expect(manager.getAllCharacters().has('hero')).toBe(false);
     expect(char.motionManager.playing).toBe(false);
     expect(char.expressionState.current).toBeNull();
     expect(char.paramValues[0]).toBe(0);
+    await resources.loadCharacter('next', 'hero.model.json', async loaded => {
+      expect(loaded.model).toBe(char.model);
+      expect(char.paramValues[0]).toBe(0);
+    });
+    expect(adapter.createModel).toHaveBeenCalledTimes(1);
   });
 });
 

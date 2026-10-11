@@ -198,7 +198,7 @@ describe('seek before the first motion returns to the entrance pose (real layout
 
   it('ScriptEngine reconstruct-seek sequence drops the in-flight motion pose', async () => {
     const char = createRealLayoutSdkModel();
-    // Loader-time capture (Live2DModelLoader.preloadModel does this after
+    // Loader-time capture (Live2DModelResources.preloadModel does this after
     // createModel; addCharacter then neutralizes + captures idleSnapshot).
     captureModelNeutralPoseOnce(char.model);
     const { manager, entry } = makeManager(char);

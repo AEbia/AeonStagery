@@ -6,7 +6,6 @@ export class Live2DCompositeModel extends PIXI.Container {
   public subModels: any[] = [];
   public internalModel: any;
   public idleSnapshot: any;
-  public _modelUrl?: string; // Used for recycling and identification
 
   private _anchor = new PIXI.ObservablePoint({
     _onUpdate: () => this.onAnchorChanged(),

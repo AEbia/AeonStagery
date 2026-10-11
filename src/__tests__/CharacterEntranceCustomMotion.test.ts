@@ -105,11 +105,9 @@ async function createHarness(): Promise<Harness> {
   vi.spyOn(cubism2Live2DAdapter, 'getControls').mockReturnValue(controls);
   vi.spyOn(cubism2Live2DAdapter, 'createModelHandle').mockImplementation((id: string) => createHandle(id, model));
 
-  vi.spyOn((manager as any).modelLoader, 'probeModelPath').mockResolvedValue({
-    exists: true,
-    fullPath: '/project/figure/char1/model.model.json',
-    runtime: RUNTIME as any,
-  });
+  vi.stubGlobal('window', { aeonStageryAPI: { fs: {
+    readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }),
+  } } });
   vi.spyOn(manager as any, 'getContainer').mockReturnValue({
     x: 0,
     y: 0,
@@ -153,6 +151,7 @@ async function expectCharacterNotPerformingCustomMotion(
 describe('character entrance and custom motion at the same time', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('performs a custom motion that is requested before the entrance finished loading', async () => {
@@ -208,5 +207,36 @@ describe('character entrance and custom motion at the same time', () => {
     manager.clear();
 
     await expectCharacterNotPerformingCustomMotion(manager, controls);
+  });
+
+  it('keeps a cancelled entrance off stage after asynchronous idle warmup', async () => {
+    const { manager, controls } = await createHarness();
+    let finishWarmup!: () => void;
+    const warmup = new Promise<void>(resolve => { finishWarmup = resolve; });
+    vi.mocked(controls.flushIdleState).mockReturnValueOnce(warmup);
+    manager.playCustomMotion('char1', createCustomMotion(), MOTION_SCENE_TIME);
+    const entrance = manager.addCharacter('char1', 'figure/char1/model.model.json');
+    await vi.waitFor(() => expect(controls.flushIdleState).toHaveBeenCalledTimes(1));
+    manager.removeCharacter('char1');
+    finishWarmup();
+    await entrance;
+    await manager.waitForAllLoaded();
+    expect(manager.hasCharacter('char1')).toBe(false);
+    await expectCharacterNotPerformingCustomMotion(manager, controls);
+    expect(cubism2Live2DAdapter.createModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a staged entry if replaying a buffered instruction fails', async () => {
+    const { manager, controls } = await createHarness();
+    manager.playCustomMotion('char1', createCustomMotion(), MOTION_SCENE_TIME);
+    const replay = vi.spyOn(manager, 'playCustomMotion').mockImplementationOnce(() => {
+      throw new Error('buffered instruction failed');
+    });
+    await expect(manager.addCharacter('char1', 'figure/char1/model.model.json'))
+      .rejects.toThrow('buffered instruction failed');
+    expect(manager.hasCharacter('char1')).toBe(false);
+    replay.mockRestore();
+    await expectCharacterNotPerformingCustomMotion(manager, controls);
+    expect(cubism2Live2DAdapter.createModel).toHaveBeenCalledTimes(1);
   });
 });

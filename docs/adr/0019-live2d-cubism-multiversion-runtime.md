@@ -48,5 +48,17 @@ Cubism 2 当前由 `Cubism2PixiLive2DAdapter` 包住 `untitled-pixi-live2d-engin
 Implementation: `src/engine/CubismPixiSdk.ts`, `src/engine/CubismPixiModel.ts`, `src/engine/Live2DEngineBridge.ts`, `src/engine/Live2DRuntimeAdapter.ts`.
 Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
 
+### 2026-10-10: Model resource ownership
+
+`Live2DModelResources` 收拢原 `Live2DModelLoader` 的读取/缓存能力，以及原 `Live2DManager` 的加载取消、模型池取还、组合模型组装和纹理引用计数。模型池、加载任务和所有权记录全部私有；`Live2DManager` 通过 `loadCharacter` 借用实例，通过 `releaseModel` 归还，保留舞台编排、角色运行时清脏及积压指令处理。
+
+- 同角色加载串行化。取消后的迟到实例和组合模型的部分加载结果由资源 Module 回收；舞台异步预热后必须检查 `isCurrent()` 才能展示。回收还校验实例当前所有者，避免旧回调误收已经归还并被另一角色借用的实例。
+- 纹理引用按具体模型的解析 URL 记录，覆盖创建中、预加载、舞台借用及池内实例；取还不改变引用数，实际销毁才递减。组合容器自身不持有纹理引用，具体模型分别使用自己的 Adapter 销毁，避免重复销毁。
+- `clear()` 推进资源代次，取消旧加载及旧排队请求，销毁池内实例；旧异步结果不能重新填池，也不能删除新代次的任务。未完成任务仍纳入 `waitForLoads()`。
+- 模型池每 URL 最多保留 10 个根实例。容量溢出时，只允许最后一个具体模型引用释放对应纹理；整场清空继续保留与独立 Bake 模型共享的 SDK/浏览器纹理。
+
+Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/Live2DManager.ts`.
+Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DModelResources.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
+
 
 下一阶段接入 Cubism 5 时，优先填充 `OfficialCubismWebLive2DAdapter` 的 init/create/model control 能力，而不是继续在 `Live2DManager`、`Live2DMotionController` 或 `BakeEngine` 中新增 Cubism 5 私有字段分支。

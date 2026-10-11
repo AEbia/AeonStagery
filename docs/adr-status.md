@@ -11,7 +11,7 @@
 | [KSM-0003 Semantic Scene Statements](ksm-adr/ksm-0003-semantic-scene-statements.md) | current freshness anchor | 当前 semantic statement authoring、prepared runtime、template payload 与 legacy deletion gates 的权威入口；SceneDocumentV5 现作为当前 schema epoch（由 ADR-0031 演进，支持自 v3 与 v4 自动迁移），协作协议升级为 v3 wire。 |
 | [0031 Evolution Compatibility Policy](adr/0031-evolution-compatibility-policy.md) | current freshness anchor | 持久化创作资产演进兼容政策；SceneDocumentV5 为当前激活的 schema epoch（支持自 v3 与 v4 自动迁移），project metadata v2（包含 Project Compatibility Envelope），collaboration wire v3（要求 sceneSchemaVersion = 5），以及兼容性协调器 (Compatibility Coordinator) 与未知字段保真契约的权威入口。 |
 | [0018 Timeline Authoring, Collaboration Transactions, and Resource Seams](adr/0018-timeline-authoring-collaboration-resource-seams.md) | current for collaboration/resource seams; timeline edit section superseded by KSM-0003 | Collaboration transaction planner、publish executor、asset readiness gate、Live2D bundle rules 与 asset scope policy 仍以本文为入口；legacy action-edit Interface 已由 semantic statement authoring 接管。 |
-| [0019 Live2D Cubism Multi-Version Runtime Compatibility](adr/0019-live2d-cubism-multiversion-runtime.md) | current freshness anchor | Cubism 2 与 Cubism 3/4/5 runtime Adapter seam、Live2D entry 识别与 bundle 兼容承诺以本文为准。 |
+| [0019 Live2D Cubism Multi-Version Runtime Compatibility](adr/0019-live2d-cubism-multiversion-runtime.md) | current freshness anchor | Cubism 2 与 Cubism 3/4/5 runtime Adapter seam、Live2D entry 识别、模型资源所有权与 bundle 兼容承诺以本文为准。 |
 | [0021 Stable External Library Mount References](adr/0021-stable-external-library-mount-references.md) | current freshness anchor | 本地 scene 使用稳定 `@mount/<id>/...` 引用，用户设置映射本机根目录，协作发布前 projectize 为项目相对引用。 |
 
 ## Current Supporting Decisions

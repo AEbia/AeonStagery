@@ -288,7 +288,6 @@ export interface CharacterEntry {
   lastManualTimeMs?: number; // Track last manual update time to detect large seek jumps and prevent physics overflow
   filterWarmupFrames?: number; // Avoid Pixi filter offscreen rendering on freshly reconstructed Live2D models
   lifecycleGeneration?: number;
-  loadToken?: symbol;
   /** Inline custom motion currently owning the character's parameters. */
   customMotion?: CustomMotionRuntimeState;
   /** Handoff pose captured when the custom motion took over (fade-in source). */
