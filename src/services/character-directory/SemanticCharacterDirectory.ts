@@ -261,6 +261,7 @@ function rewriteStatementCharacterReferences(
     case 'customAnimation':
       return rewriteCustomAnimationParams(statement.params, command);
     case 'environmentLayer':
+    case 'dialogueVisibility':
     case 'visualStyle':
     case 'filterAdd':
     case 'filterChange':

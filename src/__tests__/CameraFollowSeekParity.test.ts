@@ -147,6 +147,50 @@ describe('camera scrub parity inside a focus segment', () => {
   });
 });
 
+describe('camera focus defaults during seek', () => {
+  it('uses the same default anchor as playback when the focused part is omitted', async () => {
+    const { createStageAnchorResolver } = await import('../engine/cameraAnchorResolver');
+
+    cameraMocks.getPoint.mockImplementation((_id: string, part: string) => {
+      if (part === 'head') return { x: 0.62, y: 0.46 };
+      if (part === 'center') return { x: 0.58, y: 0.54 };
+      return null;
+    });
+    cameraMocks.getPosition.mockReturnValue({ x: 0.6, y: 0.52 });
+    cameraController.init();
+
+    const actions: any[] = [
+      { action: 'cameraMotion', time: 4.7, params: { move: 'zoom', duration: 1, easing: 'smooth', focus: { character: '1' }, zoom: 1.2 } },
+    ];
+    const tl = gsap.timeline({ paused: true });
+    for (const action of actions) actionSchedulers.cameraMotion({ tl } as any, action);
+    const coordinator = new CameraCoordinator(cameraController as any);
+    const resolveCharacterPosition = createStageAnchorResolver({
+      desiredPosition: () => ({ x: 0.6, y: 0.52 }),
+      getPoint: (_id: string, part: string) =>
+        part === 'head' ? { x: 0.62, y: 0.46 } : part === 'center' ? { x: 0.58, y: 0.54 } : null,
+      getPosition: () => ({ x: 0.6, y: 0.52 }),
+    });
+    const deps = { resolveCharacterPosition };
+
+    tl.seek(5.5, true);
+    const playbackState = cameraController.getState();
+
+    cameraController.init();
+    tl.seek(4.8, true);
+    coordinator.sync(4.8, actions as any, deps);
+    tl.seek(5.5, true);
+    coordinator.sync(5.5, actions as any, deps);
+
+    const scrubbed = cameraController.getState();
+    const playbackPosition = playbackState.position as { x: number; y: number };
+    const scrubbedPosition = scrubbed.position as { x: number; y: number };
+    expect(scrubbedPosition.x).toBeCloseTo(playbackPosition.x, 3);
+    expect(scrubbedPosition.y).toBeCloseTo(playbackPosition.y, 3);
+    expect(scrubbed.zoom).toBeCloseTo(playbackState.zoom, 3);
+  });
+});
+
 /**
  * Reported regression: seeking INTO the middle of a camera follow presented
  * the follow's terminal framing instead of its intermediate transition state.

@@ -1,10 +1,15 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { editNumericControl } from './fixtures/editNumericControl';
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimelineListView } from '../ui/timeline/TimelineListView';
 import { settingsManager } from '../ui/SettingsStore';
+import { SCENE_SCHEMA_VERSION } from '../api/types/semantic-scene';
+import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
+import type { SemanticAuthorIntent } from '../api/types/authoring';
+import { useKeyboardShortcuts } from '../ui/hooks/useKeyboardShortcuts';
 
 const state = vi.hoisted(() => {
   const holder = {
@@ -13,7 +18,7 @@ const state = vi.hoisted(() => {
     documentVersion: 0,
     documentListeners: new Set<() => void>(),
     collaborationStatus: 'disconnected' as 'disconnected' | 'offline',
-    author: vi.fn(async (): Promise<{ createdStatementIds: string[] }> => ({ createdStatementIds: [] })),
+    author: vi.fn(async (_intent: SemanticAuthorIntent): Promise<{ createdStatementIds: string[] }> => ({ createdStatementIds: [] })),
     documentStore: null as any,
   };
   holder.documentStore = {
@@ -79,15 +84,17 @@ function renderStatements(
   state.author.mockClear();
   const handleSelect = vi.fn();
   render(
-    <TimelineListView
-      sceneData={{ sceneId: 'inline-list', meta: state.document.meta, timeline: [] }}
-      selectedActionIds={{}}
-      setSelectedIds={vi.fn()}
-      addAction={vi.fn()}
-      handleSelect={handleSelect}
-      setCurrentTime={vi.fn()}
-      loadExample={vi.fn(async () => true)}
-    />,
+    <div className="timeline-editor-root">
+      <TimelineListView
+        sceneData={{ sceneId: 'inline-list', meta: state.document.meta, timeline: [] }}
+        selectedActionIds={{}}
+        setSelectedIds={vi.fn()}
+        addAction={vi.fn()}
+        handleSelect={handleSelect}
+        setCurrentTime={vi.fn()}
+        loadExample={vi.fn(async () => true)}
+      />
+    </div>,
   );
   return { handleSelect };
 }
@@ -119,7 +126,10 @@ describe('timeline list inline authoring', () => {
   });
 
   it('opens track-blank-menu when clicking gap plus and inserts statement at gap position', async () => {
-    state.author.mockResolvedValueOnce({ createdStatementIds: ['created-dialogue'] });
+    state.author.mockImplementationOnce(async () => {
+      state.document = { ...state.document, statements: [...state.document.statements, makeStatement('created-dialogue', 0.1)] };
+      return { createdStatementIds: ['created-dialogue'] };
+    });
     const { handleSelect } = renderList([0.04, 0.16]);
 
     expect(document.querySelector('.track-blank-menu')).toBeNull();
@@ -160,9 +170,7 @@ describe('timeline list inline authoring', () => {
     renderList([0, 1, 2]);
     fireEvent.click(screen.getByRole('button', { name: '全自动' }));
 
-    fireEvent.change(screen.getAllByTitle('编辑时间')[1], {
-      target: { value: '2.0' },
-    });
+    editNumericControl(screen.getAllByTitle('编辑时间')[1], '2.0');
 
     await waitFor(() => expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'update-statement',
@@ -227,6 +235,38 @@ describe('timeline list inline authoring', () => {
     expect(screen.getAllByTitle('编辑时间')).toHaveLength(3);
   });
 
+  it.each(['auto', 'manual'] as const)('routes Ctrl+Z to scene history after dragging from a time input in %s mode', async (mode) => {
+    settingsManager.set('workbenchDialogueFlowMode', mode);
+    renderList([0, 3, 6]);
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    renderHook(() => useKeyboardShortcuts({
+      initialized: true, onUndo, onRedo, onPlayPause: vi.fn(),
+      onStageReset: vi.fn(), onFrameStep: vi.fn(),
+    }));
+    const timeControl = screen.getAllByTitle('编辑时间')[0];
+    fireEvent.keyDown(timeControl.querySelector('[role="spinbutton"]')!, { key: 'Enter' });
+    const timeInput = timeControl.querySelector<HTMLInputElement>('input.scrubbable-input-mode')!;
+    timeInput.focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'z', code: 'KeyZ', ctrlKey: true });
+    expect(onUndo).not.toHaveBeenCalled();
+
+    const dataTransfer = {
+      effectAllowed: 'none', dropEffect: 'none', setData: vi.fn(), getData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText('拖拽第 1 行调整语句顺序'), { dataTransfer });
+    fireEvent.drop(screen.getByRole('group', { name: /statement-2/ }), { dataTransfer, clientY: 10 });
+    await waitFor(() => expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['statement-1', 'statement-2', 'statement-0'],
+      flow: mode === 'auto',
+    })));
+
+    fireEvent.keyDown(document.activeElement!, { key: 'z', code: 'KeyZ', ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(document.activeElement!, { key: 'Z', code: 'KeyZ', ctrlKey: true, shiftKey: true });
+    expect(onRedo).toHaveBeenCalledTimes(1);
+  });
+
   it('moves non-dialogue root statements with the ordinary timeline move intent', async () => {
     renderStatements([
       {
@@ -255,6 +295,44 @@ describe('timeline list inline authoring', () => {
       })],
     })));
   });
+
+  it.each(['before', 'after'] as const)(
+    'moves a single dialogue %s a non-dialogue statement in automatic mode', async (placement) => {
+      const camera = {
+        id: 'camera-0',
+        time: placement === 'before' ? 0 : 2,
+        type: 'camera',
+        params: { mode: 'focus', position: [0, 0], durationSeconds: 0.5 },
+      };
+      const dialogue = makeStatement('statement-0', placement === 'before' ? 2 : 0);
+      renderStatements(placement === 'before' ? [camera, dialogue] : [dialogue, camera]);
+      state.document = { ...state.document, schemaVersion: SCENE_SCHEMA_VERSION };
+      const service = new SemanticTimelineAuthoringService();
+      state.author.mockImplementationOnce(async (intent) => {
+        const result = service.author(state.document, intent, 'auto');
+        state.document = result.document;
+        state.documentVersion += 1;
+        state.documentListeners.forEach((listener) => listener());
+        return result.receipt;
+      });
+      fireEvent.click(screen.getByRole('button', { name: '全自动' }));
+      const dataTransfer = {
+        effectAllowed: 'none', dropEffect: 'none', setData: vi.fn(), getData: vi.fn(),
+      };
+      fireEvent.dragStart(screen.getByLabelText(`拖拽第 ${placement === 'before' ? 2 : 1} 行调整语句顺序`), { dataTransfer });
+      fireEvent.drop(screen.getByRole('group', { name: /镜头/ }), {
+        dataTransfer, clientY: placement === 'before' ? -1 : 10,
+      });
+
+      await waitFor(() => expect(state.document.statements.map((statement: any) => statement.id)).toEqual(
+        placement === 'before' ? ['statement-0', 'camera-0'] : ['camera-0', 'statement-0'],
+      ));
+      expect(state.author).toHaveBeenCalledTimes(1);
+      const rows = screen.getAllByRole('group', { name: /，时间/ });
+      expect(rows[placement === 'before' ? 0 : 1].getAttribute('aria-label')).toContain('statement-0');
+      expect(rows[placement === 'before' ? 1 : 0].getAttribute('aria-label')).toContain('镜头');
+    },
+  );
 
   it('correctly reorders dialogue upwards when dragged to preceding item', async () => {
     renderList([0, 1, 2]);

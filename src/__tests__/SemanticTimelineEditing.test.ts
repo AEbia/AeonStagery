@@ -14,6 +14,7 @@ import {
   defaultDialogueStatementDraft,
   locatorForTimelineAction,
   shouldRouteTimelineParamPatchToSource,
+  switchCameraFocusTarget,
 } from '../ui/timeline/semanticTimelineEditing';
 import { DEFAULT_SETTINGS, settingsManager } from '../ui/SettingsStore';
 
@@ -970,5 +971,17 @@ describe('shouldRouteTimelineParamPatchToSource', () => {
       false,
       'characterPerformance',
     )).toBe(false);
+  });
+});
+
+describe('switchCameraFocusTarget', () => {
+  it('switches a character focus to fixed coordinates and removes character-only fields', () => {
+    expect(switchCameraFocusTarget({ mode: 'focus', target: 'tomori', targetPart: 'chest' }, undefined))
+      .toEqual({ mode: 'focus', target: undefined, targetPart: undefined, position: [0.5, 0.5] });
+  });
+
+  it('switches fixed coordinates to a character focus and removes the stale position', () => {
+    expect(switchCameraFocusTarget({ mode: 'focus', position: [0.2, 0.7] }, 'tomori'))
+      .toEqual({ mode: 'focus', position: undefined, target: 'tomori' });
   });
 });

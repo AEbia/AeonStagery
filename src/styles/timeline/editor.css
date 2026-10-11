@@ -400,12 +400,63 @@
 }
 
 /* Color-coded left borders */
-.timeline-item--dialogue { border-left: 3px solid var(--color-dialogue); }
-.timeline-item--character { border-left: 3px solid var(--color-character); }
-.timeline-item--placeholder { opacity: 0.7; border-left-style: dashed; }
-.timeline-item--camera { border-left: 3px solid var(--color-camera); }
-.timeline-item--environment { border-left: 3px solid var(--color-environment); }
-.timeline-item--audio { border-left: 3px solid var(--color-audio); }
+.timeline-item--dialogue,
+.timeline-item-container .timeline-item--dialogue,
+.timeline-item-container .timeline-item--dialogue ~ .inspector-workspace__detail,
+.timeline-item--dialogue ~ .inspector-workspace__detail { border-left: 3px solid var(--color-dialogue); }
+.timeline-item--character,
+.timeline-item-container .timeline-item--character,
+.timeline-item-container .timeline-item--character ~ .inspector-workspace__detail,
+.timeline-item--character ~ .inspector-workspace__detail { border-left: 3px solid var(--color-character); }
+.timeline-item--placeholder { opacity: 0.7; }
+.timeline-item--placeholder,
+.timeline-item-container .timeline-item--placeholder,
+.timeline-item-container .timeline-item--placeholder ~ .inspector-workspace__detail,
+.timeline-item--placeholder ~ .inspector-workspace__detail { border-left-style: dashed; }
+.timeline-item--camera,
+.timeline-item-container .timeline-item--camera,
+.timeline-item-container .timeline-item--camera ~ .inspector-workspace__detail,
+.timeline-item--camera ~ .inspector-workspace__detail { border-left: 3px solid var(--color-camera); }
+.timeline-item--environment,
+.timeline-item-container .timeline-item--environment,
+.timeline-item-container .timeline-item--environment ~ .inspector-workspace__detail,
+.timeline-item--environment ~ .inspector-workspace__detail { border-left: 3px solid var(--color-environment); }
+.timeline-item--audio,
+.timeline-item-container .timeline-item--audio,
+.timeline-item-container .timeline-item--audio ~ .inspector-workspace__detail,
+.timeline-item--audio ~ .inspector-workspace__detail { border-left: 3px solid var(--color-audio); }
+
+/* Unified hover reaction for color-coded left borders across expanded statement */
+.timeline-item-container:hover .timeline-item--dialogue,
+.timeline-item-container:hover .timeline-item--dialogue ~ .inspector-workspace__detail,
+.timeline-item--dialogue:hover,
+.timeline-item--dialogue ~ .inspector-workspace__detail:hover {
+  border-left-color: color-mix(in srgb, var(--color-dialogue) 80%, white);
+}
+.timeline-item-container:hover .timeline-item--character,
+.timeline-item-container:hover .timeline-item--character ~ .inspector-workspace__detail,
+.timeline-item--character:hover,
+.timeline-item--character ~ .inspector-workspace__detail:hover {
+  border-left-color: color-mix(in srgb, var(--color-character) 80%, white);
+}
+.timeline-item-container:hover .timeline-item--camera,
+.timeline-item-container:hover .timeline-item--camera ~ .inspector-workspace__detail,
+.timeline-item--camera:hover,
+.timeline-item--camera ~ .inspector-workspace__detail:hover {
+  border-left-color: color-mix(in srgb, var(--color-camera) 80%, white);
+}
+.timeline-item-container:hover .timeline-item--environment,
+.timeline-item-container:hover .timeline-item--environment ~ .inspector-workspace__detail,
+.timeline-item--environment:hover,
+.timeline-item--environment ~ .inspector-workspace__detail:hover {
+  border-left-color: color-mix(in srgb, var(--color-environment) 80%, white);
+}
+.timeline-item-container:hover .timeline-item--audio,
+.timeline-item-container:hover .timeline-item--audio ~ .inspector-workspace__detail,
+.timeline-item--audio:hover,
+.timeline-item--audio ~ .inspector-workspace__detail:hover {
+  border-left-color: color-mix(in srgb, var(--color-audio) 80%, white);
+}
 
 .track-summary-block__accent {
   width: 4px;

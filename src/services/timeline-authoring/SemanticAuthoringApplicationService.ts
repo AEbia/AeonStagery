@@ -314,22 +314,28 @@ export class SemanticAuthoringApplicationService {
     return this.requireDocument();
   }
 
-  async undo(): Promise<boolean> {
-    const entry = this.undoStack.pop();
-    if (!entry) return false;
-    await this.coordinator.applyDocument(entry.before, this.documentStore.filePath ?? undefined);
-    this.redoStack.push(entry);
-    this.notifyHistory();
-    return true;
+  undo(): Promise<boolean> {
+    return this.enqueueOperation(async () => {
+      const entry = this.undoStack[this.undoStack.length - 1];
+      if (!entry) return false;
+      await this.coordinator.applyDocument(entry.before, this.documentStore.filePath ?? undefined);
+      this.undoStack.pop();
+      this.redoStack.push(entry);
+      this.notifyHistory();
+      return true;
+    });
   }
 
-  async redo(): Promise<boolean> {
-    const entry = this.redoStack.pop();
-    if (!entry) return false;
-    await this.coordinator.applyDocument(entry.after, this.documentStore.filePath ?? undefined);
-    this.undoStack.push(entry);
-    this.notifyHistory();
-    return true;
+  redo(): Promise<boolean> {
+    return this.enqueueOperation(async () => {
+      const entry = this.redoStack[this.redoStack.length - 1];
+      if (!entry) return false;
+      await this.coordinator.applyDocument(entry.after, this.documentStore.filePath ?? undefined);
+      this.redoStack.pop();
+      this.undoStack.push(entry);
+      this.notifyHistory();
+      return true;
+    });
   }
 
   clearHistory(): void {
@@ -347,9 +353,14 @@ export class SemanticAuthoringApplicationService {
   }
 
   private enqueue<T>(operation: (document: CurrentSceneDocument) => Promise<T>): Promise<T> {
+    return this.enqueueOperation(() => operation(this.requireDocument()));
+  }
+
+  /** History requests wait for pending edits and restore snapshots in request order. */
+  private enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
     const task = this.mutationChain
       .catch(() => undefined)
-      .then(() => operation(this.requireDocument()));
+      .then(operation);
     this.mutationChain = task;
     return task;
   }

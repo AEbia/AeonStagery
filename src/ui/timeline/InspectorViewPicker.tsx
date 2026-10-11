@@ -8,6 +8,7 @@ import {
   IconUser,
 } from '../icons';
 import type { WorkspaceToolTab } from '../workspace-tools/types';
+import { useSettings } from '../SettingsStore';
 
 export type InspectorPanelView = 'actions' | WorkspaceToolTab;
 
@@ -44,6 +45,9 @@ export const InspectorViewPicker: React.FC<InspectorViewPickerProps> = ({
   warningCount,
   onSelect,
 }) => {
+  const { settings } = useSettings();
+  if (settings.workbenchTimelineLayoutMode === 'tracks') return null;
+
   const activeDefinition = viewDefinitions.find((view) => view.id === activeView) ?? viewDefinitions[0];
   const ActiveIcon = activeDefinition.icon;
   const issueCount = errorCount + warningCount;

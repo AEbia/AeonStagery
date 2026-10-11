@@ -4,7 +4,7 @@ import type {
   SceneStatement,
 } from '../../api/types/semantic-scene';
 import { sceneStatementDefinitionRegistry } from '../semantic-scene';
-import { withSceneDocumentCanonicalOrder } from '../semantic-scene/SceneDocumentCanonicalOrder';
+import { getSceneDocumentCanonicalOrder, withSceneDocumentCanonicalOrder } from '../semantic-scene/SceneDocumentCanonicalOrder';
 import { PACE_GAP } from '../pacing/pacing';
 import { scenePaceTierOf } from './SequentialFlowAuthoring';
 
@@ -198,6 +198,7 @@ export function reorderDialogueFlow(
   orderedDialogueIds: readonly string[],
   movedStatementId: string,
   tier: ScenePaceTier,
+  beforeStatementId?: string | null,
 ): CurrentSceneDocument {
   const dialogueIds = document.statements
     .filter((statement) => statement.type === 'dialogue')
@@ -210,6 +211,9 @@ export function reorderDialogueFlow(
     || !dialogueSet.has(movedStatementId)
   ) {
     return document;
+  }
+  if (beforeStatementId !== undefined) {
+    return reorderDialogueAtRootAnchor(document, orderedDialogueIds, movedStatementId, beforeStatementId, tier, true);
   }
   if (orderedDialogueIds.every((id, index) => id === dialogueIds[index])) return document;
 
@@ -262,6 +266,7 @@ export function reorderDialogueManual(
   document: CurrentSceneDocument,
   orderedDialogueIds: readonly string[],
   movedStatementId: string,
+  beforeStatementId?: string | null,
 ): CurrentSceneDocument {
   const dialogueIds = document.statements
     .filter((statement) => statement.type === 'dialogue')
@@ -277,6 +282,9 @@ export function reorderDialogueManual(
   const byId = new Map(document.statements.map((statement) => [statement.id, statement]));
   const moved = dialogueSet.has(movedStatementId) ? byId.get(movedStatementId)! : undefined;
   if (moved === undefined) return document;
+  if (beforeStatementId !== undefined) {
+    return reorderDialogueAtRootAnchor(document, orderedDialogueIds, movedStatementId, beforeStatementId, scenePaceTierOf(document), false);
+  }
   if (orderedDialogueIds.every((id, index) => id === dialogueIds[index])) return document;
 
   const reordered = document.statements.filter((statement) => statement.id !== movedStatementId);
@@ -303,5 +311,64 @@ export function reorderDialogueManual(
   return withSceneDocumentCanonicalOrder(
     { ...document, statements: reordered },
     reordered.map((statement) => statement.id),
+  );
+}
+
+/** Preserve an exact list drop boundary, including boundaries between non-dialogue roots. */
+function reorderDialogueAtRootAnchor(
+  document: CurrentSceneDocument,
+  orderedDialogueIds: readonly string[],
+  movedStatementId: string,
+  beforeStatementId: string | null,
+  tier: ScenePaceTier,
+  flow: boolean,
+): CurrentSceneDocument {
+  const canonicalOrder = new Map(
+    (getSceneDocumentCanonicalOrder(document) ?? document.statements.map((statement) => statement.id))
+      .map((id, index) => [id, index]),
+  );
+  const original = [...document.statements].sort((left, right) => left.time - right.time
+    || canonicalOrder.get(left.id)! - canonicalOrder.get(right.id)!);
+  const oldIndex = original.findIndex((statement) => statement.id === movedStatementId);
+  const moved = original[oldIndex];
+  const remaining = original.filter((statement) => statement.id !== movedStatementId);
+  const insertionIndex = beforeStatementId === null
+    ? remaining.length
+    : remaining.findIndex((statement) => statement.id === beforeStatementId);
+  if (!moved || insertionIndex < 0) return document;
+
+  const nextOrder = [...remaining];
+  nextOrder.splice(insertionIndex, 0, moved);
+  const nextDialogueIds = nextOrder.filter((statement) => statement.type === 'dialogue').map((statement) => statement.id);
+  if (nextDialogueIds.some((id, index) => id !== orderedDialogueIds[index])) return document;
+  if (nextOrder.every((statement, index) => statement.id === original[index].id)) return document;
+
+  const span = roundTime(dialogueSlotSpan(moved, tier));
+  // Overlapping roots cannot be pulled before zero or before the preceding root.
+  // Limit the uniform removal shift while retaining all downstream relative gaps.
+  const firstAfterOldSlot = original[oldIndex + 1];
+  const removalShift = flow && firstAfterOldSlot
+    ? Math.min(span, Math.max(0, firstAfterOldSlot.time - (original[oldIndex - 1]?.time ?? 0)))
+    : 0;
+  const shifted = remaining.map((statement, index) => flow && index >= oldIndex && removalShift !== 0
+    ? { ...statement, time: roundTime(statement.time - removalShift) }
+    : statement);
+  const previous = shifted[insertionIndex - 1];
+  const following = shifted[insertionIndex];
+  const anchorTime = flow
+    ? roundTime(previous ? flowSlotEnd(previous, tier) : original[0].time)
+    : roundTime(previous && following
+      ? (previous.time + following.time) / 2
+      : previous ? flowSlotEnd(previous, tier) : following?.time ?? moved.time);
+  // If an existing root overlaps the previous slot, open enough room for the
+  // dragged dialogue as well as the overlap, keeping the requested order visible.
+  const insertionShift = flow ? roundTime(span + Math.max(0, anchorTime - (following?.time ?? anchorTime))) : 0;
+  const statements = shifted.map((statement, index) => index >= insertionIndex && insertionShift !== 0
+    ? { ...statement, time: roundTime(statement.time + insertionShift) }
+    : statement);
+  statements.splice(insertionIndex, 0, { ...moved, time: anchorTime });
+  return withSceneDocumentCanonicalOrder(
+    { ...document, statements },
+    statements.map((statement) => statement.id),
   );
 }

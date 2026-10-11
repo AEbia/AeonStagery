@@ -20,6 +20,7 @@ export type RuntimeActionType =
   | 'playMotion'
   | 'setExpression'
   | 'dialogue'
+  | 'setDialogueVisibility'
   | 'cameraMotion'
   | 'cameraFollow'
   | 'cameraUnfollow'
@@ -182,6 +183,7 @@ export function assertSceneDocumentV5(
 
 export type StatementFamily =
   | 'dialogue'
+  | 'dialogueVisibility'
   | 'characterPresence'
   | 'characterTransform'
   | 'characterPerformance'
@@ -457,6 +459,8 @@ export type CameraParams =
 export interface EnvironmentLayerParams {
   mode: 'set' | 'transform' | 'remove';
   layerId: string;
+  /** Author-facing name; layerId remains the stable reference. */
+  label?: string;
   file?: string;
   image?: string;
   position?: Vec2;
@@ -771,6 +775,7 @@ export interface CustomAnimationParams {
 
 export interface StatementParamsByFamily {
   dialogue: DialogueParams;
+  dialogueVisibility: DialogueVisibilityParams;
   characterPresence: CharacterPresenceParams;
   characterTransform: CharacterTransformParams;
   characterPerformance: CharacterPerformanceParams;
@@ -784,6 +789,12 @@ export interface StatementParamsByFamily {
   audio: AudioParams;
   graphicLayer: GraphicLayerParams;
   customAnimation: CustomAnimationParams;
+}
+
+/** Persistent presentation state; voice and lip sync continue while hidden. */
+export interface DialogueVisibilityParams {
+  visible: boolean;
+  durationSeconds?: number;
 }
 
 export type SceneStatement = {

@@ -14,8 +14,12 @@ permissions:
 
 jobs:
   verify:
-    name: lint / check / build
-    runs-on: ubuntu-latest
+    name: lint / check / build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -44,3 +48,18 @@ jobs:
 
       - name: Build renderer and Electron bundles
         run: npm run build
+
+  required-check:
+    # Branch protection requires this stable name; matrix job names include the OS.
+    name: lint / check / build
+    if: always()
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass when every platform succeeds
+        if: needs.verify.result == 'success'
+        run: echo "All platform checks passed."
+
+      - name: Fail if a platform check failed or was cancelled
+        if: needs.verify.result != 'success'
+        run: exit 1

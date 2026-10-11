@@ -12,7 +12,7 @@ import type {
   SceneStatementDraft,
 } from '../../api/types/semantic-scene';
 import { sceneStatementFactory } from '../semantic-scene';
-import { PACE_GAP, resolveDialogueDuration } from '../pacing/pacing';
+import { PACE_GAP, resolveDialogueDuration, type DialogueTypewriterTiming } from '../pacing/pacing';
 
 /**
  * 顺序语句流:WebGAL 式逐句对白追加。
@@ -46,6 +46,7 @@ function roundTime(value: number): number {
 export function compileSequentialDialogueDrafts(
   lines: readonly string[],
   pace: AiRhythmPace = DEFAULT_SEQUENTIAL_PACE,
+  typewriter?: DialogueTypewriterTiming,
 ): SequentialDialogueCompileResult {
   const statements: SceneStatementDraft[] = [];
   let cursor = 0;
@@ -56,6 +57,7 @@ export function compileSequentialDialogueDrafts(
       context: 'pace-tier',
       text,
       pace,
+      typewriter,
     });
     statements.push({
       time: roundTime(cursor),

@@ -216,6 +216,9 @@ export function parseTemplatePackageManifest(input: unknown): TemplatePackageMan
   const manifestSchemaVersion = optionalManifestSchemaVersion(manifest.manifestSchemaVersion);
   const compatibility = optionalRecord(template.compatibility, 'template.compatibility');
   validateTemplateCompatibility(manifestSchemaVersion, compatibility);
+  const sceneSchemaVersion = manifestSchemaVersion === 2
+    ? optionalSceneSchemaVersion(compatibility?.sceneSchemaVersion, 'template.compatibility.sceneSchemaVersion')
+    : undefined;
   const parsed: TemplatePackageManifest = {
     manifestSchemaVersion,
     template: {
@@ -243,7 +246,7 @@ export function parseTemplatePackageManifest(input: unknown): TemplatePackageMan
   parsed.defaults = parseTemplateDefaults(manifest.defaults);
   parsed.characterPresets = optionalArray(manifest.characterPresets, 'characterPresets').map(parseCharacterPreset);
   parsed.authoringCombos = optionalArray(manifest.authoringCombos, 'authoringCombos')
-    .map((combo, index) => parseAuthoringCombo(combo, index, manifestSchemaVersion));
+    .map((combo, index) => parseAuthoringCombo(combo, index, manifestSchemaVersion, sceneSchemaVersion));
   parsed.dialogueStyles = optionalArray(manifest.dialogueStyles, 'dialogueStyles').map(parseDialogueStyle);
   parsed.voiceProfiles = optionalArray(manifest.voiceProfiles, 'voiceProfiles').map((profile, index) => parseTemplateVoiceProfile(profile, `voiceProfiles[${index}]`));
   parsed.performanceProfiles = parsePerformanceProfileManifestEntries(manifest.performanceProfiles);
@@ -281,8 +284,9 @@ export function parseTemplateAuthoringCombo(
   input: unknown,
   path = 'authoringCombo',
   manifestSchemaVersion: TemplateManifestSchemaVersion = 1,
+  inheritedSceneSchemaVersion?: 4 | 5,
 ): TemplateAuthoringCombo {
-  return parseAuthoringCombo(input, path, manifestSchemaVersion);
+  return parseAuthoringCombo(input, path, manifestSchemaVersion, inheritedSceneSchemaVersion);
 }
 
 export function authoringComboToComboTemplate(combo: TemplateAuthoringCombo): ComboTemplate | null {
@@ -414,6 +418,7 @@ function parseAuthoringCombo(
   input: unknown,
   index: number | string,
   manifestSchemaVersion: TemplateManifestSchemaVersion,
+  inheritedSceneSchemaVersion?: 4 | 5,
 ): TemplateAuthoringCombo {
   const path = typeof index === 'number' ? `authoringCombos[${index}]` : index;
   const combo = expectRecord(input, path);
@@ -423,7 +428,7 @@ function parseAuthoringCombo(
   }
   const file = optionalString(combo.file, `${path}.file`);
   const actions = parseAuthoringComboActions(combo.actions, `${path}.actions`);
-  const payload = parseAuthoringComboPayload(combo.payload, `${path}.payload`);
+  const payload = parseAuthoringComboPayload(combo.payload, `${path}.payload`, inheritedSceneSchemaVersion);
 
   if (manifestSchemaVersion === 2) {
     assertNoLegacyComboShape(combo, path);
@@ -473,16 +478,21 @@ function parseAuthoringComboActions(input: unknown, path: string): TemplateAutho
   });
 }
 
-function parseAuthoringComboPayload(input: unknown, path: string): TemplateAuthoringComboPayload | undefined {
+function parseAuthoringComboPayload(
+  input: unknown,
+  path: string,
+  inheritedSceneSchemaVersion?: 4 | 5,
+): TemplateAuthoringComboPayload | undefined {
   if (input === undefined) return undefined;
   const payload = expectRecord(input, path);
   assertNoLegacyPayloadShape(payload, path);
   const kind = expectString(payload.kind, `${path}.kind`);
   const sceneSchemaVersion = optionalSceneSchemaVersion(payload.sceneSchemaVersion, `${path}.sceneSchemaVersion`);
+  const effectiveSceneSchemaVersion = sceneSchemaVersion ?? inheritedSceneSchemaVersion;
   switch (kind) {
     case 'statementPreset': {
       const statement = expectRecord(payload.statement, `${path}.statement`);
-      assertKnownStatementType(statement.type, `${path}.statement.type`);
+      assertKnownStatementType(statement.type, `${path}.statement.type`, effectiveSceneSchemaVersion);
       return {
         kind,
         statement,
@@ -491,10 +501,10 @@ function parseAuthoringComboPayload(input: unknown, path: string): TemplateAutho
     }
     case 'dialoguePreset': {
       const dialogue = expectRecord(payload.dialogue, `${path}.dialogue`);
-      assertKnownStatementType(dialogue.type, `${path}.dialogue.type`);
+      assertKnownStatementType(dialogue.type, `${path}.dialogue.type`, effectiveSceneSchemaVersion);
       const companions = optionalRecordArray(payload.companions, `${path}.companions`);
       companions?.forEach((companion, index) => {
-        assertKnownStatementType(companion.type, `${path}.companions[${index}].type`);
+        assertKnownStatementType(companion.type, `${path}.companions[${index}].type`, effectiveSceneSchemaVersion);
       });
       return {
         kind,
@@ -507,7 +517,7 @@ function parseAuthoringComboPayload(input: unknown, path: string): TemplateAutho
       const statements = optionalArray(payload.statements, `${path}.statements`)
         .map((statement, index) => {
           const stmtRecord = expectRecord(statement, `${path}.statements[${index}]`);
-          assertKnownStatementType(stmtRecord.type, `${path}.statements[${index}].type`);
+          assertKnownStatementType(stmtRecord.type, `${path}.statements[${index}].type`, effectiveSceneSchemaVersion);
           return stmtRecord;
         });
       return {
@@ -521,9 +531,12 @@ function parseAuthoringComboPayload(input: unknown, path: string): TemplateAutho
   }
 }
 
-function assertKnownStatementType(type: unknown, path: string): void {
+function assertKnownStatementType(type: unknown, path: string, sceneSchemaVersion?: 4 | 5): void {
   if (typeof type !== 'string' || !sceneStatementDefinitionRegistry.has(type)) {
     throw new Error(`Unknown statement family at ${path}: "${String(type)}"`);
+  }
+  if (sceneSchemaVersion !== undefined) {
+    sceneStatementDefinitionRegistry.assertSupportedInSchema(type, sceneSchemaVersion, path);
   }
 }
 

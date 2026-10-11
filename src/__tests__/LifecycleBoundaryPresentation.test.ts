@@ -92,4 +92,15 @@ describe('lifecycleBoundaryPresentation', () => {
     );
     expect(metrics.isLifecycleBoundary).toBe(false);
   });
+
+  it.each([0, 0.1, 0.3])('uses the ordinary minimum width for subtitle visibility at duration %s', (durationSeconds) => {
+    for (const visible of [false, true]) {
+      const metrics = getLifecycleBoundaryPresentationMetrics({
+        type: 'dialogueVisibility', params: { visible, durationSeconds },
+      }, 40);
+      expect(metrics.visualWidthPx).toBe(Math.max(4, durationSeconds * 40));
+      expect(metrics.semanticDurationSeconds).toBe(durationSeconds);
+      expect(metrics.isLifecycleBoundary).toBe(false);
+    }
+  });
 });

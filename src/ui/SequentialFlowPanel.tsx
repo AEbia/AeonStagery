@@ -10,6 +10,7 @@ import {
   compileSequentialDialogueDrafts,
   computeTimelineEndSeconds,
 } from '../services/sequential-flow/SequentialFlowAuthoring';
+import { useSetting } from './SettingsStore';
 import {
   useSemanticAuthoringService,
 } from './context/AppContext';
@@ -33,6 +34,8 @@ const DEFAULT_SCENE_PACE_TIER: ScenePaceTier = 'normal';
 export function SequentialFlowPanel() {
   const { document: semanticDocument } = useSemanticDocument();
   const semanticAuthoring = useSemanticAuthoringService();
+  const dialogueTextSpeed = useSetting('dialogueTextSpeed');
+  const dialogueEntranceAnimation = useSetting('dialogueEntranceAnimation');
   const [sourceText, setSourceText] = useState(() => localStorage.getItem('aeonstagery_sequential_source') || '');
   const [singleLine, setSingleLine] = useState('');
   const [receipt, setReceipt] = useState<SemanticAuthorReceipt | null>(null);
@@ -71,13 +74,16 @@ export function SequentialFlowPanel() {
     if (!semanticDocument) return null;
     const lines = splitLines(sourceText).map((line) => line.trim()).filter(Boolean);
     if (lines.length === 0) return null;
-    const compiled = compileSequentialDialogueDrafts(lines, scenePaceTier);
+    const compiled = compileSequentialDialogueDrafts(lines, scenePaceTier, {
+      textSpeed: dialogueTextSpeed,
+      entranceAnimation: dialogueEntranceAnimation,
+    });
     return {
       lines,
       anchorTime: computeTimelineEndSeconds(semanticDocument),
       compiled,
     };
-  }, [semanticDocument, sourceText, scenePaceTier]);
+  }, [semanticDocument, sourceText, scenePaceTier, dialogueTextSpeed, dialogueEntranceAnimation]);
 
   const appendText = useCallback(async (text: string) => {
     if (!semanticAuthoring || !semanticDocument) {

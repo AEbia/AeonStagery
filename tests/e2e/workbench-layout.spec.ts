@@ -20,12 +20,16 @@ test('script-action priority extends the side panel and gives the tracks the rem
   try {
     launched = await launchAeonApp(fixture.projectFilePath, testInfo);
     const { page } = launched;
+    await page.addLocatorHandler(page.locator('.live2d-runtime-dialog'), async dialog => {
+      await dialog.getByRole('button', { name: /我知道了|配置完成，进入/ }).click();
+    });
     await page.evaluate(() => {
       const key = 'aeonstagery_settings';
       const saved = JSON.parse(localStorage.getItem(key) || '{}');
       localStorage.setItem(key, JSON.stringify({
         ...saved,
         workbenchTimelineLayoutMode: 'list',
+        showLive2DRuntimeSetupOnStartup: false,
       }));
     });
     await page.reload();
@@ -51,6 +55,9 @@ test('script-action priority extends the side panel and gives the tracks the rem
         main: rect('.main-content'),
         trackPanel: rect('.bottom-panel'),
         trackEditor: rect('.bottom-panel .timeline-editor-root'),
+        trackViewport: rect('.bottom-panel .timeline-editor-scroll-container'),
+        zoomSlider: rect('[data-testid="timeline-zoom-slider"]'),
+        zoomWindow: rect('[data-testid="timeline-zoom-window"]'),
       };
     });
 
@@ -59,51 +66,35 @@ test('script-action priority extends the side panel and gives the tracks the rem
     expect(geometry.navigator.bottom).toBeCloseTo(geometry.trackPanel.bottom, 0);
     expect(geometry.trackPanel.right).toBeLessThanOrEqual(geometry.navigator.left + 1);
     expect(geometry.trackEditor.right).toBeLessThanOrEqual(geometry.navigator.left + 1);
+    expect(geometry.trackViewport.right).toBeCloseTo(geometry.navigator.left, 0);
+    expect(geometry.zoomSlider.right).toBeCloseTo(geometry.navigator.left, 0);
+    expect(geometry.zoomWindow.right).toBeLessThanOrEqual(geometry.zoomSlider.right + 1);
 
-    await page.getByTestId('timeline-track-block').first().click();
-    await expect(page.getByTestId('action-param-text')).toBeVisible();
+    await page.getByTestId('timeline-zoom-handle-right').press('End');
 
-    const readSplitGeometry = async () => page.evaluate(() => {
-      const boundsOf = (selector: string) => {
-        const element = document.querySelector(selector);
-        if (!(element instanceof HTMLElement)) throw new Error(`Missing ${selector}`);
-        return element.getBoundingClientRect();
-      };
-      const main = boundsOf('.main-content');
-      const sidePanel = boundsOf('.side-panel');
-      const navigator = boundsOf('.inspector-workspace__pane--navigator');
-      const detail = boundsOf('.inspector-workspace__detail');
-      const trackPanel = boundsOf('.bottom-panel');
-      const pointBelowDetail = document.elementFromPoint(
-        detail.left + detail.width / 2,
-        trackPanel.top + trackPanel.height / 2,
-      );
-      return {
-        mainBottom: main.bottom,
-        sidePanelLeft: sidePanel.left,
-        sidePanelBottom: sidePanel.bottom,
-        navigatorLeft: navigator.left,
-        navigatorBottom: navigator.bottom,
-        detailBottom: detail.bottom,
-        trackRight: trackPanel.right,
-        trackBottom: trackPanel.bottom,
-        belowDetailIsTrack: !!pointBelowDetail?.closest('.bottom-panel'),
-      };
+    const separator = page.getByRole('separator', { name: '调整剧本动作面板宽度' });
+    const separatorBounds = await separator.boundingBox();
+    expect(separatorBounds).not.toBeNull();
+    const x = separatorBounds!.x + separatorBounds!.width / 2;
+    const y = separatorBounds!.y + separatorBounds!.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 240, y, { steps: 8 });
+    await page.mouse.up();
+
+    await expect.poll(async () => page.evaluate(() => {
+      const slider = document.querySelector('[data-testid="timeline-zoom-slider"]')!;
+      const zoomWindow = document.querySelector('[data-testid="timeline-zoom-window"]')!;
+      return zoomWindow.getBoundingClientRect().right - slider.getBoundingClientRect().right;
+    })).toBeLessThanOrEqual(1);
+
+    const resizedGeometry = await page.evaluate(() => {
+      const navigator = document.querySelector('.inspector-workspace__pane--navigator')!;
+      const viewport = document.querySelector('.bottom-panel .timeline-editor-scroll-container')!;
+      return { navigatorLeft: navigator.getBoundingClientRect().left, viewportRight: viewport.getBoundingClientRect().right };
     });
-
-    await expect.poll(async () => {
-      const current = await readSplitGeometry();
-      return current.trackRight > current.sidePanelLeft && current.belowDetailIsTrack;
-    }).toBe(true);
-
-    const splitGeometry = await readSplitGeometry();
-
-    expect(splitGeometry.sidePanelBottom).toBeCloseTo(splitGeometry.trackBottom, 0);
-    expect(splitGeometry.navigatorBottom).toBeCloseTo(splitGeometry.trackBottom, 0);
-    expect(splitGeometry.detailBottom).toBeCloseTo(splitGeometry.mainBottom, 0);
-    expect(splitGeometry.trackRight).toBeLessThanOrEqual(splitGeometry.navigatorLeft + 1);
-    expect(splitGeometry.trackRight).toBeGreaterThan(splitGeometry.sidePanelLeft);
-    expect(splitGeometry.belowDetailIsTrack).toBe(true);
+    expect(resizedGeometry.navigatorLeft).toBeLessThan(geometry.navigator.left);
+    expect(resizedGeometry.viewportRight).toBeCloseTo(resizedGeometry.navigatorLeft, 0);
   } catch (error) {
     failed = true;
     await captureFailureArtifacts(launched?.page, testInfo);

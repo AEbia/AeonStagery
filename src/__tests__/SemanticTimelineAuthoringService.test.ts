@@ -43,6 +43,73 @@ function makeCustomMotion(durationSeconds: number, key = 'wave'): Extract<Charac
 }
 
 describe('SemanticTimelineAuthoringService', () => {
+  it.each(['insert-statement', 'insert-dialogue-in-chain', 'append-sequential-lines'] as const)(
+    'allows the configured typewriter to finish when creating dialogue through %s', (kind) => {
+      const service = new SemanticTimelineAuthoringService({
+        getDialogueTypewriterTiming: () => ({ textSpeed: 0.1, entranceAnimation: true }),
+      });
+      const text = '文'.repeat(100);
+      const base = { version: AUTHORING_SCHEMA_VERSION, correlationId: 'insert_typewriter', origin: 'timeline-editor' as const };
+      const intent = kind === 'insert-statement'
+        ? { ...base, kind, anchorTime: 0, statement: { type: 'dialogue' as const, params: { text, durationSeconds: 2 } } }
+        : kind === 'insert-dialogue-in-chain' ? { ...base, kind, text } : { ...base, kind, lines: [text, text] };
+      const result = service.author(makeDocument(), intent);
+      expect((result.document.statements[0].params as any).durationSeconds).toBe(10.2);
+      if (kind === 'append-sequential-lines') {
+        expect(result.document.statements[1].time).toBe(10.2 + PACE_GAP.normal);
+      }
+      expect(sceneDocumentCodec.parseAndValidate(result.document)).toBeDefined();
+    },
+  );
+
+  it('reads current typewriter settings on text edits, allows manual shortening, and shrinks after shortening text', () => {
+    let textSpeed = 0.1;
+    const service = new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({ textSpeed, entranceAnimation: true }),
+    });
+    let document = makeDocument({
+      statements: [{ id: 'line_1', time: 0, type: 'dialogue', params: { text: 'Hello', durationSeconds: 2 } }],
+    });
+    const update = (text: string, durationSeconds: number, style: 'typewriter' | 'instant' = 'typewriter') => {
+      document = service.author(document, {
+        version: AUTHORING_SCHEMA_VERSION, correlationId: 'update_typewriter', origin: 'timeline-editor',
+        kind: 'update-statement', statementId: 'line_1', patch: { params: { text, durationSeconds, style } },
+      }).document;
+      return (document.statements[0].params as any).durationSeconds;
+    };
+    expect(update('文'.repeat(100), 2)).toBe(10.2);
+    expect(update('文'.repeat(100), 0.3)).toBe(0.3);
+    textSpeed = 0.2;
+    expect(update('文'.repeat(101), 0.3)).toBe(20.4);
+    expect(update('短', 20.4)).toBe(estimateDialogueDuration('短', 'normal'));
+    expect(update('文'.repeat(100), 1.6, 'instant')).toBe(estimateDialogueDuration('文'.repeat(100), 'normal'));
+    expect(update('手工改文', 0.4)).toBe(0.4);
+  });
+
+  it.each(['raw-script', 'ai-script-panel'] as const)('preserves explicit insert timing from %s', (origin) => {
+    const service = new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({ textSpeed: 0.1, entranceAnimation: true }),
+    });
+    const result = service.author(makeDocument(), {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'authored_insert', origin,
+      kind: 'insert-statement', anchorTime: 0,
+      statement: { type: 'dialogue', params: { text: '文'.repeat(100), durationSeconds: 0.3 } },
+    });
+    expect((result.document.statements[0].params as any).durationSeconds).toBe(0.3);
+  });
+
+  it('preserves a manually shortened duration when other dialogue properties change', () => {
+    const document = makeDocument({
+      statements: [{ id: 'line_1', time: 0, type: 'dialogue', params: { text: 'Hello', durationSeconds: 0.3 } }],
+    });
+    const result = new SemanticTimelineAuthoringService().author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'keep_manual_duration', origin: 'timeline-editor',
+      kind: 'update-statement', statementId: 'line_1',
+      patch: { params: { text: 'Hello', durationSeconds: 0.3, textColor: '#ff0000' } },
+    });
+    expect((result.document.statements[0].params as any).durationSeconds).toBe(0.3);
+  });
+
   it('extends an explicit scene end when a statement duration grows', () => {
     const document = makeDocument({
       meta: { title: 'Test', characters: [], durationSeconds: 3 },
@@ -1241,6 +1308,92 @@ describe('SemanticTimelineAuthoringService reorder-dialogue-chain flow', () => {
       flow: true,
     })).toThrow(/movedStatementId/);
   });
+
+  it.each([
+    { movedStatementId: 'dlg_2', beforeStatementId: 'cam_1', ids: ['dlg_1', 'dlg_2', 'cam_1', 'dlg_3'], times: [0, 2, 5.5, 11] },
+    { movedStatementId: 'dlg_1', beforeStatementId: 'dlg_2', ids: ['cam_1', 'dlg_1', 'dlg_2', 'dlg_3'], times: [1, 1.5, 6, 11] },
+  ])('honours an exact root anchor $beforeStatementId even when dialogue order is unchanged', ({ movedStatementId, beforeStatementId, ids, times }) => {
+    const result = service.author(documentToReorder(), {
+      version: AUTHORING_SCHEMA_VERSION,
+      correlationId: 'reorder_root_anchor',
+      origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain',
+      orderedDialogueIds: ['dlg_1', 'dlg_2', 'dlg_3'],
+      movedStatementId,
+      flow: true,
+      beforeStatementId,
+    });
+
+    expect(result.document.statements.map((statement) => statement.id)).toEqual(ids);
+    expect(result.document.statements.map((statement) => statement.time)).toEqual(times);
+    expect(getSceneDocumentCanonicalOrder(result.document)).toEqual(ids);
+  });
+
+  it.each([
+    { name: 'before a simultaneous camera', cameraTime: 0, dialogueTime: 0, cameraFirst: true, beforeStatementId: 'camera', ids: ['dialogue', 'camera'], times: [0, 1.5] },
+    { name: 'after a simultaneous camera', cameraTime: 0, dialogueTime: 0, cameraFirst: false, beforeStatementId: null, ids: ['camera', 'dialogue'], times: [0, 0.5] },
+    { name: 'after a camera inside the old dialogue slot', cameraTime: 0.2, dialogueTime: 0, cameraFirst: false, beforeStatementId: null, ids: ['camera', 'dialogue'], times: [0, 0.5] },
+  ])('keeps root and compiled timing valid $name', ({ cameraTime, dialogueTime, cameraFirst, beforeStatementId, ids, times }) => {
+    const camera = {
+      id: 'camera', time: cameraTime, type: 'camera' as const,
+      params: { mode: 'focus' as const, position: [0, 0] as [number, number], durationSeconds: 0.5 },
+    };
+    const dialogue = {
+      id: 'dialogue', time: dialogueTime, type: 'dialogue' as const,
+      params: { text: 'Line', durationSeconds: 1 },
+      companions: [{
+        id: 'companion', anchor: 'end' as const, offset: 0.2, type: 'camera' as const,
+        params: { mode: 'focus' as const, position: [1, 1] as [number, number], durationSeconds: 0.5 },
+      }],
+    };
+    const document = makeDocument({ statements: cameraFirst ? [camera, dialogue] : [dialogue, camera] });
+    const result = service.author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_overlap', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['dialogue'], movedStatementId: 'dialogue',
+      beforeStatementId, flow: true,
+    });
+
+    expect(result.document.statements.map((statement) => statement.id)).toEqual(ids);
+    expect(result.document.statements.map((statement) => statement.time)).toEqual(times);
+    expect(getSceneDocumentCanonicalOrder(result.document)).toEqual(ids);
+    const moved = result.document.statements.find((statement) => statement.id === 'dialogue')!;
+    expect(moved.companions).toEqual(dialogue.companions);
+    const compiled = sceneStatementCompiler.compile(result.document);
+    expect(compiled.actions.filter((action) => !action.source.companionId).map((action) => action.source.statementId)).toEqual(ids);
+    expect(compiled.actions.find((action) => action.source.companionId === 'companion')?.time).toBeCloseTo(moved.time + 1.2);
+    expect(result.document.meta.durationSeconds).toBeCloseTo(Math.max(cameraFirst ? 2 : 0.5, moved.time + 1.7));
+  });
+
+  it('opens enough room at a root anchor inside an overlapping preceding dialogue', () => {
+    const document = makeDocument({ statements: [
+      { id: 'previous', time: 0, type: 'dialogue', params: { text: 'Long line', durationSeconds: 5 } },
+      { id: 'camera', time: 1, type: 'camera', params: { mode: 'focus', position: [0, 0], durationSeconds: 0.5 } },
+      { id: 'moved', time: 3, type: 'dialogue', params: { text: 'Moved line', durationSeconds: 1 } },
+    ] });
+    const result = service.author(document, {
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_overlap_anchor', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['previous', 'moved'], movedStatementId: 'moved',
+      beforeStatementId: 'camera', flow: true,
+    });
+    expect(result.document.statements.map((statement) => [statement.id, statement.time])).toEqual([
+      ['previous', 0], ['moved', 5.5], ['camera', 7],
+    ]);
+    expect(sceneStatementCompiler.compile(result.document).actions.map((action) => action.source.statementId))
+      .toEqual(['previous', 'moved', 'camera']);
+  });
+
+  it.each(['dlg_3', 'missing', 'dlg_2'])(
+    'does not change timing for an unchanged or invalid root anchor %s', (beforeStatementId) => {
+      const document = documentToReorder();
+      const result = service.author(document, {
+        version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder_no_change', origin: 'sequential-flow',
+        kind: 'reorder-dialogue-chain', orderedDialogueIds: ['dlg_1', 'dlg_2', 'dlg_3'], movedStatementId: 'dlg_2',
+        beforeStatementId, flow: true,
+      });
+      expect(result.document).toBe(document);
+      expect(result.receipt.updatedStatementIds).toEqual([]);
+    },
+  );
 });
 
 describe('SemanticTimelineAuthoringService delete-statements flow', () => {

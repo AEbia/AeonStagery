@@ -126,10 +126,10 @@ export class Live2DModelLoader {
     return `${baseDir}/${child}`.replace(/\/+/g, '/');
   }
 
-  private async readModelJson(modelPath: string): Promise<{ fullPath: string; json: any } | null> {
+  private async readModelJson(modelPath: string, resolvedFullPath?: string): Promise<{ fullPath: string; json: any } | null> {
     if (!modelPath) return null;
 
-    const fullPath = await this.resolveModelFilePath(modelPath);
+    const fullPath = resolvedFullPath ?? await this.resolveModelFilePath(modelPath);
     const api = (window as any).aeonStageryAPI;
 
     try {
@@ -346,38 +346,32 @@ export class Live2DModelLoader {
       return { motions: [], expressions: [] };
     }
 
-    const modelData = await this.readModelJson(modelPath);
-    if (!modelData) {
-      return { motions: [], expressions: [] };
-    }
-    const { fullPath, json } = modelData;
+    // Resolve on each request so project switches and mount changes cannot reuse
+    // data from a different file with the same relative model path.
+    const fullPath = await this.resolveModelFilePath(modelPath);
     const modelUrl = this.toAssetUrl(fullPath);
 
-    // Check cache — now stores Promise to prevent thundering herd
-    if (this._modelDataCache.has(modelUrl)) {
-      return this._modelDataCache.get(modelUrl)!;
-    }
+    const cached = this._modelDataCache.get(modelUrl);
+    if (cached) return cached;
 
-    const fetchTask = (async () => {
-      let motions: string[] = [];
-      let expressions: string[] = [];
-
-      const modelData = extractLive2DModelData(json, fullPath);
-      motions = modelData.motions;
-      expressions = modelData.expressions;
-
-      return { motions, expressions };
-    })();
+    // Cache the entire read/parse operation, including in-flight requests.
+    const fetchTask = this.readModelJson(modelPath, fullPath)
+      .then((modelData) => {
+        if (!modelData) {
+          this._modelDataCache.delete(modelUrl);
+          return { motions: [], expressions: [] };
+        }
+        const { motions, expressions } = extractLive2DModelData(modelData.json, modelData.fullPath);
+        return { motions, expressions };
+      })
+      .catch((err) => {
+        this._modelDataCache.delete(modelUrl);
+        console.error(`[Live2D] Failed to fetch model data from ${fullPath}:`, err);
+        return { motions: [], expressions: [] };
+      });
 
     this._modelDataCache.set(modelUrl, fetchTask);
-
-    try {
-      return await fetchTask;
-    } catch (err) {
-      this._modelDataCache.delete(modelUrl); // Clean up failed fetch so it can be retried
-      console.error(`[Live2D] Failed to fetch model data from ${fullPath}:`, err);
-      return { motions: [], expressions: [] };
-    }
+    return fetchTask;
   }
 
   /** Resolve a catalog/resource motion key to the runtime group in a model. */

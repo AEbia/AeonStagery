@@ -238,6 +238,9 @@ function defaultRimLightValue(key: string, params: Readonly<Record<string, unkno
 }
 
 export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
+  dialogueVisibility: [field('durationSeconds', '过渡时长', {
+    valueType: 'number', min: '0', step: '0.1', defaultValue: inspectorDefault(0),
+  })],
   dialogue: [
     field('speakerId', '绑定角色'),
     field('text', '对话文本', { defaultValue: inspectorDefault('新对白') }),
@@ -497,7 +500,7 @@ export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
   ],
   environmentLayer: [
     field('mode', '图层操作', { surface: 'semantic' }),
-    field('layerId', '环境层名称', { surface: 'semantic', defaultValue: inspectorDefault('background') }),
+    field('layerId', '环境图层 ID', { surface: 'semantic' }),
     field('file', '资源路径', { when: (params) => params.mode === 'set' && hasOwn(params, 'file') }),
     field('image', '背景图片', { when: (params) => params.mode === 'set' && environmentImageField(params) }),
     field('position', '空间坐标', { when: modeIsOneOf('set', 'transform'), defaultValue: (params) => params.mode === 'transform' ? [0.5, 0.5] : undefined }),
@@ -734,8 +737,8 @@ export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
     field('lacunarity', 'Lacunarity', { valueType: 'number', min: '0', popoverMin: '0', popoverMax: '10', step: '0.1', when: lightingEffectModeIs('godrays'), defaultValue: inspectorDefault(2) }),
     field('color', '颜色', { when: (params) => ['overlay', 'pointLight'].includes(String(params.effect)) && lightingValueMode(params) }),
     field('blendMode', '混合模式', { when: lightingEffectModeIs('overlay'), defaultValue: inspectorDefault('multiply') }),
-    field('x', 'X', { valueType: 'number', min: '0', max: '1', step: '0.01', when: lightingEffectModeIs('pointLight'), defaultValue: inspectorDefault(0.5) }),
-    field('y', 'Y', { valueType: 'number', min: '0', max: '1', step: '0.01', when: lightingEffectModeIs('pointLight'), defaultValue: inspectorDefault(0.5) }),
+    field('x', 'X', { valueType: 'number', step: '0.01', when: lightingEffectModeIs('pointLight'), defaultValue: inspectorDefault(0.5) }),
+    field('y', 'Y', { valueType: 'number', step: '0.01', when: lightingEffectModeIs('pointLight'), defaultValue: inspectorDefault(0.5) }),
     field('radius', '半径', { valueType: 'number', min: '10', popoverMin: '10', popoverMax: '1000', step: '10', when: lightingEffectModeIs('pointLight'), defaultValue: inspectorDefault(240) }),
     field('adjBrightness', '亮度', { valueType: 'number', popoverMin: '0', popoverMax: '2', step: '0.01', when: lightingEffectModeIs('post'), defaultValue: inspectorDefault(1) }),
     field('adjContrast', '对比度', { valueType: 'number', popoverMin: '0', popoverMax: '2', step: '0.01', when: lightingEffectModeIs('post'), defaultValue: inspectorDefault(1) }),

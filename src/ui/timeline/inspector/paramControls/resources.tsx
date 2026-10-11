@@ -84,6 +84,7 @@ export function resolveResourceParam(ctx: InspectorParamContext, key: string, ba
         <label className="inspector-label">{base.label}</label>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 6, alignItems: 'center' }}>
           <InlineFilePicker
+            presentation="asset"
             value={val || ''}
             onChange={(v) => ctx.updateResourceParam(key, v)}
             filters={filters}
@@ -125,6 +126,7 @@ export function resolveResourceParam(ctx: InspectorParamContext, key: string, ba
   }
   return (
     <FileInput
+      presentation={ctx.rowFieldKeys?.has(key) ? 'button' : 'asset'}
       key={key}
       label={base.label}
       value={val}

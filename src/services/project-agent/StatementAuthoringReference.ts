@@ -31,6 +31,7 @@ import type { StatementFamily } from '../../api/types/semantic-scene';
  */
 export const STATEMENT_AUTHORING_REFERENCE_FAMILIES: readonly StatementFamily[] = [
   'dialogue',
+  'dialogueVisibility',
   'characterPresence',
   'characterTransform',
   'characterPerformance',
@@ -50,9 +51,10 @@ export const STATEMENT_AUTHORING_REFERENCE_FAMILIES: readonly StatementFamily[] 
 export const PROJECT_AGENT_STATEMENT_AUTHORING_REFERENCE_MAX_CHARS = 5000 as const;
 
 export const PROJECT_AGENT_STATEMENT_AUTHORING_REFERENCE: string = [
-  'Required fields are marked with !. Resource references are project-relative or @mount/<id>/... paths returned by resource tools. position and screenTarget are [x, y] number pairs, as is the camera follow offset. A dialogue companion draft is { anchor (start|end), offset (seconds), type, params }: anchor=start counts from the parent start, anchor=end from the parent end.',
+  'Required fields: !. Resources: project-relative or @mount/<id>/... paths from resource tools. position, screenTarget, camera follow offset: [x, y]. Dialogue companion: { anchor (start|end), offset (seconds), type, params }; anchor counts from the parent start/end.',
   '',
   '- dialogue: text!, durationSeconds! (> 0); optional speakerId, speaker, voice (@mount vocal), voiceDurationSeconds, style, speakerColor, textColor, lipSync, template (glass|minimal|classic).',
+  '- dialogueVisibility (v5): visible! boolean, durationSeconds? >=0 (default 0); fade box; voice/lip sync continue.',
   '- characterPresence: mode! (enter|exit), id! (character id from the scene character list); optional model (@mount figure), variant, position, scale, rotation, opacity, z, transition, durationSeconds, ease.',
   '- characterTransform: id!; optional position, scale, rotation, opacity, z, durationSeconds, ease.',
   '- characterPerformance (dialogue companion): target! (character id) and at least one of motion | expression | lookAt | blink; motion is "" (unfilled placeholder) or {"kind":"resource","key":"<catalog key>"}; lookAt { target?, point?, enabled?, intensity? }, blink { enabled?, interval?, intervalRange? }; schema v4 has no params.durationSeconds / loop / priority (motions run once with deterministic takeover); custom motions (kind "custom") are editor-authored, read views show their tracks as { parameterId, keyframeCount } metadata, never write tracks or keyframes yourself.',

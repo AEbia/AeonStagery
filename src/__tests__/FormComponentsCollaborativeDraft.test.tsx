@@ -83,6 +83,21 @@ describe('collaborative text draft inputs', () => {
     expect(onChange).toHaveBeenNthCalledWith(2, 2, false);
   });
 
+  it('blocks mouse and keyboard adjustments on a disabled numeric scrubber', () => {
+    const onChange = vi.fn();
+    render(<InlineNumericInput ariaLabel="Disabled number" value={1} disabled onChange={onChange} />);
+    const control = screen.getByRole('spinbutton', { name: 'Disabled number' });
+    expect(control.getAttribute('aria-disabled')).toBe('true');
+    expect(control.tabIndex).toBe(-1);
+    fireEvent.keyDown(control, { key: 'ArrowUp' });
+    fireEvent.keyDown(control, { key: 'Enter' });
+    fireEvent.mouseDown(control, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 30, clientY: 10 });
+    fireEvent.mouseUp(document);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole('spinbutton', { name: 'Disabled number' })?.tagName).toBe('DIV');
+  });
+
   it('adjusts a numeric scrubber from the keyboard', () => {
     const onChange = vi.fn();
     render(<InlineNumericInput ariaLabel="时间" value={1} step="0.1" onChange={onChange} />);

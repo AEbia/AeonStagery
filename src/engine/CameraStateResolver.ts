@@ -19,6 +19,7 @@
 import type { RuntimeTimelineAction } from './RuntimeTimelineScene';
 import { evaluateCharacterEase } from './CharacterAnimationContract';
 import { resolveVec2 } from './utils/math';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../api/types/camera';
 
 export interface CameraPosition {
   x: number;
@@ -67,7 +68,6 @@ export interface CameraStateResolverDeps {
 export const STAGE_DEFAULT_CAMERA_POSITION: CameraPosition = { x: 0.5, y: 0.5 };
 export const STAGE_DEFAULT_CAMERA_ZOOM = 1;
 export const STAGE_DEFAULT_CAMERA_ROTATION = 0;
-
 /**
  * Must match CameraController.follow()'s built-in default — playback glides
  * into a follow with alpha = 1 − smoothing^(60·dt) per frame, and seek
@@ -320,12 +320,13 @@ function applyCameraMotion(
     if (!isCharacterAnchored) return raw;
     return clampPointIntoViewport(raw, characterAnchorClampZoom());
   };
+  const focusPart = params.focus?.part || params.targetPart || DEFAULT_CAMERA_FOCUS_PART;
 
   switch (params.move) {
     case 'pan': {
       const focusCharacter = params.characterId ?? params.focus?.character;
       const target = focusCharacter
-        ? anchorTarget(deps.resolveCharacterPosition?.(focusCharacter, params.focus?.part ?? params.targetPart ?? 'chest') ?? null, true)
+        ? anchorTarget(deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null, true)
         : resolvePanTarget(params, from, deps);
       if (target) {
         lerp('x', target.x);
@@ -340,8 +341,8 @@ function applyCameraMotion(
       const fallbackPoint = params.move === 'push' ? { x: 0.5, y: 0.4 } : { x: 0.5, y: 0.5 };
       const focusCharacter = params.characterId ?? params.focus?.character;
       const rawTarget = focusCharacter
-        ? deps.resolveCharacterPosition?.(focusCharacter, params.focus?.part ?? params.targetPart ?? (params.move === 'push' ? 'head' : 'center')) ?? null
-        : normalizePoint(params.target ?? fallbackPoint);
+        ? deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null
+        : normalizePoint(params.focus?.point ?? params.target ?? fallbackPoint);
       const target = anchorTarget(rawTarget, Boolean(focusCharacter));
       if (target) {
         lerp('x', target.x);
@@ -364,11 +365,11 @@ function applyCameraMotion(
       // only ever touches the y channel.
       const focusCharacter = params.characterId ?? params.focus?.character;
       const rawAnchor = focusCharacter
-        ? deps.resolveCharacterPosition?.(focusCharacter, params.focus?.part ?? params.targetPart ?? 'center') ?? null
+        ? deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null
         : params.move === 'zoom'
-          ? normalizePoint(params.target ?? params.position ?? { x: 0.5, y: 0.5 }) // moveTo() fallback point
-          : params.target !== undefined || params.position !== undefined
-            ? normalizePoint(params.target ?? params.position)
+          ? normalizePoint(params.focus?.point ?? params.target ?? params.position ?? { x: 0.5, y: 0.5 }) // moveTo() fallback point
+          : params.focus?.point !== undefined || params.target !== undefined || params.position !== undefined
+            ? normalizePoint(params.focus?.point ?? params.target ?? params.position)
             : null;
       const anchor = anchorTarget(rawAnchor, Boolean(focusCharacter));
       if (params.move !== 'tilt' && anchor) {
@@ -537,7 +538,7 @@ function applyCameraHitchcock(
 
   const characterId = params.characterId ?? params.focus?.character;
   const headAnchor = characterId
-    ? deps.resolveCharacterPosition?.(characterId, params.targetPart ?? 'head') ?? null
+    ? deps.resolveCharacterPosition?.(characterId, params.targetPart ?? DEFAULT_CAMERA_FOCUS_PART) ?? null
     : null;
   const bodyAnchor = characterId
     ? deps.resolveCharacterPosition?.(characterId) ?? null
@@ -586,8 +587,8 @@ function resolvePanTarget(
   from: MotionChannels,
   _deps: CameraStateResolverDeps,
 ): CameraPosition | null {
-  if (params.to !== undefined || params.target !== undefined) {
-    const point = resolveVec2(params.to ?? params.target);
+  if (params.to !== undefined || params.focus?.point !== undefined || params.target !== undefined) {
+    const point = resolveVec2(params.to ?? params.focus?.point ?? params.target);
     return { x: point.x, y: point.y };
   }
   if (typeof params.strength === 'number') {

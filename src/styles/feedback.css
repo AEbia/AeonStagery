@@ -289,46 +289,6 @@
   }
 }
 
-@keyframes uiDetailFloatIn {
-  from {
-    opacity: 0;
-    transform: translate3d(8px, 0, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes uiDetailFloatOut {
-  from {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    opacity: 0;
-    transform: translate3d(8px, 0, 0);
-  }
-}
-
-@keyframes uiDetailSplitIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes uiDetailSplitOut {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
 @keyframes uiContentIn {
   from {
     opacity: 0;

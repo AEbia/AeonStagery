@@ -455,6 +455,111 @@ describe('semantic backend integration', () => {
     })).rejects.toThrow('exactly once');
   });
 
+  it.each([false, true])('undoes a multi-statement dialogue reorder with a pending commit: %s', async (pendingCommit) => {
+    const { store, coordinator, runtime } = makeServices();
+    const document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'reorder-history',
+      meta: { title: 'Reorder history' },
+      statements: [
+        { id: 'a', type: 'dialogue', time: 0, params: { text: 'A', durationSeconds: 1 } },
+        { id: 'x', type: 'camera', time: 2, params: { mode: 'focus', position: [0, 0], durationSeconds: 0.5 } },
+        { id: 'y', type: 'camera', time: 3, params: { mode: 'focus', position: [1, 1], durationSeconds: 0.5 } },
+        { id: 'b', type: 'dialogue', time: 5, params: { text: 'B', durationSeconds: 1 } },
+      ],
+    };
+    await coordinator.applyDocument(document);
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const beforeOrder = getSceneDocumentCanonicalOrder(before);
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    let releaseProjection!: () => void;
+    let projectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    const projection = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    if (pendingCommit) runtime.projectPreparedScene.mockImplementationOnce(async () => {
+      projectionStarted();
+      await projection;
+    });
+    const reorder = authoring.author({
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'reorder-history', origin: 'sequential-flow',
+      kind: 'reorder-dialogue-chain', orderedDialogueIds: ['a', 'b'], movedStatementId: 'a',
+      beforeStatementId: 'b', flow: true,
+    });
+    if (pendingCommit) await started;
+    else await reorder;
+    const undo = authoring.undo();
+    releaseProjection();
+    await reorder;
+
+    expect(await undo).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+    expect(getSceneDocumentCanonicalOrder(store.getCurrentSceneDocumentSnapshot())).toEqual(beforeOrder);
+    expect(authoring.canUndo).toBe(false);
+    expect(authoring.canRedo).toBe(true);
+    expect(await authoring.redo()).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()?.statements.map((statement) => statement.id)).toEqual(['x', 'y', 'a', 'b']);
+  });
+
+  it('serializes undo and redo requests that arrive together during a pending edit', async () => {
+    const { store, coordinator, runtime } = makeServices();
+    await coordinator.applyDocument(makeDocument());
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    let releaseProjection!: () => void;
+    let projectionStarted!: () => void;
+    const started = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    const projection = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    runtime.projectPreparedScene.mockImplementationOnce(async () => {
+      projectionStarted();
+      await projection;
+    });
+    const edit = authoring.author({
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'queued-history', origin: 'timeline-editor',
+      kind: 'update-statement', statementId: 'dialogue-1', patch: { time: 0.5 },
+    });
+    await started;
+    const undo = authoring.undo();
+    const redo = authoring.redo();
+    releaseProjection();
+    await edit;
+    const after = store.getCurrentSceneDocumentSnapshot();
+    expect(await undo).toBe(true);
+    expect(await redo).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(after);
+    expect(authoring.canUndo).toBe(true);
+    expect(authoring.canRedo).toBe(false);
+    expect(await authoring.undo()).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+  });
+
+  it.each(['undo', 'redo'] as const)('retains the history entry when %s fails to restore the scene', async (operation) => {
+    const { store, coordinator, runtime } = makeServices();
+    await coordinator.applyDocument(makeDocument());
+    const before = store.getCurrentSceneDocumentSnapshot();
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    await authoring.author({
+      version: AUTHORING_SCHEMA_VERSION, correlationId: 'failed-history', origin: 'timeline-editor',
+      kind: 'delete-statements', statementIds: ['rim-1'],
+    });
+    const after = store.getCurrentSceneDocumentSnapshot();
+    if (operation === 'redo') await authoring.undo();
+    const current = store.getCurrentSceneDocumentSnapshot();
+    runtime.projectPreparedScene.mockRejectedValueOnce(new Error('History projection failed'));
+
+    await expect(authoring[operation]()).rejects.toThrow('History projection failed');
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(current);
+    expect(operation === 'undo' ? authoring.canUndo : authoring.canRedo).toBe(true);
+    expect(await authoring[operation]()).toBe(true);
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(operation === 'undo' ? before : after);
+  });
+
+  it('returns false for empty undo and redo requests without a loaded scene', async () => {
+    const { store, coordinator } = makeServices();
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    expect(await authoring.undo()).toBe(false);
+    expect(await authoring.redo()).toBe(false);
+  });
+
   it('changes an attachable companion family with replacement params atomically', async () => {
     const { store, coordinator } = makeServices();
     await coordinator.applyDocument(makeDocument());

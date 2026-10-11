@@ -571,7 +571,9 @@ function validateCameraStatement(
           '镜头对焦缺少目标，请提供有效角色 ID 或 position。',
         );
       }
-      if (params.target !== undefined) {
+      // Empty target values can remain in documents saved by older editors;
+      // an explicit position is the valid fixed-coordinate representation.
+      if (params.target !== undefined && !(params.position !== undefined && !hasNonEmptyString(params.target))) {
         validateCameraCharacterTarget(context, params.target, characterIds, issues);
       }
       return {

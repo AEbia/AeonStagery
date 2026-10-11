@@ -133,7 +133,7 @@ export const PARAM_LABELS: Record<string, string> = {
   exitDuration: '退场时长',
   exitEase: '退场缓动',
   image: '背景图片',
-  layerId: '技术标识（高级）',
+  layerId: '环境图层 ID',
   label: '层名',
   layoutMode: '布局模式',
   tileScaleX: '平铺缩放 X',

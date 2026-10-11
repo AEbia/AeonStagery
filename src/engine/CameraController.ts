@@ -17,6 +17,7 @@ import { stageManager } from './StageManager';
 import { live2DManager } from './Live2DManager';
 import { hookSystem } from '../api/hooks';
 import type { Vec2 } from '../api/types/common';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../api/types/camera';
 import type {
   CameraMoveConfig,
   CameraShakeConfig,
@@ -308,7 +309,7 @@ class CameraController {
   hitchcockZoom(config: CameraHitchcockConfig): gsap.core.Timeline {
     const {
       characterId,
-      targetPart = 'head',
+      targetPart = DEFAULT_CAMERA_FOCUS_PART,
       screenTarget,
       zoomStart,
       zoomEnd,
@@ -407,7 +408,7 @@ class CameraController {
     // Resolve focus: explicit `focus` field takes precedence over legacy flat params
     const focus = config.focus;
     const effectiveCharId = focus?.character || config.characterId;
-    const effectivePart = focus?.part || config.targetPart || 'head';
+    const effectivePart = focus?.part || config.targetPart || DEFAULT_CAMERA_FOCUS_PART;
     const effectivePoint = focus?.point || config.target;
 
     const handler = MOVE_HANDLERS[config.move];

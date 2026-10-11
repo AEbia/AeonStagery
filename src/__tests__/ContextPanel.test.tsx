@@ -4,6 +4,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ContextPanel } from '../ui/timeline/ContextPanel';
+import { settingsManager } from '../ui/SettingsStore';
 
 vi.mock('../ui/timeline/ActionInspectorTabs', () => ({
   DiagnosticsTab: () => <div>diagnostics content</div>,
@@ -18,6 +19,7 @@ const sceneMeta = { title: 'workspace', characters: [] };
 
 describe('ContextPanel', () => {
   it('renders as an embedded workspace tools page with detach support', () => {
+    settingsManager.set('workbenchTimelineLayoutMode', 'list');
     const setActiveTab = vi.fn();
     const setIsOpen = vi.fn();
     const onDetach = vi.fn();

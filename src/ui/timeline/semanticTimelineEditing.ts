@@ -44,6 +44,24 @@ export function shouldRouteTimelineParamPatchToSource(
   return !hasCompiledAction;
 }
 
+/** Keep the two mutually exclusive camera-focus target representations canonical. */
+export function switchCameraFocusTarget(
+  params: Readonly<Record<string, unknown>>,
+  target: string | undefined,
+): Record<string, unknown> {
+  const next = { ...params };
+  if (typeof target === 'string' && target.trim().length > 0) {
+    next.target = target;
+    next.position = undefined;
+    return next;
+  }
+
+  next.target = undefined;
+  next.targetPart = undefined;
+  if (!Array.isArray(next.position) || next.position.length < 2) next.position = [0.5, 0.5];
+  return next;
+}
+
 export function findCompiledTimelineAction(
   documentStore: Pick<ReadonlyDocumentStore, 'getCompiledSceneSnapshot'>,
   actionId: string,
@@ -732,6 +750,8 @@ function applyTimelineParam(
   value: unknown,
 ): boolean {
   switch (item.type) {
+    case 'dialogueVisibility':
+      return setMappedParam(params, key === 'duration' ? 'durationSeconds' : key, value, ['visible', 'durationSeconds']);
     case 'dialogue':
       return setMappedParam(params, key === 'duration' ? 'durationSeconds' : key, value, [
         'speakerId',
@@ -856,6 +876,7 @@ function applyCameraTimelineParam(
     if (typeof focus.character === 'string' && focus.character) {
       setParam(params, 'mode', 'focus');
       setParam(params, 'target', focus.character);
+      delete params.position;
       if (typeof focus.part === 'string') setParam(params, 'targetPart', focus.part);
       return true;
     }
@@ -863,6 +884,7 @@ function applyCameraTimelineParam(
       setParam(params, 'mode', 'focus');
       setParam(params, 'position', focus.point);
       delete params.target;
+      delete params.targetPart;
       return true;
     }
     return false;
@@ -1169,6 +1191,7 @@ function paramsWithDuration(
       params.motion = { ...motion, durationSeconds };
       return params as SceneStatement['params'] | DialogueCompanion['params'];
     }
+    case 'dialogueVisibility':
     case 'characterPresence':
     case 'characterTransform':
     case 'environmentLayer':

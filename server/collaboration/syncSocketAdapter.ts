@@ -115,7 +115,12 @@ export class CollaborationSyncSocketAdapterV2 {
   }
 
   connect(socket: WebSocket, requestUrl: string | undefined, _host: string | undefined): void {
-    socket.on('error', () => socket.terminate());
+    socket.on('error', () => {
+      // ws emits protocol errors (for example maxPayload violations) after it
+      // has started a status-bearing close handshake. Terminating while that
+      // handshake is in flight replaces the intended close code with 1006.
+      if (socket.readyState === WebSocket.OPEN) socket.terminate();
+    });
     const url = parseCollaborationRequestUrl(requestUrl);
     let identity;
     try { identity = createPresenceIdentity(url); }

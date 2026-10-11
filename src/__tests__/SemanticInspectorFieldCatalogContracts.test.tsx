@@ -13,6 +13,7 @@ import type { StatementFamily } from '../api/types/semantic-scene';
 
 const state = vi.hoisted(() => ({
   document: null as any,
+  pickedAssetPath: "",
   compiledScene: null as any,
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: [], expressions: [] })),
@@ -45,6 +46,14 @@ vi.mock('../ui/context/AppContext', () => ({
   useSceneAssetService: () => state.sceneAssetService,
 }));
 
+vi.mock('../ui/AssetBrowserModal', () => ({
+  AssetBrowserModal: ({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) => (
+    <div role="dialog" aria-label="资源浏览器">
+      <button onClick={() => { onSelect(state.pickedAssetPath); onClose(); }}>使用选中资源</button>
+    </div>
+  ),
+}));
+
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: [], loading: false }),
@@ -53,6 +62,7 @@ vi.mock('../ui/store/storeHooks', () => ({
 
 const FAMILIES: readonly StatementFamily[] = [
   'dialogue',
+  'dialogueVisibility',
   'characterPresence',
   'characterTransform',
   'characterPerformance',
@@ -118,10 +128,26 @@ describe('semantic Inspector field catalog contracts', () => {
     cleanup();
   });
 
-  it('covers exactly the current 14 semantic families without legacy statement types', () => {
+  it('covers exactly the current semantic families without legacy statement types', () => {
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG).sort()).toEqual([...FAMILIES].sort());
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG)).not.toContain('wait');
     expect(Object.keys(SEMANTIC_INSPECTOR_FIELD_CATALOG)).not.toContain('custom');
+  });
+
+  it.each([false, true])('edits only the subtitle transition duration while preserving visible=%s', (visible) => {
+    const statement = {
+      id: 'subtitle_visibility', time: 1, type: 'dialogueVisibility', params: { visible, durationSeconds: 0.3 },
+    };
+    const actionId = 'subtitle_visibility::primary';
+    const { updateParam } = renderInspector(statement, {
+      id: actionId, time: 1, action: 'setDialogueVisibility', params: { visible, duration: 0.3 },
+      source: { statementId: statement.id, outputKey: 'primary' },
+    });
+    expect(screen.queryByRole('checkbox', { name: '显示字幕框' })).toBeNull();
+    expect(getSemanticInspectorFields('dialogueVisibility', statement.params).map((field) => field.key)).toEqual(['durationSeconds']);
+    const duration = screen.getByRole('spinbutton', { name: '过渡时长' });
+    fireEvent.keyDown(duration, { key: 'ArrowUp' });
+    expect(updateParam).toHaveBeenCalledWith(actionId, 'durationSeconds', 0.4, false);
   });
 
   it('marks raw layer and audio identity fields as advanced while keeping semantic selectors authoring-facing', () => {
@@ -490,12 +516,11 @@ describe('semantic Inspector field catalog contracts', () => {
     });
 
     expect(screen.getByText('动画资源')).toBeTruthy();
-    const input = screen.getByLabelText('动画资源');
-    fireEvent.change(input, { target: { value: 'animation/intro.html' } });
-    fireEvent.blur(input);
+    state.pickedAssetPath = 'animation/intro.html';
+    fireEvent.click(screen.getByRole('button', { name: '动画资源' }));
+    fireEvent.click(screen.getByRole('button', { name: '使用选中资源' }));
 
     await waitFor(() => {
-      expect(state.sceneAssetService.importAssetPath).toHaveBeenCalledWith('animation/intro.html', 'animation');
       expect(replaceSourceParams).toHaveBeenCalledWith(actionId, {
         target: 'hero',
         durationSeconds: 1,

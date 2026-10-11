@@ -254,8 +254,7 @@ describe('SearchableSelect hierarchical multi-column protocol', () => {
     const hints = resolveCharacterModelHints(
       'anon',
       { id: 'anon', name: '千早爱音' },
-      'C:\\Users\\admin\\AppData\\Local\\WebGAL_Terre_MyGO_v3.1.0\\public\\games\\short\\game\\figure\\mygo\\anon\\live_01\\adv_live2d_anon_002_live_01.model3.json',
-      sampleOptions,
+      'C:\\games\\figure\\mygo\\anon\\live_01\\model.model3.json',
     );
 
     expect(hints.preferredGroup).toBe('mygo/anon');

@@ -6,6 +6,7 @@ import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import SubtitleRenderer from '../engine/SubtitleRenderer';
 import { DialogueCoordinator } from '../engine/coordinators/DialogueCoordinator';
+import { sceneStatementDefinitionRegistry } from '../services/semantic-scene/SceneStatementDefinitionRegistry';
 import { SEMANTIC_BUILTIN_TEMPLATE_PACKAGE } from '../services/template-package/BuiltinTemplatePackage';
 
 const stageState = vi.hoisted(() => ({
@@ -97,6 +98,94 @@ describe('SubtitleRenderer', () => {
     vi.restoreAllMocks();
     stageState.subtitleLayer.destroy({ children: true });
     stageState.subtitleLayer = null;
+  });
+
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('retains hidden state across dialogue playback, seek and replacement for %s', (styleId) => {
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
+    const config = {
+      _id: 'hidden-dialogue', text: 'Hello', speaker: 'Hero', style: 'typewriter' as const, duration: 4,
+      template: styleId,
+      presentation: preset.renderer === 'image-dialogue-v1'
+        ? sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+          text: 'Hello', durationSeconds: 4,
+          presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId },
+        }, 'visibility-test').presentation : undefined,
+    };
+    const renderer = new SubtitleRenderer();
+    const unrelated = new PIXI.Container();
+    stageState.subtitleLayer.addChild(unrelated);
+    renderer.setDialogueVisibility(false);
+    const timeline = renderer.showDialogue(config).pause();
+    timeline.seek(0.1, false);
+    renderer.ensureDialogueOnStage(config, 1);
+    const container = stageState.subtitleLayer.children[1] as PIXI.Container;
+    expect(container.visible).toBe(false);
+    expect(unrelated.visible).toBe(true);
+    renderer.ensureDialogueOnStage(config, 2);
+    expect(container.visible).toBe(false);
+    renderer.setDialogueVisibility(true);
+    expect(container.visible).toBe(true);
+    expect(renderer.getCurrentTimeline()).toBe(timeline);
+    expect(timeline.time()).toBe(2);
+
+    renderer.setDialogueVisibility(false);
+    const next = { ...config, _id: 'next-dialogue', text: 'Next line' };
+    renderer.showDialogue(next).pause();
+    renderer.ensureDialogueOnStage(next, 1);
+    expect(stageState.subtitleLayer.children[1].visible).toBe(false);
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(container.visible).toBe(false);
+  });
+
+  it('resets visibility when clearing the scene', () => {
+    const renderer = new SubtitleRenderer();
+    renderer.setDialogueVisibility(false);
+    renderer.clear();
+    const config = { _id: 'new-scene', text: 'Visible', speaker: '', style: 'instant' as const, duration: 3 };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(stageState.subtitleLayer.children[0].visible).toBe(true);
+  });
+
+  it.each(['glass', 'pink-nameplate'])('preserves fade opacity across timeline updates and cached dialogue replacement for %s', (styleId) => {
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
+    const config = {
+      _id: 'fading-dialogue', text: 'Hello', speaker: 'Hero', style: 'typewriter' as const, duration: 4,
+      template: styleId,
+      presentation: preset.renderer === 'image-dialogue-v1'
+        ? sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+          text: 'Hello', durationSeconds: 4,
+          presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId },
+        }, 'fade-test').presentation : undefined,
+    };
+    const renderer = new SubtitleRenderer();
+    const unrelated = new PIXI.Container();
+    stageState.subtitleLayer.addChild(unrelated);
+    const timeline = renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    const container = stageState.subtitleLayer.children[1] as PIXI.Container;
+    renderer.setDialogueVisibility(false, 0.5);
+    expect(container.visible).toBe(true);
+    expect(container.alpha).toBeCloseTo(0.5);
+    timeline.seek(2, false);
+    renderer.forceUpdate();
+    expect(container.alpha).toBeCloseTo(0.5);
+    expect(unrelated.alpha).toBe(1);
+    const next = { ...config, _id: 'next-fading-dialogue', text: 'Next line' };
+    renderer.showDialogue(next).pause();
+    renderer.ensureDialogueOnStage(next, 1);
+    expect(stageState.subtitleLayer.children[1].alpha).toBeCloseTo(0.5);
+    renderer.setDialogueVisibility(false, 0);
+    expect(stageState.subtitleLayer.children[1].visible).toBe(false);
+    renderer.setDialogueVisibility(true, 0.25);
+    renderer.ensureDialogueOnStage(config, 1);
+    expect(container.visible).toBe(true);
+    expect(container.alpha).toBeCloseTo(0.25);
+    renderer.ensureDialogueOnStage(config, 0.1);
+    expect(container.alpha).toBeGreaterThan(0);
+    expect(container.alpha).toBeLessThan(0.25);
   });
 
   it.each(['pink-nameplate', 'immersive-subtitle', 'glass', 'minimal', 'classic'])('wraps long Chinese text using real Pixi metrics for %s', (styleId) => {
@@ -204,6 +293,59 @@ describe('SubtitleRenderer', () => {
     sync(3);
     expect(lines.map((line) => line.text).join('')).toBe(content);
     expect(stageState.subtitleLayer.children).toHaveLength(1);
+  });
+
+  it.each([false, true])('keeps configured typewriter speed in a short dialogue (entrance: %s)', (entrance) => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
+      ? 0.1 : key === 'dialogueEntranceAnimation' ? entrance : '');
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'pink-nameplate')!;
+    const textStart = entrance ? 0.2 : 0;
+
+    for (const image of [false, true]) {
+      const renderer = new SubtitleRenderer();
+      const config = { _id: `short-${image}`, speaker: '', text: 'Hello', style: 'typewriter' as const,
+        duration: textStart + 0.25,
+        presentation: image ? { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any : undefined };
+      const timeline = renderer.showDialogue(config).pause();
+      renderer.ensureDialogueOnStage(config, textStart + 0.15);
+      const tween = timeline.getChildren().find((child) => 'count' in child.vars || 'charIndex' in child.vars)!;
+      const property = image ? 'count' : 'charIndex';
+      const reveal = (tween as gsap.core.Tween).targets()[0] as Record<string, number>;
+      expect(reveal[property]).toBeCloseTo(1.5);
+      renderer.ensureDialogueOnStage(config, config.duration);
+      expect(reveal[property]).toBeCloseTo(2.5);
+      expect(timeline.duration()).toBeLessThanOrEqual(Math.max(0.45, config.duration + 0.001));
+      if (image) {
+        const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+        const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+        expect(text.text).toBe('He');
+      }
+      renderer.clear();
+    }
+  });
+
+  it('rebuilds the active typewriter timeline when dialogue text speed changes', () => {
+    let dialogueTextSpeed = 0.01;
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
+      ? dialogueTextSpeed
+      : key === 'dialogueEntranceAnimation' ? false : '');
+    const renderer = new SubtitleRenderer();
+    const config = { _id: 'live-text-speed', speaker: '', text: 'Hello', style: 'typewriter' as const, duration: 4 };
+    const original = renderer.showDialogue(config);
+    const master = gsap.timeline({ paused: true }).add(original, 2);
+    renderer.ensureDialogueOnStage(config, 0.02);
+    expect(original.getChildren().some((child) => Math.abs(child.duration() - 0.05) < 0.001)).toBe(true);
+
+    dialogueTextSpeed = 0.1;
+    renderer.forceUpdate();
+
+    const updated = renderer.getCurrentTimeline()!;
+    expect(updated).not.toBe(original);
+    expect(updated.getChildren().some((child) => Math.abs(child.duration() - 0.5) < 0.001)).toBe(true);
+    expect(updated.parent).toBe(master);
+    expect(updated.startTime()).toBe(2);
+    expect(updated.time()).toBeCloseTo(0.02);
   });
 
   it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('keeps the speaker font unchanged when adjusting dialogue font size for %s', (styleId) => {

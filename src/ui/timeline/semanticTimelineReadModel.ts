@@ -40,22 +40,35 @@ interface SortableSemanticTimelineReadModelItem extends SemanticTimelineReadMode
   readonly companionOrder: number;
 }
 
+type CompiledActionIndex = Map<string, Map<string | undefined, CompiledAction>>;
+
 export function buildSemanticTimelineReadModel(
   document: CurrentSceneDocument | null,
   compiled: CompiledScene | null,
 ): SemanticTimelineReadModelItem[] {
   if (!document) return [];
 
+  const compiledActions: CompiledActionIndex = new Map();
+  for (const action of compiled?.actions ?? []) {
+    const { statementId, companionId } = action.source;
+    let byCompanion = compiledActions.get(statementId);
+    if (!byCompanion) {
+      byCompanion = new Map();
+      compiledActions.set(statementId, byCompanion);
+    }
+    // A source can lower to several runtime actions; preserve the first one.
+    if (!byCompanion.has(companionId)) byCompanion.set(companionId, action);
+  }
   const items: SortableSemanticTimelineReadModelItem[] = [];
   const statementOrderByStatementId = createLifecycleStatementOrderMap(document);
   for (const statement of document.statements) {
     const statementOrder = statementOrderByStatementId.get(statement.id)!;
-    addItem(items, statement, compiled, statementOrder, -1);
+    addItem(items, statement, compiledActions, statementOrder, -1);
     for (const [companionOrder, companion] of (statement.companions ?? []).entries()) {
       addItem(
         items,
         companion,
-        compiled,
+        compiledActions,
         statementOrder,
         companionOrder,
         statement,
@@ -74,7 +87,7 @@ export function buildSemanticTimelineReadModel(
 function addItem(
   items: SortableSemanticTimelineReadModelItem[],
   source: SceneStatement | DialogueCompanion,
-  compiled: CompiledScene | null,
+  compiledActions: CompiledActionIndex,
   statementOrder: number,
   companionOrder: number,
   parent?: SceneStatement,
@@ -93,7 +106,7 @@ function addItem(
       + (source as DialogueCompanion).offset
     : (source as SceneStatement).time;
   const durationSeconds = sceneStatementDefinitionRegistry.temporalExtent(source as SceneStatement);
-  const compiledAction = findFirstCompiledAction(compiled, locator);
+  const compiledAction = compiledActions.get(statementId)?.get(companionId);
   const semanticDisplay = getSemanticTimelineDisplay(source);
   const lifecycle = sceneStatementDefinitionRegistry.timelineLifecyclePresentation(source);
   const lifecycleBoundaryPresentation = lifecycle
@@ -197,18 +210,6 @@ function toReadModelItem(
       : {}),
     displayAction: item.displayAction,
   };
-}
-
-function findFirstCompiledAction(
-  compiled: CompiledScene | null,
-  locator: SemanticAuthoringLocator,
-): CompiledAction | undefined {
-  return compiled?.actions.find((action) => (
-    action.source.statementId === locator.statementId &&
-    (locator.kind === 'companion'
-      ? action.source.companionId === locator.companionId
-      : action.source.companionId === undefined)
-  ));
 }
 
 function locatorKey(locator: SemanticAuthoringLocator): string {

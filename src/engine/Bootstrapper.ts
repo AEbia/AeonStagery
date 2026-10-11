@@ -66,6 +66,7 @@ import {
 } from '../services/semantic-scene';
 import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
+import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
 import { SemanticVisualCompositionAuthoringService } from '../services/visual-authoring/SemanticVisualCompositionAuthoringService';
 import { ElectronVoiceAuthoringAdapter, VoiceAuthoringService, type VoiceAuthoringElectronPort } from '../services/voice/VoiceAuthoringService';
 import {
@@ -302,6 +303,9 @@ export function bootstrap(options?: {
   const disposeDialogueFontSize = settingsManager.subscribeKey('dialogueFontSize', () => {
     subtitleRenderer.forceUpdate();
   });
+  const disposeDialogueTextSpeed = settingsManager.subscribeKey('dialogueTextSpeed', () => {
+    subtitleRenderer.forceUpdate();
+  });
 
   // 1. Stores — reuse existing or create new
   const documentStore = options?.stores?.document ?? new DocumentStore();
@@ -369,7 +373,12 @@ export function bootstrap(options?: {
   const semanticAuthoring = new SemanticAuthoringApplicationService(
     documentStore,
     semanticDocumentCoordinator,
-    undefined,
+    new SemanticTimelineAuthoringService({
+      getDialogueTypewriterTiming: () => ({
+        textSpeed: settingsManager.get('dialogueTextSpeed'),
+        entranceAnimation: settingsManager.get('dialogueEntranceAnimation'),
+      }),
+    }),
     resourceAuthoring,
     { getDialogueFlowMode: () => settingsManager.get('workbenchDialogueFlowMode') },
     { getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates },
@@ -1144,6 +1153,7 @@ export function bootstrap(options?: {
     },
     dispose: () => {
       disposeDialogueFontSize();
+      disposeDialogueTextSpeed();
       playbackAdapter.dispose();
       disposeProjectAgentSupplementRelay();
       disposeProjectAgentStartRelay();

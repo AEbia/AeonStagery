@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore, usePlaybackAdapter } from '../context/AppContext';
-import { useSemanticDocument, useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
+import { useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
 
-import { IconPlay, IconX } from '../icons';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import {
   getPrimaryVisualIntentLabel,
@@ -18,7 +17,6 @@ import { summarizeLocatorEditingPeers } from '../../services/collaboration/Colla
 import {
   buildSemanticCopyBufferForTimelineActions,
   locatorForCompiledTimelineAction,
-  selectCompiledActionsForStatements,
 } from './semanticTimelineEditing';
 import {
   getSemanticInspectorFields,
@@ -70,8 +68,14 @@ import { useActionSelection } from './inspector/useActionSelection';
 import { useCustomMotionAuthoring } from './inspector/useCustomMotionAuthoring';
 import { useInspectorOptions } from './inspector/useInspectorOptions';
 import { useModelData } from './inspector/useModelData';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import { getStatementQuickFields } from './statementQuickFields';
+
+// These fields retain supplemental browsing/preview tools, without displaying their value again.
+const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression']);
 
 export interface ActionInspectorProps {
+  semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
@@ -82,11 +86,10 @@ export interface ActionInspectorProps {
   copyActions?: (ids: readonly string[]) => void;
   onClose: () => void | Promise<void>;
   closeMode?: 'back' | 'close';
-  inspectorTab?: any;
-  setInspectorTab?: any;
+  presentation?: 'panel' | 'inline';
 }
 
-export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
+export const ActionInspector = React.memo(function ActionInspector(props: ActionInspectorProps) {
   const {
     sceneData,
     selectedActionIds, setSelectedIds,
@@ -100,7 +103,8 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const playbackAdapter = usePlaybackAdapter();
   const appContext = useApp();
   const documentStore = useDocumentStore();
-  const { document: semanticDocument } = useSemanticDocument();
+  const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
+  const { document: semanticDocument } = semanticSnapshot;
   const { peers: collaborationPeers } = useCollaborationPresence();
   const editorStore = appContext.stores.editor;
   const semanticAuthoring = appContext.services?.semanticAuthoring;
@@ -115,7 +119,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     actionId,
     semanticItem,
     performanceTargetSpeakerId,
-  } = useActionSelection({ selectedActionIds, semanticDocument, documentStore });
+  } = useActionSelection({ selectedActionIds, snapshot: semanticSnapshot });
   const { targetModelPath, modelData, isModelDataLoading } = useModelData({
     characterAdapter,
     sceneData,
@@ -176,6 +180,9 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const semanticInspectorFieldByKey = new Map(
     semanticInspectorFields.map((fieldDefinition) => [fieldDefinition.key, fieldDefinition] as const),
   );
+  const rowFieldKeys = new Set(props.presentation === 'inline' && semanticItem
+    ? getStatementQuickFields(semanticItem, sceneData.visual).map((field) => field.key)
+    : []);
   const dialogueSpeakerCharacter = actionType === 'dialogue' && typeof actionParams.speakerId === 'string'
     ? sceneData.meta.characters?.find((character) => character.id === actionParams.speakerId)
     : undefined;
@@ -195,9 +202,6 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const rimLightTargetOptions = computeRimLightTargetOptions(actionParams, characterVisualTargetOptions);
   const displayAction = withAuthorFacingEnvironmentLabel(sceneData, action);
   const isEnvironmentLayerAuthoringAction = ['setEnvironmentLayer', 'transformEnvironmentLayer', 'removeEnvironmentLayer'].includes(actionType);
-  const currentEnvironmentLayer = isEnvironmentLayerAuthoringAction
-    ? environmentLayers.find((layer) => layer.layerId === (actionParams.layerId || 'background')) || environmentLayers[0]
-    : undefined;
   const actionIssues = validationIssues.filter((issue) => (
     issue.actionId === actionId ||
     issue.actionId === semanticItem?.statementId
@@ -217,7 +221,7 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     action, actionType, actionParams, usesSourceParamForm,
     isLensFilterSourceAction, isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     semanticItem, semanticInspectorFields, semanticInspectorFieldByKey, isCharacterEntranceAction,
-  });
+  }).filter((key) => !rowFieldKeys.has(key) || ROW_TOOL_KEYS.has(key));
   const semanticActionLabel = action.semanticType === 'visualStyle'
     ? getVisualStyleSemanticLabel(actionParams)
     : action.semanticType === 'lighting'
@@ -227,16 +231,11 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   const actionStart = action.time || 0;
   const actionDuration = actionParams.durationSeconds ?? action.params.duration ?? 0;
   const actionEnd = actionStart + actionDuration;
-  const lifecyclePeer = computeLifecyclePeerInfo(documentStore.getCurrentSceneDocumentSnapshot(), semanticItem?.statementId);
+  const lifecyclePeer = computeLifecyclePeerInfo(semanticDocument, semanticItem?.statementId);
   const jumpToLifecyclePeer = () => {
     if (!lifecyclePeer) return;
-    const selected = selectCompiledActionsForStatements(
-      documentStore.getCompiledSceneSnapshot(),
-      [lifecyclePeer.peerId],
-    );
-    if (Object.keys(selected).length > 0) {
-      setSelectedIds(selected);
-    }
+    const peer = semanticSnapshot.items.find((item) => item.statementId === lifecyclePeer.peerId && item.locator.kind === 'statement');
+    if (peer) setSelectedIds({ [peer.id]: true });
   };
 
   const primaryVisualQuickKeys = computePrimaryVisualQuickKeys(isPrimaryVisualIntentBlock, actionType, actionParams);
@@ -247,10 +246,10 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
     updateResourceParam, updateSemanticSourceParam, updateAuthoringParam,
     canRemoveCharacterPerformanceField, updateDialogueSpeaker,
     currentDialogueTemplateValue, customDialogueTemplateOptions, updateDialogueTemplate,
-    updateVisualSemanticOverride, commitEnvironmentLayerReference,
+    updateVisualSemanticOverride,
   } = createInspectorMutations({
     appContext, action, actionId, actionParams, sourceParams, usesSourceParamForm, sceneData,
-    updateAction, updateParam, replaceSourceParams,
+    updateParam, replaceSourceParams,
   });
 
   const customMotionValue = typeof actionParams.motion === 'object' && actionParams.motion !== null && actionParams.motion.kind === 'custom'
@@ -272,21 +271,29 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
 
   const groups = computeParamGroups({ actionType, allKeys, isIntegrationVisualAction, hiddenBasicVisualKeys });
 
+  const resourcePickerKeys = groups.General.filter((key) =>
+    (key === 'motion' || key === 'expression') &&
+    (actionType === 'playMotion' || actionType === 'setExpression' || action.semanticType === 'characterPerformance'),
+  );
+  const generalKeys = groups.General.filter((key) => !resourcePickerKeys.includes(key));
+
   const paramContext: InspectorParamContext = {
+    rowFieldKeys,
     action, actionId, actionType, actionParams, sourceParams, sceneData, allKeys,
     semanticInspectorFieldByKey, semanticItem, semanticDocument,
     showVisualAdvanced, isPrimaryVisualIntentBlock, isCharacterEntranceAction,
     isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     isLensFilterSourceAction, isEnvironmentLayerAuthoringAction,
-    visualSlot, currentEnvironmentLayer, displayAction, performanceTargetSpeakerId,
+    visualSlot, displayAction, performanceTargetSpeakerId,
     customMotionValue, environmentLayers, visualTargetOptions, recipeOptions,
     modelData, isModelDataLoading, targetModelPath, currentDialogueTemplateValue, customDialogueTemplateOptions,
     updateParam, replaceSourceParams, updateResourceParam, updateSemanticSourceParam,
     updateAuthoringParam, updateDialogueSpeaker, updateDialogueTemplate,
-    updateVisualSemanticOverride, commitEnvironmentLayerReference, characterAdapter, semanticAuthoring,
+    updateVisualSemanticOverride, characterAdapter, semanticAuthoring,
   };
 
   const renderParam = (key: string) => {
+    if (rowFieldKeys.has(key) && !ROW_TOOL_KEYS.has(key)) return null;
     const guarded = resolveGuardedParam(paramContext, key);
     if (guarded !== undefined) return guarded;
     return resolveParamControl(paramContext, key, computeParamBase(paramContext, key));
@@ -306,8 +313,9 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
   };
 
   return (
-    <div className="selected-action-inspector">
+    <div className="selected-action-inspector" data-presentation={props.presentation ?? 'panel'}>
       <InspectorHeader
+        presentation={props.presentation ?? 'panel'}
         closeMode={closeMode} onClose={onClose} actionId={actionId}
         actionDisplayName={actionDisplayName} inspectorTitle={inspectorTitle}
         actionStart={actionStart} actionEnd={actionEnd}
@@ -326,39 +334,15 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           actionParams={actionParams} sceneData={sceneData} updateParam={updateParam}
         />
 
-        <PlayheadLifecycleTargetCommands
-          semanticDocument={semanticDocument}
-          semanticItem={semanticItem}
-          sceneMeta={sceneData.meta}
-          semanticAuthoring={semanticAuthoring}
-          documentStore={documentStore}
-          setSelectedIds={setSelectedIds}
-        />
+
 
         {isIntegrationVisualAction && <CharacterIntegrationControls key={actionId}
+          rowFieldKeys={rowFieldKeys}
           params={sourceParams} sceneVisual={sceneData.visual} targets={characterVisualTargetOptions}
           targetKey={usesSourceParamForm ? 'target' : 'targetId'}
           durationKey={usesSourceParamForm ? 'durationSeconds' : 'duration'}
           mode={actionType === 'resetCompositeRecipe' ? 'reset' : actionType === 'modulateComposite' ? 'modulate' : 'set'}
           onChange={(next) => usesSourceParamForm ? replaceSourceParams(actionId, next) : updateAction(actionId, { params: next })} />}
-        <SemanticSourcePanel
-          action={action} actionType={actionType} actionId={actionId} actionParams={actionParams}
-          sourceParams={sourceParams} sceneData={sceneData}
-          isIntegrationVisualAction={isIntegrationVisualAction} isLensFilterSourceAction={isLensFilterSourceAction}
-          isRimLightVisualAction={isRimLightVisualAction} visualTargetOptions={visualTargetOptions}
-          rimLightTargetOptions={rimLightTargetOptions} characterVisualTargetOptions={characterVisualTargetOptions}
-          filterTemplateOptions={filterTemplateOptions} activeFilterTemplateOptions={activeFilterTemplateOptions}
-          semanticInspectorFields={semanticInspectorFields} isResourceMotion={isResourceMotion}
-          customMotionAuthoring={customMotionAuthoring} characterAdapter={characterAdapter}
-          openConversionDialog={openConversionDialog} updateParam={updateParam}
-          replaceSourceParams={replaceSourceParams} updateSemanticSourceParam={updateSemanticSourceParam}
-          renderParam={renderParam}
-        />
-        <CustomMotionPanel
-          customMotionValue={customMotionValue} actionId={actionId}
-          expandedCustomMotionActionId={expandedCustomMotionActionId}
-          editorStore={editorStore} openConversionDialog={openConversionDialog}
-        />
         <PrimaryVisualPanel
           isPrimaryVisualIntentBlock={isPrimaryVisualIntentBlock} isIntegrationVisualAction={isIntegrationVisualAction}
           actionType={actionType} action={action} sceneData={sceneData} actionParams={actionParams} actionId={actionId}
@@ -369,47 +353,97 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           renderParam={renderParam}
         />
 
-        {groups.General.length > 0 && (
-          <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>
-              {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : '基础属性'}
+        <div className="inspector-property-sections">
+          {generalKeys.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>
+                {isPrimaryVisualIntentBlock && showVisualAdvanced ? '高级属性' : props.presentation === 'inline' ? '更多设置' : '基础属性'}
+              </div>
+              <div className="inspector-grid">
+                {generalKeys.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
             </div>
-            {groups.General.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+          )}
+
+          {groups.Transform.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>变换属性</div>
+              <div className="inspector-grid">
+                {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
+            </div>
+          )}
+
+          {groups.State.length > 0 && (
+            <div className="inspector-section inspector-section--properties">
+              <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 12 }}>状态与控制</div>
+              <div className="inspector-grid">
+                {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {resourcePickerKeys.length > 0 && (
+          <div className="inspector-section inspector-section--resources">
+            <div className="inspector-section-title">角色动作与表情</div>
+            <div className="inspector-grid inspector-grid--resources">
+              {resourcePickerKeys.map((key) => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
+            </div>
           </div>
         )}
 
-        <CharacterLookAtPanel
-          action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
-          sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
-          canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+        <CustomMotionPanel
+          customMotionValue={customMotionValue} actionId={actionId}
+          expandedCustomMotionActionId={expandedCustomMotionActionId}
+          editorStore={editorStore} openConversionDialog={openConversionDialog}
         />
-        <CharacterBlinkPanel
-          action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
-          sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
-          canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
-        />
+        <div className="inspector-grid inspector-source-fields">
+          <SemanticSourcePanel
+            rowFieldKeys={rowFieldKeys}
+            action={action} actionType={actionType} actionId={actionId} actionParams={actionParams}
+            sourceParams={sourceParams} sceneData={sceneData}
+            isIntegrationVisualAction={isIntegrationVisualAction} isLensFilterSourceAction={isLensFilterSourceAction}
+            isRimLightVisualAction={isRimLightVisualAction} visualTargetOptions={visualTargetOptions}
+            rimLightTargetOptions={rimLightTargetOptions} characterVisualTargetOptions={characterVisualTargetOptions}
+            filterTemplateOptions={filterTemplateOptions} activeFilterTemplateOptions={activeFilterTemplateOptions}
+            semanticInspectorFields={semanticInspectorFields} isResourceMotion={isResourceMotion}
+            customMotionAuthoring={customMotionAuthoring} characterAdapter={characterAdapter}
+            openConversionDialog={openConversionDialog} updateParam={updateParam}
+            replaceSourceParams={replaceSourceParams} updateSemanticSourceParam={updateSemanticSourceParam}
+            renderParam={renderParam}
+          />
+        </div>
+        <div className="inspector-property-sections">
+          <CharacterLookAtPanel
+            action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
+            sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
+            canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+          />
+          <CharacterBlinkPanel
+            action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
+            sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
+            canRemoveCharacterPerformanceField={canRemoveCharacterPerformanceField}
+          />
+        </div>
         <CharacterPerformanceAddControls
           action={action} actionType={actionType} actionParams={actionParams} actionId={actionId}
           sceneData={sceneData} updateAuthoringParam={updateAuthoringParam}
         />
 
-        {groups.Transform.length > 0 && (
-          <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>变换属性</div>
-            {groups.Transform.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
-          </div>
-        )}
-
-        {groups.State.length > 0 && (
-          <div className="inspector-section">
-            <div className="inspector-section-title" style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: 8, marginBottom: 16 }}>状态与控制</div>
-            {groups.State.map(key => <React.Fragment key={key}>{renderParam(key)}</React.Fragment>)}
-          </div>
-        )}
+        <PlayheadLifecycleTargetCommands
+          semanticDocument={semanticDocument}
+          semanticItem={semanticItem}
+          sceneMeta={sceneData.meta}
+          semanticAuthoring={semanticAuthoring}
+          documentStore={documentStore}
+          setSelectedIds={setSelectedIds}
+        />
 
         <DialogueCompanionPanel
           semanticItem={semanticItem}
           sceneData={sceneData}
+          timelineActions={timelineActions}
           semanticTimelineItems={semanticTimelineItems}
           dialogueSpeakerCharacter={dialogueSpeakerCharacter}
           semanticAuthoring={semanticAuthoring}
@@ -427,14 +461,6 @@ export const ActionInspector: React.FC<ActionInspectorProps> = (props) => {
           />
         </div>
       </div>
-      <div className="selected-action-footer">
-        <button className="btn selected-action-footer__secondary" onClick={handleSeekToAction}>
-          <IconPlay width={13} height={13} /> 预览此处
-        </button>
-        <button className="btn btn--primary selected-action-footer__done" onClick={() => setSelectedIds({})}>
-          <IconX width={13} height={13} /> 完成编辑
-        </button>
-      </div>
     </div>
   );
-};
+});

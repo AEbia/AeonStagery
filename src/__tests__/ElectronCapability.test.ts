@@ -153,28 +153,29 @@ describe('Electron capability seam', () => {
   });
 
   it('keeps the Electron replace handler on the same resolved path and compatibility seam', () => {
-    const mainSource = readFileSync(resolve(process.cwd(), 'electron/main.ts'), 'utf8');
+    const ipcSource = readFileSync(resolve(process.cwd(), 'electron/ipc/fs.ts'), 'utf8');
 
-    expect(mainSource).toContain("ipcMain.handle('fs:replaceFile'");
-    expect(mainSource).toContain('resolveFileSystemPath(temporaryPath)');
-    expect(mainSource).toContain('resolveFileSystemPath(destinationPath)');
-    expect(mainSource).toContain('replaceFileWithPlatformCompatibility(absoluteSource, absoluteDestination)');
+    expect(ipcSource).toContain("ipcMain.handle('fs:replaceFile'");
+    expect(ipcSource).toContain('resolveFileSystemPath(temporaryPath)');
+    expect(ipcSource).toContain('resolveFileSystemPath(destinationPath)');
+    expect(ipcSource).toContain('replaceFileWithPlatformCompatibility(absoluteSource, absoluteDestination)');
   });
 
   it('keeps AI completion and credential operations behind the typed main/preload IPC seam', () => {
-    const mainSource = readFileSync(resolve(process.cwd(), 'electron/main.ts'), 'utf8');
+    const ipcSource = readFileSync(resolve(process.cwd(), 'electron/ipc/aiProse.ts'), 'utf8');
     const preloadSource = readFileSync(resolve(process.cwd(), 'electron/preload.ts'), 'utf8');
 
-    expect(mainSource).toContain("ipcMain.handle('aiProse:complete'");
-    expect(mainSource).toContain("ipcMain.handle('aiProse:probeCapabilities'");
-    expect(mainSource).toContain("ipcMain.handle('aiProse:listModels'");
-    expect(mainSource).toContain("ipcMain.handle('aiProse:setCredential'");
-    expect(mainSource).toContain('event.senderFrame === window.webContents.mainFrame');
-    expect(mainSource).toContain('safeStorage.encryptString');
-    expect(mainSource).toContain('headers.Authorization');
+    expect(ipcSource).toContain("ipcMain.handle('aiProse:complete'");
+    expect(ipcSource).toContain("ipcMain.handle('aiProse:probeCapabilities'");
+    expect(ipcSource).toContain("ipcMain.handle('aiProse:listModels'");
+    expect(ipcSource).toContain("ipcMain.handle('aiProse:setCredential'");
+    const guardsSource = readFileSync(resolve(process.cwd(), 'electron/ipc/windows.ts'), 'utf8');
+    expect(guardsSource).toContain('event.senderFrame === window.webContents.mainFrame');
+    expect(ipcSource).toContain('safeStorage.encryptString');
+    expect(ipcSource).toContain('headers.Authorization');
     expect(preloadSource).toContain("ipcRenderer.invoke('aiProse:complete', request)");
     expect(preloadSource).toContain("ipcRenderer.invoke('aiProse:listModels', baseUrl)");
-    expect(mainSource).toContain('reasoning_effort');
+    expect(ipcSource).toContain('reasoning_effort');
     expect(preloadSource).toContain("ipcRenderer.invoke('aiProse:setCredential', value)");
     expect(preloadSource).toContain("ipcRenderer.invoke('aiProse:getCredentialStatus')");
   });

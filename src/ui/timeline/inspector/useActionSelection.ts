@@ -1,39 +1,20 @@
 // Selection derivation for the Action Inspector: resolve the single selected display
 // action and its semantic read-model item (ADR-0022 placeholders included).
-import React from 'react';
 import { isCharacterPerformancePlaceholderParams } from '../../../services/semantic-scene';
-import { buildSemanticTimelineReadModel } from '../semanticTimelineReadModel';
-import type { useDocumentStore } from '../../context/AppContext';
-
-type InspectorSemanticDocument = Parameters<typeof buildSemanticTimelineReadModel>[0];
+import type { SemanticTimelineSnapshot } from '../useSemanticTimelineSnapshot';
 
 export function useActionSelection(args: {
   selectedActionIds: Record<string, boolean>;
-  semanticDocument: InspectorSemanticDocument;
-  documentStore: ReturnType<typeof useDocumentStore>;
+  snapshot: SemanticTimelineSnapshot;
 }) {
-  const { selectedActionIds, semanticDocument, documentStore } = args;
+  const { selectedActionIds, snapshot } = args;
+  const { items: semanticTimelineItems, actions: timelineActions } = snapshot;
 
   const selectedIdsList = Object.keys(selectedActionIds);
   const selectedActionId = selectedIdsList[0];
-  const semanticTimelineItems = React.useMemo(
-    () => buildSemanticTimelineReadModel(
-      semanticDocument,
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore, semanticDocument],
-  );
-  // Ordinary statement display actions only — no synthetic StateSpan projection.
-  const timelineActions = React.useMemo(
-    () => semanticTimelineItems.map((item) => item.displayAction),
-    [semanticTimelineItems],
-  );
-  const action = React.useMemo(
-    () => timelineActions.find((candidate) => candidate._id === selectedActionId),
-    [selectedActionId, timelineActions],
-  );
+  const semanticItem = selectedActionId ? snapshot.itemById.get(selectedActionId) : undefined;
+  const action = semanticItem?.displayAction;
   const actionId = action?._id ?? selectedActionId;
-  const semanticItem = semanticTimelineItems.find((item) => item.displayAction._id === actionId);
   // ADR-0022 placeholder: raw characterPerformance block with exact empty
   // motion. Its $speaker target resolves to the parent dialogue speaker so
   // the motion/expression pickers load the right model data and previews.

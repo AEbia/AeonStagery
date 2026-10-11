@@ -1,5 +1,8 @@
 import type { Vec2 } from './common';
 
+/** Shared fallback for character-anchored camera motions. */
+export const DEFAULT_CAMERA_FOCUS_PART = 'head' as const;
+
 export interface CameraMoveConfig {
   target?: Vec2;
   /** Alias for target */

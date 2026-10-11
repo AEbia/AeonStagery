@@ -27,6 +27,7 @@ import {
 } from '../services/project-agent-service/ProjectAgentTaskCoordinator';
 import { FileSystemProjectAgentJournalPort } from '../services/project-agent-service/FileSystemProjectAgentJournalPort';
 import { buildProjectAgentSystemPrompt } from '../services/project-agent-service/ProjectAgentSystemPrompt';
+import { createSymlinkFixture } from './helpers/symlinkFixtures';
 
 interface Sandbox {
   root: string;
@@ -49,7 +50,7 @@ function createSandbox(prefix: string): Sandbox {
       fs.mkdirSync(path.join(root, relative), { recursive: true });
     },
     symlink(target, relative) {
-      fs.symlinkSync(target, path.join(root, relative));
+      createSymlinkFixture(target, path.join(root, relative));
     },
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true });
@@ -194,7 +195,7 @@ describe('project agent resource search ports (sandbox)', () => {
     outsideSandbox.write('figure/evil/model.json', MODEL_JSON);
     outsideSandbox.write('secret/bg.png', pngBytes(64, 64));
     sandbox.symlink(path.join(outsideSandbox.root, 'figure'), 'figure/escape-link');
-    sandbox.symlink(path.join(outsideSandbox.root, 'secret', 'bg.png'), 'background/escape.png');
+    sandbox.symlink(path.join(outsideSandbox.root, 'secret'), 'background/escape');
     mountSandbox.symlink(outsideSandbox.root, 'game/escape-mount');
 
     templateSandbox.write('assets/figure/soyo/school_winter-2023/model.json', MODEL_JSON);
@@ -434,12 +435,12 @@ describe('project agent resource search ports (sandbox)', () => {
     const candidates = 'revision' in result ? result.entries : result;
     const serialized = JSON.stringify(candidates);
     expect(serialized).not.toContain('escape-link');
-    expect(serialized).not.toContain('escape.png');
+    expect(serialized).not.toContain('background/escape/bg.png');
     expect(serialized).not.toContain('escape-mount');
     expect(serialized).not.toContain('evil/model.json');
     const refs = candidates.map((candidate) => candidate.reference).filter(Boolean);
     expect(refs).not.toContain('figure/escape-link/model.json');
-    expect(refs).not.toContain('background/escape.png');
+    expect(refs).not.toContain('background/escape/bg.png');
   });
 
   it('reports template candidates as materialization_required without references', async () => {
@@ -692,7 +693,7 @@ describe('project agent resource inspect port (sandbox)', () => {
     sandbox.write('vocal/soyo/line01.wav', wavBytes(3));
     sandbox.write('notes/readme.txt', 'plain text');
     outsideSandbox.write('figure/evil/model.json', MODEL_JSON);
-    sandbox.symlink(path.join(outsideSandbox.root, 'figure', 'evil', 'model.json'), 'figure/escape-model.json');
+    sandbox.symlink(path.join(outsideSandbox.root, 'figure', 'evil'), 'figure/escape-model');
     sandbox.symlink(outsideSandbox.root, 'figure/escape-dir');
     mountSandbox.write('game/figure/anon/casual-2023/model.model3.json', MODEL3_JSON);
 
@@ -825,7 +826,7 @@ describe('project agent resource inspect port (sandbox)', () => {
   it('rejects escaping symlinks, absolute paths and traversal without leaking the target', async () => {
     const { resourceInspect } = createPorts();
     for (const reference of [
-      'figure/escape-model.json',
+      'figure/escape-model/model.json',
       'figure/escape-dir/evil/model.json',
       '/etc/passwd',
       '../outside/secret.png',

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useDocumentStore, usePlaybackAdapter, useTimelineAdapter } from '../context/AppContext';
+import { usePlaybackAdapter, useTimelineAdapter } from '../context/AppContext';
 import { useValidationIssues } from '../store/storeHooks';
 import { scriptEngine } from '../../engine/ScriptEngine';
 import { cameraController } from '../../engine/CameraController';
@@ -7,7 +7,7 @@ import type { SceneMeta } from '../../api/types/scene-common';
 import type { TimelineAction } from './semanticTimelineTypes';
 import { resolveVec2 } from '../../engine/utils/math';
 import { IconCheck, IconError, IconExternalLink, IconWarning } from '../icons';
-import { buildSemanticTimelineReadModel } from './semanticTimelineReadModel';
+import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 
 const ENGINE_SNAPSHOT_SCAN_INTERVAL_MS = 1000 / 15;
 
@@ -222,19 +222,12 @@ function getEaseSvgPath(ease: string) {
 // -------------------------------------------------------------
 // Tab 3: Diagnostics
 // -------------------------------------------------------------
-export const DiagnosticsTab: React.FC<{ globalIssues?: any[] }> = () => {
+export const DiagnosticsTab: React.FC<{ globalIssues?: any[], semanticSnapshot?: SemanticTimelineSnapshot }> = ({ semanticSnapshot }) => {
   const { issues, loading } = useValidationIssues();
-  const documentStore = useDocumentStore();
   const timelineAdapter = useTimelineAdapter();
   const playbackAdapter = usePlaybackAdapter();
   const [filter, setFilter] = React.useState<'all' | 'error' | 'warning'>('all');
-  const semanticTimelineItems = React.useMemo(
-    () => buildSemanticTimelineReadModel(
-      documentStore.getCurrentSceneDocumentSnapshot(),
-      documentStore.getCompiledSceneSnapshot(),
-    ),
-    [documentStore],
-  );
+  const { items: semanticTimelineItems } = useSemanticTimelineSnapshot(semanticSnapshot);
 
   const errors = issues.filter(i => i.severity === 'error');
   const warnings = issues.filter(i => i.severity === 'warning');

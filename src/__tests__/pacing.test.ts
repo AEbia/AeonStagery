@@ -125,6 +125,21 @@ describe('pacing module', () => {
   });
 
   describe('dialogue duration policy', () => {
+    it('counts visible Unicode characters and entrance time without imposing an upper duration cap', () => {
+      expect(resolveDialogueDuration({
+        context: 'authoring-insert', text: '你🙂\n好\u200B', authoredDurationSeconds: 0.1,
+        typewriter: { textSpeed: 0.15, entranceAnimation: true },
+      })).toBe(0.7);
+      expect(resolveDialogueDuration({
+        context: 'authoring-insert', text: '文'.repeat(200), authoredDurationSeconds: 2,
+        typewriter: { textSpeed: 0.2, entranceAnimation: false },
+      })).toBe(40);
+      expect(resolveDialogueDuration({
+        context: 'authoring-insert', text: '短', authoredDurationSeconds: 3.5,
+        typewriter: { textSpeed: 0.1, entranceAnimation: false },
+      })).toBe(3.5);
+    });
+
     it('uses the manual setting override for UI defaults and clamps it at the policy seam', () => {
       expect(resolveDialogueDuration({
         context: 'manual-default',

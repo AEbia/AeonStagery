@@ -350,6 +350,11 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   control={<Toggle label="低性能模式" active={settings.lowPerformance} onChange={(value) => setSetting('lowPerformance', value)} />}
                 />
                 <SettingItem
+                  title="时间轴选择栏"
+                  description="显示时间轴底部的选择操作栏，用于查看所选动作并执行批量操作。"
+                  control={<Toggle label="时间轴选择栏" active={settings.showTimelineSelectionBar} onChange={(value) => setSetting('showTimelineSelectionBar', value)} />}
+                />
+                <SettingItem
                   title="Live2D 运行时启动提醒"
                   description="缺少 Live2D 核心文件时，在启动时显示配置引导；关闭引导中的“不再提醒”后，可在这里重新开启。"
                   control={<Toggle label="启动时提醒" active={settings.showLive2DRuntimeSetupOnStartup} onChange={(value) => setSetting('showLive2DRuntimeSetupOnStartup', value)} />}

@@ -26,30 +26,26 @@ export function resolveGuardedParam(ctx: InspectorParamContext, key: string): Re
       || (typeof ctx.actionParams.model === 'string' && ctx.actionParams.model.trim()),
     );
     if (charMeta && hasAvailableCharacterModels) {
+      const isRowField = ctx.rowFieldKeys?.has(key);
+      const currentModel = (typeof ctx.actionParams.model === 'string' ? ctx.actionParams.model.trim() : '') || charMeta.model?.trim() || '';
+      const modelOptions = buildCharacterEntranceModelOptions(charMeta);
+      const selectId = `action-${ctx.actionId}-model-variant`;
       return (
-        <div className="inspector-row stacked" key={key}>
-          <label className="inspector-label" htmlFor={`action-${ctx.actionId}-model-variant`}>模型文件</label>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <FormSelect
-              id={`action-${ctx.actionId}-model-variant`}
-              value={ctx.actionParams.model || ''}
-              options={buildCharacterEntranceModelOptions(charMeta, ctx.actionParams.model)}
-              onChange={(value) => {
-                if (!value) {
-                  const newParams = { ...ctx.sourceParams };
-                  delete newParams.model;
-                  ctx.replaceSourceParams(ctx.actionId, newParams);
-                } else {
-                  ctx.updateResourceParam('model', value);
-                }
-              }}
-            />
-          </div>
+        <div className={isRowField ? 'inspector-row' : 'inspector-row stacked'} key={key}>
+          <label className="inspector-label" htmlFor={selectId}>{isRowField ? '模型变体' : '模型文件'}</label>
+          <FormSelect
+            id={selectId}
+            value={currentModel}
+            options={modelOptions}
+            placeholder={currentModel ? '自定义模型' : '未设置模型'}
+            onChange={(value) => ctx.updateResourceParam('model', value)}
+          />
         </div>
       );
     }
     return (
       <FileInput
+        presentation={ctx.rowFieldKeys?.has(key) ? 'button' : 'asset'}
         key={key}
         label="模型文件"
         value={ctx.actionParams.model || ''}

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   DIFFERENTIAL_ONLY_REQUIRED_MESSAGE,
   enforceDifferentialOnlyDownload,
@@ -54,7 +55,7 @@ describe('enforceDifferentialOnlyDownload', () => {
         args: ['fileInfo', 'options', 'destination.exe', 'provider', 'installer.exe'],
       },
     ]);
-    expect(rm).toHaveBeenCalledWith('/updater-cache/current.blockmap', { force: true });
+    expect(rm).toHaveBeenCalledWith(join('/updater-cache', 'current.blockmap'), { force: true });
   });
 
   it('reports an unavailable seam instead of pretending the guard is active', () => {

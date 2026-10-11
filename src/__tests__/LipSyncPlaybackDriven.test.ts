@@ -33,6 +33,7 @@ const dialogue = {
 
 function createCoordinator(lipSync: any) {
   const subtitle = {
+    setDialogueVisibility: vi.fn(),
     ensureDialogueOnStage: vi.fn(),
     getCurrentTimeline: () => null,
     forceUpdate: vi.fn(),

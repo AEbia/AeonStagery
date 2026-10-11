@@ -1,0 +1,169 @@
+/* Script authoring keeps basic fields visible and gives them the full row. */
+.timeline-item--authoring {
+  display: grid;
+  grid-template-columns: 38px 22px minmax(0, 1fr) auto;
+  grid-template-areas: "identity expand title actions" "identity fields fields fields";
+  gap: 6px 8px;
+  align-items: start;
+}
+
+.timeline-item--authoring .timeline-item__identity {
+  grid-area: identity;
+}
+.timeline-item--authoring .timeline-item__expand-btn {
+  grid-area: expand;
+}
+.timeline-item--authoring .timeline-item__select-button {
+  grid-area: title;
+}
+.timeline-item--authoring .timeline-item__actions {
+  grid-area: actions;
+}
+.timeline-item--authoring .timeline-item__inline-controls {
+  grid-area: fields;
+}
+
+.timeline-item__select-button {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-item__quick-fields {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.timeline-item__quick-fields .timeline-item__inline-field {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+.timeline-item__quick-fields .timeline-item__performance-resource {
+  flex: 1 1 320px;
+  min-width: min(100%, 240px);
+  max-width: 100%;
+}
+
+.timeline-item__performance-resource .searchable-select {
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-bottom: 0;
+}
+
+.timeline-item__performance-resource .inspector-label {
+  font-size: 11px;
+}
+
+/* Path inputs start at width: 0, so their field must reserve usable space. */
+.timeline-item__quick-fields .timeline-item__inline-field--resource {
+  flex: 1 1 280px;
+  min-width: min(100%, 240px);
+  gap: 8px;
+}
+
+.timeline-item__inline-field--resource > .timeline-item__inline-label {
+  flex-shrink: 0;
+}
+
+.timeline-item__inline-field--resource > .timeline-item__inline-select {
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.timeline-item__quick-fields .timeline-item__inline-input:not(.timeline-item__inline-input--num) {
+  width: 140px;
+  max-width: 100%;
+}
+
+.timeline-item__quick-fields textarea.timeline-item__inline-input--text {
+  box-sizing: border-box;
+  flex: 1 1 240px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 48px;
+  padding: 6px 8px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.timeline-item--expanded .timeline-item__quick-fields textarea.timeline-item__inline-input--text {
+  flex-basis: 100%;
+  min-height: calc(5 * 1.4em + 14px);
+  max-height: calc(10 * 1.4em + 14px);
+  overflow-y: auto;
+}
+
+.timeline-item__quick-fields:disabled,
+.timeline-item__time:disabled {
+  opacity: 0.6;
+}
+
+.timeline-item__expand-btn:focus-visible,
+.timeline-item__select-button:focus-visible,
+.timeline-item__inline-input:focus-visible,
+.timeline-item__inline-select:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.timeline-toolbar__selection {
+  display: flex;
+  gap: 4px;
+}
+
+.timeline-item__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 38px;
+  flex-shrink: 0;
+}
+
+.timeline-item__numeric-control {
+  min-height: 24px;
+}
+.timeline-item__numeric-control .scrubbable-badge {
+  background: transparent;
+}
+.timeline-item__numeric-control .scrubbable-input-mode {
+  background: transparent;
+}
+.timeline-item__time {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+}
+.timeline-item__time .scrubbable-badge {
+  background: transparent;
+  border: none;
+}
+.timeline-item__time .scrubbable-badge-value {
+  min-width: 24px;
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--accent-primary);
+}
+.timeline-item__time .scrubbable-input-mode {
+  background: transparent;
+}
+

@@ -20,8 +20,10 @@ import { normalizeFilterSourceParams, LENS_FILTER_CATEGORY_LABELS } from '../fil
 import type { CameraPoint } from '../cameraMotionZoom';
 import { clampCameraCoordinate, readCameraPoint } from '../cameraMotionZoom';
 import type { InspectorParamContext } from '../paramControls/context';
+import { switchCameraFocusTarget } from '../../semanticTimelineEditing';
 
 export interface SemanticSourcePanelProps {
+  rowFieldKeys: ReadonlySet<string>;
   action: TimelineAction;
   actionType: string;
   actionId: string;
@@ -49,6 +51,7 @@ export interface SemanticSourcePanelProps {
 
 export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
   const {
+    rowFieldKeys,
     action, actionType, actionId, actionParams, sourceParams, sceneData,
     isIntegrationVisualAction, isLensFilterSourceAction, isRimLightVisualAction,
     visualTargetOptions, rimLightTargetOptions, characterVisualTargetOptions, filterTemplateOptions, activeFilterTemplateOptions,
@@ -65,10 +68,12 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
     };
     const renderCameraPoint = (
       label: string,
+      key: string,
       point: CameraPoint,
       onChange: (nextPoint: CameraPoint, isTransient?: boolean) => void,
       bounds: { min: string; max: string } = { min: '0', max: '1' },
     ) => {
+      if (rowFieldKeys.has(key)) return null;
       const min = Number.parseFloat(bounds.min);
       const max = Number.parseFloat(bounds.max);
       return (
@@ -113,7 +118,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
       max?: string,
       popoverMin?: string,
       popoverMax?: string,
-    ) => (
+    ) => rowFieldKeys.has(key) ? null : (
       <div className="inspector-row" key={key}>
         <span className="inspector-label">{label}</span>
         <InlineNumericInput
@@ -129,7 +134,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         />
       </div>
     );
-    const renderCameraDuration = (label: string, value: unknown, defaultValue: number, min = '0', popoverMin = '0', popoverMax = '10') => (
+    const renderCameraDuration = (label: string, value: unknown, defaultValue: number, min = '0', popoverMin = '0', popoverMax = '10') => rowFieldKeys.has('durationSeconds') ? null : (
       <div className="inspector-row" key="durationSeconds">
         <span className="inspector-label">{label}</span>
         <InlineNumericInput
@@ -170,7 +175,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
       key: string,
       value: unknown,
       options: readonly { value: string; label: string }[],
-    ) => (
+    ) => rowFieldKeys.has(key) ? null : (
       <div className="inspector-row" key={key}>
         <label className="inspector-label" htmlFor={`action-${actionId}-camera-${key}`}>{label}</label>
         <FormSelect
@@ -182,15 +187,28 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         />
       </div>
     );
-    const renderCameraTarget = (allowEmpty: boolean) => renderCameraSelect(
-      '目标角色',
-      'target',
-      actionParams.target,
-      [
+    const renderCameraTarget = (allowEmpty: boolean) => {
+      const options = [
         ...(allowEmpty ? [{ value: '', label: '固定坐标' }] : []),
         ...(sceneData.meta.characters ?? []).map((character) => ({ value: character.id, label: character.name })),
-      ],
-    );
+      ];
+      if (!allowEmpty || action.semanticType !== 'camera') {
+        return renderCameraSelect('目标角色', 'target', actionParams.target, options);
+      }
+      if (rowFieldKeys.has('target')) return null;
+      return (
+        <div className="inspector-row" key="target">
+          <label className="inspector-label" htmlFor={`action-${actionId}-camera-target`}>目标角色</label>
+          <FormSelect
+            id={`action-${actionId}-camera-target`}
+            aria-label="目标角色"
+            value={typeof actionParams.target === 'string' ? actionParams.target : ''}
+            options={options}
+            onChange={(nextTarget) => replaceSourceParams(actionId, switchCameraFocusTarget(sourceParams, nextTarget || undefined))}
+          />
+        </div>
+      );
+    };
     const renderCameraTargetPart = () => renderCameraSelect(
       '对焦部位',
       'targetPart',
@@ -218,7 +236,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
             ]}
             onChange={(nextKind) => updateCameraParam('zoom', { kind: nextKind, value: zoom.value ?? 1 })}
           />
-          <InlineNumericInput
+          {!rowFieldKeys.has('zoom') && <InlineNumericInput
             ariaLabel={label}
             dragLabel="值"
             step="0.05"
@@ -231,7 +249,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
               { kind: zoom.kind || 'absolute', value: nextValue },
               isTransient,
             )}
-          />
+          />}
         </div>
       </div>
     );
@@ -279,6 +297,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
             {renderCameraTarget(true)}
             {actionParams.target ? renderCameraTargetPart() : renderCameraPoint(
               '焦点坐标（标准化）',
+              'position',
               focusPosition,
               (nextPoint, isTransient) => updateCameraParam('position', nextPoint, isTransient),
             )}
@@ -290,9 +309,10 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         )}
         {mode === 'move' && (
           <>
-            <div className="inspector-section-title">移动终点</div>
+            {!rowFieldKeys.has('to') && <div className="inspector-section-title">移动终点</div>}
             {renderCameraPoint(
               '终点坐标（标准化）',
+              'to',
               moveTo,
               (nextPoint, isTransient) => updateCameraParam('to', nextPoint, isTransient),
             )}
@@ -308,6 +328,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
             {renderCameraTarget(false)}
             {renderCameraPoint(
               '跟随偏移（标准化）',
+              'offset',
               followOffset,
               (nextPoint, isTransient) => updateCameraParam('offset', nextPoint, isTransient),
               { min: '-1', max: '1' },
@@ -446,6 +467,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
             {renderCameraTargetPart()}
             {renderCameraPoint(
               '屏幕目标（标准化）',
+              'screenTarget',
               readCameraPoint(actionParams.screenTarget),
               (nextPoint, isTransient) => updateCameraParam('screenTarget', nextPoint, isTransient),
             )}
@@ -495,6 +517,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
           {action.semanticType !== 'filterReset' && (
             <SearchableSelect
               label="滤镜模板"
+              triggerLabel={rowFieldKeys.has('recipeId') ? '选择滤镜模板…' : undefined}
               value={selectedRecipeId}
               options={filterTemplateOptions}
               placeholder="选择滤镜模板..."
@@ -513,6 +536,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
   }
 
   if (action.semanticType === 'visualStyle') {
+    if (rowFieldKeys.has('target')) return null;
     return (
       <>
         <div className="inspector-row"><label className="inspector-label" htmlFor={`action-${actionId}-visual-target`}>目标对象</label><FormSelect id={`action-${actionId}-visual-target`} value={actionParams.target || ''} options={isRimLightVisualAction ? rimLightTargetOptions : visualTargetOptions} disabled={isRimLightVisualAction && characterVisualTargetOptions.length === 0} onChange={(value) => updateSemanticSourceParam('target', value)} /></div>

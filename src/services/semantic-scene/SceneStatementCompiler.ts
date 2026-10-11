@@ -22,6 +22,7 @@ import {
   type VisualStyleParams,
   type ZoomIntent,
 } from '../../api/types/semantic-scene';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../api/types/camera';
 import type { SceneVisualBlock } from '../../api/types/visual';
 import {
   resolveAudioFadeIn,
@@ -478,6 +479,11 @@ function lowerStatement(
   visual: SceneVisualBlock | undefined,
 ): LoweredAction[] {
   switch (statement.type) {
+    case 'dialogueVisibility':
+      return [withOutput('primary', 'setDialogueVisibility', cleanParams({
+        visible: statement.params.visible,
+        duration: statement.params.durationSeconds ?? 0,
+      }))];
     case 'dialogue':
       return lowerDialogue(statement.params);
     case 'characterPresence':
@@ -614,7 +620,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
         duration: params.durationSeconds,
         focus: params.target ? {
           character: params.target,
-          part: params.targetPart ?? 'head',
+          part: params.targetPart ?? DEFAULT_CAMERA_FOCUS_PART,
         } : { point: params.position },
         zoom: lowerZoomValue(params.zoom),
         angle: params.rotation,
@@ -682,6 +688,7 @@ function lowerEnvironmentLayer(params: EnvironmentLayerParams): LoweredAction[] 
   const duration = resolveEnvironmentLayerDuration(params);
   const runtimeParams = cleanParams({
     layerId: params.layerId,
+    label: params.label,
     image: params.image ?? params.file,
     x: params.position?.[0],
     y: params.position?.[1],

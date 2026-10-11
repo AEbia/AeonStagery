@@ -185,12 +185,12 @@ export function useGizmosVisible() {
 export function useCustomMotionEditorActionId() {
   const store = useEditorStore();
   const getActionId = useCallback(
-    () => store.customMotionEditorActionId ?? null,
+    () => store?.customMotionEditorActionId ?? null,
     [store],
   );
 
   return useSyncExternalStore(
-    (listener) => store.subscribe(listener),
+    (listener) => (typeof store?.subscribe === 'function' ? store.subscribe(listener) : () => {}),
     getActionId,
   );
 }
@@ -199,9 +199,9 @@ export function useCustomMotionEditorActionId() {
 
 export function useEditorSaveStatus() {
   const store = useEditorStore();
-  const getSaveStatus = useCallback(() => store.saveStatus, [store]);
+  const getSaveStatus = useCallback(() => store?.saveStatus ?? 'idle', [store]);
   const saveStatus = useSyncExternalStore(
-    (listener) => store.subscribe(listener),
+    (listener) => (typeof store?.subscribe === 'function' ? store.subscribe(listener) : () => {}),
     getSaveStatus
   );
 
@@ -355,24 +355,28 @@ export function useEditorState() {
 export function useValidationIssues() {
   const store = useValidationStore();
 
-  const getIssues = useCallback(() => store.issues, [store]);
-  const getLoading = useCallback(() => store.loading, [store]);
+  const getIssues = useCallback(() => store?.issues ?? [], [store]);
+  const getLoading = useCallback(() => store?.loading ?? false, [store]);
+  const subscribe = useCallback(
+    (listener: () => void) => (typeof store?.subscribe === 'function' ? store.subscribe(listener) : () => {}),
+    [store],
+  );
 
   const issues = useSyncExternalStore(
-    (listener) => store.subscribe(listener),
+    subscribe,
     getIssues
   );
 
   const loading = useSyncExternalStore(
-    (listener) => store.subscribe(listener),
+    subscribe,
     getLoading
   );
 
   return {
     issues,
     loading,
-    errorsCount: store.errorsCount,
-    warningsCount: store.warningsCount
+    errorsCount: store?.errorsCount ?? 0,
+    warningsCount: store?.warningsCount ?? 0,
   };
 }
 
