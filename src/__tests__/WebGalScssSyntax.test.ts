@@ -80,6 +80,10 @@ describe('WebGalScssSyntax', () => {
     expect(resolveLength('10%', 20, false, 1080)).toBe(108);
     // Without a basis the old font-size-relative reading still applies.
     expect(resolveLength('100%', 20)).toBe(15);
+    // A non-positive basis means "not supplied", not a zero-width block: the
+    // font-size reading applies again (10% of 20px, scaled onto the stage).
+    expect(resolveLength('10%', 20, false, 0)).toBe(2);
+    expect(resolveLength('10%', 20, false, -5)).toBe(2);
   });
 
   it('resolves named colours and alpha', () => {

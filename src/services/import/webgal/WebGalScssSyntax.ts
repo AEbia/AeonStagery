@@ -423,7 +423,12 @@ export function resolveLength(
   if (!m) return null;
   let val = parseFloat(m[1]);
   const unit = m[2] || 'px';
-  if (unit === '%' && percentBasis != null) return rnd((percentBasis * val) / 100);
+  // A non-positive basis means "not supplied", so a zero or negative
+  // containing block falls back to the font-size reading instead of collapsing
+  // every percentage to zero.
+  if (unit === '%' && percentBasis != null && percentBasis > 0) {
+    return rnd((percentBasis * val) / 100);
+  }
   const relative = unit === 'em' || unit === 'rem' || unit === '%';
   if (unit === 'em' || unit === 'rem') val *= base;
   else if (unit === '%') val = (base * val) / 100;

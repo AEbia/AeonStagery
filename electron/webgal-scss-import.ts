@@ -367,13 +367,24 @@ export async function installWebGalTemplatePackage(
   // already uses, because scenes reference the style rather than the package.
   const requestedStyleId = String(input.styleId ?? '').trim();
 
+  // The style list de-duplicates by style id across packages, keeping the first
+  // one it sees. A second package publishing an id that is already taken would
+  // install successfully and then be invisible in the dropdown, so a fresh
+  // import gets the same `-2` treatment the package id already gets.
+  const styleId = requestedStyleId
+    ? replaceTarget
+      ? requestedStyleId
+      : uniquePackageName(requestedStyleId, installed.flatMap((entry) => entry.styleIds))
+    : replaceTarget
+      ? replaceTarget.styleIds[0] ?? packageId
+      : packageId;
+
   const { build, sourceHash, sourceName } = await convertTemplate({
     ...input,
     templateRoot,
     packageName,
     packageId,
-    styleId: requestedStyleId
-      || (replaceTarget ? replaceTarget.styleIds[0] ?? packageId : packageId),
+    styleId,
     styleName: String(input.styleName ?? '').trim() || packageName,
   });
 

@@ -320,6 +320,34 @@ describe('WebGAL SCSS template import', () => {
     await expect(stat(path.join(multi.dir, 'assets', 'extra.svg'))).resolves.toBeTruthy();
   });
 
+  it('keeps a requested style id unique across packages', async () => {
+    const root = await makeRoot('aeonstagery-webgal-styleid-dup-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot, { name: 'First' });
+    const first = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, styleId: 'shared-style',
+    });
+
+    // The style list de-duplicates by style id across packages, keeping the
+    // first it sees — so a second package reusing the id would install cleanly
+    // and then be invisible in the dropdown.
+    await writeTemplate(path.join(root, 'template2'), { name: 'Second' });
+    const second = await installWebGalTemplatePackage({
+      templateRoot: path.join(root, 'template2'), templatesRoot, styleId: 'shared-style',
+    });
+    expect(second.id).not.toBe(first.id);
+
+    const styleIds = async (id: string) => {
+      const manifest = JSON.parse(
+        await readFile(path.join(templatesRoot, id, 'manifest.v2.json'), 'utf8'),
+      ) as { dialogueStyles: { id: string }[] };
+      return manifest.dialogueStyles.map((style) => style.id);
+    };
+    expect(await styleIds(first.id)).toEqual(['shared-style']);
+    expect(await styleIds(second.id)).toEqual(['shared-style-2']);
+  });
+
   it('adds a separate package when the user keeps the import', async () => {
     const root = await makeRoot('aeonstagery-webgal-duplicate-');
     const templateRoot = path.join(root, 'template');
