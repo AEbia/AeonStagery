@@ -180,7 +180,7 @@ describe('Cubism Pixi runtime controls', () => {
     model.update(0);
     expect(drawn()[0]).toBe(1);
   });
-  it('replays Cubism 3+ state from a reset baseline at fixed 60Hz steps', async () => {
+  it('restores Cubism 3+ state with an O(1) native queue offset', async () => {
     const { model, internal } = createCubismModelFixture();
     const physics = { initialize: vi.fn() };
     const pose = { reset: vi.fn() };
@@ -189,25 +189,23 @@ describe('Cubism Pixi runtime controls', () => {
     internal.pose = pose;
     internal.focusController = focus;
     const update = vi.spyOn(internal, 'update');
+    const startMotion = vi.spyOn(model, 'startMotion').mockResolvedValue(true);
 
     const result = await model.restoreAtSceneTime({
       id: 'haru',
       targetSceneTime: 1,
-      expression: { key: null, elapsedSeconds: 0.05 },
+      motion: { key: 'wave', offset: 120, sceneTime: 1 },
     });
 
-    expect(result).toEqual({ status: 'restored', tierUsed: 'state-replay', diagnostics: [] });
+    expect(result).toEqual({ status: 'restored', tierUsed: 'native', diagnostics: [] });
+    expect(startMotion).toHaveBeenCalledWith('wave', 0, 3, 120, undefined);
     expect(physics.initialize).toHaveBeenCalledOnce();
     expect(pose.reset).toHaveBeenCalledOnce();
     expect(focus.focus).toHaveBeenCalledWith(0, 0, true);
     expect(focus.vx).toBe(0);
     expect(focus.vy).toBe(0);
-    expect(update).toHaveBeenCalledTimes(3);
-    expect(update.mock.calls.map(([delta]) => delta)).toEqual([
-      expect.closeTo(1000 / 60, 8),
-      expect.closeTo(1000 / 60, 8),
-      expect.closeTo(1000 / 60, 8),
-    ]);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.any(Number), expect.any(Number));
   });
   it('evaluates breath every frame even when a resource motion writes that parameter', () => {
     const { model, internal, core, drawn } = createCubismModelFixture();

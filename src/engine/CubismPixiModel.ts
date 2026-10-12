@@ -10,15 +10,12 @@ function parameterId(id: any): string {
   return typeof value === 'string' ? value : value?.s ?? '';
 }
 
-const CUBISM_STATE_REPLAY_STEP_MS = 1000 / 60;
-const CUBISM_STATE_REPLAY_EPSILON_MS = 1e-6;
-
 /**
- * Clear stateful Cubism 3+ subsystems before replaying from a scene snapshot.
+ * Clear stateful Cubism 3+ subsystems before restoring from a scene snapshot.
  * Parameters/opacities are restored immediately after this reset, so Pose's
  * authored default selection cannot overwrite the seek handoff pose.
  */
-function resetCubismStateForReplay(internal: any, core: any): void {
+function resetCubismStateForRestore(internal: any, core: any): void {
   const physics = internal?.physics;
   physics?.initialize?.();
   if (physics && typeof physics === 'object') {
@@ -42,15 +39,6 @@ function resetCubismStateForReplay(internal: any, core: any): void {
   if (focus && typeof focus === 'object') {
     if ('vx' in focus) focus.vx = 0;
     if ('vy' in focus) focus.vy = 0;
-  }
-}
-
-function replayCubismState(model: any, durationSeconds: number): void {
-  let remainingMs = Math.max(0, durationSeconds * 1000);
-  while (remainingMs > CUBISM_STATE_REPLAY_EPSILON_MS) {
-    const stepMs = Math.min(CUBISM_STATE_REPLAY_STEP_MS, remainingMs);
-    model.update(stepMs);
-    remainingMs -= stepMs;
   }
 }
 
@@ -510,29 +498,40 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   };
   model.restoreAtSceneTime = async (input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> => {
     model.stopAllMotions();
-    const offsetSeconds = input.motion?.offset ?? input.expression?.elapsedSeconds ?? 0;
-    sceneTime = Math.max(0, input.targetSceneTime - (Number.isFinite(offsetSeconds) ? offsetSeconds : 0));
-    resetCubismStateForReplay(internal, core);
+    // Native Cubism queues already support an absolute offset by setting the
+    // queue entry's start timestamp. Keep the scene clock at the target while
+    // restoring so natural channels (breath/blink) and the first geometry pass
+    // are evaluated at the requested scene time. This is O(1) for any offset;
+    // replaying 60Hz updates here made late seeks linearly expensive.
+    sceneTime = Math.max(0, input.targetSceneTime);
+    blink.sceneTimeSeconds = sceneTime;
+    resetCubismStateForRestore(internal, core);
     const baseline = input.handoffSnapshot ?? input.idleSnapshot ?? input.snapshot;
     if (baseline) model.applyRuntimeSnapshot(baseline);
     const focus = internal?.focusController;
     focus?.focus?.(input.focus?.[0] ?? 0, input.focus?.[1] ?? 0, true);
-    const started = !input.motion || await model.startMotion(input.motion.key, 0, input.motion.priority ?? 3, 0, input.motion.fadeInSeconds);
+    const motionOffset = input.motion && Number.isFinite(input.motion.offset)
+      ? Math.max(0, input.motion.offset)
+      : 0;
+    const started = !input.motion || await model.startMotion(
+      input.motion.key,
+      0,
+      input.motion.priority ?? 3,
+      motionOffset,
+      input.motion.fadeInSeconds,
+    );
     const key = input.expression !== undefined
       ? input.expression?.key ?? null
       : input.snapshot?.expression?.key ?? null;
     const expressionElapsed = input.expression?.elapsedSeconds;
-    await setExpression(key, expressionElapsed === undefined ? Number.POSITIVE_INFINITY : 0);
-    if (input.motion && Number.isFinite(input.motion.offset) && input.motion.offset > 0) {
-      replayCubismState(model, input.motion.offset);
-    } else if (Number.isFinite(expressionElapsed) && expressionElapsed !== undefined && expressionElapsed > 0) {
-      replayCubismState(model, expressionElapsed);
-    } else {
-      model.update(0);
-    }
+    await setExpression(key, expressionElapsed ?? Number.POSITIVE_INFINITY);
+    // `startMotion` and `setExpression` have already installed their absolute
+    // queue offsets. One zero-delta update commits both queues and runs the
+    // normal state hooks without simulating every elapsed frame.
+    model.update(0);
     return {
       status: started ? 'restored' : 'fallback',
-      tierUsed: started ? 'state-replay' : 'snapshot-forward',
+      tierUsed: started ? 'native' : 'snapshot-forward',
       diagnostics: started
         ? []
         : [`Motion "${input.motion?.key}" was not available.`],
@@ -564,5 +563,30 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
 export async function createCubismPixiModel(modelUrl: string, options: Live2DModelCreateOptions): Promise<any> {
   const engine = await loadCubismEngineModule();
   const model = await engine.Live2DModel.from(modelUrl, { ...options, autoUpdate: false, autoFocus: false, autoHitTest: false, idleMotionGroup: '__aeon_manual_idle__', eyeBlink: false });
+  // pixi-live2d-display normally installs this resolver while loading a
+  // resource, but adapter-created instances can expose raw settings without
+  // it. Motion3 cache conversion must resolve relative `File` entries against
+  // the model3.json URL or it will permanently miss and use the native queue.
+  const settings = model.internalModel?.settings as { resolveURL?: (file: string) => string } | undefined;
+  if (settings && typeof settings.resolveURL !== 'function') {
+    try {
+      settings.resolveURL = (file: string) => {
+        try {
+          const normalizedFile = file.replaceAll('\\', '/');
+          // Keep filesystem model paths usable in native/Electron loads where
+          // the SDK has not converted the Windows path to an asset URL yet.
+          if (/^[A-Za-z]:[\\/]/.test(modelUrl)) {
+            const normalized = modelUrl.replaceAll('\\', '/');
+            return `${normalized.slice(0, normalized.lastIndexOf('/') + 1)}${normalizedFile}`;
+          }
+          return new URL(normalizedFile, modelUrl).toString();
+        } catch {
+          return file;
+        }
+      };
+    } catch {
+      // Some SDK builds expose a sealed settings object; native fallback stays available.
+    }
+  }
   return installCubismPixiModelRuntime(model, engine);
 }

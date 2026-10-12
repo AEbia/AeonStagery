@@ -182,6 +182,25 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     model.update(16);
     expect(model.internalModel.parameterValues[index]).toBeCloseTo(25);
   });
+  it.each([2, 120])('restores a native motion at %ss with one update and retains its pose while paused', async (offset) => {
+    const model = await createModel();
+    addProbeMotion(model);
+    model.internalModel.physics = undefined;
+    const baseline = model.captureRuntimeSnapshot('haru');
+    const update = vi.spyOn(model.internalModel, 'update');
+    const result = await model.restoreAtSceneTime({
+      id: 'haru', targetSceneTime: offset, idleSnapshot: baseline,
+      motion: { key: 'probe', offset, sceneTime: offset, fadeInSeconds: 0 },
+    });
+    expect(result).toEqual({ status: 'restored', tierUsed: 'native', diagnostics: [] });
+    expect(update).toHaveBeenCalledTimes(1);
+    const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamAngleY');
+    const expected = Math.min(offset, 10);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(expected, 5);
+    for (let i = 0; i < 120; i++) model.update(0);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(expected, 5);
+    update.mockRestore();
+  });
   it.each([0, 0.25, 0.75])('holds a seeked motion fade pose at %ss while paused and continues on playback', async (offset) => {
     const model = await createModel();
     addProbeMotion(model);
