@@ -1,6 +1,7 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconRefresh, IconX } from '../icons';
+import { findVisibleGuideTarget } from './guideTarget';
 
 type SpotlightStatusTone = 'neutral' | 'checking' | 'success' | 'warning';
 
@@ -54,13 +55,9 @@ const clamp = (value: number, minimum: number, maximum: number) => (
 );
 
 const measureTarget = (selector: string, padding: number): ViewportRect | null => {
-  const target = document.querySelector<HTMLElement>(selector);
+  const target = findVisibleGuideTarget(selector);
   if (!target) return null;
-  const style = window.getComputedStyle(target);
   const raw = target.getBoundingClientRect();
-  if (style.display === 'none' || style.visibility === 'hidden' || raw.width <= 0 || raw.height <= 0) {
-    return null;
-  }
 
   const left = clamp(raw.left - padding, 0, window.innerWidth);
   const top = clamp(raw.top - padding, 0, window.innerHeight);
@@ -135,13 +132,6 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
   const [cardHeight, setCardHeight] = useState(CARD_ESTIMATED_HEIGHT);
   const cardRef = useRef<HTMLElement>(null);
 
-  useEffect(() => {
-    document.querySelector<HTMLElement>(targetSelector)?.scrollIntoView?.({
-      block: 'nearest',
-      inline: 'nearest',
-    });
-  }, [targetSelector]);
-
   useLayoutEffect(() => {
     let frame: number | null = null;
     let resizeObserver: ResizeObserver | null = null;
@@ -149,10 +139,11 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
 
     const update = () => {
       frame = null;
-      const nextTarget = document.querySelector<HTMLElement>(targetSelector);
+      const nextTarget = findVisibleGuideTarget(targetSelector);
       if (nextTarget !== observedTarget) {
         if (resizeObserver && observedTarget) resizeObserver.unobserve(observedTarget);
         observedTarget = nextTarget;
+        observedTarget?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
         if (resizeObserver && observedTarget) resizeObserver.observe(observedTarget);
       }
       const nextRect = measureTarget(targetSelector, padding);
@@ -169,7 +160,7 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ['open', 'hidden', 'aria-label', 'data-active'],
+      attributeFilter: ['open', 'hidden', 'aria-label', 'aria-selected', 'data-active', 'data-timeline-layout'],
     });
     window.addEventListener('resize', scheduleUpdate);
     document.addEventListener('scroll', scheduleUpdate, true);

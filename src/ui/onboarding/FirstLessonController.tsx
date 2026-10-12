@@ -23,6 +23,8 @@ import {
 import type { IFileAccess } from '../../services/io/IFileAccess';
 import { IconCheck, IconInfo, IconTarget, IconX } from '../icons';
 import { useModalDialog } from '../hooks/useModalDialog';
+import { useSettings } from '../SettingsStore';
+import { findVisibleGuideTarget } from './guideTarget';
 import { SpotlightOverlay } from './SpotlightOverlay';
 import './firstLesson.css';
 
@@ -33,6 +35,7 @@ type LessonPhase =
   | 'asset-found'
   | 'asset-setup'
   | 'creating-project'
+  | 'choose-layout'
   | 'guiding'
   | 'completed'
   | 'error';
@@ -61,6 +64,10 @@ export type FirstLessonGuideStep =
   | 'select-dialogue'
   | 'open-action-panel'
   | 'switch-to-actions'
+  | 'open-motion-panel'
+  | 'switch-to-motion-actions'
+  | 'open-camera-panel'
+  | 'switch-to-camera-actions'
   | 'edit-dialogue'
   | 'right-click-for-motion'
   | 'insert-motion'
@@ -79,6 +86,7 @@ export type FirstLessonGuideStep =
   | 'start-preview';
 
 interface GuideDomSnapshot {
+  actionPanelHidden?: boolean;
   characterDirectoryVisible: boolean;
   inspectorPickerOpen: boolean;
   blankMenuVisible: boolean;
@@ -109,7 +117,7 @@ export interface ResolveFirstLessonGuideStepInput extends GuideDomSnapshot {
   motionCtiPositioned: boolean;
 }
 
-const FIRST_LESSON_GUIDE_TOTAL_STEPS = 12;
+const FIRST_LESSON_GUIDE_TOTAL_STEPS = 13;
 
 const MOTION_PLAYBACK_IGNORED_TARGET = [
   'input',
@@ -227,21 +235,17 @@ const normalizePathForComparison = (value: string | undefined) => (
   (value ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 );
 
-const isVisible = (selector: string) => {
-  const element = document.querySelector<HTMLElement>(selector);
-  if (!element) return false;
-  const style = window.getComputedStyle(element);
-  const rect = element.getBoundingClientRect();
-  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-};
+const isVisible = (selector: string) => findVisibleGuideTarget(selector) !== null;
 
 const readGuideDomSnapshot = (_refreshKey: {
   readonly domRevision: number;
   readonly phase: LessonPhase;
   readonly semanticDocument: CurrentSceneDocument | null;
 }): GuideDomSnapshot => ({
+  actionPanelHidden: isVisible('.property-inspector-shell [aria-label="返回属性检查器"]')
+    || isVisible('.side-panel .context-panel'),
   characterDirectoryVisible: isVisible('[data-testid="character-directory"]'),
-  inspectorPickerOpen: document.querySelector('.inspector-view-picker')?.hasAttribute('open') ?? false,
+  inspectorPickerOpen: findVisibleGuideTarget('.inspector-view-picker')?.hasAttribute('open') ?? false,
   assetBrowserVisible: isVisible('[role="dialog"][aria-labelledby="asset-browser-title"]'),
   blankMenuVisible: isVisible('[data-testid="timeline-blank-insert-menu"]'),
   dialogueFieldVisible: isVisible('[data-testid="action-param-text"]'),
@@ -255,7 +259,7 @@ const readGuideDomSnapshot = (_refreshKey: {
   cameraFocusPartMenuVisible: isVisible('[role="listbox"][aria-label="对焦部位选项"]'),
   environmentBlockVisible: isVisible('[data-testid="timeline-track-block"][data-semantic-type="environmentLayer"]'),
   environmentBlockSelected: isVisible('[data-testid="timeline-track-block"][data-semantic-type="environmentLayer"][aria-pressed="true"]'),
-  environmentImageFieldVisible: isVisible('[placeholder="选择背景图片..."]'),
+  environmentImageFieldVisible: isVisible('[data-resource-directory="background"] button'),
 });
 
 const resolveCharacterPanelStep = (snapshot: GuideDomSnapshot): FirstLessonGuideStep | null => {
@@ -317,6 +321,9 @@ export function resolveFirstLessonGuideStep(
       return input.blankMenuVisible ? 'insert-motion' : 'right-click-for-motion';
     }
     if (!input.motionBlockVisible || !input.motionBlockSelected) return 'select-motion-block';
+    if (input.actionPanelHidden) {
+      return input.inspectorPickerOpen ? 'switch-to-motion-actions' : 'open-motion-panel';
+    }
     if (input.motionPickerVisible) return 'choose-motion';
     return 'open-motion-picker';
   }
@@ -331,6 +338,9 @@ export function resolveFirstLessonGuideStep(
 
   if (input.firstUnmetStep === 'tune-camera-focus-part') {
     if (input.cameraFocusPartMenuVisible) return 'choose-camera-focus-part-menu';
+    if (input.cameraBlockVisible && input.cameraBlockSelected && input.actionPanelHidden) {
+      return input.inspectorPickerOpen ? 'switch-to-camera-actions' : 'open-camera-panel';
+    }
     return input.cameraBlockVisible && input.cameraBlockSelected
       ? 'choose-camera-focus-part'
       : 'select-camera-focus';
@@ -342,13 +352,17 @@ export function resolveFirstLessonGuideStep(
 export const getGuidePresentation = (
   step: FirstLessonGuideStep,
   modelStatus: ReadinessStatus,
+  layoutMode: 'tracks' | 'list' = 'list',
 ): GuidePresentation => {
+  const isTracksMode = layoutMode === 'tracks';
   switch (step) {
     case 'open-character-panel':
       return {
-        selector: '.inspector-view-picker',
+        selector: isTracksMode ? '#left-panel-tab-characters' : '.inspector-view-picker',
         title: '进入角色管理',
-        description: '点击右侧的视图切换器，接下来进入角色管理。',
+        description: isTracksMode
+          ? '点击左侧的“角色管理”选项卡，准备登上舞台的角色。'
+          : '点击右侧的视图切换器，接下来进入角色管理。',
         step: 2,
       };
     case 'switch-to-characters':
@@ -446,9 +460,13 @@ export const getGuidePresentation = (
       };
     case 'open-environment-panel':
       return {
-        selector: '.inspector-view-picker > summary',
+        selector: isTracksMode
+          ? '.property-inspector-shell [aria-label="返回属性检查器"]'
+          : '.inspector-view-picker > summary',
         title: '打开环境编辑视图',
-        description: '环境语句已经选中。点击侧栏视图切换器，回到“剧本动作”。',
+        description: isTracksMode
+          ? '环境语句已经选中。点击“返回属性检查器”，为它选择背景图片。'
+          : '环境语句已经选中。点击侧栏视图切换器，回到“剧本动作”。',
         step: 5,
       };
     case 'switch-to-environment-actions':
@@ -460,9 +478,9 @@ export const getGuidePresentation = (
       };
     case 'pick-environment-image':
       return {
-        selector: '[aria-label="打开资源浏览器"]',
+        selector: '[data-resource-directory="background"] button',
         title: '选择一张背景图片',
-        description: '点击文件夹按钮打开资源浏览器，为环境选择一张背景图片。',
+        description: '点击背景资源选择按钮，打开资源浏览器，为环境选择一张背景图片。',
         step: 5,
         padding: 5,
       };
@@ -499,18 +517,26 @@ export const getGuidePresentation = (
         padding: 5,
       };
     case 'open-action-panel':
+    case 'open-motion-panel':
+    case 'open-camera-panel':
       return {
-        selector: '.inspector-view-picker > summary',
-        title: '打开对白编辑视图',
-        description: '对白已经选中。点击侧栏视图切换器，回到“剧本动作”。',
-        step: 6,
+        selector: isTracksMode
+          ? '.property-inspector-shell [aria-label="返回属性检查器"]'
+          : '.inspector-view-picker > summary',
+        title: step === 'open-action-panel' ? '打开对白编辑视图' : '打开语句属性',
+        description: isTracksMode
+          ? '语句已经选中。点击“返回属性检查器”，继续编辑它的属性。'
+          : '语句已经选中。点击侧栏视图切换器，回到“剧本动作”。',
+        step: step === 'open-motion-panel' ? 9 : step === 'open-camera-panel' ? 12 : 6,
       };
     case 'switch-to-actions':
+    case 'switch-to-motion-actions':
+    case 'switch-to-camera-actions':
       return {
         selector: '.inspector-view-picker__menu [role="menuitemradio"][aria-label^="剧本动作"]',
         title: '进入剧本动作',
-        description: '选择“剧本动作”，在右侧修改刚才创建的对白。',
-        step: 6,
+        description: '选择“剧本动作”，在右侧编辑选中语句的属性。',
+        step: step === 'switch-to-motion-actions' ? 9 : step === 'switch-to-camera-actions' ? 12 : 6,
       };
     case 'edit-dialogue':
       return {
@@ -573,9 +599,10 @@ export const getGuidePresentation = (
       return {
         selector: '.searchable-select-overlay [role="listbox"][aria-label="可选项"]',
         title: '选择一个动作',
-        description: '选择一个非 idle 动作，作为角色在这一刻的表演。',
+        description: '选择一个非 idle 动作，作为角色在这一刻的表演。可以切换左侧分组或搜索动作名称。',
         step: 9,
         padding: 3,
+        allowWorkspaceInteraction: true,
       };
     case 'position-motion-cti':
       return {
@@ -778,6 +805,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   playbackStore,
   children,
 }) => {
+  const { settings, setSetting } = useSettings();
   const progressStore = useMemo(
     () => new FirstLessonProgressStore(createSafeBrowserStorage()),
     [],
@@ -850,7 +878,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ['open', 'hidden', 'aria-label', 'aria-pressed', 'data-active'],
+      attributeFilter: ['open', 'hidden', 'aria-label', 'aria-pressed', 'aria-selected', 'data-active', 'data-timeline-layout'],
     });
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
@@ -1063,7 +1091,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
         return;
       }
       setProgress(progressStore.load());
-      enterGuide();
+      setPhase('choose-layout');
     } catch {
       if (operationTokenRef.current !== token) return;
       setErrorMessage('教程项目创建失败。请确认默认项目目录可写，然后重新开始教程。');
@@ -1071,7 +1099,6 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     }
   }, [
     defaultProjectDirectory,
-    enterGuide,
     fileAccess,
     progressStore,
     projectOpenWorkflow,
@@ -1146,8 +1173,8 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   }, [scanAssetSources]);
 
   const domSnapshotRefreshKey = useMemo(
-    () => ({ domRevision, phase, semanticDocument }),
-    [domRevision, phase, semanticDocument],
+    () => ({ domRevision, phase, semanticDocument, layoutMode: settings.workbenchTimelineLayoutMode }),
+    [domRevision, phase, semanticDocument, settings.workbenchTimelineLayoutMode],
   );
   const domSnapshot = useMemo(
     () => readGuideDomSnapshot(domSnapshotRefreshKey),
@@ -1202,8 +1229,18 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   }, [guideStep, hasPreviewedLive2DMotion, motionPlaybackRequested]);
 
   const guidePresentation = guideStep
-    ? getGuidePresentation(guideStep, modelStatus)
+    ? getGuidePresentation(guideStep, modelStatus, settings.workbenchTimelineLayoutMode)
     : null;
+
+  // Keep the menu's categories and search reachable even when a filter hides the desired card.
+  const insertionMenuStep = guideStep === 'insert-entrance'
+    || guideStep === 'insert-environment'
+    || guideStep === 'insert-dialogue'
+    || guideStep === 'insert-motion'
+    || guideStep === 'insert-camera-focus';
+  const guideTargetSelector = guidePresentation && insertionMenuStep && !isVisible(guidePresentation.selector)
+    ? '[data-testid="timeline-blank-insert-menu"]'
+    : guidePresentation?.selector;
 
   const assetTargetSelector = externalLibraryPaths.length > 0
     ? `[data-tutorial-target="external-library-replace-${externalLibraryPaths.length - 1}"]`
@@ -1284,6 +1321,39 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
         />
       )}
 
+      {!exitConfirmationOpen && phase === 'choose-layout' && (
+        <LessonDialog
+          eyebrow={`第 2 / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步 · 选择工作台布局`}
+          title="选择你喜欢的工作台布局"
+          description="两种布局都能完成本课。选择会立即保存，以后也可以在“全局设置 → 基础体验 → 工作区布局”中切换。"
+          onClose={requestLessonClose}
+        >
+          <fieldset className="fl-layout-choices" aria-label="工作台布局模式">
+            {([
+              { value: 'tracks', label: '轨道编辑优先', description: '底部轨道占满宽度，左侧管理角色与剧本大纲，右侧编辑选中语句的属性。' },
+              { value: 'list', label: '剧本动作优先', description: '右侧剧本动作列表占满高度，展开语句即可编辑属性，适合逐句编排故事。' },
+            ] as const).map((layout) => (
+              <label key={layout.value} className="fl-layout-choice">
+                <input
+                  type="radio"
+                  name="first-lesson-layout"
+                  value={layout.value}
+                  checked={settings.workbenchTimelineLayoutMode === layout.value}
+                  onChange={() => setSetting('workbenchTimelineLayoutMode', layout.value)}
+                />
+                <span>
+                  <strong>{layout.label}</strong>
+                  <span>{layout.description}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <button type="button" className="btn btn--primary" onClick={enterGuide}>
+            使用此布局，继续教程
+          </button>
+        </LessonDialog>
+      )}
+
       {!exitConfirmationOpen && phase === 'error' && (
         <LessonDialog
           eyebrow="教程暂时无法继续"
@@ -1295,16 +1365,16 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
         />
       )}
 
-      {!exitConfirmationOpen && phase === 'guiding' && guidePresentation && (
+      {!exitConfirmationOpen && phase === 'guiding' && guidePresentation && guideTargetSelector && (
         <SpotlightOverlay
-          targetSelector={guidePresentation.selector}
+          targetSelector={guideTargetSelector}
           title={guidePresentation.title}
           description={guidePresentation.description}
-          stepLabel={`第 ${guidePresentation.step} / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步`}
+          stepLabel={`第 ${guidePresentation.step + 1} / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步`}
           onClose={requestLessonClose}
           padding={guidePresentation.padding}
           allowTargetInteraction={guidePresentation.allowTargetInteraction}
-          allowWorkspaceInteraction={guidePresentation.allowWorkspaceInteraction}
+          allowWorkspaceInteraction={insertionMenuStep || guidePresentation.allowWorkspaceInteraction}
           showSpotlight={guidePresentation.showSpotlight}
           status={guidePresentation.status}
           action={guideStep === 'select-model' && modelStatus === 'needs_reselect'

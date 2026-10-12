@@ -92,7 +92,7 @@ export const InlineFilePicker: React.FC<InlineFilePickerProps> = ({
   );
 
   return (
-    <div className="inline-file-picker" style={{ flex: 1, minWidth: 0, width: '100%' }}>
+    <div className="inline-file-picker" data-resource-directory={inferInitialDir()} style={{ flex: 1, minWidth: 0, width: '100%' }}>
       {presentation === 'asset' && (
         <div className="inspector-asset-picker">
           <div className="inspector-asset-picker__selection">

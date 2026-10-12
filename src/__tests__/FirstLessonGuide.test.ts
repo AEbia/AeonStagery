@@ -170,7 +170,7 @@ describe('resolveFirstLessonGuideStep', () => {
       environmentImageFieldVisible: true,
     }))).toBe('pick-environment-image');
     expect(getGuidePresentation('pick-environment-image', 'idle')).toMatchObject({
-      selector: '[aria-label="打开资源浏览器"]',
+      selector: '[data-resource-directory="background"] button',
       title: '选择一张背景图片',
       step: 5,
     });

@@ -264,6 +264,62 @@
   white-space: normal;
 }
 
+.fl-layout-choices {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fl-layout-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.fl-layout-choice:hover {
+  background: var(--bg-tertiary);
+}
+
+.fl-layout-choice:has(input:checked) {
+  border-color: var(--accent-primary);
+  background: var(--accent-glow);
+}
+
+.fl-layout-choice:focus-within {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.fl-layout-choice input {
+  flex: 0 0 auto;
+  margin: 3px 0 0;
+  accent-color: var(--accent-primary);
+}
+
+.fl-layout-choice > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fl-layout-choice strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.fl-layout-choice > span > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .fl-lesson-spinner {
   width: 12px;
   height: 12px;
