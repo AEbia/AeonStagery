@@ -223,7 +223,8 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
           : resolveCubismParameterId(rawId);
         if (id === paramName) {
           coreModel.setParameterValueByIndex(index, value);
-          model?.syncInputParameters?.();
+          // Geometry is committed by syncInputParameters after the batch.
+          // Updating Core here repeats the whole model deformation per track.
           return;
         }
       }

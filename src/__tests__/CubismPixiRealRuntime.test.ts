@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import * as PIXI from 'pixi.js';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
 import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
+import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 
 const corePath = resolveCubismWebCorePath();
 const entry = process.env.AEON_CUBISM_TEST_MODEL;
@@ -85,6 +86,29 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     expect(model.internalModel.motionManager.expressionManager.definitions.length).toBeGreaterThan(0);
     expect(Array.from(model.internalModel.parameterValues).every(Number.isFinite)).toBe(true);
     expect(model.deltaTime).toBe(0);
+  });
+  it('commits a batch of injected parameters with one Core geometry update', async () => {
+    const model = await createModel();
+    const controls = new CubismPixiLive2DAdapter().getControls();
+    const core = model.internalModel.coreModel;
+    model.update(0);
+    const positions = core.getModel().drawables.vertexPositions as readonly Float32Array[];
+    const before = positions.map(vertices => vertices.slice());
+    const update = vi.spyOn(core, 'update');
+    const values = { ParamAngleX: 15, ParamAngleY: 10, ParamMouthOpenY: 0.75 };
+    try {
+      for (const [id, value] of Object.entries(values)) controls.setInjectedParameter(model, id, value);
+      expect(update).not.toHaveBeenCalled();
+      controls.syncInputParameters(model);
+      expect(update).toHaveBeenCalledOnce();
+      expect(positions.some((vertices, index) => vertices.some((value, vertex) => value !== before[index][vertex]))).toBe(true);
+      const ids = core.getParameterIds();
+      for (const [id, value] of Object.entries(values)) {
+        expect(model.internalModel.parameterValues[ids.indexOf(id)]).toBeCloseTo(value);
+      }
+    } finally {
+      update.mockRestore();
+    }
   });
   it('sorts native drawables with the Cubism 5 Core render-order API', async () => {
     const model = await createModel();

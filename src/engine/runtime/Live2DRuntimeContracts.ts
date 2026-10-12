@@ -225,7 +225,9 @@ export interface Live2DRuntimeModelControls {
     elapsedSeconds: number,
     previousExpressionKey?: string | null,
   ): Promise<void>;
+  /** Write parameter input only; callers commit geometry once after a batch. */
   setInjectedParameter(model: any, paramName: string, value: number): void;
+  /** Commit the accumulated parameter inputs to the model geometry. */
   syncInputParameters(model: any): void;
   captureSnapshot(id: string, model: any, motionStartTime?: number): ModelSnapshot | null;
   applySnapshot(model: any, snapshot: ModelSnapshot): void;
