@@ -141,8 +141,6 @@ describe('createLive2DModelHandle', () => {
   it('delegates lifecycle operations to controls for the wrapped model', () => {
     const model = { name: 'lifecycle-model' };
     const controls = createControls();
-    const coreModel = { id: 'core' };
-    vi.mocked(controls.getCoreModel).mockReturnValue(coreModel);
     const handle = createLive2DModelHandle({
       id: 'lifecycle',
       model,
@@ -154,11 +152,9 @@ describe('createLive2DModelHandle', () => {
       controls,
     });
 
-    expect(handle.lifecycle.getCoreModel()).toBe(coreModel);
     handle.lifecycle.clearMotionState();
     handle.lifecycle.stopAllMotions();
 
-    expect(controls.getCoreModel).toHaveBeenCalledWith(model);
     expect(controls.clearMotionState).toHaveBeenCalledWith(model);
     expect(controls.stopAllMotions).toHaveBeenCalledWith(model);
   });

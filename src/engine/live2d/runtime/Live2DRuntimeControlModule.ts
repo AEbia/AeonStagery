@@ -1,5 +1,7 @@
 import type * as PIXI from 'pixi.js';
 import { createBoundModelInitialization } from './BoundModelInitialization';
+import { createBoundModelParameters } from './BoundModelParameters';
+import type { Live2DParameterEdit, Live2DParameterEditResult, Live2DParameterInspection } from '../../../api/types/live2d-parameter-animation';
 import type { Live2DParameterMetadata } from '../../../api/types/live2d-parameter-animation';
 import type { ModelSnapshot } from '../../Live2DConfig';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../../Live2DRuntimeResolver';
@@ -108,7 +110,6 @@ export function getLive2DRuntimeCapabilities(entry: {
 }
 
 export interface Live2DLifecycleInterface {
-  getCoreModel(): any | null;
   clearMotionState(): void;
   stopAllMotions(): void;
 }
@@ -152,6 +153,8 @@ export interface Live2DModelHandle {
   readonly displayObject: PIXI.Container;
   readonly rawModel: any;
   readonly capabilities: Live2DRuntimeCapabilities;
+  inspectParameters(): readonly Live2DParameterInspection[] | null;
+  editParameters(edits: readonly Live2DParameterEdit[]): Live2DParameterEditResult;
   initialize(input: Live2DInitializationInput): Promise<Live2DInitializationResult>;
   bindRuntimeSource(input: Live2DRuntimeSourceBinding): boolean;
   resetRuntimeState(input?: Live2DRuntimeResetInput): void;
@@ -187,9 +190,9 @@ export function createLive2DModelHandle({
     displayObject: model as PIXI.Container,
     rawModel: model,
     capabilities,
+    ...createBoundModelParameters(model, controls),
     ...createBoundModelInitialization(id, model, controls, capabilities),
     lifecycle: {
-      getCoreModel: () => controls.getCoreModel(model),
       clearMotionState: () => controls.clearMotionState(model),
       stopAllMotions: () => controls.stopAllMotions(model),
     },

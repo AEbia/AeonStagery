@@ -113,7 +113,7 @@ async function createHarness(): Promise<Harness> {
 /** Enter the character the way the playback timeline does at the entrance time. */
 async function enterCharacter(manager: any): Promise<any> {
   await manager.addCharacter('char1', 'figure/char1/model.model.json', {});
-  return manager.getAllCharacters().get('char1');
+  return Reflect.get(manager, 'characters').get('char1');
 }
 
 /** Authored scene time of the custom motion. */

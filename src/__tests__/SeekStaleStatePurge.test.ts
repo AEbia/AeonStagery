@@ -195,7 +195,7 @@ describe('seek to a time before the character entrance', () => {
     });
     const resources = new Live2DModelResources(() => '/project', () => adapter);
     await resources.loadCharacter('hero', 'hero.model.json', async loaded => {
-      const entry = manager.getAllCharacters().get('hero');
+      const entry = Reflect.get(manager, 'characters').get('hero');
       if (!entry) throw new Error('Expected staged character');
       entry.releaseModel = loaded.release;
     });
@@ -213,7 +213,7 @@ describe('seek to a time before the character entrance', () => {
     // reveal the previous action's pose.
     manager.removeCharacter('hero');
 
-    expect(manager.getAllCharacters().has('hero')).toBe(false);
+    expect(manager.hasCharacter('hero')).toBe(false);
     expect(char.motionManager.playing).toBe(false);
     expect(char.expressionState.current).toBeNull();
     expect(char.paramValues[0]).toBe(0);

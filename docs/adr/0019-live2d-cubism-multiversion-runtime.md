@@ -112,3 +112,18 @@ Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__
 选择完整行为方法，是为了让现有时间轴编排继续决定角色意图，同时由运行时 Module 收回 SDK 协议。每帧提交全部角色目标状态的声明式重写会同时改变编排状态模型，本次没有采用。迁移过程中允许旧形式暂时存在以保持验证可运行；最终删除旧公共契约是交付条件。
 
 本节记录已接受的目标，尚不声明实现完成。实施规格、完成条件与迁移切片在本地 issue tracker 的 19 号条目维护；该 tracker 按仓库约定仅用于本地流程。
+
+### 2026-10-12: Bound initialization and neutral character inspection (implemented slices)
+
+初始化与重置切片已经完成：Stage 和 Bake 通过绑定 handle 的 `initialize`、`bindRuntimeSource`、`resetRuntimeState`、`quiesce` 与 `dispose` 请求完整操作。遮罩隔离、预热、idle flush、主模型 baseline 与组合模型 pristine neutral pose 留在 runtime implementation；资源 Module 继续持有借用、池与纹理所有权。
+
+参数与角色检查切片通过 `inspectParameters` 返回独立的参数 ID、索引、显示名称、当前值及可用范围，通过 `editParameters` 在 runtime 内将旧工作区索引解析为 ID。每个具体模型在批量写入后只提交一次几何，组合模型的参数传播留在实现内。参数面板与工作区保留前 20 个参数、播放中禁用编辑、模型不可用的处理及 reload 后恢复播放位置的行为。
+
+`CharacterInfo` 返回独立的 model path、配置、adapter identity 与确定性能力描述，供 reload、资源缓存 identity 与 Seek 行为选择使用。Stage/CharacterAdapter 的 `getModel`、`getCoreModel`、`getAllCharacters` 及绑定 handle 的 Core getter 已删除；动画与 transform target 只取得类型明确的 Pixi `Container`。
+
+剩余 implementation gaps：中立动作采样、完整 performance/Seek/frame 行为、统一 SDK 时钟与 Bake transaction 协调尚未迁移。旧 controls contract、raw model fields、sampler target getters 及相关公共 re-exports 暂时保留，最终删除仍是完整迁移的交付条件。
+
+Implementation: `src/engine/live2d/runtime/BoundModelInitialization.ts`, `src/engine/live2d/runtime/BoundModelParameters.ts`, `src/engine/Live2DManager.ts`, `src/api/adapters/CharacterAdapter.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`.
+Verification: `src/__tests__/Live2DBoundInitialization.test.ts`, `src/__tests__/Live2DBoundParameters.test.ts`, `src/__tests__/CharacterInspection.test.ts`, `src/__tests__/CharacterDirectoryParameters.test.tsx`, `src/__tests__/useWorkspaceToolsBridge.test.tsx`, existing animation/Seek/resource integrations and `npm run check`.
+
+Combined verification for these slices: `npm run check` passed 514 files, 5625 tests and TypeScript on 2026-10-12.

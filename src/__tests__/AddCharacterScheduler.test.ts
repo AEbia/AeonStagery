@@ -5,11 +5,11 @@ import type { SchedulerContext, TransformationProxy } from '../engine/actions/ty
 import { computeSceneStateAtTime } from '../engine/RuntimeSceneState';
 
 const live2DMocks = vi.hoisted(() => ({
-  getAllCharacters: vi.fn(),
+  getCharacterInfo: vi.fn(),
   removeCharacter: vi.fn(),
   addCharacter: vi.fn(),
   applyProxyTransform: vi.fn(),
-  getModel: vi.fn(),
+  getDisplayObject: vi.fn(),
   getContainer: vi.fn(),
 }));
 
@@ -35,8 +35,8 @@ function createContext(proxy: TransformationProxy): SchedulerContext {
 describe('scheduleAddCharacter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    live2DMocks.getAllCharacters.mockReturnValue(new Map());
-    live2DMocks.getModel.mockReturnValue(undefined);
+    live2DMocks.getCharacterInfo.mockReturnValue(null);
+    live2DMocks.getDisplayObject.mockReturnValue(undefined);
     live2DMocks.getContainer.mockReturnValue(undefined);
     gsap.globalTimeline.clear();
   });

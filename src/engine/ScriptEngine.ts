@@ -770,7 +770,7 @@ class ScriptEngine {
             live2DManager.removeCharacter(id);
           } else {
             // Character consistency check: reload if the model path changed
-            const currentEntry = live2DManager.getAllCharacters().get(id);
+            const currentEntry = live2DManager.getCharacterInfo(id);
             if (currentEntry && currentEntry.modelPath !== resolvedModelPaths.get(id)) {
               live2DManager.removeCharacter(id);
             }
@@ -1448,14 +1448,14 @@ class ScriptEngine {
     const fps = script.meta.fps ?? 60;
     const tasks: Promise<void>[] = [];
     for (const [id, keys] of requiredByCharacter) {
-      const entry = live2DManager.getAllCharacters().get(id);
-      if (!entry?.model) continue;
+      const entry = live2DManager.getCharacterInfo(id);
+      if (!entry) continue;
       const targets = live2DManager.getMotionSamplerTargets(id);
       if (targets.length === 0) continue;
       for (const motionKey of keys) {
         tasks.push(
           motionCurveCache.ensure({
-            adapterId: entry.runtime.adapterId,
+            adapterId: entry.adapterId,
             modelRuntimePath: entry.modelPath,
             motionKey,
             targets,

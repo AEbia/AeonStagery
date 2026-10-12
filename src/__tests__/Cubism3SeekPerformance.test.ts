@@ -42,7 +42,7 @@ it('does not rebuild the same Cubism 3+ fade history on every scrub request', as
     adapterId: 'untitled-pixi-live2d-engine-cubism', config: {}, injectedParams: {},
     lipSyncParameterIds: new Set(), baseHeight: 100, motionEpoch: 0, idleSnapshot: snapshot,
   };
-  manager.getAllCharacters().set(entry.id, entry);
+  Reflect.set(manager, 'characters', new Map([[entry.id, entry]]));
   const sync = new CharacterSynchronizer(manager);
   const snapshots = new SnapshotStore();
   snapshots.insert(0, new Map([['hero', snapshot]]));
@@ -90,7 +90,7 @@ it('does not rebuild the same Cubism 3+ fade history on every scrub request', as
   } finally {
     entry.customMotionStage?.dispose();
     model.destroy();
-    manager.getAllCharacters().clear();
+    Reflect.set(manager, 'characters', new Map());
   }
 });
 

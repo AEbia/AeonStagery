@@ -124,8 +124,9 @@ vi.mock('../ui/context/AppContext', () => ({
   useCollaborationStatus: () => 'connected',
   usePlaybackStore: () => ({}),
   useCharacterAdapter: () => ({
-    getCoreModel: () => null,
-    getModel: () => null,
+    inspectParameters: () => null,
+    editParameters: vi.fn(),
+    getDisplayObject: () => null,
   }),
 }));
 

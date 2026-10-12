@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ScriptEngine from '../engine/ScriptEngine';
 import { subtitleRenderer } from '../engine/SubtitleRenderer';
@@ -66,14 +67,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
   it('enqueues every resource motion key per loaded Cubism 2 character', async () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
-    const getAllCharacters = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([
-      ['char1', {
-        id: 'char1',
-        model: {},
-        modelPath: 'asset://models/char.model3.json',
-        runtime: { adapterId: 'pixi-live2d-display-cubism2' },
-      } as any],
-    ]));
+    const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
     const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([fakeTarget]);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue({} as any);
 
@@ -90,7 +84,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
       });
       expect(ensure).toHaveBeenCalledWith(expect.objectContaining({ motionKey: 'smile' }));
     } finally {
-      getAllCharacters.mockRestore();
+      getCharacterInfo.mockRestore();
       getSamplerTargets.mockRestore();
       ensure.mockRestore();
     }
@@ -99,14 +93,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
   it('does not throw when a sampling background task fails', async () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
-    const getAllCharacters = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([
-      ['char1', {
-        id: 'char1',
-        model: {},
-        modelPath: 'asset://models/char.model3.json',
-        runtime: { adapterId: 'pixi-live2d-display-cubism2' },
-      } as any],
-    ]));
+    const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
     const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([fakeTarget]);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockRejectedValue(new Error('sample explosion'));
 
@@ -114,7 +101,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
       await expect((engine as any).prewarmMotionCurves(scene)).resolves.toBeUndefined();
       expect(ensure).toHaveBeenCalled();
     } finally {
-      getAllCharacters.mockRestore();
+      getCharacterInfo.mockRestore();
       getSamplerTargets.mockRestore();
       ensure.mockRestore();
     }
@@ -123,14 +110,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
   it('skips characters without a loaded model or without Cubism 2 targets', async () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
-    const getAllCharacters = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([
-      ['char1', {
-        id: 'char1',
-        model: null,
-        modelPath: 'asset://models/char.model3.json',
-        runtime: { adapterId: 'pixi-live2d-display-cubism2' },
-      } as any],
-    ]));
+    const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
     const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([]);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue({} as any);
 
@@ -138,7 +118,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
       await (engine as any).prewarmMotionCurves(scene);
       expect(ensure).not.toHaveBeenCalled();
     } finally {
-      getAllCharacters.mockRestore();
+      getCharacterInfo.mockRestore();
       getSamplerTargets.mockRestore();
       ensure.mockRestore();
     }

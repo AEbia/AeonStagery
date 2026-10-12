@@ -15,10 +15,13 @@ import { stageManager } from './StageManager';
 import { hookSystem } from '../api/hooks';
 import { eventBus } from '../api/events';
 import { getLogger } from './Logger';
-import type { CharacterConfig, CharacterTransformConfig } from '../api/types/character';
+import type { CharacterConfig, CharacterInfo, CharacterTransformConfig } from '../api/types/character';
 import type { Vec2 } from '../api/types/common';
 import type {
   Live2DParameterMetadata,
+  Live2DParameterEdit,
+  Live2DParameterEditResult,
+  Live2DParameterInspection,
 } from '../api/types/live2d-parameter-animation';
 import { resolveVec2 } from './utils/math';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
@@ -749,7 +752,7 @@ class Live2DManager {
    * never re-populates models that soft cleanup already retained.
    */
   matchesLoadedModel(id: string, modelUrl: string): boolean {
-    const entry = this.getAllCharacters().get(id);
+    const entry = this.characters.get(id);
     if (!entry) return false;
     const requestedUrl = this.modelResources.pathToUrl(modelUrl);
     return entry.modelPath === modelUrl || entry.modelUrl === modelUrl || entry.modelUrl === requestedUrl;
@@ -773,11 +776,11 @@ class Live2DManager {
   }
 
   /**
-   * Get the raw Live2D model for advanced manipulation.
-   * This gives direct access to the PixiJS DisplayObject and internal Live2D core.
+   * Display capabilities for animation; SDK operations stay on the handle.
    */
-  getModel(id: string): any | null {
-    return this.characters.get(id)?.model ?? null;
+  getDisplayObject(id: string): PIXI.Container | null {
+    const entry = this.characters.get(id);
+    return entry?.runtimeHandle?.displayObject ?? entry?.model ?? null;
   }
 
   /**
@@ -793,16 +796,6 @@ class Live2DManager {
     if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls) return [];
 
     return [...getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model)];
-  }
-
-  /**
-   * Get the internal Live2D core model for direct parameter manipulation.
-   * This is used by LipSyncEngine to control PARAM_MOUTH_OPEN_Y.
-   */
-  getCoreModel(id: string): any | null {
-    const entry = this.characters.get(id);
-    if (!entry) return null;
-    return getLive2DRuntimeAdapter(entry.runtime).getControls().getCoreModel(entry.model);
   }
 
   /**
@@ -865,26 +858,40 @@ class Live2DManager {
   getParameterMetadata(id: string): readonly Live2DParameterMetadata[] {
     const entry = this.characters.get(id);
     if (!entry) return [];
-    const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-    const metadata = controls.getParameterMetadata(entry.model);
-    if (metadata) return metadata.map((parameter) => ({ ...parameter }));
-    return (controls.getParameterValues(entry.model) ?? []).map((parameter) => ({
-      id: parameter.name,
+    const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
+    const metadata = handle.parameters.getParameterMetadata();
+    if (metadata) return metadata.map(parameter => ({ ...parameter }));
+    return (handle.inspectParameters() ?? []).map(parameter => ({
+      id: parameter.id,
       index: parameter.index,
       defaultValue: Number.isFinite(parameter.value) ? parameter.value : undefined,
       source: 'runtime',
     }));
   }
 
+  inspectParameters(id: string): readonly Live2DParameterInspection[] | null {
+    const entry = this.characters.get(id);
+    if (!entry) return null;
+    const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
+    return handle.inspectParameters();
+  }
+
+  editParameters(id: string, edits: readonly Live2DParameterEdit[]): Live2DParameterEditResult {
+    const entry = this.characters.get(id);
+    if (!entry) return { appliedParameterIds: [] };
+    const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
+    return handle.editParameters(edits);
+  }
+
   /**
    * Get the PIXI objects for GSAP to animate directly.
    */
-  getTransformTargets(id: string): { container: PIXI.Container; model: any } | null {
-    const entry = this.characters.get(id);
-    if (!entry) return null;
+  getTransformTargets(id: string): { container: PIXI.Container; model: PIXI.Container } | null {
+    const display = this.getDisplayObject(id);
+    if (!display) return null;
     return {
       container: this.getContainer(id),
-      model: entry.model,
+      model: display,
     };
   }
 
@@ -1146,10 +1153,25 @@ class Live2DManager {
    */
 
   /**
-   * Get all character entries (for iteration).
+   * Detached character information for listing and reload.
    */
-  getAllCharacters(): Map<string, CharacterEntry> {
-    return this.characters;
+  getCharacterInfo(id: string): CharacterInfo | null {
+    const entry = this.characters.get(id);
+    if (!entry) return null;
+    return {
+      id: entry.id,
+      modelPath: entry.modelPath,
+      adapterId: entry.runtime?.adapterId ?? entry.adapterId,
+      config: structuredClone(entry.config),
+      determinism: structuredClone(getLive2DRuntimeCapabilities(entry).determinism),
+    };
+  }
+
+  listCharacterInfo(): readonly CharacterInfo[] {
+    return [...this.characters.keys()].flatMap(id => {
+      const info = this.getCharacterInfo(id);
+      return info ? [info] : [];
+    });
   }
 
   /**

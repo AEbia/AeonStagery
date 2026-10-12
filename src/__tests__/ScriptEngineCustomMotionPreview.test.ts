@@ -27,7 +27,7 @@ describe('temporary custom Motion stage projection', () => {
         coreModel: { getParameterValues: () => params },
       } },
     };
-    const characters = live2DManager.getAllCharacters();
+    const characters: Map<string, import('../engine/Live2DConfig').CharacterEntry> = Reflect.get(live2DManager, 'characters');
     characters.set(entry.id, entry);
     const canonical = { ...motion, fadeInSeconds: 0.5 };
     const candidate = { ...canonical, tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 30 }] }] };

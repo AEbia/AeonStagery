@@ -1,3 +1,4 @@
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
 import { SnapshotStore } from '../engine/SnapshotStore';
@@ -16,7 +17,7 @@ function createMockLive2DManager() {
   return {
     listCharacters: vi.fn().mockReturnValue([]),
     hasCharacter: vi.fn().mockReturnValue(false),
-    getAllCharacters: vi.fn().mockReturnValue(new Map()),
+    getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map().get(id), id)),
     applySnapshot: vi.fn(),
     captureSnapshot: vi.fn().mockReturnValue(null),
     playMotion: vi.fn(),
@@ -108,7 +109,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       ...createMockLive2DManager(),
       listCharacters: vi.fn().mockReturnValue(['char1']),
       hasCharacter: vi.fn().mockReturnValue(true),
-      getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', entry]])),
+      getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', entry]]).get(id), id)),
       applySnapshot: vi.fn((_id: string, snap: any) => {
         params.set(snap.params);
       }),
@@ -178,7 +179,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       ...createMockLive2DManager(),
       listCharacters: vi.fn().mockReturnValue(['char1']),
       hasCharacter: vi.fn().mockReturnValue(true),
-      getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', entry]])),
+      getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', entry]]).get(id), id)),
       applySnapshot: vi.fn((_id: string, snap: any) => {
         params.set(snap.params);
       }),

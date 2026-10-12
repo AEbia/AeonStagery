@@ -1,3 +1,4 @@
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { applyBehaviorFixes, applyParameterOverride } from '../engine/Live2DModelSetup';
@@ -157,7 +158,7 @@ describe('Blink diagnostics and regression', () => {
       const live2D: any = {
         listCharacters: vi.fn().mockReturnValue(['char1']),
         hasCharacter: vi.fn().mockReturnValue(true),
-        getAllCharacters: vi.fn().mockReturnValue(new Map()),
+        getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map().get(id), id)),
         applySnapshot: vi.fn(),
         captureSnapshot: vi.fn().mockReturnValue(null),
         playMotion: vi.fn(),

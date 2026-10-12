@@ -263,15 +263,18 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     const values = this.getParameterValues(model);
     if (!values) return null;
     const settings = model?.internalModel?.settings;
+    const context = getCubism2ModelContext(model?.internalModel?.coreModel);
     return values.map((parameter) => {
       const setting = settings?.parameters?.[parameter.index] ?? {};
       const knownDefault = CUBISM2_DEFAULT_PARAMS[parameter.name];
       return {
         id: parameter.name,
         index: parameter.index,
-        label: typeof setting.label === 'string' ? setting.label : undefined,
-        min: finiteOrUndefined(setting.min),
-        max: finiteOrUndefined(setting.max),
+        label: typeof setting.label === 'string' && setting.label
+          ? setting.label
+          : typeof setting.name === 'string' && setting.name !== parameter.name ? setting.name : undefined,
+        min: finiteOrUndefined(context?.getParamMin?.(parameter.index)) ?? finiteOrUndefined(setting.min),
+        max: finiteOrUndefined(context?.getParamMax?.(parameter.index)) ?? finiteOrUndefined(setting.max),
         defaultValue: finiteOrUndefined(setting.defaultValue) ?? knownDefault,
         source: knownDefault !== undefined ? 'known-cubism2-default' : 'runtime',
       };

@@ -1,3 +1,4 @@
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 /**
  * @vitest-environment node
  */
@@ -57,12 +58,12 @@ function createMockLive2D() {
     id: 'char1',
     model: {},
     modelPath: 'asset://models/char.model3.json',
-    runtime: { adapterId: 'pixi-live2d-display-cubism2' },
+    runtime: { adapterId: 'pixi-live2d-display-cubism2' as const },
   };
   const live2D = {
     listCharacters: vi.fn().mockReturnValue(['char1']),
     hasCharacter: vi.fn().mockReturnValue(true),
-    getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', characterEntry]])),
+    getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', characterEntry]]).get(id), id)),
     applySnapshot: vi.fn(),
     captureSnapshot: vi.fn().mockReturnValue(null),
     playMotion: vi.fn(),
@@ -304,8 +305,10 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
   });
 
   it('routes cached Cubism 3+ parameter motions through the custom evaluator instead of native replay', async () => {
-    const entry = live2D.getAllCharacters().get('char1')!;
-    entry.runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true };
+    live2D.getCharacterInfo.mockReturnValue(characterInfoFixture({
+      modelPath: 'asset://models/char.model3.json',
+      runtime: { runtimeFamily: 'cubism3-plus' as const, adapterId: 'untitled-pixi-live2d-engine-cubism' as const, supported: true },
+    }));
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(cachedCubism3Entry);
 
     await synchronizer.syncTo({

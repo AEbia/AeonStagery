@@ -1,60 +1,71 @@
 import { live2DManager } from '../../engine/Live2DManager';
 import type { CharacterConfig, CharacterTransformConfig } from '../types/character';
 import type { ICharacterAdapter } from '../../api/interfaces';
+import type { Live2DParameterEdit } from '../types/live2d-parameter-animation';
 
 export class CharacterAdapter implements ICharacterAdapter {
+  constructor(private readonly manager = live2DManager) {}
+
+  inspectParameters(characterId: string) {
+    return this.manager.inspectParameters(characterId);
+  }
+
+  editParameters(characterId: string, edits: readonly Live2DParameterEdit[]) {
+    return this.manager.editParameters(characterId, edits);
+  }
+
   getParameterMetadata(characterId: string) {
-    return live2DManager.getParameterMetadata(characterId);
+    return this.manager.getParameterMetadata(characterId);
   }
 
   async add(id: string, modelPath: string, config?: CharacterConfig): Promise<void> {
-    await live2DManager.addCharacter(id, modelPath, config);
+    await this.manager.addCharacter(id, modelPath, config);
   }
 
   async remove(id: string): Promise<void> {
-    live2DManager.removeCharacter(id);
+    this.manager.removeCharacter(id);
   }
 
   playMotion(id: string, motionKey: string): void {
-    live2DManager.playMotion(id, motionKey);
+    this.manager.playMotion(id, motionKey);
   }
 
   stopAllMotions(id: string): void {
-    live2DManager.stopAllMotions(id);
+    this.manager.stopAllMotions(id);
   }
 
   setExpression(id: string, expressionName: string): void {
-    live2DManager.setExpression(id, expressionName);
+    this.manager.setExpression(id, expressionName);
   }
 
   lookAt(id: string, x: number, y: number, duration?: number): void {
-    live2DManager.lookAt(id, x, y, duration);
+    this.manager.lookAt(id, x, y, duration);
   }
 
   transform(id: string, config: CharacterTransformConfig): void {
-    live2DManager.transform(id, config);
+    this.manager.transform(id, config);
   }
 
   getPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null {
-    return live2DManager.getPoint(id, pointName, out);
+    return this.manager.getPoint(id, pointName, out);
   }
 
   listCharacters(): string[] {
-    return live2DManager.listCharacters();
+    return this.manager.listCharacters();
   }
 
   getModelDataFromPath(modelPath: string): Promise<{ motions: string[]; expressions: string[] }> {
-    return live2DManager.getModelDataFromPath(modelPath);
+    return this.manager.getModelDataFromPath(modelPath);
   }
 
-  getCoreModel(id: string): any { return live2DManager.getCoreModel(id); }
-  getModel(id: string): any { return live2DManager.getModel(id); }
-  hasCharacter(id: string): boolean { return live2DManager.hasCharacter(id); }
-  getAllCharacters(): Map<string, any> { return live2DManager.getAllCharacters(); }
+  getCharacterInfo(id: string) { return this.manager.getCharacterInfo(id); }
+  listCharacterInfo() { return this.manager.listCharacterInfo(); }
+  getDisplayObject(id: string) { return this.manager.getDisplayObject(id); }
+  hasCharacter(id: string): boolean { return this.manager.hasCharacter(id); }
   getCubism2SamplerTargets(characterId: string): readonly import('../../engine/live2d/cubism2MotionSampler').Cubism2MotionSamplerTarget[] {
-    return live2DManager.getCubism2SamplerTargets(characterId);
+    return this.manager.getCubism2SamplerTargets(characterId);
   }
   getMotionDuration(characterId: string, motionKey: string): number {
-    return live2DManager.getMotionDuration(characterId, motionKey);
+    return this.manager.getMotionDuration(characterId, motionKey);
   }
 }

@@ -1,3 +1,4 @@
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
 import Live2DManager from '../engine/Live2DManager';
@@ -7,7 +8,7 @@ function createMockLive2D() {
   return {
     listCharacters: vi.fn().mockReturnValue(['tomori']),
     hasCharacter: vi.fn().mockReturnValue(true),
-    getAllCharacters: vi.fn().mockReturnValue(new Map()),
+    getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map().get(id), id)),
     applySnapshot: vi.fn(),
     captureSnapshot: vi.fn().mockReturnValue(null),
     playMotion: vi.fn(),

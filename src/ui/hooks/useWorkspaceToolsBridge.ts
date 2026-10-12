@@ -34,10 +34,7 @@ function captureWorkspaceRuntimeSnapshot(
   scriptEngine.transformationProxies.forEach((proxy, id) => {
     const character = charactersById.get(id);
     if (!character?.model) return;
-    const core = characterAdapter.getCoreModel(id);
-    const model = characterAdapter.getModel(id);
-    const values = core?.getParameterValues?.() || core?.paramValues || [];
-    const parameterSettings = model?.internalModel?.settings?.parameters || [];
+    const parameters = characterAdapter.inspectParameters(id) ?? [];
     characters.push({
       id,
       name: character.name || id,
@@ -46,10 +43,10 @@ function captureWorkspaceRuntimeSnapshot(
       z: proxy.z ?? 0,
       scale: proxy.scale,
       opacity: proxy.opacity,
-      parameters: Array.from({ length: Math.min(values.length, 20) }, (_, index) => ({
-        index,
-        name: parameterSettings[index]?.name || `Param_${index}`,
-        value: Number(values[index] ?? 0),
+      parameters: parameters.slice(0, 20).map(parameter => ({
+        index: parameter.index,
+        name: parameter.label,
+        value: parameter.value,
       })),
     });
   });
@@ -223,7 +220,7 @@ export function useWorkspaceToolsBridge(
             });
             break;
           case 'reload-character': {
-            const entry = contextValue.adapters.character.getAllCharacters().get(command.charId);
+            const entry = contextValue.adapters.character.getCharacterInfo(command.charId);
             if (!entry) break;
             const currentTime = contextValue.adapters.playback.getCurrentTime();
             await contextValue.adapters.character.remove(command.charId);
@@ -232,9 +229,7 @@ export function useWorkspaceToolsBridge(
             break;
           }
           case 'set-character-parameter':
-            contextValue.adapters.character
-              .getCoreModel(command.charId)
-              ?.setParamFloat(command.parameterIndex, command.value);
+            contextValue.adapters.character.editParameters(command.charId, [{ index: command.parameterIndex, value: command.value }]);
             break;
           case 'save':
             await handleSave();
