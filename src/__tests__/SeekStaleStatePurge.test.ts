@@ -194,7 +194,11 @@ describe('seek to a time before the character entrance', () => {
       fs: { readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }) },
     });
     const resources = new Live2DModelResources(() => '/project', () => adapter);
-    await resources.loadCharacter('hero', 'hero.model.json', async () => {});
+    await resources.loadCharacter('hero', 'hero.model.json', async loaded => {
+      const entry = manager.getAllCharacters().get('hero');
+      if (!entry) throw new Error('Expected staged character');
+      entry.releaseModel = loaded.release;
+    });
     Reflect.set(manager, 'modelResources', resources);
     manager.setScriptEngine({ isReconstructing: false, getCurrentTime: () => 3 } as any);
 

@@ -18,15 +18,15 @@ import { eventBus } from '../api/events';
 import { settingsManager } from '../ui/SettingsStore';
 import type { Snapshot } from './SnapshotStore';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
-import { Live2DCompositeModel } from './Live2DCompositeModel';
+import { Live2DModelResources, Live2DModelLoadError, type Live2DResourceModel, type LoadedLive2DModel } from './Live2DModelResources';
 import type { Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
-import { getUnsupportedLive2DRuntimeMessage, resolveLive2DRuntimeDescriptor } from './Live2DRuntimeResolver';
 import {
   cubism2Live2DAdapter,
   getLive2DRuntimeAdapter,
   type Live2DRuntimeClock,
 } from './Live2DRuntimeAdapter';
 import { isPreparedAssetRef, preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
+import { resetModelToNeutralPose } from './live2d/characterStatePurge';
 import { BakeMotionRuntime, type BakeMotionPlanRequest, type BakeMotionRuntimeHost } from './BakeMotionRuntime';
 
 /**
@@ -42,7 +42,8 @@ const BAKE_DIALOGUE_MOUTH_PARAMS = new Set(['PARAM_MOUTH_OPEN_Y', 'ParamMouthOpe
 
 interface BakeModel {
   id: string;
-  model: any;
+  model: Live2DResourceModel;
+  release: LoadedLive2DModel['release'];
   modelPath: string;
   modelKey: string;
   runtime: Live2DRuntimeDescriptor;
@@ -65,29 +66,21 @@ export interface BakeResult {
 export class BakeEngine {
   private models: Map<string, BakeModel> = new Map();
   private token = 0;
-  /** Per-id lifecycle generation: bumped on every `removeModel` so a stale
-   *  async `loadModel` continuation can never resurrect a replaced/removed
-   *  model entry (costume swaps and scene reloads race the long `createModel`
-   *  chains). A load captures the generation at start and only publishes its
-   *  entry when it is still current. */
-  private readonly modelGeneration = new Map<string, number>();
+  private taskVersion = 0;
+  private closed = false;
+  private readonly modelResources: Live2DModelResources;
   private snapshotHistory: { time: number; models: Map<string, ModelSnapshot> }[] = [];
-  private live2dReady = false;
-  private initPromise: Promise<void> | null = null;
-  private initPromises: Map<string, Promise<void>> = new Map();
   private activeMotionLoads: Set<string> = new Set();
 
 
   private container: PIXI.Container;
   private app: PIXI.Application;
-  private wmdlConfigRegistry: WmdlConfigRegistry | null = null;
 
   constructor(app: PIXI.Application, wmdlConfigRegistry?: WmdlConfigRegistry) {
     this.app = app;
     this.container = new PIXI.Container();
-    if (wmdlConfigRegistry) {
-      this.wmdlConfigRegistry = wmdlConfigRegistry;
-    }
+    this.modelResources = new Live2DModelResources(() => '', runtime => getLive2DRuntimeAdapter(runtime), 'bake');
+    if (wmdlConfigRegistry) this.modelResources.setWmdlConfigRegistry(wmdlConfigRegistry);
     // 关键修复：不要挂载到主舞台 (app.stage)，否则会被主渲染循环 (Ticker) 劫持
     // 导致主线程在后台线程的 update() 调用之前疯狂调用 render()，从而引发 Cubism 底层报错！
     this.container.alpha = 0;
@@ -98,7 +91,9 @@ export class BakeEngine {
    * Cancel current bake task by invalidating the token.
    */
   cancel(): void {
-    this.token = -1; // Any number that won't match the current task
+    this.taskVersion++;
+    this.token = -1;
+    this.modelResources.cancelLoads();
     console.log('[BakeEngine] Cancellation requested.');
   }
 
@@ -120,6 +115,7 @@ export class BakeEngine {
       step,
       undefined,
       false,
+      buildPreparedBakeModelSourceMap(scene),
     );
   }
 
@@ -142,6 +138,7 @@ export class BakeEngine {
       precision,
       seedSnapshot,
       silent,
+      buildPreparedBakeModelSourceMap(scene),
     );
   }
 
@@ -159,8 +156,13 @@ export class BakeEngine {
     precision: number,
     seedSnapshot?: Snapshot,
     silent: boolean = false,
+    modelSources: ReadonlyMap<string, string> = new Map(),
   ): Promise<BakeResult> {
+    if (this.closed) return { snapshotHistory: [] };
+    this.modelResources.cancelLoads();
+    const taskVersion = ++this.taskVersion;
     this.token = token;
+    const isCurrent = () => this.checkToken(token, taskVersion);
 
     this.snapshotHistory = [];
     
@@ -169,7 +171,7 @@ export class BakeEngine {
 
     const startTime = performance.now();
 
-    const { requiredMotions } = this.scanAssets(script);
+    const { requiredMotions } = this.scanAssets(script, modelSources);
 
     // Load all models in parallel
     const loadPromises: Promise<void>[] = [];
@@ -189,24 +191,6 @@ export class BakeEngine {
       }
     }
 
-    const runtimeDescriptors = new Map<string, Live2DRuntimeDescriptor>();
-    for (const [id, modelPath] of charModelMap.entries()) {
-      const resolvedPath = resolvedModelPaths.get(modelPath) ?? modelPath;
-      const runtimeInfo = await this.resolveBakeRuntime(resolvedPath, modelPath);
-      if (runtimeInfo.runtime) {
-        runtimeDescriptors.set(id, runtimeInfo.runtime);
-      }
-    }
-
-    const needsCubism2 = Array.from(runtimeDescriptors.values()).some((runtime) => runtime.adapterId === 'pixi-live2d-display-cubism2');
-    if (needsCubism2) {
-      await this.initLive2D();
-      if (!this.live2dReady) {
-        console.error('[BakeEngine] Live2D runtime not available.');
-        return { snapshotHistory: [] };
-      }
-    }
-
     // 核心修复：清理不再属于当前剧本的角色模型，防止长期编辑导致模型堆积内存泄漏
     const idsToRemove: string[] = [];
     for (const id of this.models.keys()) {
@@ -220,11 +204,11 @@ export class BakeEngine {
 
     for (const [id, modelPath] of charModelMap.entries()) {
       const path = resolvedModelPaths.get(modelPath);
-      if (path) loadPromises.push(this.loadModel(id, path, modelPath));
+      if (path) loadPromises.push(this.loadModel(id, path, modelSources.get(modelPath) ?? modelPath, isCurrent));
     }
 
     await Promise.all(loadPromises);
-    if (!this.checkToken(token)) {
+    if (!isCurrent()) {
       eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
       return { snapshotHistory: [] };
     }
@@ -238,6 +222,7 @@ export class BakeEngine {
       }
       loadWait++;
       await new Promise((r) => setTimeout(r, 10));
+      if (!isCurrent()) return { snapshotHistory: [] };
     }
     for (let i = 0; i < 5; i++) {
       for (const entry of this.models.values()) {
@@ -248,7 +233,9 @@ export class BakeEngine {
       requiredMotions,
       script.meta?.fps ?? 60,
       seedSnapshot && rangeStart > 0 ? seedSnapshot.time : undefined,
+      isCurrent,
     );
+    if (!isCurrent()) return { snapshotHistory: [], motionReport: motionRuntime.report() };
     console.log('[BakeEngine] All assets ready. Starting timeline simulation...');
 
     const totalDuration = script.timeline.reduce(
@@ -292,7 +279,7 @@ export class BakeEngine {
     let lastYieldTime = performance.now();
 
     while (simTime <= effectiveEnd) {
-      if (!this.checkToken(token)) break;
+      if (!isCurrent()) break;
 
         // 1. Sync state (safe, no SDK clock required)
         const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
@@ -302,11 +289,12 @@ export class BakeEngine {
 
           if (entry && targetResolvedPath && entry.modelPath !== targetResolvedPath) {
             this.removeModel(id);
-            await this.loadModel(id, targetResolvedPath, state.model);
+            await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
           } else if (!entry && targetResolvedPath) {
-            await this.loadModel(id, targetResolvedPath, state.model);
+            await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
           }
 
+          if (!isCurrent()) break;
           entry = this.models.get(id);
           if (entry) {
             // 核心修复：如果这个角色是刚被 addCharacter 的（无论是第一次出现，还是 remove 后重新出现）
@@ -318,6 +306,7 @@ export class BakeEngine {
               runtimeControls.applySnapshot(entry.model, entry.idleSnapshot as ModelSnapshot);
               if (entry.runtime.runtimeFamily === 'cubism2') {
                 await runtimeControls.restartIdleMotion(entry.model);
+                if (!isCurrent()) break;
               }
             }
 
@@ -346,12 +335,15 @@ export class BakeEngine {
         // 绝不在此处 removeModel！避免角色被短暂 removeCharacter 后再 addCharacter 导致模型反复加载/释放引发内存泄漏。
         lastCharacters = new Set(characters.keys());
 
+        if (!isCurrent()) break;
+
         // 2. 执行 MotionRuntime 的一次性 native start/restart，然后统一推进。
         //    这只在同一个全局 SDK 时钟锁内执行；不再每帧向 SDK 队列写入
         //    _pendingPlayMotion，也不再复制 Live2DManager._executePlayMotion。
         // === 核心修复：必须获取全局锁才能修改 SDK 时钟并执行模型物理更新 ===
         await acquireUtSystemLock();
         try {
+          if (!isCurrent()) break;
           // NativeDriver 的 start/restart 必须在“普通帧推进”之前发生：它
           // 复用 Cubism2NativeMotionSession 在锁内完成 offset 初始化/50ms
           // 快进，随后下面的统一 update 才把 SDK 时钟推进到下一帧。
@@ -360,7 +352,9 @@ export class BakeEngine {
             const clock = getLive2DRuntimeAdapter(entry.runtime).getClock();
             if (clock) clocks.add(clock);
             await motionRuntime.advanceNative({ charId: entry.id, utSystem: clock });
+            if (!isCurrent()) break;
           }
+          if (!isCurrent()) break;
           for (const clock of clocks) {
             // 绝不能设置为 simTime * 1000（会引起时间倒流和负数 dt 导致物理坍缩）
             // 必须在当前全局时钟基础上严格单调递增
@@ -377,6 +371,8 @@ export class BakeEngine {
           // 不再恢复 originalUt，让全局时钟严格单调递增，供主引擎和后台共同使用
           releaseUtSystemLock();
         }
+
+        if (!isCurrent()) break;
 
         // Capture snapshots
         const models = new Map<string, ModelSnapshot>();
@@ -405,12 +401,17 @@ export class BakeEngine {
         lastYieldTime = performance.now();
         
         // Check if task was cancelled while we were yielding
-        if (!this.checkToken(token)) {
+        if (!isCurrent()) {
           console.warn('[BakeEngine] Simulation aborted after yield.');
           eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
           return { snapshotHistory: [], motionReport: motionRuntime.report() }; // 返回空，防止污染主引擎快照
         }
       }
+    }
+
+    if (!isCurrent()) {
+      eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
+      return { snapshotHistory: [], motionReport: motionRuntime.report() };
     }
 
     // --- 正常完成路径 ---
@@ -423,7 +424,10 @@ export class BakeEngine {
   }
 
   destroy(): void {
-    for (const id of this.models.keys()) this.removeModel(id);
+    if (this.closed) return;
+    this.closed = true;
+    this.cancel();
+    this.modelResources.close();
     this.models.clear();
     this.snapshotHistory = [];
     this.activeMotionLoads.clear();
@@ -443,52 +447,20 @@ export class BakeEngine {
 
   // ── Private: lifecycle ─────────────────────────────────────────────────
 
-  private checkToken(token: number): boolean {
-    if (this.token !== token) {
+  private checkToken(token: number, taskVersion: number): boolean {
+    if (this.closed || this.token !== token || this.taskVersion !== taskVersion) {
       console.log('[BakeEngine] Token mismatch, cancelled.');
       return false;
     }
     return true;
   }
 
-  private async initLive2D(): Promise<void> {
-    if (this.live2dReady) return;
-    if (this.initPromise) return this.initPromise;
-
-    this.initPromise = (async () => {
-      try {
-        await cubism2Live2DAdapter.init();
-        this.live2dReady = cubism2Live2DAdapter.isReady();
-        console.log('[BakeEngine] Live2D runtime initialized.');
-      } catch (err) {
-        console.error('[BakeEngine] Failed to init Live2D:', err);
-      } finally {
-        this.initPromise = null;
-      }
-    })();
-
-    return this.initPromise;
+  /** Includes SDK requests whose task has already been cancelled or closed. */
+  async waitForLoads(): Promise<void> {
+    await this.modelResources.waitForLoads();
   }
 
-  private async initRuntimeAdapter(runtime: Live2DRuntimeDescriptor): Promise<void> {
-    if (runtime.adapterId === 'pixi-live2d-display-cubism2') {
-      await this.initLive2D();
-      return;
-    }
-
-    if (this.initPromises.has(runtime.adapterId)) {
-      return this.initPromises.get(runtime.adapterId)!;
-    }
-
-    const adapter = getLive2DRuntimeAdapter(runtime);
-    const initTask = adapter.init().finally(() => {
-      this.initPromises.delete(runtime.adapterId);
-    });
-    this.initPromises.set(runtime.adapterId, initTask);
-    await initTask;
-  }
-
-  private scanAssets(script: RuntimeTimelineScene) {
+  private scanAssets(script: RuntimeTimelineScene, modelSources: ReadonlyMap<string, string>) {
     const requiredMotions = new Map<string, Set<string>>(); // ModelPath -> Set of motion keys
     
     // Track the active model path for each character ID as we scan the timeline
@@ -498,14 +470,14 @@ export class BakeEngine {
     if (script.meta.characters) {
       for (const char of script.meta.characters) {
         if (char.model) {
-          activeModelMap.set(char.id, char.model);
+          activeModelMap.set(char.id, modelSources.get(char.model) ?? char.model);
         }
       }
     }
 
     for (const action of script.timeline) {
       if (action.action === 'addCharacter' && action.params?.id && action.params?.model) {
-        activeModelMap.set(action.params.id, action.params.model);
+        activeModelMap.set(action.params.id, modelSources.get(action.params.model) ?? action.params.model);
       }
       if (action.action === 'playMotion' && action.params?.id && action.params.motion) {
         const motionKey = resolveMotionKey(action.params.motion);
@@ -523,7 +495,8 @@ export class BakeEngine {
   private async createBakeMotionRuntime(
     requiredMotions: Map<string, Set<string>>,
     fps: number,
-    seedSceneTime?: number,
+    seedSceneTime: number | undefined,
+    isCurrent: () => boolean,
   ): Promise<BakeMotionRuntime> {
     const requests: BakeMotionPlanRequest[] = [];
     for (const [id, entry] of this.models) {
@@ -544,16 +517,17 @@ export class BakeEngine {
       fps,
       getSamplingTargets: (charId) => {
         const entry = this.models.get(charId);
-        if (!entry) return [];
+        if (!isCurrent() || !entry) return [];
         return getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model);
       },
-      preloadMotion: (charId, motionKey) => this.preloadMotion(charId, motionKey),
+      preloadMotion: (charId, motionKey) => isCurrent() ? this.preloadMotion(charId, motionKey) : Promise.resolve(),
       getBaseValues: (charId, parameterIds, excludeParameterIds) => {
         const entry = this.models.get(charId);
-        if (!entry) return {};
+        if (!isCurrent() || !entry) return {};
         return this.getBakeParameterBaseValues(entry, parameterIds, excludeParameterIds);
       },
       stopNativeMotion: (charId) => {
+        if (!isCurrent()) return;
         const entry = this.models.get(charId);
         if (!entry) return;
         const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
@@ -562,7 +536,7 @@ export class BakeEngine {
       },
       getModel: (charId) => {
         const entry = this.models.get(charId);
-        if (!entry) return undefined;
+        if (!isCurrent() || !entry) return undefined;
         return {
           model: entry.model,
           runtimeFamily: entry.runtime.runtimeFamily,
@@ -579,302 +553,70 @@ export class BakeEngine {
 
   // ── Private: model loading ─────────────────────────────────────────────
 
-  private pathToUrl(modelPath: string): string {
-    let fullPath = modelPath;
-    const isAbsolute = fullPath.startsWith('asset://') || fullPath.startsWith('file://') || /^[a-zA-Z]:[/\\]/.test(fullPath) || fullPath.startsWith('/');
-    if (!isAbsolute) {
-      return modelPath;
-    }
-    if (fullPath.startsWith('file:///')) fullPath = fullPath.replace('file:///', '');
-    return fullPath.startsWith('asset://') ? fullPath : encodeURI(`asset://localhost/${fullPath.replace(/\\/g, '/')}`);
-  }
-
   private async loadModel(
     id: string,
     absolutePath: string,
-    modelKey?: string,
+    modelKey: string,
+    isTaskCurrent: () => boolean,
   ): Promise<void> {
-    if (this.models.has(id)) return;
-    // Lifecycle epoch: if the character is removed/replaced while this load is
-    // still in flight, the entry must not be published (and the freshly loaded
-    // model must be dropped quietly instead of resurrecting a stale identity).
-    const generation = this.modelGeneration.get(id) ?? 0;
-    const runtimeInfo = await this.resolveBakeRuntime(absolutePath, modelKey);
-    if (!runtimeInfo.supported || !runtimeInfo.runtime) {
-      return;
-    }
-    const { runtime, assetUrl } = runtimeInfo;
-    const adapter = getLive2DRuntimeAdapter(runtime);
-    await this.initRuntimeAdapter(runtime);
-
-    // Check if this is a composed model (.wmdl) - pure in-memory lookup
-    let wmdlConfig = this.wmdlConfigRegistry?.get(modelKey || '');
-    if (!wmdlConfig && modelKey?.endsWith('.wmdl')) {
-      wmdlConfig = this.wmdlConfigRegistry?.get(absolutePath);
-    }
-
-    let model: any = null;
-    if (wmdlConfig) {
-      // Composed model! Load torso and submodels
-      const mainModelUrl = this.pathToUrl(wmdlConfig.modelRelativePath);
-      const mainModel = await adapter.createModel(mainModelUrl, {
-        autoHitTest: false,
-        autoFocus: false,
-        autoUpdate: false,
-        idleMotionGroup: '',
-      });
-
-      const subModels: any[] = [];
-      if (wmdlConfig.subModels && Array.isArray(wmdlConfig.subModels)) {
-        for (const sub of wmdlConfig.subModels) {
-          const subUrl = this.pathToUrl(sub.modelRelativePath);
+    const existing = this.models.get(id);
+    if (existing?.modelPath === absolutePath || !isTaskCurrent()) return;
+    if (existing) this.removeModel(id);
+    try {
+      await this.modelResources.loadCharacter(id, absolutePath, async loaded => {
+        const { model, runtime, isCurrent, release } = loaded;
+        if (!isCurrent() || !isTaskCurrent()) return;
+        const runtimeControls = getLive2DRuntimeAdapter(runtime).getControls();
+        resetModelToNeutralPose(model, runtime);
+        model.visible = true;
+        model.alpha = 1;
+        if (runtime.runtimeFamily === 'cubism2' || runtime.runtimeFamily === 'wmdl') {
+          runtimeControls.installBakeRenderGuards(model);
+        }
+        this.container.addChild(model);
+        try {
+          runtimeControls.stepBakeFrame(model, 16, this.app.renderer, id, false);
+        } catch (error) {
+          console.warn(`[BakeEngine] Initial render failed for ${id}`, error);
+        }
+        if (runtime.runtimeFamily === 'cubism2') {
           try {
-            const subModel = await adapter.createModel(subUrl, {
-              autoHitTest: false,
-              autoFocus: false,
-              autoUpdate: false,
-              idleMotionGroup: '',
-            });
-            subModel.x = sub.offsetX ?? 0;
-            subModel.y = sub.offsetY ?? 0;
-            subModel.visible = true;
-
-            // Isolate sub-model masks to prevent glitches on Cubism 2.
-            if (runtime.runtimeFamily === 'cubism2') {
-              getLive2DRuntimeAdapter(runtime).getControls().isolateMask(subModel);
-            }
-
-            subModels.push(subModel);
-          } catch (err) {
-            console.warn(`[BakeEngine] Failed to load sub-model during pre-bake: ${subUrl}`, err);
+            await runtimeControls.flushIdleState(model);
+            if (!isCurrent() || !isTaskCurrent()) return;
+            runtimeControls.stepBakeFrame(model, 0, this.app.renderer, id, false);
+          } catch {
+            // Preserve the legacy idle-flush fallback.
           }
         }
-      }
-
-      model = new Live2DCompositeModel(mainModel, subModels);
-      model._modelUrl = absolutePath;
-    } else {
-      model = await adapter.createModel(assetUrl, {
-        autoHitTest: false,
-        autoFocus: false,
-        autoUpdate: false,
-        idleMotionGroup: '',
-      });
-    }
-
-    // The character was removed/replaced while this model was still loading
-    // (costume swap, scene reload, cancelled bake). Drop the superseded model
-    // before any further wiring so it cannot leak into the simulation or
-    // publish a stale entry under the current owner's id.
-    if ((this.modelGeneration.get(id) ?? 0) !== generation) {
-      this.discardSupersededModel(model);
-      return;
-    }
-
-    model.visible = true; // must be visible for PIXI to call _render()
-
-    // The render guards keep the family-string gate: they interact with
-    // pixi/SDK GL texture state which must not be forced onto a model
-    // classified outside the cubism2 family.
-    if (runtime.runtimeFamily === 'cubism2' || runtime.runtimeFamily === 'wmdl') {
-      getLive2DRuntimeAdapter(runtime).getControls().installBakeRenderGuards(model);
-    }
-
-    // Add to hidden container
-    this.container.addChild(model);
-
-    const runtimeControls = getLive2DRuntimeAdapter(runtime).getControls();
-
-    try {
-      // 核心修复：先 update 后 render，符合 SDK 预期顺序，消除警告。
-      // 绝对不能传入 0，否则底层 Physics 会因为除以零 (dt=0) 产生 NaN/Infinity，
-      // 导致整个快照被严重污染，进而导致前台模型恢复快照时坍缩成“2个小点”。
-      runtimeControls.stepBakeFrame(model, 16, this.app.renderer, id, false);
-    } catch (e) {
-      console.warn(`[BakeEngine] Initial render failed for ${id}`, e);
-    }
-
-    // === 核心修复：安全地洗刷初始状态遗留的 0 opacity ===
-    if (runtime.runtimeFamily === 'cubism2') {
-      try {
-        await runtimeControls.flushIdleState(model);
-        // 与旧实现一致：idle flush 结束后再推进一帧（deltaTime 已由 flush 内的
-        // update 累积），随后快照捕获看到的才是洗刷后的姿态。
-        runtimeControls.stepBakeFrame(model, 0, this.app.renderer, id, false);
-      } catch (e) {
-        // Ignore
-      }
-    }
-
-    const entry: BakeModel = {
-      id,
-      model,
-      modelPath: absolutePath, // Note: absolutePath is used here
-      modelKey: modelKey || absolutePath,
-      runtime,
-      adapterId: runtime.adapterId,
-      expressionKey: null,
-      injectedParams: {},
-      idleSnapshot: {
-        params: new Float32Array(0),
-        opacities: new Float32Array(0),
-      },
-    };
-
-    // 核心修复：应用完整的行为修复，禁用 SDK 自带的、会导致参数重置的内建系统。
-    // The parameter-override hook reads `_characterEntry.injectedParams`
-    // during the SDK core update. It must point at this BakeModel — a throwaway
-    // mockEntry would leave curve-driver fade-in values uncommitted, so
-    // captureModelSnapshot would miss Live2D FadeIn (ADR-0029/0033).
-    // `resolveBakeRuntime` can degrade the descriptor to `unknown` when the
-    // model json cannot be fetched/parsed for classification (path-only
-    // resolution), even though the model is a plain Cubism 2.1 model; the
-    // adapter applies the hooks to any model exposing a writable Cubism core
-    // shape so degraded descriptors still commit bake params.
-    runtimeControls.prepareModel(model, {
-      id,
-      mode: 'bake',
-      isExportMode: false,
-      injectedParamsSource: entry,
-    });
-
-    const initSnap = runtimeControls.captureSnapshot(id, model);
-    entry.idleSnapshot = {
-      params: initSnap?.params || new Float32Array(0),
-      opacities: initSnap?.opacities || new Float32Array(0),
-    };
-    // Authoritative lifecycle check: a removal/replacement could have landed
-    // during the hook installation and idle flush above. Never publish a
-    // stale entry over the current owner.
-    if ((this.modelGeneration.get(id) ?? 0) !== generation) {
-      this.discardSupersededModel(model);
-      return;
-    }
-    this.models.set(id, entry);
-
-    console.log(`[BakeEngine] Loaded model "${id}" (params=${initSnap?.params?.length ?? '?'})`);
-
-  }
-
-  /**
-   * Drop a model whose lifecycle slot has moved on (character removed or
-   * replaced while its async load was in flight). Matches `removeModel`'s
-   * Cubism 2 policy: soft-detach instead of hard-destroying, so in-flight
-   * SDK expression/motion XHRs are never aborted mid-state.
-   */
-  private discardSupersededModel(model: any): void {
-    if (!model) return;
-    cubism2Live2DAdapter.getControls().disposeModel(model, {
-      mode: 'soft-detach',
-      detach: true,
-    });
-  }
-
-  private async resolveBakeRuntime(
-    absolutePath: string,
-    modelKey?: string,
-  ): Promise<{ supported: boolean; runtime: Live2DRuntimeDescriptor | null; assetUrl: string }> {
-    const assetUrl = this.pathToUrl(absolutePath);
-    const wmdlConfig = modelKey?.toLowerCase().endsWith('.wmdl')
-      ? (this.wmdlConfigRegistry?.get(modelKey) ?? this.wmdlConfigRegistry?.get(absolutePath))
-      : null;
-    if (wmdlConfig) {
-      const modelPaths = [
-        wmdlConfig.modelRelativePath,
-        ...(Array.isArray(wmdlConfig.subModels)
-          ? wmdlConfig.subModels.map((subModel: any) => subModel?.modelRelativePath).filter(Boolean)
-          : []),
-      ];
-      for (const modelPath of modelPaths) {
-        const childRuntime = await this.resolveBakeRuntime(modelPath, modelPath);
-        if (!childRuntime.supported) {
-          return { supported: false, runtime: childRuntime.runtime, assetUrl };
-        }
-      }
-      return {
-        supported: true,
-        runtime: {
-          runtimeFamily: 'wmdl',
-          adapterId: 'pixi-live2d-display-cubism2',
-          supported: true,
-        },
-        assetUrl,
-      };
-    }
-    const modelPath = modelKey || absolutePath;
-    try {
-      const response = await fetch(assetUrl);
-      if (!response.ok) {
-        return {
-          supported: true,
-          runtime: resolveLive2DRuntimeDescriptor(modelPath),
-          assetUrl,
+        if (!isCurrent() || !isTaskCurrent()) return;
+        const entry: BakeModel = {
+          id, model, release, modelPath: absolutePath, modelKey,
+          runtime, adapterId: runtime.adapterId, expressionKey: null,
+          injectedParams: {},
+          idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
         };
-      }
-      const parsed = await response.json();
-      const runtime = resolveLive2DRuntimeDescriptor(modelPath, parsed);
-      const unsupported = getUnsupportedLive2DRuntimeMessage(modelPath, runtime);
-      if (unsupported) {
-        console.warn(`[BakeEngine] ${unsupported}`);
-        return { supported: false, runtime, assetUrl };
-      }
-      if (runtime.runtimeFamily === 'cubism3-plus' && modelPath.toLowerCase().endsWith('.wmdl')) {
-        console.warn(
-          `[BakeEngine] Live2D 模型 "${modelPath}" 已支持主舞台官方 runtime，但 Bake 尚未接入官方 runtime。`,
-        );
-        return { supported: false, runtime, assetUrl };
-      }
-    } catch {
-      return {
-        supported: true,
-        runtime: resolveLive2DRuntimeDescriptor(modelPath),
-        assetUrl,
-      };
+        runtimeControls.prepareModel(model, {
+          id, mode: 'bake', isExportMode: false, injectedParamsSource: entry,
+        });
+        const initSnap = runtimeControls.captureSnapshot(id, model);
+        entry.idleSnapshot = {
+          params: initSnap?.params ?? new Float32Array(0),
+          opacities: initSnap?.opacities ?? new Float32Array(0),
+        };
+        if (!isCurrent() || !isTaskCurrent()) return;
+        this.models.set(id, entry);
+      }, undefined, modelKey);
+    } catch (error) {
+      if (!(error instanceof Live2DModelLoadError)) throw error;
+      console.warn(`[BakeEngine] ${error.message}`, error.fullPath);
     }
-    return {
-      supported: true,
-      runtime: resolveLive2DRuntimeDescriptor(modelPath),
-      assetUrl,
-    };
   }
 
   private removeModel(id: string): void {
-    // Bump the lifecycle generation BEFORE the entry lookup: a load can be in
-    // flight for this id even when no entry exists yet, and its continuation
-    // must not publish a model for a character that was just removed.
-    this.modelGeneration.set(id, (this.modelGeneration.get(id) ?? 0) + 1);
-
+    this.modelResources.cancelLoad(id, 'discard');
     const entry = this.models.get(id);
     if (!entry) return;
-    try {
-      // Teardown decision is adapter-based, not family-string based. A Cubism
-      // 2 model whose runtimeFamily degraded to 'unknown' (asset-fetch hiccup
-      // during project open) is still a pixi-live2d-display model: hard-
-      // destroying it aborts its in-flight expression/motion XHRs and nulls
-      // the SDK ExpressionManager caches, which later explodes in the
-      // adapter's expression path (unhandled "setting '<index>'" TypeError).
-      // Only composites (wmdl) hard-destroy.
-      const isCubism2Concrete = entry.adapterId === 'pixi-live2d-display-cubism2'
-        && entry.runtime.runtimeFamily !== 'wmdl';
-      if (isCubism2Concrete) {
-        // Cubism 2 runtime keeps global mask/framebuffer state inside the shared SDK singleton.
-        // Fully destroying a background model can clear that global state while other models are
-        // still alive, which later crashes in clipManager.setupClip() with undefined framebuffer.
-        // For BakeEngine we therefore soft-detach Cubism 2 models instead of calling destroy().
-        getLive2DRuntimeAdapter(entry.runtime).getControls().disposeModel(entry.model, {
-          mode: 'soft-detach',
-          detach: true,
-        });
-      } else {
-        getLive2DRuntimeAdapter(entry.runtime).getControls().disposeModel(entry.model, {
-          mode: 'destroy',
-          keepTextures: true,
-          detach: true,
-        });
-      }
-    } catch {
-      /* detach/destroy may fail if model is already partially disposed */
-    }
+    entry.release('discard');
     this.models.delete(id);
   }
 
@@ -1099,6 +841,10 @@ export class BakeEngine {
       entry.lastOffset = undefined;
     }
   }
+}
+
+function buildPreparedBakeModelSourceMap(scene: PreparedCompiledScene): Map<string, string> {
+  return new Map(collectPreparedModelRefs(scene).map(ref => [ref.runtimeUri, ref.source]));
 }
 
 function buildPreparedBakeModelPathMap(

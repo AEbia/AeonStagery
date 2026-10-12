@@ -50,7 +50,7 @@ Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
 
 ### 2026-10-10: Model resource ownership
 
-`Live2DModelResources` 收拢原 `Live2DModelLoader` 的读取/缓存能力，以及原 `Live2DManager` 的加载取消、模型池取还、组合模型组装和纹理引用计数。模型池、加载任务和所有权记录全部私有；`Live2DManager` 通过 `loadCharacter` 借用实例，通过 `releaseModel` 归还，保留舞台编排、角色运行时清脏及积压指令处理。
+`Live2DModelResources` 收拢原 `Live2DModelLoader` 的读取/缓存能力，以及原 `Live2DManager` 的加载取消、模型池取还、组合模型组装和纹理引用计数。模型池、加载任务和所有权记录全部私有；`Live2DManager` 通过 `loadCharacter` 借用实例，通过借用结果的 `release()` 归还，保留舞台编排、角色运行时清脏及积压指令处理。
 
 - 同角色加载串行化。取消后的迟到实例和组合模型的部分加载结果由资源 Module 回收；舞台异步预热后必须检查 `isCurrent()` 才能展示。回收还校验实例当前所有者，避免旧回调误收已经归还并被另一角色借用的实例。
 - 纹理引用按具体模型的解析 URL 记录，覆盖创建中、预加载、舞台借用及池内实例；取还不改变引用数，实际销毁才递减。组合容器自身不持有纹理引用，具体模型分别使用自己的 Adapter 销毁，避免重复销毁。
@@ -59,6 +59,20 @@ Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
 
 Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/Live2DManager.ts`.
 Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DModelResources.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
+
+
+### 2026-10-11: Bake resource ownership
+
+Stage 与 Bake 各持有独立的 `Live2DModelResources`，共享同一所有权实现。用途在构造时固定；模型创建、runtime 识别、registry 查询、组合组装、池与回收策略都留在资源 Module。BakeEngine 只负责隐藏容器、发布前模型准备、场景时间推进与快照采集；prepared source identity 与 resolved runtime URI 一起进入获取接口。
+
+- `loadCharacter` 交付带 `isCurrent()` 与 `release()` 的借用结果。归还绑定实际所有权记录，旧回调和重复归还不会回收已经被其他角色借用的实例；实际创建 adapter 同样记录在所有权上。
+- `cancelLoads()` 使当前任务及其排队获取失效，但保留已加载模型，迟到创建归入该 Module 的池。获取同角色的不同 source/runtime 路径会替代旧获取；替代结果与被明确 `discard` 的借用不再进入池。
+- `close()` 永久禁止获取，同步使旧交付失效并回收全部现有所有权。SDK 请求无法同步终止时，迟到结果只能回收；`waitForLoads()` 继续覆盖请求和交付准备，BakeEngine 在同步关闭时移除隐藏容器并暴露相同等待接口。
+- Bake 具体模型按实际 adapter 回收：Cubism 2 保留 soft-detach 约束；其他 adapter 销毁实例并保留共享纹理。组合容器不重复回收子模型。Stage 的池上限、具体 URL 纹理引用与 clear 语义沿用现有实现。
+- 组合主模型失败终止，子模型创建失败继续；设置失败和取消回收已获取实例，部分组装失败后丢弃已安装 sync hook 的子模型。Bake 发布准备失败时丢弃未交付实例，避免残缺 hook 进入池。归池及关闭先静止 SDK 通道并清除旧借用者引用，Cubism 2 参数 hook 只读取当前绑定。
+
+Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/BakeEngine.ts`, `src/engine/Live2DManager.ts`.
+Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/BakeResourceIntegration.test.ts`, `src/__tests__/BakeEngine.test.ts`.
 
 
 下一阶段接入 Cubism 5 时，优先填充 `OfficialCubismWebLive2DAdapter` 的 init/create/model control 能力，而不是继续在 `Live2DManager`、`Live2DMotionController` 或 `BakeEngine` 中新增 Cubism 5 私有字段分支。

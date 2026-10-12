@@ -239,6 +239,8 @@ export interface CharacterEntry {
   runtime: Live2DRuntimeDescriptor;
   adapterId: Live2DAdapterId;
   runtimeHandle?: Live2DModelHandle;
+  /** Return exactly this borrowing to the resource module. */
+  releaseModel?: () => void;
   config: CharacterConfig;
   injectedParams: Record<string, number>;
   /**

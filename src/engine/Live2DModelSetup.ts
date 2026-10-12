@@ -232,7 +232,8 @@ export function applyParameterOverride(
   isExportMode: boolean,
 ): void {
   if (!coreModel) return;
-  if (internalModel) internalModel._characterEntry = entry;
+  const parameterOwner = internalModel ?? coreModel;
+  parameterOwner._characterEntry = entry;
   if (coreModel.__aeonstageryParameterOverrideApplied) return;
   coreModel.__aeonstageryParameterOverrideApplied = true;
 
@@ -240,9 +241,9 @@ export function applyParameterOverride(
     ? coreModel.update.bind(coreModel)
     : () => {};
   coreModel.update = function () {
-    const currentEntry = internalModel?._characterEntry || entry;
+    const currentEntry = parameterOwner._characterEntry;
     // 1. Apply standard injected params (lip sync, etc.)
-    if (currentEntry.injectedParams) {
+    if (currentEntry?.injectedParams) {
       for (const [paramName, value] of Object.entries(currentEntry.injectedParams)) {
         const idx = coreModel.getParamIndex?.(paramName);
         if (idx !== undefined && idx !== -1) {

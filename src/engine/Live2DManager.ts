@@ -255,7 +255,7 @@ class Live2DManager {
     if (targetMap.has(id)) this.removeCharacter(id);
     const staging: { container?: PIXI.Container; entry?: CharacterEntry } = {};
     try {
-      await this.modelResources.loadCharacter(id, modelJsonPath, async ({ model, modelUrl, runtime, isCurrent }) => {
+      await this.modelResources.loadCharacter(id, modelJsonPath, async ({ model, modelUrl, runtime, isCurrent, release }) => {
         const lifecycleGeneration = this.nextCharacterGeneration(id);
         const adapter = getLive2DRuntimeAdapter(runtime);
         const isCubism2Runtime = runtime.adapterId === 'pixi-live2d-display-cubism2';
@@ -374,6 +374,7 @@ class Live2DManager {
           model,
           modelPath: modelJsonPath,
           modelUrl,
+          releaseModel: release,
           runtime,
           adapterId: runtime.adapterId,
           runtimeHandle: adapter.createModelHandle(id, model, runtime),
@@ -547,7 +548,7 @@ class Live2DManager {
         this.containers.delete(id);
       }
 
-      this.modelResources.releaseModel(entry.model);
+      entry.releaseModel?.();
 
       // 3. 清理状态
       targetMap.delete(id);

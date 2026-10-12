@@ -1156,12 +1156,19 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
   }
 
   quiesceModel(model: any): void {
-    const internalModel = model?.internalModel;
-    if (!internalModel?.motionManager) return;
-    internalModel.motionManager.stopAllMotions?.();
-    internalModel.motionManager._motionQueueManager?.stopAllMotions?.();
-    const expMgr = internalModel.motionManager.expressionManager;
-    if (expMgr && typeof expMgr.resetExpression === 'function') expMgr.resetExpression();
+    if (!model) return;
+    Reflect.deleteProperty(model, '_characterEntry');
+    for (const concrete of this.getConcreteModels(model)) {
+      Reflect.deleteProperty(concrete, '_characterEntry');
+      const internalModel = concrete?.internalModel;
+      if (!internalModel) continue;
+      Reflect.deleteProperty(internalModel, '_characterEntry');
+      if (internalModel.coreModel) Reflect.deleteProperty(internalModel.coreModel, '_characterEntry');
+      internalModel.motionManager?.stopAllMotions?.();
+      internalModel.motionManager?._motionQueueManager?.stopAllMotions?.();
+      const expMgr = internalModel.motionManager?.expressionManager;
+      if (expMgr && typeof expMgr.resetExpression === 'function') expMgr.resetExpression();
+    }
   }
 
   disposeModel(model: any, options: Live2DDisposeOptions): void {

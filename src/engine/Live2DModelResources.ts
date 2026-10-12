@@ -2,7 +2,8 @@
  * AeonStagery — Live2D Model Resources
  *
  * Owns model loading, cancellation, pooling, and texture lifetime. Stage
- * orchestration only borrows instances through loadCharacter/releaseModel.
+ * and Bake orchestration borrow instances through loadCharacter and return
+ * them through the ownership-bound release handle.
  */
 
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
@@ -26,6 +27,7 @@ export type LoadedLive2DModel = {
   modelUrl: string;
   runtime: Live2DRuntimeDescriptor;
   isCurrent: () => boolean;
+  release: (disposition?: 'reuse' | 'discard') => void;
 };
 
 export class Live2DModelLoadError extends Error {
@@ -36,9 +38,12 @@ export class Live2DModelLoadError extends Error {
 }
 
 type LoadRequest = {
+  modelPath: string;
+  sourcePath: string;
   epoch: number;
   cancelled: boolean;
   completed: boolean;
+  reusable: boolean;
   promise: Promise<void>;
 };
 
@@ -46,7 +51,9 @@ type OwnedModel = {
   url: string;
   runtime: Live2DRuntimeDescriptor;
   epoch: number;
+  adapter: Live2DRuntimeAdapter;
   pooled: boolean;
+  reusable: () => boolean;
   // Constituents are owned separately; the composite has no texture of its own.
   constituents?: Live2DResourceModel[];
 };
@@ -60,16 +67,20 @@ export class Live2DModelResources {
   private _modelDataCache: Map<string, Promise<{ motions: string[], expressions: string[] }>> = new Map();
   private readonly pool = new Map<string, Live2DResourceModel[]>();
   private readonly preloads = new Map<string, Promise<void>>();
+  private readonly loadVersions = new Map<string, number>();
   private readonly loads = new Map<string, LoadRequest>();
   private readonly tasks = new Set<Promise<void>>();
   private readonly owned = new Map<Live2DResourceModel, OwnedModel>();
   private readonly textureRefs = new Map<string, number>();
   private epoch = 0;
+  private closed = false;
+  private acquisitionVersion = 0;
   private wmdlConfigRegistry: WmdlConfigRegistry | null = null;
 
   constructor(
     private getBasePath: () => string,
     private getAdapter: (runtime: Live2DRuntimeDescriptor) => Live2DRuntimeAdapter = getLive2DRuntimeAdapter,
+    private readonly purpose: 'stage' | 'bake' = 'stage',
   ) {}
 
   public setWmdlConfigRegistry(registry: WmdlConfigRegistry): void {
@@ -94,35 +105,49 @@ export class Live2DModelResources {
     modelPath: string,
     deliver: (loaded: LoadedLive2DModel) => Promise<void>,
     fallbackRenderer?: () => unknown,
+    sourcePath: string = modelPath,
   ): Promise<void> {
+    if (this.closed) return;
+    const pending = this.loads.get(id);
+    if (pending && (pending.modelPath !== modelPath || pending.sourcePath !== sourcePath)) {
+      this.cancelLoad(id, 'discard');
+    }
     const epoch = this.epoch;
+    const version = this.acquisitionVersion;
+    const slotVersion = this.loadVersions.get(id) ?? 0;
+    const isValid = () => !this.closed && epoch === this.epoch
+      && version === this.acquisitionVersion && slotVersion === (this.loadVersions.get(id) ?? 0);
     while (this.loads.has(id)) {
       const previous = this.loads.get(id)!;
       await previous.promise;
-      if (epoch !== this.epoch) return;
+      if (!isValid()) return;
       if (previous.completed && !previous.cancelled) return;
     }
-    if (epoch !== this.epoch) return;
+    if (!isValid()) return;
     const request: LoadRequest = {
-      epoch, cancelled: false, completed: false, promise: Promise.resolve(),
+      modelPath, sourcePath, epoch, cancelled: false, completed: false, reusable: true, promise: Promise.resolve(),
     };
-    const isCurrent = () => !request.cancelled && request.epoch === this.epoch;
+    const isCurrent = () => !request.cancelled && isValid();
     this.loads.set(id, request);
     request.promise = this.track(async () => {
       let loaded: LoadedLive2DModel | null = null;
-      let deliveryOwner: OwnedModel | undefined;
+      let failed = false;
       try {
         if (!isCurrent()) return;
-        loaded = await this.acquire(modelPath, request.epoch, isCurrent, fallbackRenderer);
-        if (loaded) deliveryOwner = this.owned.get(loaded.model);
+        loaded = await this.acquire(
+          modelPath, request.epoch, isCurrent, fallbackRenderer, () => request.reusable, sourcePath,
+        );
         if (!loaded || !isCurrent()) return;
         await deliver(loaded);
         request.completed = isCurrent();
+      } catch (error) {
+        failed = true;
+        if (isCurrent()) throw error;
       } finally {
         // An exit can return the model during delivery. A new character may
         // already have borrowed it before this cancelled callback settles.
-        if (loaded && !request.completed && this.owned.get(loaded.model) === deliveryOwner) {
-          this.releaseModel(loaded.model);
+        if (loaded && !request.completed) {
+          loaded.release(failed && this.purpose === 'bake' ? 'discard' : 'reuse');
         }
         if (this.loads.get(id) === request) this.loads.delete(id);
       }
@@ -130,23 +155,37 @@ export class Live2DModelResources {
     await request.promise;
   }
 
-  cancelLoad(id: string): void {
+  cancelLoad(id: string, disposition: 'reuse' | 'discard' = 'reuse'): void {
+    this.loadVersions.set(id, (this.loadVersions.get(id) ?? 0) + 1);
     const request = this.loads.get(id);
-    if (request) request.cancelled = true;
+    if (request) {
+      request.cancelled = true;
+      if (disposition === 'discard') request.reusable = false;
+    }
+  }
+
+  /** Cancel this task's acquisition, retaining instances for subsequent tasks. */
+  cancelLoads(): void {
+    this.acquisitionVersion++;
+    for (const request of this.loads.values()) request.cancelled = true;
   }
 
   /** Idempotent return; pooled instances retain their texture references. */
-  releaseModel(model: Live2DResourceModel): void {
+  private releaseModel(model: Live2DResourceModel, disposition: 'reuse' | 'discard' = 'reuse'): void {
     const owner = this.owned.get(model);
     if (!owner || owner.pooled) return;
-    model.parent?.removeChild(model);
     try {
+      model.parent?.removeChild(model);
       model.autoUpdate = false;
-      this.getAdapter(owner.runtime).getControls().quiesceModel(model);
+      for (const concrete of owner.constituents ?? [model]) {
+        const concreteOwner = this.owned.get(concrete);
+        concreteOwner?.adapter.getControls().quiesceModel(concrete);
+        Reflect.deleteProperty(concrete, '_characterEntry');
+      }
       Reflect.deleteProperty(model, '_characterEntry');
       this.resetVisualState(model);
       const pool = this.pool.get(owner.url) ?? [];
-      if (owner.epoch === this.epoch && pool.length < 10) {
+      if (disposition === 'reuse' && owner.reusable() && !this.closed && owner.epoch === this.epoch && pool.length < 10) {
         owner.pooled = true;
         pool.push(model);
         this.pool.set(owner.url, pool);
@@ -155,7 +194,7 @@ export class Live2DModelResources {
     } catch (error) {
       console.warn('[Live2D] Failed to recycle model:', error);
     }
-    this.destroyOwnedModel(model, owner.epoch !== this.epoch);
+    this.destroyOwnedModel(model, disposition === 'discard' || owner.epoch !== this.epoch);
   }
 
   /**
@@ -166,6 +205,7 @@ export class Live2DModelResources {
     this.epoch++;
     for (const request of this.loads.values()) request.cancelled = true;
     this.loads.clear();
+    this.loadVersions.clear();
     this.preloads.clear();
     for (const pool of this.pool.values()) {
       for (const model of pool) this.destroyOwnedModel(model, true);
@@ -173,8 +213,17 @@ export class Live2DModelResources {
     this.pool.clear();
   }
 
+  /** Permanently invalidate acquisition and reclaim all existing ownership now. */
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.clear();
+    for (const model of [...this.owned.keys()]) this.destroyOwnedModel(model, true);
+  }
+
   /** A concurrent caller waits for the same preload, including composed children. */
   async preloadModel(modelUrl: string): Promise<void> {
+    if (this.closed) return;
     if (this.pool.get(modelUrl)?.length) return;
     const pending = this.preloads.get(modelUrl);
     if (pending) return pending;
@@ -252,7 +301,7 @@ export class Live2DModelResources {
         model = adapter.createFallbackModel(fallbackRenderer());
       }
       if (!model) throw new Error(`Live2D runtime returned no model for ${url}`);
-      this.owned.set(model, { url, runtime, epoch, pooled: false });
+      this.owned.set(model, { url, runtime, adapter, epoch, pooled: false, reusable: () => true });
       captureModelNeutralPoseOnce(model);
       this.resetVisualState(model);
       return model;
@@ -265,7 +314,7 @@ export class Live2DModelResources {
 
   private async takeConcrete(
     url: string, runtime: Live2DRuntimeDescriptor, epoch: number, isCurrent: () => boolean,
-    fallbackRenderer?: () => unknown,
+    fallbackRenderer?: () => unknown, reusable: () => boolean = () => true,
   ): Promise<Live2DResourceModel | null> {
     const preload = this.preloads.get(url);
     if (preload) await preload;
@@ -273,7 +322,7 @@ export class Live2DModelResources {
     const pool = this.pool.get(url);
     const model = pool?.pop() ?? await this.createConcrete(url, runtime, epoch, fallbackRenderer);
     if (pool && pool.length === 0 && this.pool.get(url) === pool) this.pool.delete(url);
-    this.owned.set(model, { ...this.owned.get(model)!, pooled: false });
+    this.owned.set(model, { ...this.owned.get(model)!, pooled: false, reusable });
     if (!isCurrent()) {
       this.releaseModel(model);
       return null;
@@ -284,9 +333,10 @@ export class Live2DModelResources {
 
   private async acquire(
     modelPath: string, epoch: number, isCurrent: () => boolean, fallbackRenderer?: () => unknown,
+    reusable: () => boolean = () => true, sourcePath: string = modelPath,
   ): Promise<LoadedLive2DModel | null> {
     if (!modelPath) return null;
-    const probe = await this.probeModelPath(modelPath);
+    const probe = await this.probeModelPath(modelPath, sourcePath);
     if (!isCurrent()) return null;
     if (!probe.exists) {
       throw new Live2DModelLoadError('模型文件无法读取。', probe.fullPath || modelPath);
@@ -297,8 +347,10 @@ export class Live2DModelResources {
     const adapter = this.getAdapter(runtime);
     await adapter.init();
     if (!isCurrent() || !adapter.isReady()) return null;
-    const url = this.resolvedPathToUrl(probe.fullPath || modelPath);
-    const config = this.getWmdlConfig(modelPath);
+    const url = this.purpose === 'bake'
+      ? this.pathToUrl(probe.fullPath || modelPath)
+      : this.resolvedPathToUrl(probe.fullPath || modelPath);
+    const config = this.getWmdlConfig(sourcePath) ?? this.getWmdlConfig(modelPath);
     const acquired: Live2DResourceModel[] = [];
     let model: Live2DResourceModel | null = null;
     try {
@@ -306,12 +358,15 @@ export class Live2DModelResources {
       const pooled = this.pool.get(url);
       model = pooled?.pop() ?? null;
       if (pooled && !pooled.length) this.pool.delete(url);
-      if (model) this.owned.set(model, { ...this.owned.get(model)!, pooled: false });
+      if (model) this.owned.set(model, { ...this.owned.get(model)!, pooled: false, reusable });
       else if (config) {
         if (!config.modelRelativePath || (runtime.runtimeFamily !== 'cubism2' && runtime.runtimeFamily !== 'wmdl')) {
           throw new Live2DModelLoadError('组合模型配置无效或运行时不受支持。', probe.fullPath);
         }
-        const main = await this.takeConcrete(this.pathToUrl(config.modelRelativePath), runtime, epoch, isCurrent);
+        const main = await this.takeConcrete(
+          this.pathToUrl(config.modelRelativePath), resolveLive2DRuntimeDescriptor(config.modelRelativePath),
+          epoch, isCurrent, undefined, reusable,
+        );
         if (!main) return null;
         acquired.push(main);
         const subs: Live2DResourceModel[] = [];
@@ -319,7 +374,10 @@ export class Live2DModelResources {
           if (!sub.modelRelativePath) continue;
           let child: Live2DResourceModel | null;
           try {
-            child = await this.takeConcrete(this.pathToUrl(sub.modelRelativePath), runtime, epoch, isCurrent);
+            child = await this.takeConcrete(
+              this.pathToUrl(sub.modelRelativePath), resolveLive2DRuntimeDescriptor(sub.modelRelativePath),
+              epoch, isCurrent, undefined, reusable,
+            );
           } catch (error) {
             console.warn(`[Live2D] Failed to load sub-model: ${sub.modelRelativePath}`, error);
             if (!isCurrent()) return null;
@@ -331,10 +389,18 @@ export class Live2DModelResources {
           child.y = sub.offsetY ?? 0;
           subs.push(child);
         }
-        model = new Live2DCompositeModel(main, subs);
-        this.owned.set(model, { url, runtime, epoch, pooled: false, constituents: acquired.slice() });
+        try {
+          model = new Live2DCompositeModel(main, subs);
+        } catch (error) {
+          // Construction can install child sync hooks before failing. Those
+          // children must never re-enter the pool with a partial owner.
+          for (const concrete of acquired) this.releaseModel(concrete, 'discard');
+          acquired.length = 0;
+          throw error;
+        }
+        this.owned.set(model, { url, runtime, adapter, epoch, pooled: false, reusable, constituents: acquired.slice() });
       } else {
-        model = await this.takeConcrete(url, runtime, epoch, isCurrent, fallbackRenderer);
+        model = await this.takeConcrete(url, runtime, epoch, isCurrent, fallbackRenderer, reusable);
         if (!model) return null;
       }
       if (!isCurrent()) return null;
@@ -343,7 +409,15 @@ export class Live2DModelResources {
         const controls = adapter.getControls();
         for (const concrete of controls.getConcreteModels(model)) controls.isolateMask(concrete);
       }
-      return { model, modelUrl: url, runtime, isCurrent };
+      const borrowed = model;
+      const owner = this.owned.get(borrowed)!;
+      return {
+        model: borrowed, modelUrl: url, runtime,
+        isCurrent: () => isCurrent() && this.owned.get(borrowed) === owner && !owner.pooled,
+        release: (disposition = 'reuse') => {
+          if (this.owned.get(borrowed) === owner) this.releaseModel(borrowed, disposition);
+        },
+      };
     } catch (error) {
       if (model) this.releaseModel(model);
       throw error;
@@ -376,6 +450,15 @@ export class Live2DModelResources {
     const owner = this.owned.get(model);
     if (!owner) return;
     this.owned.delete(model);
+    Reflect.deleteProperty(model, '_characterEntry');
+    if (!owner.constituents) {
+      try {
+        model.autoUpdate = false;
+        owner.adapter.getControls().quiesceModel(model);
+      } catch (error) {
+        console.warn('[Live2D] Failed to quiesce owned model:', error);
+      }
+    }
     try {
       if (owner.constituents) {
         for (const child of owner.constituents) this.destroyOwnedModel(child, keepSharedTextures);
@@ -388,8 +471,10 @@ export class Live2DModelResources {
         model.destroy();
       } else {
         const remaining = this.releaseTexture(owner.url);
-        this.getAdapter(owner.runtime).getControls().disposeModel(model, {
-          mode: 'destroy', keepTextures: keepSharedTextures || remaining > 0, detach: true,
+        owner.adapter.getControls().disposeModel(model, {
+          mode: this.purpose === 'bake' && owner.adapter.id === 'pixi-live2d-display-cubism2'
+            ? 'soft-detach' : 'destroy',
+          keepTextures: this.purpose === 'bake' || keepSharedTextures || remaining > 0, detach: true,
         });
       }
     } catch (error) {
@@ -404,6 +489,7 @@ export class Live2DModelResources {
     let fullPath = this.normalizeModelPath(modelPath);
     const isAbsolute = fullPath.startsWith('asset://') || fullPath.startsWith('file://') || /^[a-zA-Z]:[/\\]/.test(fullPath) || fullPath.startsWith('/');
     if (!isAbsolute) {
+      if (this.purpose === 'bake' && !this.getBasePath()) return fullPath;
       fullPath = `${this.getBasePath()}/${fullPath}`.replace(/\\/g, '/');
     }
     return this.resolvedPathToUrl(fullPath);
@@ -426,7 +512,7 @@ export class Live2DModelResources {
   private normalizeModelPath(modelPath: string): string {
     if (!modelPath) return modelPath;
     const normalized = modelPath.replace(/\\/g, '/').trim();
-    if (normalized.startsWith('/') && !normalized.startsWith('//') && !/^\/[a-zA-Z]:\//.test(normalized)) {
+    if (this.purpose !== 'bake' && normalized.startsWith('/') && !normalized.startsWith('//') && !/^\/[a-zA-Z]:\//.test(normalized)) {
       return normalized.replace(/^\/+/, '');
     }
     return normalized;
@@ -459,7 +545,7 @@ export class Live2DModelResources {
   private async resolveModelFilePath(modelPath: string): Promise<string> {
     let fullPath = this.normalizeFilesystemPath(modelPath);
     const isAbsolute = fullPath.startsWith('asset://') || fullPath.startsWith('file://') || /^[a-zA-Z]:[/\\]/.test(fullPath) || fullPath.startsWith('/');
-    if (!isAbsolute) {
+    if (!isAbsolute && !(this.purpose === 'bake' && !this.getBasePath())) {
       const projectResources = (window as any).AeonStagery?.services?.projectResources;
       if (projectResources?.getCurrentProject?.()) {
         fullPath = await projectResources.resolveForRead(fullPath);
@@ -530,45 +616,51 @@ export class Live2DModelResources {
     }
   }
 
-  private async probeModelPath(modelPath: string): Promise<{ exists: boolean; fullPath: string; error?: string; runtime?: Live2DRuntimeDescriptor }> {
+  private async probeModelPath(modelPath: string, sourcePath: string = modelPath): Promise<{ exists: boolean; fullPath: string; error?: string; runtime?: Live2DRuntimeDescriptor }> {
     if (!modelPath) {
       return { exists: false, fullPath: '', error: 'empty model path' };
     }
 
     const modelData = await this.readModelJson(modelPath);
-    if (!modelData) {
+    const registered = this.getWmdlConfig(sourcePath) ?? this.getWmdlConfig(modelPath);
+    if (!modelData && (!registered || this.purpose === 'stage')) {
       return {
-        exists: false,
+        // Bake retains path-only runtime detection when descriptor reads fail.
+        exists: this.purpose === 'bake',
+        runtime: this.purpose === 'bake' ? resolveLive2DRuntimeDescriptor(sourcePath) : undefined,
         fullPath: await this.resolveModelFilePath(modelPath),
         error: 'unable to read model file',
       };
     }
 
-    if (modelPath.toLowerCase().endsWith('.wmdl')) {
-      if (!modelData.json || typeof modelData.json.modelRelativePath !== 'string' || !modelData.json.modelRelativePath.trim()) {
+    const fullPath = modelData?.fullPath ?? await this.resolveModelFilePath(modelPath);
+    const config = registered ?? modelData?.json;
+    if (sourcePath.toLowerCase().endsWith('.wmdl') || registered) {
+      if (!config || typeof config.modelRelativePath !== 'string' || !config.modelRelativePath.trim()) {
         return {
           exists: false,
-          fullPath: modelData.fullPath,
+          fullPath,
           error: 'invalid wmdl config: missing modelRelativePath',
         };
       }
 
-      const wmdlDir = this.dirname(modelData.fullPath);
+      const wmdlDir = this.dirname(fullPath);
       const childPaths = [
-        modelData.json.modelRelativePath,
-        ...(Array.isArray(modelData.json.subModels)
-          ? modelData.json.subModels.map((subModel: any) => subModel?.modelRelativePath).filter(Boolean)
+        config.modelRelativePath,
+        ...(Array.isArray(config.subModels)
+          ? config.subModels.map((subModel: any) => subModel?.modelRelativePath).filter(Boolean)
           : []),
       ];
       for (const childPath of childPaths) {
-        const childFullPath = this.joinPath(wmdlDir, childPath);
+        const childFullPath = registered
+          ? await this.resolveModelFilePath(childPath) : this.joinPath(wmdlDir, childPath);
         const childData = await this.readModelJson(childFullPath);
-        if (!childData) continue;
-        const childRuntime = resolveLive2DRuntimeDescriptor(childData.fullPath, childData.json);
+        if (!childData && this.purpose === 'stage') continue;
+        const childRuntime = resolveLive2DRuntimeDescriptor(childData?.fullPath ?? childPath, childData?.json);
         if (childRuntime.runtimeFamily === 'cubism3-plus') {
           return {
             exists: true,
-            fullPath: modelData.fullPath,
+            fullPath,
             runtime: {
               ...childRuntime,
               supported: false,
@@ -579,7 +671,7 @@ export class Live2DModelResources {
         if (!childRuntime.supported) {
           return {
             exists: true,
-            fullPath: modelData.fullPath,
+            fullPath,
             runtime: childRuntime,
           };
         }
@@ -588,8 +680,8 @@ export class Live2DModelResources {
 
     return {
       exists: true,
-      fullPath: modelData.fullPath,
-      runtime: resolveLive2DRuntimeDescriptor(modelData.fullPath, modelData.json),
+      fullPath,
+      runtime: resolveLive2DRuntimeDescriptor(sourcePath, config),
     };
   }
 

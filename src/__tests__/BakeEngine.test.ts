@@ -447,12 +447,10 @@ describe('BakeEngine runtime routing', () => {
     } as any;
 
     const engine = new BakeEngine(createApp(), wmdlRegistry);
-    (engine as any).live2dReady = true;
-
-    await (engine as any).loadModel(
-      'rana',
-      'D:/mock/demo/figure/rana/rana.wmdl',
-      'figure/rana/rana.wmdl',
+    await engine.bakePreparedRange(
+      createBasePreparedScene('figure/rana/rana.wmdl'),
+      new Map([['figure/rana/rana.wmdl', 'D:/mock/demo/figure/rana/rana.wmdl']]),
+      1, 0, 0, 0.1, undefined, true,
     );
 
     expect(createRuntimeModel).toHaveBeenCalledTimes(2);
@@ -469,60 +467,6 @@ describe('BakeEngine runtime routing', () => {
         injectedParamsSource: expect.objectContaining({ id: 'rana' }),
       }),
     );
-  });
-
-  it('soft-detaches Cubism 2 bake models instead of destroying shared runtime state', () => {
-    const engine = new BakeEngine(createApp());
-    const destroy = vi.fn();
-    const stopAllMotions = vi.fn();
-    const model = new PIXI.Container() as any;
-    model.visible = true;
-    model.renderable = true;
-    model.alpha = 1;
-    model.destroy = destroy;
-    model.update = vi.fn();
-    model.render = vi.fn();
-
-    // The teardown decision (soft-detach vs destroy) is delegated to the
-    // runtime adapter; BakeEngine only picks the policy from its own
-    // lifecycle rules.
-    const disposeModel = vi.fn((target: any, options: any) => {
-      if (options.mode === 'soft-detach') {
-        target.visible = false;
-        target.renderable = false;
-        target.alpha = 0;
-        target.stopAllMotions?.();
-      }
-    });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      getControls: () => mockControls({ disposeModel, stopAllMotions }),
-    } as any);
-
-    (engine as any).models.set('soyo', {
-      id: 'soyo',
-      model,
-      modelPath: 'D:/mock/demo/figure/soyo/model.json',
-      modelKey: 'figure/soyo/model.json',
-      runtime: {
-        runtimeFamily: 'cubism2',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      adapterId: 'pixi-live2d-display-cubism2',
-      motionEpoch: 0,
-      idleSnapshot: {
-        params: new Float32Array(),
-        opacities: new Float32Array(),
-      },
-    });
-
-    (engine as any).removeModel('soyo');
-
-    expect(disposeModel).toHaveBeenCalledWith(model, { mode: 'soft-detach', detach: true });
-    expect(destroy).not.toHaveBeenCalled();
-    expect(model.visible).toBe(false);
-    expect(model.renderable).toBe(false);
-    expect(model.alpha).toBe(0);
   });
 
   it('invalidates the Pixi program cache on both sides of the Cubism 2 bake draw', () => {
@@ -697,141 +641,5 @@ describe('BakeEngine runtime routing', () => {
 
     expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_MOUTH_OPEN_Y', 0);
     expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'ParamMouthOpenY', 0);
-  });
-});
-
-describe('BakeEngine model lifecycle race', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  function createApp(): any {
-    return { renderer: {} };
-  }
-
-  function makeLifecycleEngine(): BakeEngine {
-    const engine = new BakeEngine(createApp());
-    vi.spyOn(engine as any, 'resolveBakeRuntime').mockResolvedValue({
-      supported: true,
-      runtime: {
-        runtimeFamily: 'cubism2',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      assetUrl: 'asset://localhost/figures/hero/casual-2023/model.json',
-    });
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'init').mockResolvedValue(undefined);
-    return engine;
-  }
-
-  function deferredCreateModel() {
-    const state: { resolveCreate?: (model: any) => void } = {};
-    const createModel = vi.fn(
-      () => new Promise<any>((resolve) => { state.resolveCreate = resolve; }),
-    );
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'createModel').mockImplementation(createModel);
-    return {
-      createModel,
-      // Property access stays live through the mutable state object.
-      resolveCreate: (model: any) => state.resolveCreate?.(model),
-    };
-  }
-
-  it('drops a superseded in-flight loadModel instead of publishing the entry (costume-swap race)', async () => {
-    const engine = makeLifecycleEngine();
-    const { createModel, resolveCreate } = deferredCreateModel();
-
-    const loadPromise = (engine as any).loadModel(
-      'hero',
-      '/figures/hero/casual-2023/model.json',
-      'hero/casual-2023',
-    );
-    await vi.waitFor(() => expect(createModel).toHaveBeenCalled());
-
-    // Character removed while the load is still in flight (costume swap /
-    // scene reload). No entry existed yet, so removeModel must still
-    // invalidate the in-flight load.
-    (engine as any).removeModel('hero');
-
-    const superseded = {
-      parent: null,
-      visible: true,
-      renderable: true,
-      alpha: 1,
-      stopAllMotions: vi.fn(),
-      internalModel: { coreModel: {}, motionManager: { stopAllMotions: vi.fn() } },
-    };
-    resolveCreate(superseded);
-    await loadPromise;
-
-    expect((engine as any).models.has('hero')).toBe(false);
-    expect(superseded.visible).toBe(false);
-    expect(superseded.renderable).toBe(false);
-    expect(superseded.alpha).toBe(0);
-  });
-
-  it('publishes the entry when no removal raced the load', async () => {
-    const engine = makeLifecycleEngine();
-    const { createModel, resolveCreate } = deferredCreateModel();
-
-    const loadPromise = (engine as any).loadModel(
-      'hero',
-      '/figures/hero/casual-2023/model.json',
-      'hero/casual-2023',
-    );
-    await vi.waitFor(() => expect(createModel).toHaveBeenCalled());
-
-    const model = new PIXI.Container() as any;
-    model.visible = false;
-    model.alpha = 0;
-    model.update = vi.fn();
-    model.render = vi.fn();
-    model.stopAllMotions = vi.fn();
-    model.internalModel = {
-      coreModel: {},
-      motionManager: { stopAllMotions: vi.fn() },
-    };
-    resolveCreate(model);
-    await loadPromise;
-
-    expect((engine as any).models.has('hero')).toBe(true);
-    expect(model.visible).toBe(true);
-  });
-
-  it('removeModel soft-detaches Cubism 2 models even when classification degraded to unknown', () => {
-    const engine = makeLifecycleEngine();
-    const destroy = vi.fn();
-    const stopAllMotions = vi.fn();
-    const entry = {
-      id: 'hero',
-      model: {
-        parent: null,
-        visible: true,
-        renderable: true,
-        alpha: 1,
-        destroy,
-        stopAllMotions,
-        update: vi.fn(),
-      },
-      modelPath: '/figures/hero/casual-2023/model.json',
-      modelKey: 'hero/casual-2023',
-      runtime: {
-        runtimeFamily: 'unknown',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      adapterId: 'pixi-live2d-display-cubism2',
-      expressionKey: null,
-      injectedParams: {},
-      idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
-    };
-    (engine as any).models.set('hero', entry);
-
-    (engine as any).removeModel('hero');
-
-    expect((engine as any).models.has('hero')).toBe(false);
-    expect(destroy).not.toHaveBeenCalled();
-    expect(entry.model.visible).toBe(false);
-    expect(stopAllMotions).toHaveBeenCalled();
   });
 });
