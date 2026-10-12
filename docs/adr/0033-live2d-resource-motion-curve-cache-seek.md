@@ -5,6 +5,10 @@
 - 关联：ADR-0019（runtime seam）、ADR-0029（自定义 Motion 关键帧）、ADR-0032（日志/诊断）
 - 代码入口：`src/engine/live2d/motionCurveCache.ts`、`src/engine/SeekProfiler.ts`、`src/engine/coordinators/CharacterSynchronizer.ts`、`src/engine/Live2DManager.ts`、`src/engine/BakeEngine.ts`
 
+## 术语：Bake
+
+本项目的 **Bake** 指 **Seek 快照预计算**：在独立模型实例上按场景时间求值，生成供 `SnapshotStore` 与 Seek 恢复使用的 `snapshotHistory`。隐藏容器与必要的 runtime 更新、绘制仅用于取得有效模型状态；Bake 的产物是状态快照，画面捕获与视频输出属于 Export。
+
 ## 问题
 
 场景中的普通资源 Motion（`kind: 'resource'`）在 Seek 时依赖 SDK 快照-快进：
@@ -83,9 +87,3 @@
 3. **Seek 内 ensure**：`CharacterSynchronizer.syncTo` 对未缓存且未被拒绝的可转换动作并行 `ensure` 一次，随后 Phase 3 走统一纯求值器；永久 miss 立即回退 SDK 且不重复采样。
 4. **前向模拟移除**：`simulateForward`、快照 motion 预填、`updateAll(16)` 冲刷与 `freezeVisibleMotionDuringSeek` 参数删除（生产两处调用点本已冻结）。
 5. **seek 报告**：`SeekPhaseReport.cacheMissKeys` 列出本次仍走 SDK 的动作与原因，解释非零 `motionStep`。
-
-## 运行期验证（dev 控制台）
-
-- 每次 seek/scrub 输出一行 `[SeekProfiler] seek report ... forward=... motionStep=...`：缓存全覆盖时 `forward`/`motionStep` 接近 0（不再走 SDK 步进）。
-- 加载场景后输出 `[ScriptEngine] Resource motion curve cache pre-warm complete: N entries cached`；`[Live2DManager] ... hit -> custom evaluator` 表示命中缓存求值，`miss -> SDK motion queue` 表示回退。
-- 控制台可查 `window.__AEON_MOTION_CURVE_CACHE`（size/keys）并用 `window.__AEON_SEEK_PROFILER = false|true` 开关报告。
