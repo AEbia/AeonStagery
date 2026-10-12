@@ -1,3 +1,4 @@
+import { resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Live2DModelResources } from '../engine/Live2DModelResources';
 import * as sdk from '../engine/CubismPixiSdk';
@@ -389,23 +390,7 @@ describe('Live2DModelResources', () => {
         runtime,
         displayObject: model,
         rawModel: model,
-        capabilities: {
-          runtimeFamily: runtime.runtimeFamily,
-          adapterId: runtime.adapterId,
-          supportsMotion: true,
-          supportsExpression: true,
-          supportsParameterInjection: true,
-          supportsSnapshot: true,
-          supportsBakeRender: true,
-          usesCubism2PrivateControls: false,
-          determinism: {
-            tier: 'native-offset-deterministic',
-            supportsParameterCurves: true,
-            supportsNativeMotionOffset: true,
-            supportsStateReplay: false,
-            diagnostics: ['mock runtime determinism'],
-          },
-        },
+        capabilities: resolveLive2DRuntimeCapabilities(runtime),
         lifecycle: {
           getCoreModel: () => null,
           clearMotionState: () => {},

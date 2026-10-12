@@ -1,3 +1,4 @@
+import { getLive2DRuntimeCapabilities } from '../live2d/runtime/Live2DRuntimeControlModule';
 import type { SnapshotStore } from '../SnapshotStore';
 import type { ProxyRegistry } from './ProxyRegistry';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
@@ -320,7 +321,7 @@ export class CharacterSynchronizer {
       // seek and playback keep one owner for its parameters. Native offset
       // restoration remains the fallback for unsupported/unconverted motions
       // and other runtime-owned state.
-      if (entry?.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism'
+      if (!entry || !getLive2DRuntimeCapabilities(entry).determinism.supportsNativeMotionOffset
         || (cachedResourceMotions.has(id) && !!this.live2D.playCustomMotion)
         || !this.live2D.restoreSeekState
         || !this.live2D.hasCharacter(id)) {
@@ -477,7 +478,7 @@ export class CharacterSynchronizer {
           const offset = this.getMotionOffset(id, state.motion, time);
           if (!nativeSeekIds.has(id)) {
             const characterEntry = this.live2D.getAllCharacters?.().get(id);
-            const cachedCubism3Motion = characterEntry?.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+            const cachedDirectOffsetMotion = characterEntry && getLive2DRuntimeCapabilities(characterEntry).determinism.supportsNativeMotionOffset
               ? cachedResourceMotions.get(id)
               : undefined;
             this.playDesiredMotion(
@@ -487,7 +488,7 @@ export class CharacterSynchronizer {
               time,
               skipHardReset || isScrubbing,
               customMotionHandoffSnapshots.get(id),
-              cachedCubism3Motion,
+              cachedDirectOffsetMotion,
             );
           }
         } else if (!isScrubbing) {

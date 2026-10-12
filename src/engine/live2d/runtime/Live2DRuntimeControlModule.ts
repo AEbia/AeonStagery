@@ -18,18 +18,26 @@ export interface Live2DRuntimeCapabilities {
   readonly supportsSnapshot: boolean;
   readonly supportsBakeRender: boolean;
   readonly usesCubism2PrivateControls: boolean;
+  readonly usesSharedSdkClock: boolean;
+  /** update(0) evaluates motion/expression writers and commits the pose. */
+  readonly evaluatesPoseOnZeroDelta: boolean;
+  readonly supportsMotionHandoff: boolean;
+  readonly supportsCompositeModels: boolean;
+  readonly supportsFallbackModel: boolean;
+  readonly requiresIdleMotionFlush: boolean;
   readonly determinism: Live2DDeterminismCapabilities;
 }
 
 function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeterminismCapabilities {
   if (adapterId === 'pixi-live2d-display-cubism2') {
     return {
-      tier: 'native-offset-deterministic',
+      tier: 'offset-replay-deterministic',
       supportsParameterCurves: true,
-      supportsNativeMotionOffset: true,
+      supportsNativeMotionOffset: false,
+      supportsMotionOffsetReplay: true,
       supportsStateReplay: false,
       diagnostics: [
-        'Cubism 2 native motion offsets use fixed-step SDK clock replay.',
+        'Cubism 2 motion offsets require fixed-step replay with a shared SDK clock.',
         'Stateful Physics/Pose replay is not guaranteed by this adapter.',
       ],
     };
@@ -39,6 +47,7 @@ function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeter
       tier: 'native-offset-deterministic',
       supportsParameterCurves: true,
       supportsNativeMotionOffset: true,
+      supportsMotionOffsetReplay: false,
       supportsStateReplay: false,
       diagnostics: [
         'Cubism 3+ parameter motions use the runtime-neutral deterministic curve cache when available.',
@@ -50,9 +59,46 @@ function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeter
     tier: 'unsupported',
     supportsParameterCurves: false,
     supportsNativeMotionOffset: false,
+    supportsMotionOffsetReplay: false,
     supportsStateReplay: false,
     diagnostics: ['No runtime adapter can provide deterministic motion evaluation.'],
   };
+}
+
+/** Capability classification stays here, including before a model is loaded. */
+export function resolveLive2DRuntimeCapabilities(runtime: Live2DRuntimeDescriptor): Live2DRuntimeCapabilities {
+  const usesCubism2PrivateControls = runtime.adapterId === 'pixi-live2d-display-cubism2';
+  const isCubism3 = runtime.adapterId === 'untitled-pixi-live2d-engine-cubism';
+  const supported = runtime.supported && (usesCubism2PrivateControls || isCubism3);
+  return {
+    runtimeFamily: runtime.runtimeFamily,
+    adapterId: runtime.adapterId,
+    supportsMotion: supported,
+    supportsExpression: supported,
+    supportsParameterInjection: supported,
+    supportsSnapshot: supported,
+    supportsBakeRender: supported,
+    usesCubism2PrivateControls: supported && usesCubism2PrivateControls,
+    usesSharedSdkClock: supported && usesCubism2PrivateControls,
+    evaluatesPoseOnZeroDelta: supported && isCubism3,
+    supportsMotionHandoff: supported && isCubism3,
+    supportsCompositeModels: supported && usesCubism2PrivateControls,
+    supportsFallbackModel: supported && usesCubism2PrivateControls && runtime.runtimeFamily === 'cubism2',
+    requiresIdleMotionFlush: supported && usesCubism2PrivateControls && runtime.runtimeFamily === 'cubism2',
+    determinism: resolveDeterminismCapabilities(supported ? runtime.adapterId : 'unknown'),
+  };
+}
+
+/** Loaded handles are authoritative; descriptor-only legacy entries retain Cubism 2 defaults. */
+export function getLive2DRuntimeCapabilities(entry: {
+  runtime?: Live2DRuntimeDescriptor | null;
+  runtimeHandle?: Pick<Live2DModelHandle, 'capabilities'>;
+}): Live2DRuntimeCapabilities {
+  return entry.runtimeHandle?.capabilities ?? resolveLive2DRuntimeCapabilities(entry.runtime ?? {
+    runtimeFamily: 'cubism2',
+    adapterId: 'pixi-live2d-display-cubism2',
+    supported: true,
+  });
 }
 
 export interface Live2DLifecycleInterface {
@@ -122,17 +168,7 @@ export function createLive2DModelHandle({
   runtime,
   controls,
 }: Live2DModelHandleCreateOptions): Live2DModelHandle {
-  const capabilities: Live2DRuntimeCapabilities = {
-    runtimeFamily: runtime.runtimeFamily,
-    adapterId: runtime.adapterId,
-    supportsMotion: runtime.adapterId !== 'unknown',
-    supportsExpression: runtime.adapterId !== 'unknown',
-    supportsParameterInjection: runtime.adapterId !== 'unknown',
-    supportsSnapshot: runtime.adapterId !== 'unknown',
-    supportsBakeRender: runtime.adapterId !== 'unknown',
-    usesCubism2PrivateControls: runtime.adapterId === 'pixi-live2d-display-cubism2',
-    determinism: resolveDeterminismCapabilities(runtime.adapterId),
-  };
+  const capabilities = resolveLive2DRuntimeCapabilities(runtime);
 
   return {
     id,

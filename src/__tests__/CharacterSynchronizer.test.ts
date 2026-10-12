@@ -32,6 +32,7 @@ import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchroni
 import { SnapshotStore } from '../engine/SnapshotStore';
 import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
 import { Live2DMotionController } from '../engine/Live2DMotionController';
+import { resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 
 vi.mock('../ui/SettingsStore', () => ({
   settingsManager: { get: vi.fn().mockReturnValue(1000), set: vi.fn(), load: vi.fn(), save: vi.fn() },
@@ -1118,6 +1119,40 @@ describe('CharacterSynchronizer', () => {
     expect(live2D.playMotion).toHaveBeenCalledWith('char1', 'wave', 4, 10.25, 20.25, true);
   });
 
+  it.each([true, false])('selects direct seek from handle capabilities (native offset=%s)', async (supportsNativeMotionOffset) => {
+    const runtime = {
+      runtimeFamily: 'cubism3-plus' as const,
+      adapterId: 'untitled-pixi-live2d-engine-cubism' as const,
+      supported: true,
+    };
+    const capabilities = resolveLive2DRuntimeCapabilities(runtime);
+    const restoreSeekState = vi.fn().mockResolvedValue(undefined);
+    const manager = { ...live2D, restoreSeekState };
+    manager.listCharacters.mockReturnValue(['char1']);
+    manager.hasCharacter.mockReturnValue(true);
+    manager.getAllCharacters.mockReturnValue(new Map([['char1', {
+      runtime,
+      runtimeHandle: { capabilities: {
+        ...capabilities,
+        determinism: { ...capabilities.determinism, supportsNativeMotionOffset },
+      } },
+    }]]));
+    await new CharacterSynchronizer(manager).syncTo({
+      time: 0.25,
+      desiredChars: new Map([['char1', {
+        id: 'char1', model: 'm.model3.json', config: {},
+        motion: { output: { kind: 'resource', key: 'wave' }, priority: 3, time: 0 },
+      }]]),
+      transformationProxies: new ProxyRegistry(),
+      snapshotStore: snapshots,
+      shouldCancel: () => false,
+      skipHardReset: false,
+      isScrubbing: false,
+    });
+    expect(restoreSeekState).toHaveBeenCalledTimes(supportsNativeMotionOffset ? 1 : 0);
+    expect(manager.playMotion).toHaveBeenCalledTimes(supportsNativeMotionOffset ? 0 : 1);
+  });
+
   it('does not stop official runtime motion during scrubbing before native seek restore', async () => {
     const charSnap = {
       params: new Float32Array(1),
@@ -1128,7 +1163,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
+      { runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1159,7 +1194,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
+      { runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1195,7 +1230,7 @@ describe('CharacterSynchronizer', () => {
     live2D.listCharacters.mockReturnValue(['char1']);
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([['char1', {
-      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' },
+      runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
     }]]));
     const restoreSeekState = vi.fn().mockResolvedValue(undefined);
     (live2D as any).restoreSeekState = restoreSeekState;
@@ -1227,7 +1262,7 @@ describe('CharacterSynchronizer', () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([[
       'char1',
-      { runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' } },
+      { runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } },
     ]]));
     (live2D as any).restoreSeekState = vi.fn().mockResolvedValue(undefined);
 
@@ -1268,7 +1303,7 @@ describe('CharacterSynchronizer', () => {
     live2D.listCharacters.mockReturnValue(['char1']);
     live2D.hasCharacter.mockReturnValue(true);
     live2D.getAllCharacters.mockReturnValue(new Map([['char1', {
-      runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism' },
+      runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
     }]]));
     let renderedParameter = 2;
     (live2D as any).restoreSeekState = vi.fn(async (_id: string, restore: any) => {

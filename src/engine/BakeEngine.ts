@@ -28,6 +28,7 @@ import {
 import { isPreparedAssetRef, preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
 import { resetModelToNeutralPose } from './live2d/characterStatePurge';
 import { BakeMotionRuntime, type BakeMotionPlanRequest, type BakeMotionRuntimeHost } from './BakeMotionRuntime';
+import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 
 /**
  * Mouth parameters written by the deterministic dialogue text-mouth channel.
@@ -47,6 +48,7 @@ interface BakeModel {
   modelPath: string;
   modelKey: string;
   runtime: Live2DRuntimeDescriptor;
+  runtimeHandle: Live2DModelHandle;
   adapterId: string;
   motionStartTime?: number;
   lastOffset?: number;
@@ -304,7 +306,7 @@ export class BakeEngine {
               runtimeControls.stopAllMotions(entry.model);
               runtimeControls.clearMotionState(entry.model);
               runtimeControls.applySnapshot(entry.model, entry.idleSnapshot as ModelSnapshot);
-              if (entry.runtime.runtimeFamily === 'cubism2') {
+              if (entry.runtimeHandle.capabilities.requiresIdleMotionFlush) {
                 await runtimeControls.restartIdleMotion(entry.model);
                 if (!isCurrent()) break;
               }
@@ -566,11 +568,13 @@ export class BakeEngine {
       await this.modelResources.loadCharacter(id, absolutePath, async loaded => {
         const { model, runtime, isCurrent, release } = loaded;
         if (!isCurrent() || !isTaskCurrent()) return;
-        const runtimeControls = getLive2DRuntimeAdapter(runtime).getControls();
+        const adapter = getLive2DRuntimeAdapter(runtime);
+        const runtimeControls = adapter.getControls();
+        const runtimeHandle = adapter.createModelHandle(id, model, runtime);
         resetModelToNeutralPose(model, runtime);
         model.visible = true;
         model.alpha = 1;
-        if (runtime.runtimeFamily === 'cubism2' || runtime.runtimeFamily === 'wmdl') {
+        if (runtimeHandle.capabilities.usesCubism2PrivateControls) {
           runtimeControls.installBakeRenderGuards(model);
         }
         this.container.addChild(model);
@@ -579,7 +583,7 @@ export class BakeEngine {
         } catch (error) {
           console.warn(`[BakeEngine] Initial render failed for ${id}`, error);
         }
-        if (runtime.runtimeFamily === 'cubism2') {
+        if (runtimeHandle.capabilities.requiresIdleMotionFlush) {
           try {
             await runtimeControls.flushIdleState(model);
             if (!isCurrent() || !isTaskCurrent()) return;
@@ -591,7 +595,7 @@ export class BakeEngine {
         if (!isCurrent() || !isTaskCurrent()) return;
         const entry: BakeModel = {
           id, model, release, modelPath: absolutePath, modelKey,
-          runtime, adapterId: runtime.adapterId, expressionKey: null,
+          runtime, runtimeHandle, adapterId: runtime.adapterId, expressionKey: null,
           injectedParams: {},
           idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
         };

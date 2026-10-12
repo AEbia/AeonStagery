@@ -6,6 +6,8 @@ import type { MotionRequest } from '../engine/Live2DMotionController';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
+import { acquireUtSystemLock, releaseUtSystemLock } from '../engine/Live2DConfig';
+import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 
 const runtime = {
   runtimeFamily: 'cubism2' as const,
@@ -98,6 +100,67 @@ describe('Live2DStageRuntime', () => {
     expect(advanceFrame.mock.invocationCallOrder[0]).toBeLessThan(setInjectedParameter.mock.invocationCallOrder[0]);
     expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_ANGLE_X', 0.4);
     expect(syncInputParameters).toHaveBeenCalledWith(entry.model);
+  });
+
+  it('uses handle clock capabilities to defer motions and updates during shared clock replay', async () => {
+    const stage = new Live2DStageRuntime({
+      dispatchMotion,
+      describeInvalidModelState: () => null,
+      repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
+      maybeInstallCustomMotionStage: vi.fn(),
+      resolveCustomMotionSceneTime: () => 0,
+      getScriptEngine: () => null,
+    });
+    const independent = makeEntry('independent', {});
+    const shared = makeEntry('shared', {});
+    for (const entry of [independent, shared]) {
+      entry.runtimeHandle = createLive2DModelHandle({
+        id: entry.id, model: entry.model, runtime, controls: adapter.getControls(),
+      });
+      entry._pendingPlayMotion = {
+        key: 'wave', priority: 3, offset: 0, sceneTime: 0, skipHardReset: false, reqEpoch: 1,
+      };
+      stage.characters.set(entry.id, entry);
+    }
+    // Both descriptors say Cubism 2; only the handle declares an independent clock.
+    independent.runtimeHandle = {
+      ...independent.runtimeHandle!,
+      capabilities: { ...independent.runtimeHandle!.capabilities, usesSharedSdkClock: false },
+    };
+    await acquireUtSystemLock();
+    try {
+      await stage.step(16);
+      expect(dispatchMotion).toHaveBeenCalledTimes(1);
+      expect(dispatchMotion).toHaveBeenCalledWith('independent', expect.anything());
+      expect(advanceFrame).toHaveBeenCalledTimes(1);
+      expect(advanceFrame).toHaveBeenCalledWith(independent.model, 16);
+      expect(shared._pendingPlayMotion).toBeDefined();
+    } finally {
+      releaseUtSystemLock();
+    }
+  });
+
+  it('commits and freezes zero-delta evaluation according to the handle', async () => {
+    const stage = new Live2DStageRuntime({
+      dispatchMotion,
+      describeInvalidModelState: () => null,
+      repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
+      maybeInstallCustomMotionStage: vi.fn(),
+      resolveCustomMotionSceneTime: () => 0,
+      getScriptEngine: () => null,
+    });
+    const entry = makeEntry('hero', {});
+    const handle = createLive2DModelHandle({ id: entry.id, model: entry.model, runtime, controls: adapter.getControls() });
+    entry.runtimeHandle = {
+      ...handle,
+      capabilities: { ...handle.capabilities, evaluatesPoseOnZeroDelta: true },
+    };
+    stage.characters.set(entry.id, entry);
+    stage.setAutoUpdate(false);
+    await stage.step(0, true, 1000);
+    expect(advanceFrame).toHaveBeenCalledExactlyOnceWith(entry.model, 0);
+    await stage.step(16);
+    expect(advanceFrame).toHaveBeenCalledTimes(1);
   });
 
   it('commits cached Cubism 3+ motion poses on paused zero-delta seeks', async () => {

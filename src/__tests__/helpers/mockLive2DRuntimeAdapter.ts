@@ -1,3 +1,4 @@
+import { resolveLive2DRuntimeCapabilities } from '../../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { vi } from 'vitest';
 import type {
   Live2DRuntimeAdapter,
@@ -81,23 +82,7 @@ export function mockAdapter(overrides: Partial<Live2DRuntimeAdapter> = {}): Live
       runtime,
       displayObject: model,
       rawModel: model,
-      capabilities: {
-        runtimeFamily: runtime?.runtimeFamily,
-        adapterId: runtime?.adapterId,
-        supportsMotion: true,
-        supportsExpression: true,
-        supportsParameterInjection: true,
-        supportsSnapshot: true,
-        supportsBakeRender: true,
-        usesCubism2PrivateControls: runtime?.adapterId === 'pixi-live2d-display-cubism2',
-        determinism: {
-          tier: 'native-offset-deterministic',
-          supportsParameterCurves: true,
-          supportsNativeMotionOffset: true,
-          supportsStateReplay: false,
-          diagnostics: ['mock runtime determinism'],
-        },
-      },
+      capabilities: resolveLive2DRuntimeCapabilities(runtime),
       lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
       motion: {
         getAvailableMotions: () => [],

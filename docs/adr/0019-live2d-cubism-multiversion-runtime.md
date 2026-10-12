@@ -88,4 +88,15 @@ Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/BakeEngine.ts`
 Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/BakeResourceIntegration.test.ts`, `src/__tests__/BakeEngine.test.ts`.
 
 
-下一阶段接入 Cubism 5 时，优先填充 `OfficialCubismWebLive2DAdapter` 的 init/create/model control 能力，而不是继续在 `Live2DManager`、`Live2DMotionController` 或 `BakeEngine` 中新增 Cubism 5 私有字段分支。
+### 2026-10-12: Runtime capability consumption
+
+Stage、Motion、Seek 和 Bake 编排优先读取 `runtimeHandle.capabilities`；资源加载前的能力分类与 descriptor-only entry 的兼容路径统一使用 `Live2DRuntimeControlModule`。Adapter ID 仍用于 Adapter 选择、诊断和曲线缓存 identity，行为选择使用能力声明，覆盖共享 SDK 时钟、零步长姿态求值、动作 handoff、快照、组合模型和加载失败占位模型。
+
+- Cubism 2 的 `supportsNativeMotionOffset` 为 false，`supportsMotionOffsetReplay` 为 true，tier 为 `offset-replay-deterministic`。目标 offset 依赖共享 SDK 时钟的 50ms 固定步重放；没有时钟不能完成重放，Physics 在重放期间被禁用，`supportsStateReplay` 仍为 false。
+- Cubism 3+ 的 `supportsNativeMotionOffset` 为 true，`supportsMotionOffsetReplay` 为 false。Seek 使用直接队列 offset，强制零步长帧提交姿态，暂停时避免重复执行 writer；这不声明完整 Physics/Pose/LookAt 状态重建。
+- 已加载 handle 的能力优先于 descriptor；没有 handle 的旧 entry 才使用 descriptor 分类，没有 descriptor 的旧 entry 保留 Cubism 2 默认行为。`supported: false` 的 descriptor 不声明执行能力。
+
+Implementation: `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/Live2DStageRuntime.ts`, `src/engine/Live2DModelResources.ts`, `src/engine/Live2DMotionController.ts`, `src/engine/Live2DManager.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`, `src/engine/BakeEngine.ts`.
+Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__/Live2DStageRuntime.test.ts`, `src/__tests__/CharacterSynchronizer.test.ts`.
+
+后续 runtime 能力扩展优先填充对应 Adapter 的 init/create/model control 与能力声明，而不是继续在编排层新增 runtime 身份或私有字段分支。

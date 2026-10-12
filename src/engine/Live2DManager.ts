@@ -8,6 +8,7 @@
  * Runtime imports stay lazy inside the adapters.
  */
 
+import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { stageManager } from './StageManager';
@@ -216,7 +217,8 @@ class Live2DManager {
       await this.modelResources.loadCharacter(id, modelJsonPath, async ({ model, modelUrl, runtime, isCurrent, release }) => {
         const lifecycleGeneration = this.nextCharacterGeneration(id);
         const adapter = getLive2DRuntimeAdapter(runtime);
-        const isCubism2Runtime = runtime.adapterId === 'pixi-live2d-display-cubism2';
+        const runtimeHandle = adapter.createModelHandle(id, model, runtime);
+        const usesPrivateControls = runtimeHandle.capabilities.usesCubism2PrivateControls;
         // A pooled instance keeps the motion queue, expression and pose of its
         // previous owner. The idle snapshot captured below is the pose every
         // later hard reset and custom-motion baseline restores to, so it must
@@ -225,7 +227,7 @@ class Live2DManager {
         resetModelToNeutralPose(model, runtime);
         adapter.getControls().advanceFrame(model, 100);
 
-        if (isCubism2Runtime) {
+        if (usesPrivateControls) {
           // === 核心修复：安全地洗刷初始状态遗留的 0 opacity ===
           // SDK 时钟在 adapter 的锁内单调前进一小步，避免一次超长模型更新
           // 带来的巨大 dt 导致物理系统 NaN 爆炸（flush 在 adapter 内完成）。
@@ -335,7 +337,7 @@ class Live2DManager {
           releaseModel: release,
           runtime,
           adapterId: runtime.adapterId,
-          runtimeHandle: adapter.createModelHandle(id, model, runtime),
+          runtimeHandle,
           config,
           injectedParams: {},
           lipSyncParameterIds: new Set<string>(),
@@ -360,7 +362,7 @@ class Live2DManager {
         // blink), the parameter-override commit hook (lip sync, etc.), the
         // _render() GL-boundary hook and mask isolation are all owned by the
         // runtime adapter.
-        if (isCubism2Runtime) {
+        if (usesPrivateControls) {
           adapter.getControls().prepareModel(model, {
             id,
             mode: 'live',
@@ -727,7 +729,7 @@ class Live2DManager {
     try {
       const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
       if (!this._shouldUpdate
-        && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+        && getLive2DRuntimeCapabilities(entry).evaluatesPoseOnZeroDelta
         && controls.setExpressionForSeek) {
         // An explicit inspector preview should show the final expression while
         // the timeline is paused. Re-evaluate at the same motion timestamp so
@@ -841,7 +843,7 @@ class Live2DManager {
   getCubism2SamplerTargets(characterId: string): Cubism2MotionSamplerTarget[] {
     const entry = this.characters.get(characterId);
     if (!entry?.model) return [];
-    if (entry.runtime?.adapterId !== 'pixi-live2d-display-cubism2') return [];
+    if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls) return [];
 
     return [...getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model)];
   }
@@ -1209,6 +1211,7 @@ class Live2DManager {
   captureSnapshot(id: string): ModelSnapshot | null {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return null;
+    if (!getLive2DRuntimeCapabilities(entry).supportsSnapshot) return null;
     return entry.runtimeHandle?.snapshot.captureSnapshot(entry.motionStartTime)
       ?? getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(id, entry.model, entry.motionStartTime);
   }
@@ -1240,7 +1243,7 @@ class Live2DManager {
     const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
     let result;
     try {
-      result = await controls.restoreSeekState(entry.model, {
+      const restoreInput = {
         id,
         snapshot: input.snapshot ?? null,
         handoffSnapshot: input.handoffSnapshot ?? null,
@@ -1251,7 +1254,10 @@ class Live2DManager {
         idleSnapshot: entry.idleSnapshot ?? null,
         isScrubbing: input.isScrubbing,
         preserveMotionForPlayback: input.preserveMotionForPlayback,
-      });
+      };
+      result = entry.runtimeHandle
+        ? await entry.runtimeHandle.snapshot.restoreSeekState(restoreInput)
+        : await controls.restoreSeekState(entry.model, restoreInput);
     } catch (err) {
       if (this.characters.get(id) !== entry || (entry.lifecycleGeneration ?? 0) !== lifecycleGeneration) {
         return;

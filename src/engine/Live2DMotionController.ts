@@ -6,6 +6,7 @@
  * with Live2DManager — no copying.
  */
 
+import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import gsap from 'gsap';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
 import { acquireUtSystemLock, describeInvalidModelSnapshot, releaseUtSystemLock } from './Live2DConfig';
@@ -81,8 +82,8 @@ export class Live2DMotionController {
     private getScriptEngine: () => any,
   ) {}
 
-  private isCubism2Runtime(entry: CharacterEntry): boolean {
-    return (entry.runtime?.adapterId ?? 'pixi-live2d-display-cubism2') === 'pixi-live2d-display-cubism2';
+  private usesPrivateMotionControls(entry: CharacterEntry): boolean {
+    return getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls;
   }
 
   private restoreExpressionAfterMotionReset(entry: CharacterEntry): void {
@@ -159,7 +160,7 @@ export class Live2DMotionController {
     const preserveTinyOffset = skipHardReset || scriptEngine?.isReconstructing === true;
     const targetOffset = normalizeLive2DMotionOffset(offset, { preserveTinyOffset });
     const shouldCaptureHandoffAtIntent =
-      entry?.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+      (entry && getLive2DRuntimeCapabilities(entry).supportsMotionHandoff)
       || (preserveTinyOffset && isLive2DMotionHandoffOffset(targetOffset));
 
     if (!entry) {
@@ -271,7 +272,7 @@ export class Live2DMotionController {
       // 拿到锁后第一时间校验：如果外头产生过更新的 playMotion 意图，立刻丢弃旧指令
       if (isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) return;
 
-      if (!this.isCubism2Runtime(entry)) {
+      if (!this.usesPrivateMotionControls(entry)) {
         this.activeMotionLoads.add(id);
         try {
           if (!skipHardReset) {
@@ -567,6 +568,7 @@ export class Live2DMotionController {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return;
 
+    if (!getLive2DRuntimeCapabilities(entry).supportsSnapshot) return;
     if (entry.runtimeHandle) {
       entry.runtimeHandle.snapshot.applySnapshot(snapshot);
     } else {
@@ -713,7 +715,7 @@ export class Live2DMotionController {
   async preloadMotion(id: string, motionKey: string): Promise<void> {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return;
-    if (entry.runtime.adapterId !== 'pixi-live2d-display-cubism2') return;
+    if (!getLive2DRuntimeCapabilities(entry).supportsMotion) return;
 
     this.activeMotionLoads.add(id);
     try {
@@ -768,7 +770,7 @@ export class Live2DMotionController {
       });
 
       if (entry) {
-        if (!this.isCubism2Runtime(entry)) {
+        if (!this.usesPrivateMotionControls(entry)) {
           entry.motionStartTime = undefined;
           entry.lastOffset = undefined;
           entry.lastSnapshot = undefined;
@@ -778,7 +780,7 @@ export class Live2DMotionController {
 
       // The legacy Cubism 2 reset ended with one wrapper-level advance after
       // the per-concrete steps; keep that final frame.
-      if (this.isCubism2Runtime(entry)) {
+      if (this.usesPrivateMotionControls(entry)) {
         controls.advanceFrame(model, 16);
       }
 

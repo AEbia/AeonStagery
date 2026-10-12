@@ -305,7 +305,7 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
 
   it('routes cached Cubism 3+ parameter motions through the custom evaluator instead of native replay', async () => {
     const entry = live2D.getAllCharacters().get('char1')!;
-    entry.runtime = { adapterId: 'untitled-pixi-live2d-engine-cubism' };
+    entry.runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true };
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(cachedCubism3Entry);
 
     await synchronizer.syncTo({

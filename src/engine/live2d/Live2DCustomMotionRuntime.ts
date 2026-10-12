@@ -1,4 +1,5 @@
 /** Owns custom-motion takeover, handoff identity and Motion-stage installation. */
+import { getLive2DRuntimeCapabilities } from './runtime/Live2DRuntimeControlModule';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import type { CharacterEntry, ModelSnapshot } from '../Live2DConfig';
 import { getLive2DRuntimeAdapter } from '../Live2DRuntimeAdapter';
@@ -117,7 +118,7 @@ export class Live2DCustomMotionRuntime {
    */
   private restoreCustomMotionBaseline(entry: CharacterEntry): void {
     if (!entry.model) return;
-    if (entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism') {
+    if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls && getLive2DRuntimeCapabilities(entry).supportsSnapshot) {
       if (entry.idleSnapshot) {
         getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, entry.idleSnapshot);
       }

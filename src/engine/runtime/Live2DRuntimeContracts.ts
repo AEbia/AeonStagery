@@ -59,6 +59,7 @@ export interface Live2DModelCreateOptions {
 /** Strongest deterministic motion guarantee an adapter can make. */
 export type Live2DDeterminismTier =
   | 'parameter-deterministic'
+  | 'offset-replay-deterministic'
   | 'native-offset-deterministic'
   | 'state-replay-deterministic'
   | 'unsupported';
@@ -67,8 +68,10 @@ export interface Live2DDeterminismCapabilities {
   readonly tier: Live2DDeterminismTier;
   /** Pure parameter curves can be evaluated from absolute scene time. */
   readonly supportsParameterCurves: boolean;
-  /** Native motion queues can be restored to an authored offset. */
+  /** Native motion queues accept an authored offset without clock replay. */
   readonly supportsNativeMotionOffset: boolean;
+  /** Motion offsets can be reached by fixed-step shared SDK clock replay. */
+  readonly supportsMotionOffsetReplay: boolean;
   /** Physics/Pose/LookAt state can be reconstructed from a fixed-step baseline. */
   readonly supportsStateReplay: boolean;
   readonly diagnostics: readonly string[];

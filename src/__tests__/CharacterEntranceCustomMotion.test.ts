@@ -1,3 +1,4 @@
+import { resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cubism2Live2DAdapter, type Live2DRuntimeModelControls } from '../engine/Live2DRuntimeAdapter';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
@@ -68,7 +69,7 @@ function createHandle(id: string, model: any) {
     runtime: RUNTIME,
     displayObject: model,
     rawModel: model,
-    capabilities: {},
+    capabilities: resolveLive2DRuntimeCapabilities(RUNTIME),
     lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
     motion: { getAvailableMotions: () => [], getMotionDuration: () => 0, getMotionDebugState: () => null, preloadMotion: vi.fn() },
     expression: { getAvailableExpressions: () => [], setExpression: () => {} },

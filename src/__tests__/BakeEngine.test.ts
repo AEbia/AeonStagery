@@ -7,7 +7,7 @@ import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
 import { captureModelSnapshot } from '../engine/Live2DConfig';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
-import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import { createV8GuardRenderer } from './helpers/v8GuardRendererStub';
 
 describe('BakeEngine runtime routing', () => {
@@ -159,7 +159,7 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
@@ -175,7 +175,7 @@ describe('BakeEngine runtime routing', () => {
         getCoreModel: (model: any) => model.internalModel.coreModel,
         captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
       }),
-    } as any);
+    }));
 
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
@@ -243,7 +243,7 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
@@ -259,7 +259,7 @@ describe('BakeEngine runtime routing', () => {
         getCoreModel: (model: any) => model.internalModel.coreModel,
         captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
       }),
-    } as any);
+    }));
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -320,7 +320,7 @@ describe('BakeEngine runtime routing', () => {
 
   it('keeps composed cubism3-plus bake paths rejected for now', async () => {
     const officialCreateModel = vi.fn();
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
@@ -333,7 +333,7 @@ describe('BakeEngine runtime routing', () => {
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
       getControls: () => mockControls(),
-    } as any);
+    }));
 
     const wmdlRegistry = {
       get: (key: string) => key.endsWith('.wmdl')
@@ -421,7 +421,7 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'pixi-live2d-display-cubism2',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'pixi-live2d-display-cubism2',
       supported: true,
       init: vi.fn(async () => {}),
@@ -434,7 +434,7 @@ describe('BakeEngine runtime routing', () => {
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
       getControls: () => mockControls({ renderForBake, installBakeRenderGuards, prepareModel }),
-    } as any);
+    }));
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
 
     const wmdlRegistry = {

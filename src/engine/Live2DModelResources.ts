@@ -6,6 +6,7 @@
  * them through the ownership-bound release handle.
  */
 
+import { resolveLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { extractLive2DModelData } from './Live2DModelData';
 import type * as PIXI from 'pixi.js';
@@ -296,7 +297,7 @@ export class Live2DModelResources {
           autoHitTest: false, autoFocus: false, autoUpdate: false, idleMotionGroup: '',
         });
       } catch (error) {
-        if (runtime.runtimeFamily !== 'cubism2' || !fallbackRenderer) throw error;
+        if (!resolveLive2DRuntimeCapabilities(runtime).supportsFallbackModel || !fallbackRenderer) throw error;
         console.warn(`[Live2D] Failed to load model ${url}, using placeholder`, error);
         model = adapter.createFallbackModel(fallbackRenderer());
       }
@@ -360,7 +361,7 @@ export class Live2DModelResources {
       if (pooled && !pooled.length) this.pool.delete(url);
       if (model) this.owned.set(model, { ...this.owned.get(model)!, pooled: false, reusable });
       else if (config) {
-        if (!config.modelRelativePath || (runtime.runtimeFamily !== 'cubism2' && runtime.runtimeFamily !== 'wmdl')) {
+        if (!config.modelRelativePath || !resolveLive2DRuntimeCapabilities(runtime).supportsCompositeModels) {
           throw new Live2DModelLoadError('组合模型配置无效或运行时不受支持。', probe.fullPath);
         }
         const main = await this.takeConcrete(
@@ -405,7 +406,7 @@ export class Live2DModelResources {
       }
       if (!isCurrent()) return null;
       this.resetVisualState(model);
-      if (runtime.adapterId === 'pixi-live2d-display-cubism2') {
+      if (resolveLive2DRuntimeCapabilities(runtime).usesCubism2PrivateControls) {
         const controls = adapter.getControls();
         for (const concrete of controls.getConcreteModels(model)) controls.isolateMask(concrete);
       }
@@ -657,7 +658,7 @@ export class Live2DModelResources {
         const childData = await this.readModelJson(childFullPath);
         if (!childData && this.purpose === 'stage') continue;
         const childRuntime = resolveLive2DRuntimeDescriptor(childData?.fullPath ?? childPath, childData?.json);
-        if (childRuntime.runtimeFamily === 'cubism3-plus') {
+        if (childRuntime.supported && !resolveLive2DRuntimeCapabilities(childRuntime).supportsCompositeModels) {
           return {
             exists: true,
             fullPath,
@@ -665,7 +666,7 @@ export class Live2DModelResources {
               ...childRuntime,
               supported: false,
             },
-            error: 'composed cubism3-plus models are not supported yet',
+            error: `composed ${childRuntime.runtimeFamily} models are not supported yet`,
           };
         }
         if (!childRuntime.supported) {

@@ -6,6 +6,7 @@
  * Live2DModelResources; motion policy remains in Live2DMotionController.
  */
 
+import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import * as PIXI from 'pixi.js';
 import { isUtSystemLockActive } from './Live2DConfig';
 import type { CharacterTransformConfig } from '../api/types/character';
@@ -137,7 +138,8 @@ export class Live2DStageRuntime {
 
     this.pendingMotionCount = 0;
     for (const entry of this.characters.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') continue;
+      const capabilities = getLive2DRuntimeCapabilities(entry);
+      if (sharedClockLocked && (capabilities.usesSharedSdkClock || !capabilities.supportsMotion)) continue;
       const request = (entry as any)._pendingPlayMotion as MotionRequest | undefined;
       if (!request) continue;
       (entry as any)._pendingPlayMotion = undefined;
@@ -171,7 +173,8 @@ export class Live2DStageRuntime {
 
     const scriptEngine = this.callbacks.getScriptEngine();
     for (const entry of this.characters.values()) {
-      if (sharedClockLocked && entry.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism') continue;
+      const capabilities = getLive2DRuntimeCapabilities(entry);
+      if (sharedClockLocked && (capabilities.usesSharedSdkClock || !capabilities.supportsMotion)) continue;
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !scriptEngine?.isReconstructing) {
         entry.filterWarmupFrames = Math.max(0, entry.filterWarmupFrames - 1);
       }
@@ -210,11 +213,11 @@ export class Live2DStageRuntime {
 
           const freezeNativeMotion = !this.shouldUpdate
             && !forceStep
-            && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
+            && capabilities.evaluatesPoseOnZeroDelta;
           // Cubism 3+ evaluates cached motion writers and native queues inside
           // update(), including at delta 0. A forced seek flush must commit
           // that pose before rendering without advancing the paused clock.
-          const commitNativeSeek = forceStep && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
+          const commitNativeSeek = forceStep && capabilities.evaluatesPoseOnZeroDelta;
           if ((shouldStepModels || commitNativeSeek) && !freezeNativeMotion) {
             getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
           }

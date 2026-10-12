@@ -276,6 +276,7 @@ describe('Live2DRuntimeAdapter', () => {
       tier: 'native-offset-deterministic',
       supportsParameterCurves: true,
       supportsNativeMotionOffset: true,
+      supportsMotionOffsetReplay: false,
       supportsStateReplay: false,
       diagnostics: [
         'Cubism 3+ parameter motions use the runtime-neutral deterministic curve cache when available.',

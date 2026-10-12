@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createLive2DModelHandle, getLive2DRuntimeCapabilities, resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import type {
   Live2DRuntimeModelControls,
   Live2DSeekRestoreResult,
@@ -16,6 +16,55 @@ function createControls(): Live2DRuntimeModelControls {
 }
 
 describe('createLive2DModelHandle', () => {
+  it('distinguishes SDK offset replay from direct native offsets', () => {
+    const capabilities = resolveLive2DRuntimeCapabilities({
+      runtimeFamily: 'cubism3-plus',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
+      supported: true,
+    });
+    expect(capabilities).toMatchObject({
+      usesSharedSdkClock: false,
+      evaluatesPoseOnZeroDelta: true,
+      supportsMotionHandoff: true,
+      supportsCompositeModels: false,
+      supportsFallbackModel: false,
+      requiresIdleMotionFlush: false,
+      determinism: {
+        supportsNativeMotionOffset: true,
+        supportsMotionOffsetReplay: false,
+        supportsStateReplay: false,
+      },
+    });
+  });
+
+  it('uses handle capabilities even when the descriptor identifies a different adapter', () => {
+    const capabilities = resolveLive2DRuntimeCapabilities({
+      runtimeFamily: 'cubism3-plus',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
+      supported: true,
+    });
+    expect(getLive2DRuntimeCapabilities({
+      runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      runtimeHandle: { capabilities },
+    })).toBe(capabilities);
+    expect(getLive2DRuntimeCapabilities({}).usesCubism2PrivateControls).toBe(true);
+  });
+
+  it('does not advertise controls for an unsupported composite runtime', () => {
+    const capabilities = resolveLive2DRuntimeCapabilities({
+      runtimeFamily: 'cubism3-plus',
+      adapterId: 'untitled-pixi-live2d-engine-cubism',
+      supported: false,
+    });
+    expect(capabilities).toMatchObject({
+      supportsMotion: false,
+      supportsSnapshot: false,
+      evaluatesPoseOnZeroDelta: false,
+      supportsCompositeModels: false,
+      determinism: { tier: 'unsupported', supportsNativeMotionOffset: false, supportsMotionOffsetReplay: false },
+    });
+  });
+
   it('exposes runtime metadata and capability flags', () => {
     const model = { name: 'tomori-model' };
     const handle = createLive2DModelHandle({
@@ -42,13 +91,20 @@ describe('createLive2DModelHandle', () => {
       supportsSnapshot: true,
       supportsBakeRender: true,
       usesCubism2PrivateControls: true,
+      usesSharedSdkClock: true,
+      evaluatesPoseOnZeroDelta: false,
+      supportsMotionHandoff: false,
+      supportsCompositeModels: true,
+      supportsFallbackModel: true,
+      requiresIdleMotionFlush: true,
       determinism: {
-        tier: 'native-offset-deterministic',
+        tier: 'offset-replay-deterministic',
         supportsParameterCurves: true,
-        supportsNativeMotionOffset: true,
+        supportsNativeMotionOffset: false,
+        supportsMotionOffsetReplay: true,
         supportsStateReplay: false,
         diagnostics: [
-          'Cubism 2 native motion offsets use fixed-step SDK clock replay.',
+          'Cubism 2 motion offsets require fixed-step replay with a shared SDK clock.',
           'Stateful Physics/Pose replay is not guaranteed by this adapter.',
         ],
       },
@@ -75,6 +131,7 @@ describe('createLive2DModelHandle', () => {
         tier: 'unsupported',
         supportsParameterCurves: false,
         supportsNativeMotionOffset: false,
+        supportsMotionOffsetReplay: false,
         supportsStateReplay: false,
         diagnostics: ['No runtime adapter can provide deterministic motion evaluation.'],
       },
