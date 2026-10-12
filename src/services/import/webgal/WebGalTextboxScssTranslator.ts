@@ -775,7 +775,8 @@ export function translateWebGalTextboxScss(
   if (textboxDeco || nameboxDeco) {
     notes.push('**角落装饰**：模板的 `::after` 引用了 `'
       + [textboxDeco && textboxDeco.file, nameboxDeco && nameboxDeco.file].filter(Boolean).join('` / `')
-      + '`。导入时会尝试从模板目录 `assets/` 一并复制；若找不到该文件会跳过（不影响其他观感）。');
+      + '`。它们会被内联进生成的贴图，并裁切到圆角框内 —— 模板用负偏移让装饰只露出一角，'
+      + 'WebGAL 靠父元素的 `overflow: hidden` 遮挡，引擎没有这一层，故按同样的范围裁剪。');
   }
   notes.push('**入场动画无法迁移**：引擎 `textbox`/`namebox`/`text` 三个图层的参数白名单里'
     + '**没有任何动画字段**，模板的 `@keyframes` 淡入与逐字显示无法在样式层面还原，需引擎侧新增能力。');
