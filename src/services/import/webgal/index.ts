@@ -25,6 +25,19 @@ export {
   describeWebGalTemplatePackageFiles,
   WEBGAL_PACKAGE_ASSET_ROOT,
 } from './WebGalTextboxScssPackage';
+export {
+  dialogueParamsSignature,
+  findWebGalImportConflicts,
+  hashImportSource,
+  normalizeScssForHashing,
+  scssContentHash,
+  slugifyWebGalPackageName,
+  stableStringify,
+  uniquePackageName,
+  WEBGAL_IMPORT_RECORD_FILE,
+  WEBGAL_PACKAGE_ID_PREFIX,
+} from './WebGalScssPackageNaming';
+export type { WebGalImportRecord } from './WebGalScssPackageNaming';
 export type {
   BoxSides,
   Paint,

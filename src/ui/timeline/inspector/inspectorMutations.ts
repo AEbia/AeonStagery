@@ -7,6 +7,7 @@ import { showToast } from '../../Toast';
 import type { ActionInspectorProps } from '../ActionInspector';
 import type { TimelineAction, TimelineScene } from '../semanticTimelineTypes';
 import { asRecord } from './asRecord';
+import type { WebGalStyleImportActions } from './paramControls/context';
 
 export interface InspectorMutationsDeps {
   appContext: ReturnType<typeof useApp>;
@@ -162,6 +163,53 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     }
   };
 
+  // The style list is derived from the template catalog, so an import has to
+  // re-scan the library before the new style can be selected.
+  const templatePackageCatalog = appContext.services?.templatePackages;
+
+  const webGalStyleImport: WebGalStyleImportActions = {
+    inspect: async () => {
+      const templates = window.aeonStageryAPI?.templates;
+      if (!templates?.inspectWebgalScss) {
+        showToast('当前桌面版本不支持导入 WebGAL 模板，请更新应用', 'error');
+        return null;
+      }
+      try {
+        const result = await templates.inspectWebgalScss();
+        if (!result.success) {
+          if (!result.canceled) showToast(`读取模板失败：${result.error ?? '未知错误'}`, 'error');
+          return null;
+        }
+        return result.inspection;
+      } catch (error) {
+        showToast(`读取模板失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+        return null;
+      }
+    },
+    install: async (request) => {
+      const templates = window.aeonStageryAPI?.templates;
+      if (!templates?.installWebgalScss) {
+        return { ok: false, message: '当前桌面版本不支持导入 WebGAL 模板，请更新应用' };
+      }
+      try {
+        const result = await templates.installWebgalScss(request);
+        if (!result.success) {
+          return { ok: false, message: `导入失败：${result.error ?? '未知错误'}` };
+        }
+        if (templatePackageCatalog) await templatePackageCatalog.refresh();
+        return {
+          ok: true,
+          message: `${result.package.replaced ? '已更新' : '已导入'}字幕样式：${result.package.name}`,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          message: `导入失败：${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
+  };
+
   const updateVisualSemanticOverride = (key: string, value: unknown, isTransient?: boolean) => {
     const currentOverride = asRecord(sourceParams.semanticOverride);
     const nextOverride = { ...currentOverride };
@@ -183,6 +231,7 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     currentDialogueTemplateValue,
     customDialogueTemplateOptions,
     updateDialogueTemplate,
+    webGalStyleImport,
     updateVisualSemanticOverride,
   };
 }
