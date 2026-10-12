@@ -31,6 +31,7 @@ import {
 import { getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
 import type { Cubism2NativeMotionClock } from './live2d/Cubism2NativeMotionSession';
+import type { Live2DMotionSamplingResult } from './runtime/Live2DRuntimeContracts';
 import {
   applyCustomMotionValues,
   customMotionControlledParameterIds,
@@ -80,7 +81,8 @@ export interface BakeMotionModelInfo {
 export interface BakeMotionRuntimeHost {
   /** Scene frame rate used for on-demand curve cache sampling. */
   readonly fps: number;
-  getSamplingTargets(charId: string): readonly Cubism2MotionSamplerTarget[];
+  getSamplingTargets?(charId: string): readonly Cubism2MotionSamplerTarget[];
+  sampleMotion?(charId: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   preloadMotion(charId: string, motionKey: string): Promise<void>;
   getBaseValues(
     charId: string,
@@ -217,8 +219,11 @@ export class BakeMotionRuntime {
           seenCache.add(cacheKeyString);
           const source: MotionCurveCacheSource = {
             ...cacheKey,
-            targets: this.host.getSamplingTargets(request.charId),
             fps: this.host.fps,
+            targets: this.host.getSamplingTargets?.(request.charId) ?? [],
+            ...(this.host.sampleMotion
+              ? { sample: (options) => this.host.sampleMotion!(request.charId, request.motionKey, options) }
+              : { targets: this.host.getSamplingTargets?.(request.charId) ?? [] }),
           };
           const cacheEntry = await this.cache.ensure(source);
           if (cacheEntry) {

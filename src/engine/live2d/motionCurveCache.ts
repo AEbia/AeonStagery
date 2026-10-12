@@ -37,6 +37,7 @@ import {
   type CustomMotionSampledTrack,
 } from './customMotionConversion';
 import { evaluateCustomMotion } from './customMotion';
+import type { Live2DMotionSamplingResult } from '../runtime/Live2DRuntimeContracts';
 
 export interface MotionCurveCacheKey {
   readonly adapterId: string;
@@ -46,7 +47,9 @@ export interface MotionCurveCacheKey {
 
 export interface MotionCurveCacheSource extends MotionCurveCacheKey {
   /** Concrete Cubism 2 model sampling targets (composite models yield ≥1). */
-  readonly targets: readonly Cubism2MotionSamplerTarget[];
+  readonly targets?: readonly Cubism2MotionSamplerTarget[];
+  /** Bound runtime behavior; preferred over exposing concrete SDK targets. */
+  readonly sample?: (options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }) => Promise<Live2DMotionSamplingResult>;
   /** Scene frame rate for per-frame density. */
   readonly fps: number;
 }
@@ -303,7 +306,8 @@ export class MotionCurveCacheService {
 
   private async build(source: MotionCurveCacheSource): Promise<CachedResourceMotion | null> {
     const key = motionCurveCacheKey(source);
-    if (source.targets.length === 0) {
+    if (source.sample) return this.buildFromNeutralSample(source, key);
+    if (!source.targets || source.targets.length === 0) {
       this.logger.warn(`[MotionCurveCache] No sampling targets for motion "${source.motionKey}"`);
       return null;
     }
@@ -411,6 +415,90 @@ export class MotionCurveCacheService {
       },
     };
     return entry;
+  }
+
+  private async buildFromNeutralSample(
+    source: MotionCurveCacheSource,
+    key: string,
+  ): Promise<CachedResourceMotion | null> {
+    let sampled: Live2DMotionSamplingResult;
+    try {
+      sampled = await source.sample!({ fps: source.fps, zeroSourceFades: true, skipMissingParameters: true });
+    } catch (error) {
+      if (source.targets && source.targets.length > 0) {
+        return this.build({ ...source, sample: undefined });
+      }
+      const reason = classifyMissReason(error, 'sampling-failed');
+      this.logger.warn(`[MotionCurveCache] Bound sampling failed for "${source.motionKey}": ${String(error)}`);
+      this.reject(key, reason);
+      return null;
+    }
+    if (sampled.status !== 'sampled' || sampled.metadata?.hasNonParameterCurves) {
+      if (sampled.status === 'unsupported' && source.targets && source.targets.length > 0) {
+        return this.build({ ...source, sample: undefined });
+      }
+      this.reject(key, sampled.metadata?.hasNonParameterCurves ? 'unsupported-curve-target' : 'unsupported');
+      return null;
+    }
+    if (sampled.motion) {
+      const motion = sampled.motion;
+      const isIdle = isIdleMotionKey(source.motionKey);
+      return {
+        key,
+        motion,
+        sourceFadeInSeconds: sampled.metadata?.fadeInSeconds,
+        sourceFadeOutSeconds: sampled.metadata?.fadeOutSeconds,
+        isIdle,
+        evaluate(localTime: number): Readonly<Record<string, number>> {
+          const frame = evaluateCustomMotion(motion, localTime);
+          return frame.active ? frame.values : {};
+        },
+      };
+    }
+    const curves = sampled.curves ?? [];
+    if (curves.length === 0) {
+      this.reject(key, 'no-parameter-curves');
+      return null;
+    }
+    let fit: ReturnType<typeof buildCustomMotionTracks>;
+    try {
+      fit = buildCustomMotionTracks(curves.map((curve) => ({
+        parameterId: curve.parameterId,
+        samples: curve.samples,
+      })), { density: 'perFrame' });
+    } catch (error) {
+      this.reject(key, 'keyframe-build-failed');
+      return null;
+    }
+    if (fit.tracks.length === 0) {
+      this.reject(key, 'no-buildable-tracks');
+      return null;
+    }
+    const metadata = sampled.metadata!;
+    const fadeInSeconds = resolveEffectiveCubism2FadeInSeconds(metadata, source.motionKey);
+    const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
+      kind: 'custom',
+      durationSeconds: Math.max(metadata.durationSeconds, fadeInSeconds),
+      fadeInSeconds,
+      derivedFrom: {
+        key: source.motionKey,
+        ...(metadata.fadeInSeconds !== undefined ? { fadeInSeconds: metadata.fadeInSeconds } : {}),
+        ...(metadata.fadeOutSeconds !== undefined ? { fadeOutSeconds: metadata.fadeOutSeconds } : {}),
+      },
+      tracks: fit.tracks,
+    };
+    const isIdle = isIdleMotionKey(source.motionKey);
+    return {
+      key,
+      motion,
+      sourceFadeInSeconds: metadata.fadeInSeconds,
+      sourceFadeOutSeconds: metadata.fadeOutSeconds,
+      isIdle,
+      evaluate(localTime: number): Readonly<Record<string, number>> {
+        const frame = evaluateCustomMotion(motion, localTime);
+        return frame.active ? frame.values : {};
+      },
+    };
   }
 
   private async buildCubism3(

@@ -12,10 +12,15 @@ import {
 } from '../Live2DConfig';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
 import { Cubism2NativeMotionSession, stepMotionQueuesAt } from '../live2d/Cubism2NativeMotionSession';
+import {
+  mergeCubism2SampledCurves,
+  resolveCubism2MotionMeta,
+  sampleCubism2MotionCurves,
+  type Cubism2MotionSamplerTarget,
+} from '../live2d/cubism2MotionSampler';
 import { Cubism2BakeRenderCore } from '../live2d/runtime/Cubism2BakeRenderCore';
 import { guardExternalGl } from '../live2d/runtime/Cubism2RenderGuardSeam';
 import { readPartOpacities, writePartOpacities } from '../live2d/runtime/Cubism2PartOpacity';
-import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import {
   installCustomMotionStage,
   type CustomMotionStageHandle,
@@ -41,6 +46,8 @@ import type {
   Live2DFocusInput,
   Live2DFocusOptions,
   Live2DRuntimeModelControls,
+  Live2DMotionSamplingOptions,
+  Live2DMotionSamplingResult,
   MutableNumericArrayLike,
   Live2DPerformanceMetadata,
   PerformanceCompatibility,
@@ -1145,6 +1152,36 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       targets.push({ internalModel, motionManager });
     }
     return targets;
+  }
+
+  async sampleMotion(
+    model: any,
+    motionKey: string,
+    options: Live2DMotionSamplingOptions,
+  ): Promise<Live2DMotionSamplingResult> {
+    const targets = this.getMotionSamplingTargets(model);
+    if (targets.length === 0) {
+      return { status: 'unsupported', diagnostics: ['Cubism 2 motion sampling requires a loaded motion manager.'] };
+    }
+    const metas = await Promise.all(targets.map((target) => resolveCubism2MotionMeta(target, motionKey)));
+    const firstMeta = metas[0];
+    const meta = {
+      ...firstMeta,
+      ...(metas.some((candidate) => candidate.hasNonParameterCurves) ? { hasNonParameterCurves: true } : {}),
+    };
+    const curves = await Promise.all(targets.map((target) => sampleCubism2MotionCurves(target, motionKey, {
+      fps: options.fps,
+      durationSeconds: meta.durationSeconds,
+      zeroSourceFades: options.zeroSourceFades,
+      skipMissingParameters: options.skipMissingParameters,
+      fadeInSeconds: meta.fadeInSeconds,
+      fadeOutSeconds: meta.fadeOutSeconds,
+    })));
+    return {
+      status: 'sampled',
+      metadata: meta,
+      curves: mergeCubism2SampledCurves(curves),
+    };
   }
 
   installCustomMotionStage(

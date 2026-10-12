@@ -1453,14 +1453,22 @@ class ScriptEngine {
       const targets = live2DManager.getMotionSamplerTargets(id);
       if (targets.length === 0) continue;
       for (const motionKey of keys) {
+        const source = {
+          adapterId: entry.adapterId,
+          modelRuntimePath: entry.modelPath,
+          motionKey,
+          targets,
+          fps,
+        } as import('./live2d/motionCurveCache').MotionCurveCacheSource;
+        // Keep the legacy target list as a private fallback during the staged
+        // migration, while the cache receives the bound behavior first.
+        Object.defineProperty(source, 'sample', {
+          configurable: true,
+          value: (options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }) =>
+            live2DManager.sampleMotion(id, motionKey, options),
+        });
         tasks.push(
-          motionCurveCache.ensure({
-            adapterId: entry.adapterId,
-            modelRuntimePath: entry.modelPath,
-            motionKey,
-            targets,
-            fps,
-          }).then(() => undefined, (error) => {
+          motionCurveCache.ensure(source).then(() => undefined, (error) => {
             this.logger.warn(`[MotionCurveCache] Pre-warm failed for "${id}/${motionKey}": ${String(error)}`);
           }),
         );

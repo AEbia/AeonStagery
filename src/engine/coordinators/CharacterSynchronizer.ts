@@ -8,6 +8,7 @@ import { resolveLookAtFocus } from '../lookAtFocus';
 import { seekProfiler } from '../SeekProfiler';
 import { motionCurveCache, type CachedResourceMotion, type MotionCurveCacheSource } from '../live2d/motionCurveCache';
 import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
+import type { Live2DMotionSamplingResult } from '../runtime/Live2DRuntimeContracts';
 
 interface DesiredCharState {
   id: string;
@@ -137,6 +138,7 @@ interface Live2DMuscle {
    * motion on demand (ADR-0033). Absent on runtimes without the sampler.
    */
   getMotionSamplerTargets?(id: string): readonly Cubism2MotionSamplerTarget[];
+  sampleMotion?(id: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   lookAt(id: string, x: number, y: number, duration: number, options?: {
     fromX?: number;
     fromY?: number;
@@ -209,9 +211,19 @@ export class CharacterSynchronizer {
       }
       // Permanently-rejected keys stay on the SDK path without re-sampling.
       if (motionCurveCache.missReason(cacheKey)) continue;
-      const targets = this.live2D.getMotionSamplerTargets?.(id) ?? [];
-      if (targets.length === 0) continue;
-      ensureTargets.push({ id, source: { ...cacheKey, targets, fps: input.fps ?? 60 } });
+      const fps = input.fps ?? 60;
+      const resourceMotionKey = motion.output.key;
+      if (this.live2D.sampleMotion) {
+        ensureTargets.push({ id, source: {
+          ...cacheKey,
+          fps,
+          sample: (options) => this.live2D.sampleMotion!(id, resourceMotionKey, options),
+        } });
+      } else {
+        const targets = this.live2D.getMotionSamplerTargets?.(id) ?? [];
+        if (targets.length === 0) continue;
+        ensureTargets.push({ id, source: { ...cacheKey, targets, fps } });
+      }
     }
 
     // Seek-side ensure: a not-yet-sampled but convertible resource motion is

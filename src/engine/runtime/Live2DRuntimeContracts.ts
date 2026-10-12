@@ -7,6 +7,7 @@ import type { Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlMo
 import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type { PreparedAssetRef } from '../../api/types/semantic-scene';
+import type { CustomMotionSamplePoint } from '../live2d/customMotionConversion';
 export type { PreparedAssetRef } from '../../api/types/semantic-scene';
 
 export type Live2DPerformanceKind = 'motion' | 'expression';
@@ -29,6 +30,36 @@ export interface Live2DPerformanceResource {
   asset: PreparedAssetRef;
   runtimeFamily: Live2DPerformanceRuntimeFamily;
   metadata?: Live2DPerformanceMetadata;
+}
+
+/** Runtime-neutral curve returned by an isolated resource-motion evaluation. */
+export interface Live2DMotionSampledCurve {
+  readonly parameterId: string;
+  readonly samples: readonly CustomMotionSamplePoint[];
+}
+
+export interface Live2DMotionSamplingOptions {
+  readonly fps: number;
+  /** Keep source fades in the metadata instead of baking them into values. */
+  readonly zeroSourceFades?: boolean;
+  /** Best-effort cache sampling may ignore parameters absent from the model. */
+  readonly skipMissingParameters?: boolean;
+}
+
+export interface Live2DMotionSamplingMetadata {
+  readonly durationSeconds: number;
+  readonly fadeInSeconds?: number;
+  readonly fadeOutSeconds?: number;
+  readonly hasNonParameterCurves?: boolean;
+}
+
+export interface Live2DMotionSamplingResult {
+  readonly status: 'sampled' | 'unsupported';
+  readonly metadata?: Live2DMotionSamplingMetadata;
+  readonly curves?: readonly Live2DMotionSampledCurve[];
+  /** Cubism 3+ retains native curve segments in this neutral parsed form. */
+  readonly motion?: Extract<import('../../api/types/semantic-scene').CharacterMotionOutput, { kind: 'custom' }>;
+  readonly diagnostics?: readonly string[];
 }
 
 export interface PerformanceCompatibility {
@@ -313,6 +344,12 @@ export interface Live2DRuntimeModelControls {
    * and authoring helpers (resolve-to-opaque-targets; not a pass-through).
    */
   getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[];
+  /** Evaluate a resource motion in isolation and return SDK-neutral data. */
+  sampleMotion(
+    model: any,
+    motionKey: string,
+    options: Live2DMotionSamplingOptions,
+  ): Promise<Live2DMotionSamplingResult>;
   /**
    * Install the Motion-stage writer on every attachable concrete model.
    * Returns null when no target has both the emitter and parameter-write seams.

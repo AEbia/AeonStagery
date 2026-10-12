@@ -53,6 +53,7 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     hasMotionGroup: vi.fn(() => true),
     startMotion: vi.fn(async () => ({ ok: true, offsetReplayMs: 0 })),
     getMotionSamplingTargets: vi.fn(() => []),
+    sampleMotion: vi.fn(async () => ({ status: 'unsupported' as const })),
     installCustomMotionStage: vi.fn(() => null),
     quiesceModel: vi.fn(),
     disposeModel: vi.fn(),

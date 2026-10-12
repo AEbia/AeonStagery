@@ -3,7 +3,6 @@ import React, { useEffect, useState } from 'react';
 import { useApp, useCharacterAdapter } from '../../context/AppContext';
 import type { CustomMotionEditTarget } from '../../../services/timeline-authoring/CustomMotionEditingTypes';
 import { estimateCustomMotionKeyframes, type CustomMotionDensity } from '../../../engine/live2d/customMotionConversion';
-import { resolveCubism2MotionMeta } from '../../../engine/live2d/cubism2MotionSampler';
 import type { CustomMotionConversionDialogState } from '../CustomMotionConversionDialog';
 import type { SemanticTimelineReadModelItem } from '../semanticTimelineReadModel';
 
@@ -25,11 +24,12 @@ export function useCustomMotionAuthoring(args: {
 
   useEffect(() => {
     if (conversionMode !== 'convert' || !conversionTargetId || !conversionMotionKey) return;
-    const targets = characterAdapter.getCubism2SamplerTargets?.(conversionTargetId) ?? [];
-    if (targets.length === 0) return;
+    if (!characterAdapter.sampleMotion) return;
     let active = true;
-    void resolveCubism2MotionMeta(targets[0], conversionMotionKey).then((meta) => {
+    void characterAdapter.sampleMotion(conversionTargetId, conversionMotionKey, { fps, zeroSourceFades: true }).then((sampled) => {
       if (!active) return;
+      const meta = sampled.metadata;
+      if (!meta) return;
       if (meta.durationSeconds > 0) {
         setConversionDialog((prev) => (
           prev && prev.targetId === conversionTargetId && prev.motionKey === conversionMotionKey && Math.abs(prev.durationSeconds - meta.durationSeconds) > 0.001

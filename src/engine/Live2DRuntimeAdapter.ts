@@ -31,6 +31,10 @@ export type {
   PerformanceCompatibility,
   PreparedPerformance,
   Live2DPerformanceModelBinding,
+  Live2DMotionSampledCurve,
+  Live2DMotionSamplingOptions,
+  Live2DMotionSamplingMetadata,
+  Live2DMotionSamplingResult,
   Live2DRuntimeAdapter,
 } from './runtime/Live2DRuntimeContracts';
 export { Live2DPerformanceRegistry } from './runtime/Live2DPerformanceRegistry';

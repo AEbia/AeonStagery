@@ -490,7 +490,7 @@ export function bootstrap(options?: {
   });
   const customMotionConversion = new CustomMotionConversion({
     store: documentStore, authoring: semanticAuthoring, editing: customMotionEditing,
-    samplerTargets: (characterId) => characterAdapter.getCubism2SamplerTargets(characterId),
+    sampleMotion: (characterId, motionKey, options) => characterAdapter.sampleMotion(characterId, motionKey, options),
   });
   let editingProject = projectSession.getCurrentProject();
   const disposeMotionProjectLifecycle = projectSession.subscribe(() => {

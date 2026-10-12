@@ -121,9 +121,15 @@ Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__
 
 `CharacterInfo` 返回独立的 model path、配置、adapter identity 与确定性能力描述，供 reload、资源缓存 identity 与 Seek 行为选择使用。Stage/CharacterAdapter 的 `getModel`、`getCoreModel`、`getAllCharacters` 及绑定 handle 的 Core getter 已删除；动画与 transform target 只取得类型明确的 Pixi `Container`。
 
-剩余 implementation gaps：中立动作采样、完整 performance/Seek/frame 行为、统一 SDK 时钟与 Bake transaction 协调尚未迁移。旧 controls contract、raw model fields、sampler target getters 及相关公共 re-exports 暂时保留，最终删除仍是完整迁移的交付条件。
+剩余 implementation gaps：完整 performance/Seek/frame 行为、统一 SDK 时钟与 Bake transaction 协调尚未迁移。旧 controls contract、raw model fields、sampler target getters 及相关公共 re-exports 暂时保留，最终删除仍是完整迁移的交付条件。
 
 Implementation: `src/engine/live2d/runtime/BoundModelInitialization.ts`, `src/engine/live2d/runtime/BoundModelParameters.ts`, `src/engine/Live2DManager.ts`, `src/api/adapters/CharacterAdapter.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`.
 Verification: `src/__tests__/Live2DBoundInitialization.test.ts`, `src/__tests__/Live2DBoundParameters.test.ts`, `src/__tests__/CharacterInspection.test.ts`, `src/__tests__/CharacterDirectoryParameters.test.tsx`, `src/__tests__/useWorkspaceToolsBridge.test.tsx`, existing animation/Seek/resource integrations and `npm run check`.
 
 Combined verification for these slices: `npm run check` passed 514 files, 5625 tests and TypeScript on 2026-10-12.
+
+### 2026-10-12: Bound neutral motion sampling (implemented slice)
+
+运行时 handle 现在提供 `motion.sampleMotion`，由 Adapter 在私有 SDK seam 内完成动作元数据解析、Cubism 2 隔离队列采样与组合模型曲线合并，Cubism 3+ 返回保留原曲线段的中立 custom motion。转换、曲线缓存预热、Seek-side cache ensure 与 Bake plan 通过该行为取得数据；不支持的曲线/运行时返回 typed unsupported 结果，缓存继续记录永久 miss 并回退原生动作路径。旧 sampler target 仍只作为分阶段迁移的私有 fallback，计划在后续删除公共 controls contract 时移除。
+
+Implementation: `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`, `src/engine/runtime/CubismPixiLive2DAdapter.ts`, `src/engine/live2d/motionCurveCache.ts`, `src/services/timeline-authoring/CustomMotionConversionCommand.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`, `src/engine/BakeMotionRuntime.ts`.

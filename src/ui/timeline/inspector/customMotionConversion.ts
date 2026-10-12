@@ -4,7 +4,6 @@ import { showToast } from '../../Toast';
 import type { CustomMotionDensity } from '../../../engine/live2d/customMotionConversion';
 import type { CharacterMotionOutput } from '../../../api/types/semantic-scene';
 import type { TimelineAction } from '../semanticTimelineTypes';
-import { resolveCubism2MotionMeta } from '../../../engine/live2d/cubism2MotionSampler';
 import type { useCustomMotionAuthoring } from './useCustomMotionAuthoring';
 
 type CustomMotionConversionState = ReturnType<typeof useCustomMotionAuthoring>;
@@ -59,9 +58,10 @@ export function createCustomMotionConversion(deps: CustomMotionConversionDeps) {
     });
 
     if (!isCustom && charId && motionKey && characterAdapter) {
-      const targets = characterAdapter.getCubism2SamplerTargets?.(charId) ?? [];
-      if (targets.length > 0) {
-        void resolveCubism2MotionMeta(targets[0], motionKey).then((meta) => {
+      if (characterAdapter.sampleMotion) {
+        void characterAdapter.sampleMotion(charId, motionKey, { fps: 60, zeroSourceFades: true }).then((sampled: { metadata?: { durationSeconds: number } }) => {
+          const meta = sampled.metadata;
+          if (!meta) return;
           if (meta.durationSeconds > 0) {
             setConversionDialog((prev) => (
               prev && prev.motionKey === motionKey && prev.targetId === charId

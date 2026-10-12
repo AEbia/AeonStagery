@@ -53,7 +53,6 @@ import {
   estimateCustomMotionKeyframes,
   type CustomMotionDensity,
 } from '../../engine/live2d/customMotionConversion';
-import { resolveCubism2MotionMeta } from '../../engine/live2d/cubism2MotionSampler';
 import {
   buildSummarySegmentsFromBuckets,
   buildTimeBucketIndex,
@@ -892,9 +891,10 @@ export const TrackArea = React.memo(({
           conversionTargetRef.current = { actionId: id };
           setConversionDialog({ mode: 'convert', targetId: charId, motionKey, durationSeconds });
           if (charId && motionKey && adapterDuration <= 0) {
-            const targets = characterAdapter.getCubism2SamplerTargets?.(charId) ?? [];
-            if (targets.length > 0) {
-              void resolveCubism2MotionMeta(targets[0], motionKey).then((meta) => {
+            if (characterAdapter.sampleMotion) {
+              void characterAdapter.sampleMotion(charId, motionKey, { fps: 60, zeroSourceFades: true }).then((sampled) => {
+                const meta = sampled.metadata;
+                if (!meta) return;
                 if (meta.durationSeconds > 0) {
                   setConversionDialog((prev) => (
                     prev && prev.motionKey === motionKey && prev.targetId === charId

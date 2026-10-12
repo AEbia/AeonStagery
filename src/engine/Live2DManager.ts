@@ -798,6 +798,19 @@ class Live2DManager {
     return [...getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model)];
   }
 
+  async sampleMotion(
+    characterId: string,
+    motionKey: string,
+    options: import('./runtime/Live2DRuntimeContracts').Live2DMotionSamplingOptions,
+  ): Promise<import('./runtime/Live2DRuntimeContracts').Live2DMotionSamplingResult> {
+    const entry = this.characters.get(characterId);
+    if (!entry?.model) {
+      return { status: 'unsupported', diagnostics: [`Character "${characterId}" is not loaded.`] };
+    }
+    const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(characterId, entry.model, entry.runtime);
+    return handle.motion.sampleMotion(motionKey, options);
+  }
+
   /**
    * Set a Live2D parameter value directly.
    * Used for lip sync, breathing, and other real-time parameter control.

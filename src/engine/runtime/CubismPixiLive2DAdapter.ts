@@ -8,6 +8,7 @@ import { createLive2DModelHandle, type Live2DModelHandle } from '../live2d/runti
 import { loadCubismEngineModule } from '../Live2DEngineBridge';
 import { installCustomMotionStage, type InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
+import { loadCubism3Motion } from '../live2d/cubism3MotionSampler';
 import type {
   Live2DModelCreateOptions,
   Live2DRuntimeClock,
@@ -401,6 +402,30 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         });
       }
       return targets;
+    },
+    sampleMotion: async (model, motionKey, _options) => {
+      const targets = this.controls.getConcreteModels(model)
+        .map((concrete) => concrete?.internalModel)
+        .filter((internal): internal is { settings: unknown } => !!internal?.settings)
+        .map((internal) => ({ kind: 'cubism3-plus' as const, settings: internal.settings }));
+      const target = targets[0];
+      if (!target) {
+        return { status: 'unsupported', diagnostics: ['Cubism 3+ motion settings are unavailable.'] };
+      }
+      const parsed = await loadCubism3Motion(target, motionKey);
+      return {
+        status: 'sampled',
+        metadata: {
+          durationSeconds: parsed.motion.durationSeconds,
+          fadeInSeconds: parsed.motion.derivedFrom.fadeInSeconds,
+          fadeOutSeconds: parsed.motion.derivedFrom.fadeOutSeconds,
+          hasNonParameterCurves: parsed.ignoredCurves.length > 0,
+        },
+        motion: parsed.motion,
+        diagnostics: parsed.ignoredCurves.length > 0
+          ? parsed.ignoredCurves.map((curve) => `Unsupported ${curve.target} curve: ${curve.id}`)
+          : undefined,
+      };
     },
     installCustomMotionStage: (model, input: Omit<InstallCustomMotionStageInput, 'targets'>) => {
       const targets = this.controls.getConcreteModels(model)

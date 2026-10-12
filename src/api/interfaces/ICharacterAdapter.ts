@@ -2,6 +2,7 @@ import type { CharacterConfig, CharacterInfo } from '../types/character';
 import type { Container } from 'pixi.js';
 import type { Cubism2MotionSamplerTarget } from '../../engine/live2d/cubism2MotionSampler';
 import type { Live2DParameterEdit, Live2DParameterEditResult, Live2DParameterInspection } from '../types/live2d-parameter-animation';
+import type { Live2DMotionSamplingOptions, Live2DMotionSamplingResult } from '../../engine/runtime/Live2DRuntimeContracts';
 
 export interface ICharacterAdapter {
   inspectParameters(characterId: string): readonly Live2DParameterInspection[] | null;
@@ -22,5 +23,6 @@ export interface ICharacterAdapter {
   hasCharacter(id: string): boolean;
   /** Concrete Cubism 2.1 sampling targets of a loaded character (ADR-0029 conversion). */
   getCubism2SamplerTargets?(characterId: string): readonly Cubism2MotionSamplerTarget[];
+  sampleMotion?(characterId: string, motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult>;
   getMotionDuration?(characterId: string, motionKey: string): number;
 }

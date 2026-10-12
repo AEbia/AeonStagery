@@ -2,6 +2,7 @@ import { live2DManager } from '../../engine/Live2DManager';
 import type { CharacterConfig, CharacterTransformConfig } from '../types/character';
 import type { ICharacterAdapter } from '../../api/interfaces';
 import type { Live2DParameterEdit } from '../types/live2d-parameter-animation';
+import type { Live2DMotionSamplingOptions, Live2DMotionSamplingResult } from '../../engine/runtime/Live2DRuntimeContracts';
 
 export class CharacterAdapter implements ICharacterAdapter {
   constructor(private readonly manager = live2DManager) {}
@@ -64,6 +65,9 @@ export class CharacterAdapter implements ICharacterAdapter {
   hasCharacter(id: string): boolean { return this.manager.hasCharacter(id); }
   getCubism2SamplerTargets(characterId: string): readonly import('../../engine/live2d/cubism2MotionSampler').Cubism2MotionSamplerTarget[] {
     return this.manager.getCubism2SamplerTargets(characterId);
+  }
+  sampleMotion(characterId: string, motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult> {
+    return this.manager.sampleMotion(characterId, motionKey, options);
   }
   getMotionDuration(characterId: string, motionKey: string): number {
     return this.manager.getMotionDuration(characterId, motionKey);

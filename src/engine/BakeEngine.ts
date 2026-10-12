@@ -516,6 +516,13 @@ export class BakeEngine {
 
     const host: BakeMotionRuntimeHost = {
       fps,
+      sampleMotion: (charId, motionKey, options) => {
+        const entry = this.models.get(charId);
+        if (!isCurrent() || !entry) {
+          return Promise.resolve({ status: 'unsupported' as const, diagnostics: ['Bake model is no longer current.'] });
+        }
+        return entry.runtimeHandle.motion.sampleMotion(motionKey, options);
+      },
       getSamplingTargets: (charId) => {
         const entry = this.models.get(charId);
         if (!isCurrent() || !entry) return [];

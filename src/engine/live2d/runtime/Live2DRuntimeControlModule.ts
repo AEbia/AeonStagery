@@ -15,6 +15,8 @@ import type {
   Live2DRuntimeModelControls,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
+  Live2DMotionSamplingOptions,
+  Live2DMotionSamplingResult,
 } from '../../runtime/Live2DRuntimeContracts';
 
 export interface Live2DRuntimeCapabilities {
@@ -119,6 +121,7 @@ export interface Live2DMotionInterface {
   getMotionDuration(motionKey: string): number;
   getMotionDebugState(): Record<string, unknown> | null;
   preloadMotion(motionKey: string): Promise<void>;
+  sampleMotion(motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult>;
 }
 
 export interface Live2DExpressionInterface {
@@ -201,6 +204,7 @@ export function createLive2DModelHandle({
       getMotionDuration: (motionKey) => controls.getMotionDuration(model, motionKey),
       getMotionDebugState: () => controls.getMotionDebugState(model),
       preloadMotion: (motionKey) => controls.preloadMotion(model, motionKey),
+      sampleMotion: (motionKey, options) => controls.sampleMotion(model, motionKey, options),
     },
     expression: {
       getAvailableExpressions: () => controls.getAvailableExpressions(model),
