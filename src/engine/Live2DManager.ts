@@ -127,6 +127,8 @@ class Live2DManager {
   private motionController: Live2DMotionController | null = null;
   private readonly modelResources: Live2DModelResources;
   private resourceMotionCacheEnabled = true;
+  /** Retain equal seek handoffs so the deterministic fade cache survives a purge. */
+  private readonly customMotionSeekHandoffs = new WeakMap<CharacterEntry, CustomMotionHandoffPose>();
   private readonly logger = getLogger('Live2DManager');
 
   constructor() {
@@ -856,14 +858,21 @@ class Live2DManager {
     // Effect-channel parameters (an in-flight lip-sync mouth value) are
     // excluded so the transient effect output is not baked into the fade-in
     // source; uncovered ids fall back to the curve value at fade evaluation.
-    return {
-      values: selectHandoffPoseValues(
-        byName,
-        state.controlledParameterIds,
-        snapshot?.params,
-        entry.lipSyncParameterIds,
-      ),
-    };
+    const handoffValues = selectHandoffPoseValues(
+      byName,
+      state.controlledParameterIds,
+      snapshot?.params,
+      entry.lipSyncParameterIds,
+    );
+    const previous = this.customMotionSeekHandoffs.get(entry);
+    const parameterIds = Object.keys(handoffValues);
+    if (previous && Object.keys(previous.values).length === parameterIds.length
+      && parameterIds.every(id => previous.values[id] === handoffValues[id])) {
+      return previous;
+    }
+    const handoff = { values: handoffValues };
+    this.customMotionSeekHandoffs.set(entry, handoff);
+    return handoff;
   }
 
   private resolveCustomMotionSceneTime(entry: CharacterEntry, manualTimeMs: number | undefined): number {
