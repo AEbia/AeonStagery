@@ -60,6 +60,19 @@ Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
 Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/Live2DManager.ts`.
 Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DModelResources.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
 
+### 2026-10-12: Stage orchestration modules
+
+`Live2DManager` 保留调用接口和角色登场/移除顺序，把下列实现集中到内部 Module：
+
+- `Live2DCustomMotionRuntime`：自定义动作接管、handoff 身份缓存、未覆盖参数的中立姿态恢复、Motion-stage writer 安装及场景时间选择。退出仍使用共享 `releaseCustomMotionOwnership`。
+- `Live2DCharacterGeometry`：传统 transform、相机投影、AlphaFilter 透明度保护、组合模型语义锚点及稳定采样范围。
+- `Live2DRimLightController`：轮廓光配置/补间、登场后的积压命令恢复、绝对时间 Seek 重建和移除时的 tween 清理。
+
+积压命令容器仍由 `Live2DStageRuntime` 持有并统一清空；模型借用/归还仍由 `Live2DModelResources` 持有。新 Module 通过已有 runtime Adapter 操作模型，不增加 runtime family 分支或新的 Adapter seam。
+
+Implementation: `src/engine/live2d/Live2DCustomMotionRuntime.ts`, `src/engine/Live2DCharacterGeometry.ts`, `src/engine/Live2DRimLightController.ts`.
+Verification: `src/__tests__/CharacterEntranceCustomMotion.test.ts`, `src/__tests__/CustomMotionLipSyncMouthProtection.test.ts`, `src/__tests__/Live2DManagerGetPoint.test.ts`, `src/__tests__/Live2DFadeAlphaFilter.test.ts`, `src/__tests__/Live2DRimLight.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
+
 
 ### 2026-10-11: Bake resource ownership
 

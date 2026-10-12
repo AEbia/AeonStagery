@@ -262,6 +262,8 @@ export interface CharacterEntry {
   baseHeight: number;
   baseWidth?: number;
   breathTween?: gsap.core.Tween;
+  rimFilter?: import('./RimLightFilter').RimLightFilter;
+  rimProxy?: { alpha: number };
   motionStartTime?: number;
   motionEpoch: number;
   motionStartUtTime?: number;

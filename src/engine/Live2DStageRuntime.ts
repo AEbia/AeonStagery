@@ -8,6 +8,7 @@
 
 import * as PIXI from 'pixi.js';
 import { isUtSystemLockActive } from './Live2DConfig';
+import type { CharacterTransformConfig } from '../api/types/character';
 import type { CharacterEntry } from './Live2DConfig';
 import type { ModelSnapshot } from './Live2DConfig';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
@@ -69,7 +70,7 @@ export class Live2DStageRuntime {
   readonly jumpingCharacters = new Set<string>();
   readonly motionMutex = new Map<string, Promise<void>>();
   readonly hardResetMutex = new Map<string, Promise<void>>();
-  readonly pendingConfigs = new Map<string, unknown[]>();
+  readonly pendingConfigs = new Map<string, Partial<CharacterTransformConfig>[]>();
   readonly activeMotionLoads = new Set<string>();
   readonly pendingExpressions = new Map<string, string | null>();
   readonly pendingCustomMotions = new Map<string, PendingCustomMotion>();
