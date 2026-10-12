@@ -15,7 +15,7 @@ import { Live2DCompositeModel } from './Live2DCompositeModel';
 import { getUnsupportedLive2DRuntimeMessage } from './Live2DRuntimeResolver';
 import type { Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
 import { resolveLive2DRuntimeDescriptor } from './Live2DRuntimeResolver';
-import { captureModelNeutralPoseOnce } from './live2d/characterStatePurge';
+import { captureModelNeutralPoseOnce } from './live2d/runtime/BoundModelInitialization';
 
 export type Live2DResourceModel = PIXI.Container & {
   anchor: PIXI.ObservablePoint;
@@ -180,7 +180,7 @@ export class Live2DModelResources {
       model.autoUpdate = false;
       for (const concrete of owner.constituents ?? [model]) {
         const concreteOwner = this.owned.get(concrete);
-        concreteOwner?.adapter.getControls().quiesceModel(concrete);
+        concreteOwner?.adapter.createModelHandle(owner.url, concrete, concreteOwner.runtime).quiesce();
         Reflect.deleteProperty(concrete, '_characterEntry');
       }
       Reflect.deleteProperty(model, '_characterEntry');
@@ -455,7 +455,7 @@ export class Live2DModelResources {
     if (!owner.constituents) {
       try {
         model.autoUpdate = false;
-        owner.adapter.getControls().quiesceModel(model);
+        owner.adapter.createModelHandle(owner.url, model, owner.runtime).quiesce();
       } catch (error) {
         console.warn('[Live2D] Failed to quiesce owned model:', error);
       }
@@ -472,7 +472,7 @@ export class Live2DModelResources {
         model.destroy();
       } else {
         const remaining = this.releaseTexture(owner.url);
-        owner.adapter.getControls().disposeModel(model, {
+        owner.adapter.createModelHandle(owner.url, model, owner.runtime).dispose({
           mode: this.purpose === 'bake' && owner.adapter.id === 'pixi-live2d-display-cubism2'
             ? 'soft-detach' : 'destroy',
           keepTextures: this.purpose === 'bake' || keepSharedTextures || remaining > 0, detach: true,

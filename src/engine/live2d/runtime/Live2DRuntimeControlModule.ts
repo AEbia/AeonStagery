@@ -1,8 +1,14 @@
 import type * as PIXI from 'pixi.js';
+import { createBoundModelInitialization } from './BoundModelInitialization';
 import type { Live2DParameterMetadata } from '../../../api/types/live2d-parameter-animation';
 import type { ModelSnapshot } from '../../Live2DConfig';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../../Live2DRuntimeResolver';
 import type {
+  Live2DInitializationInput,
+  Live2DInitializationResult,
+  Live2DRuntimeSourceBinding,
+  Live2DRuntimeResetInput,
+  Live2DDisposeOptions,
   Live2DDeterminismCapabilities,
   Live2DRuntimeModelControls,
   Live2DSeekRestoreInput,
@@ -146,6 +152,11 @@ export interface Live2DModelHandle {
   readonly displayObject: PIXI.Container;
   readonly rawModel: any;
   readonly capabilities: Live2DRuntimeCapabilities;
+  initialize(input: Live2DInitializationInput): Promise<Live2DInitializationResult>;
+  bindRuntimeSource(input: Live2DRuntimeSourceBinding): boolean;
+  resetRuntimeState(input?: Live2DRuntimeResetInput): void;
+  quiesce(): void;
+  dispose(input: Live2DDisposeOptions): void;
   readonly lifecycle: Live2DLifecycleInterface;
   readonly motion: Live2DMotionInterface;
   readonly expression: Live2DExpressionInterface;
@@ -176,6 +187,7 @@ export function createLive2DModelHandle({
     displayObject: model as PIXI.Container,
     rawModel: model,
     capabilities,
+    ...createBoundModelInitialization(id, model, controls, capabilities),
     lifecycle: {
       getCoreModel: () => controls.getCoreModel(model),
       clearMotionState: () => controls.clearMotionState(model),

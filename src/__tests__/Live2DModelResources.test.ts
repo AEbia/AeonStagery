@@ -1,4 +1,4 @@
-import { resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Live2DModelResources } from '../engine/Live2DModelResources';
 import * as sdk from '../engine/CubismPixiSdk';
@@ -385,44 +385,9 @@ describe('Live2DModelResources', () => {
       getControls: () => mockControls({
         getCoreModel: () => null,
       }),
-      createModelHandle: (id: string, model: any, runtime: any) => ({
-        id,
-        runtime,
-        displayObject: model,
-        rawModel: model,
-        capabilities: resolveLive2DRuntimeCapabilities(runtime),
-        lifecycle: {
-          getCoreModel: () => null,
-          clearMotionState: () => {},
-          stopAllMotions: () => {},
-        },
-        motion: {
-          getAvailableMotions: () => [],
-          getMotionDuration: () => 0,
-          getMotionDebugState: () => null,
-          preloadMotion: async () => {},
-        },
-        expression: {
-          getAvailableExpressions: () => [],
-          setExpression: () => {},
-        },
-        parameters: {
-          getParameterValues: () => null,
-          getParameterMetadata: () => null,
-          setInjectedParameter: () => {},
-          syncInputParameters: () => {},
-        },
-        snapshot: {
-          captureSnapshot: () => null,
-          applySnapshot: () => {},
-          restoreSeekState: async () => ({ status: 'restored', tierUsed: 'native' }),
-        },
-        render: {
-          renderForBake: () => {},
-        },
-        diagnostics: {
-          describeInvalidState: () => null,
-        },
+      createModelHandle: (id, model, runtime) => createLive2DModelHandle({
+        id, model, runtime: runtime ?? { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
+        controls: mockControls(),
       }),
       createModel: officialCreate,
       getUnsupportedMessage: () => null,

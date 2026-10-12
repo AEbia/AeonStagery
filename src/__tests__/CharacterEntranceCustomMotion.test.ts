@@ -1,4 +1,4 @@
-import { resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cubism2Live2DAdapter, type Live2DRuntimeModelControls } from '../engine/Live2DRuntimeAdapter';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
@@ -63,21 +63,8 @@ function createFakeModel() {
   };
 }
 
-function createHandle(id: string, model: any) {
-  return {
-    id,
-    runtime: RUNTIME,
-    displayObject: model,
-    rawModel: model,
-    capabilities: resolveLive2DRuntimeCapabilities(RUNTIME),
-    lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
-    motion: { getAvailableMotions: () => [], getMotionDuration: () => 0, getMotionDebugState: () => null, preloadMotion: vi.fn() },
-    expression: { getAvailableExpressions: () => [], setExpression: () => {} },
-    parameters: { getParameterValues: () => null, getParameterMetadata: () => null, setInjectedParameter: () => {}, syncInputParameters: () => {} },
-    snapshot: { captureSnapshot: () => null, applySnapshot: () => {}, restoreSeekState: vi.fn() },
-    render: { renderForBake: () => {} },
-    diagnostics: { describeInvalidState: () => null },
-  } as any;
+function createHandle(id: string, model: object, controls: Live2DRuntimeModelControls) {
+  return createLive2DModelHandle({ id, model, runtime: RUNTIME, controls });
 }
 
 interface Harness {
@@ -104,7 +91,7 @@ async function createHarness(): Promise<Harness> {
   vi.spyOn(cubism2Live2DAdapter, 'getModelClass').mockReturnValue(function FakeModel() {} as any);
   vi.spyOn(cubism2Live2DAdapter, 'createModel').mockResolvedValue(model as any);
   vi.spyOn(cubism2Live2DAdapter, 'getControls').mockReturnValue(controls);
-  vi.spyOn(cubism2Live2DAdapter, 'createModelHandle').mockImplementation((id: string) => createHandle(id, model));
+  vi.spyOn(cubism2Live2DAdapter, 'createModelHandle').mockImplementation((id: string) => createHandle(id, model, controls));
 
   vi.stubGlobal('window', { aeonStageryAPI: { fs: {
     readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }),

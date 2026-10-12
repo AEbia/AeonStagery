@@ -888,7 +888,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     return advanced;
   }
 
-  async flushIdleState(model: any): Promise<void> {
+  async flushIdleState(model: any, isCurrent: () => boolean = () => true): Promise<void> {
+    if (!isCurrent()) return;
     const internalModel = model?.internalModel;
     const coreModel = internalModel?.coreModel;
     if (!internalModel || !coreModel) return;
@@ -898,7 +899,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       if (idleGroup && internalModel.motionManager) {
         try {
           await internalModel.motionManager.loadMotion(idleGroup, 0);
+          if (!isCurrent()) return;
           await internalModel.motionManager.startMotion(idleGroup, 0, 3);
+          if (!isCurrent()) return;
 
           // 核心修复：绝对不能在此处执行大幅度的时间跳跃和回退（如 t+2000 然后 t）！
           // 否则模型的物理系统记录了 t+2000，等稍后在较早的场景时间烘焙/渲染时，
@@ -907,6 +910,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           if (sdkClock) {
             await acquireUtSystemLock();
             try {
+              if (!isCurrent()) return;
               const t = sdkClock.getUserTimeMSec();
               sdkClock.setUserTimeMSec(t + 16);
               model.update?.(16);

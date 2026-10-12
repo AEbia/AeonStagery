@@ -205,8 +205,8 @@ describe('Live2D model resource ownership', () => {
     let old!: LoadedLive2DModel;
     await resources.loadCharacter('old', 'hero.model.json', async loaded => {
       old = loaded;
-      controls.prepareModel(loaded.model, {
-        id: 'old', mode: 'bake', injectedParamsSource: { injectedParams: { ParamAngleX: 42 } },
+      adapter.createModelHandle('old', loaded.model, loaded.runtime).bindRuntimeSource({
+        mode: 'bake', injectedParamsSource: { injectedParams: { ParamAngleX: 42 } }, isCurrent: loaded.isCurrent,
       });
     });
     old.release();
@@ -214,9 +214,11 @@ describe('Live2D model resource ownership', () => {
     expect(values[0]).toBe(0);
     await resources.loadCharacter('next', 'hero.model.json', async loaded => {
       expect(loaded.model).toBe(instance);
-      controls.prepareModel(loaded.model, {
-        id: 'next', mode: 'bake', injectedParamsSource: { injectedParams: { ParamAngleX: 7 } },
+      const source = { injectedParams: { ParamAngleX: 42 } };
+      adapter.createModelHandle('next', loaded.model, loaded.runtime).bindRuntimeSource({
+        mode: 'bake', injectedParamsSource: source, isCurrent: loaded.isCurrent,
       });
+      source.injectedParams = { ParamAngleX: 7 };
       core.update();
     });
     expect(values[0]).toBe(7);

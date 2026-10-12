@@ -1,4 +1,4 @@
-import { resolveLive2DRuntimeCapabilities } from '../../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createLive2DModelHandle } from '../../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { vi } from 'vitest';
 import type {
   Live2DRuntimeAdapter,
@@ -77,34 +77,10 @@ export function mockAdapter(overrides: Partial<Live2DRuntimeAdapter> = {}): Live
     getModelClass: vi.fn(() => null),
     getConfig: vi.fn(() => null),
     getControls: vi.fn(() => mockControls()),
-    createModelHandle: vi.fn((id: string, model: any, runtime: any) => ({
-      id,
-      runtime,
-      displayObject: model,
-      rawModel: model,
-      capabilities: resolveLive2DRuntimeCapabilities(runtime),
-      lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
-      motion: {
-        getAvailableMotions: () => [],
-        getMotionDuration: () => 0,
-        getMotionDebugState: () => null,
-        preloadMotion: vi.fn(async () => {}),
-      },
-      expression: { getAvailableExpressions: () => [], setExpression: () => {} },
-      parameters: {
-        getParameterValues: () => null,
-        getParameterMetadata: () => null,
-        setInjectedParameter: () => {},
-        syncInputParameters: () => {},
-      },
-      snapshot: {
-        captureSnapshot: () => null,
-        applySnapshot: () => {},
-        restoreSeekState: vi.fn(async () => ({ status: 'restored', tierUsed: 'native' })),
-      },
-      render: { renderForBake: () => {} },
-      diagnostics: { describeInvalidState: () => null },
-    }) as any),
+    createModelHandle: vi.fn((id, model, runtime) => createLive2DModelHandle({
+      id, model, runtime: runtime ?? { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls: overrides.getControls?.() ?? mockControls(),
+    })),
     createModel: vi.fn(async () => ({})),
     getUnsupportedMessage: vi.fn(() => null),
     getClock: vi.fn(() => null),

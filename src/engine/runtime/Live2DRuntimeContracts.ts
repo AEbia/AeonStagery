@@ -1,3 +1,5 @@
+import type * as PIXI from 'pixi.js';
+import type { TransformationProxy } from '../actions/types';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../Live2DRuntimeResolver';
 import type { ModelSnapshot } from '../Live2DConfig';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
@@ -154,6 +156,35 @@ export interface Live2DMotionStartResult {
   motionStartUtTimeMs?: number;
 }
 
+/** Neutral entrance pose; composite snapshots describe the main model. */
+export type Live2DIdleBaseline = Pick<ModelSnapshot, 'params' | 'opacities'>;
+
+export type Live2DInitializationInput = {
+  isCurrent: () => boolean;
+} & ({ mode: 'live' } | { mode: 'bake'; renderer: PIXI.Renderer });
+
+export type Live2DInitializationResult =
+  | { status: 'ready'; idleSnapshot: Live2DIdleBaseline | null }
+  | { status: 'cancelled' };
+
+export interface Live2DRuntimeSourceBinding {
+  mode: 'live' | 'bake';
+  isExportMode?: boolean;
+  /** Retain this live source; its injectedParams property may be replaced. */
+  injectedParamsSource: { injectedParams: Record<string, number> };
+  applyProxyTransform?: (proxyId: string, proxy: Partial<TransformationProxy>) => void;
+  isCurrent: () => boolean;
+}
+
+export interface Live2DRuntimeResetInput {
+  /** Pose handoff can retain a newly enqueued performance. */
+  stopPlayback?: boolean;
+  pose?: 'preserve' | 'neutral' | 'idle';
+  idleSnapshot?: Live2DIdleBaseline | null;
+  clearExpression?: boolean;
+  keepFocus?: boolean;
+}
+
 export interface Live2DModelResetOptions {
   keepFocus?: boolean;
   idleSnapshot?: Pick<ModelSnapshot, 'params' | 'opacities'> | null;
@@ -260,7 +291,7 @@ export interface Live2DRuntimeModelControls {
     flushCore?: boolean,
   ): void;
   /** Load-time idle flush: start the idle group once, step 16ms, then stop it. */
-  flushIdleState(model: any): Promise<void>;
+  flushIdleState(model: any, isCurrent?: () => boolean): Promise<void>;
   /** Hard reset to idle: stop motions/expressions, restore idle pose, reset focus. */
   resetModelToIdle(model: any, options?: Live2DModelResetOptions): Promise<void>;
   /** Restore only the idle parameter baseline (uncovered-parameter ownership handoff). */

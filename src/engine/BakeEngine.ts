@@ -26,7 +26,6 @@ import {
   type Live2DRuntimeClock,
 } from './Live2DRuntimeAdapter';
 import { isPreparedAssetRef, preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
-import { resetModelToNeutralPose } from './live2d/characterStatePurge';
 import { BakeMotionRuntime, type BakeMotionPlanRequest, type BakeMotionRuntimeHost } from './BakeMotionRuntime';
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 
@@ -569,44 +568,23 @@ export class BakeEngine {
         const { model, runtime, isCurrent, release } = loaded;
         if (!isCurrent() || !isTaskCurrent()) return;
         const adapter = getLive2DRuntimeAdapter(runtime);
-        const runtimeControls = adapter.getControls();
         const runtimeHandle = adapter.createModelHandle(id, model, runtime);
-        resetModelToNeutralPose(model, runtime);
-        model.visible = true;
-        model.alpha = 1;
-        if (runtimeHandle.capabilities.usesCubism2PrivateControls) {
-          runtimeControls.installBakeRenderGuards(model);
-        }
         this.container.addChild(model);
-        try {
-          runtimeControls.stepBakeFrame(model, 16, this.app.renderer, id, false);
-        } catch (error) {
-          console.warn(`[BakeEngine] Initial render failed for ${id}`, error);
-        }
-        if (runtimeHandle.capabilities.requiresIdleMotionFlush) {
-          try {
-            await runtimeControls.flushIdleState(model);
-            if (!isCurrent() || !isTaskCurrent()) return;
-            runtimeControls.stepBakeFrame(model, 0, this.app.renderer, id, false);
-          } catch {
-            // Preserve the legacy idle-flush fallback.
-          }
-        }
-        if (!isCurrent() || !isTaskCurrent()) return;
+        const isBorrowCurrent = () => isCurrent() && isTaskCurrent();
+        const initialized = await runtimeHandle.initialize({
+          mode: 'bake', renderer: this.app.renderer, isCurrent: isBorrowCurrent,
+        });
+        if (initialized.status !== 'ready' || !isBorrowCurrent()) return;
         const entry: BakeModel = {
           id, model, release, modelPath: absolutePath, modelKey,
           runtime, runtimeHandle, adapterId: runtime.adapterId, expressionKey: null,
           injectedParams: {},
           idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
         };
-        runtimeControls.prepareModel(model, {
-          id, mode: 'bake', isExportMode: false, injectedParamsSource: entry,
-        });
-        const initSnap = runtimeControls.captureSnapshot(id, model);
-        entry.idleSnapshot = {
-          params: initSnap?.params ?? new Float32Array(0),
-          opacities: initSnap?.opacities ?? new Float32Array(0),
-        };
+        if (!runtimeHandle.bindRuntimeSource({
+          mode: 'bake', isExportMode: false, injectedParamsSource: entry, isCurrent: isBorrowCurrent,
+        })) return;
+        entry.idleSnapshot = initialized.idleSnapshot ?? entry.idleSnapshot;
         if (!isCurrent() || !isTaskCurrent()) return;
         this.models.set(id, entry);
       }, undefined, modelKey);
@@ -825,7 +803,6 @@ export class BakeEngine {
 
   resetAllModelsToIdle(): void {
     for (const entry of this.models.values()) {
-      const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
       // A new range gets a new BakeMotionRuntime, but reuses these models.
       // The new curve driver cannot release parameters owned by the previous
       // run. Drop those writers before warmup or the core update hook writes
@@ -833,14 +810,8 @@ export class BakeEngine {
       for (const parameterId of Object.keys(entry.injectedParams)) {
         delete entry.injectedParams[parameterId];
       }
-      runtimeControls.stopAllMotions(entry.model);
-      runtimeControls.clearMotionState(entry.model);
-      runtimeControls.setExpression(entry.model, null);
+      entry.runtimeHandle.resetRuntimeState({ pose: 'idle', idleSnapshot: entry.idleSnapshot });
       entry.expressionKey = null;
-      const idle = entry.idleSnapshot;
-      if (idle) {
-        runtimeControls.applySnapshot(entry.model, idle as ModelSnapshot);
-      }
       entry.motionStartTime = undefined;
       entry.lastOffset = undefined;
     }

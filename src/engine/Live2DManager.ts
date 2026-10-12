@@ -27,7 +27,6 @@ import { setScriptEngineForSetup } from './Live2DSetupState';
 import { Live2DMotionController, MotionRequest } from './Live2DMotionController';
 import { Live2DModelResources, Live2DModelLoadError } from './Live2DModelResources';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
-import { Live2DCompositeModel } from './Live2DCompositeModel';
 import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
 import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
@@ -36,7 +35,7 @@ import type { CustomMotionHandoffPose } from './live2d/customMotionRuntime';
 import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import { motionCurveCache } from './live2d/motionCurveCache';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
-import { purgeCharacterRuntimeState, resetModelToNeutralPose } from './live2d/characterStatePurge';
+import { purgeCharacterRuntimeState } from './live2d/characterStatePurge';
 import { Live2DStageRuntime, type PendingLookAt, type PendingBlink, type PendingCustomMotion } from './Live2DStageRuntime';
 import { Live2DCustomMotionRuntime } from './live2d/Live2DCustomMotionRuntime';
 import { Live2DCharacterGeometry } from './Live2DCharacterGeometry';
@@ -218,46 +217,9 @@ class Live2DManager {
         const lifecycleGeneration = this.nextCharacterGeneration(id);
         const adapter = getLive2DRuntimeAdapter(runtime);
         const runtimeHandle = adapter.createModelHandle(id, model, runtime);
-        const usesPrivateControls = runtimeHandle.capabilities.usesCubism2PrivateControls;
-        // A pooled instance keeps the motion queue, expression and pose of its
-        // previous owner. The idle snapshot captured below is the pose every
-        // later hard reset and custom-motion baseline restores to, so it must
-        // be taken from a neutralised model — otherwise the character's neutral
-        // pose is the previous scene time's action.
-        resetModelToNeutralPose(model, runtime);
-        adapter.getControls().advanceFrame(model, 100);
-
-        if (usesPrivateControls) {
-          // === 核心修复：安全地洗刷初始状态遗留的 0 opacity ===
-          // SDK 时钟在 adapter 的锁内单调前进一小步，避免一次超长模型更新
-          // 带来的巨大 dt 导致物理系统 NaN 爆炸（flush 在 adapter 内完成）。
-          await adapter.getControls().flushIdleState(model);
-        } else {
-          try {
-            adapter.getControls().stopAllMotions(model);
-            adapter.getControls().advanceFrame(model, 16);
-          } catch {
-            // Ignore errors
-          }
-        }
-
-        if (!isCurrent()) return;
-
-        // Idle warmup advances the SDK and can leave its final motion pose
-        // in the parameter buffer. The snapshot used for future entrances
-        // must remain the instance's pristine baseline captured before the
-        // first update, especially when this pooled model has already served
-        // another character.
-        try {
-          resetModelToNeutralPose(model, runtime);
-        } catch (e) {
-          console.warn(`[Live2D] Failed to neutralise idle baseline for ${id}`, e);
-        }
-
-        const idleSnapshot = adapter.getControls().captureIdleSnapshot(model);
-
-        // Keep hidden during setup to prevent "flashing" at wrong scale/pos
-        model.visible = false;
+        const initialized = await runtimeHandle.initialize({ mode: 'live', isCurrent });
+        if (initialized.status !== 'ready' || !isCurrent()) return;
+        const idleSnapshot = initialized.idleSnapshot;
 
         // Start our manual ticker if this is the first character
         if (!this._tickerAdded) {
@@ -349,28 +311,13 @@ class Live2DManager {
         };
         staging.entry = entry;
 
-        (model as any)._characterEntry = entry;
-
-        // Link CharacterEntry to composite model for dynamic injected parameters synchronization
-        if (model instanceof Live2DCompositeModel) {
-          (model as any)._characterEntry = entry;
-        }
-
         if (idleSnapshot) entry.idleSnapshot = idleSnapshot;
-
-        // Apply visual fixes and hooks — behavior fixes (head/eye, breathing,
-        // blink), the parameter-override commit hook (lip sync, etc.), the
-        // _render() GL-boundary hook and mask isolation are all owned by the
-        // runtime adapter.
-        if (usesPrivateControls) {
-          adapter.getControls().prepareModel(model, {
-            id,
-            mode: 'live',
-            isExportMode: this._isExportMode,
-            injectedParamsSource: entry,
-            applyProxyTransform: (proxyId, proxy) => this.applyProxyTransform(proxyId, proxy),
-          });
-        }
+        // Warmup precedes entry creation; binding retains the live source and
+        // installs runtime protections before the first stage render.
+        if (!runtimeHandle.bindRuntimeSource({
+          mode: 'live', isExportMode: this._isExportMode, injectedParamsSource: entry,
+          applyProxyTransform: (proxyId, proxy) => this.applyProxyTransform(proxyId, proxy), isCurrent,
+        })) return;
 
         targetMap.set(id, entry);
 
