@@ -54,6 +54,34 @@ describe('WebGalScssSyntax', () => {
     expect(stripComments('.a{background:url(https://x/y.png)}')).toContain('https://x/y.png');
   });
 
+  it('strips a trailing line comment without swallowing the next declarations', () => {
+    // A comment that ends a line used to travel with the following line's
+    // declarations into the parser, so `left` was never recognised and the box
+    // fell back to its default position.
+    const css = '.a {\n  font-size:40px; // base font\n  left:120px; right:120px; height:300px;\n}';
+    expect(stripComments(css)).not.toContain('//');
+    expect(stripComments(css)).toContain('left:120px');
+    expect(stripComments(css)).toContain('height:300px');
+    expect(parseBlocks(css)['.a']).toContain('left:120px');
+  });
+
+  it('keeps // inside strings and url() out of the comment pass', () => {
+    expect(stripComments('.a{content:"x // y"}')).toContain('"x // y"');
+    expect(stripComments('.a{background:url(//cdn/x.png)}')).toContain('url(//cdn/x.png)');
+    expect(stripComments(".a{background:url('a//b.png')}")).toContain("url('a//b.png')");
+    // Only the bare `url(` token is protected, so a function that merely ends in
+    // `url` still gets its trailing comment removed.
+    expect(stripComments('.a{filter:myurl(//x)}')).not.toContain('//');
+  });
+
+  it('resolves layout percentages against the containing block, not the font size', () => {
+    // `left: 10%` is a tenth of the 1920px stage, not a tenth of a font size.
+    expect(resolveLength('10%', 20, false, 1920)).toBe(192);
+    expect(resolveLength('10%', 20, false, 1080)).toBe(108);
+    // Without a basis the old font-size-relative reading still applies.
+    expect(resolveLength('100%', 20)).toBe(15);
+  });
+
   it('resolves named colours and alpha', () => {
     // `tryParseColor` yields 8-digit #RRGGBBAA.
     expect(tryParseColor('white')).toBe('#FFFFFFFF');

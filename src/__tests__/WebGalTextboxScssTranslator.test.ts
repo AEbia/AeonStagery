@@ -107,7 +107,9 @@ describe('translateWebGalTextboxScss', () => {
         // that already carries the stage scale.
         padding: [45, 0, 0, 0],
         strokeColor: '#FF3B72',
-        strokeWidth: 5,
+        // 6px raw WebGAL length: the stage scale and the template's scale(0.5)
+        // each apply once, which is what the body outline gets too.
+        strokeWidth: 2,
       },
     });
 
@@ -235,5 +237,73 @@ describe('translateWebGalTextboxScss', () => {
     expect(notes.some((note) => note.includes('text-shadow'))).toBe(true);
     expect(notes.some((note) => note.includes('名牌文字描边'))).toBe(true);
     expect(notes.some((note) => note.includes('入场动画无法迁移'))).toBe(true);
+  });
+
+  it('keeps the declarations a trailing comment sits in front of', () => {
+    const commented = `.TextBox_main {
+  font-size:40px; // base font
+  left:120px; right:120px; height:300px;
+}
+.text { }
+.outer { }
+.inner { }
+.outerName { }
+.innerName { }
+`;
+    const { style } = translateWebGalTextboxScss(commented, { sourceName: 'textbox.scss' });
+    // Without the comment being stripped the block only declared a font size,
+    // so the box fell back to 50 × 0.75 for its position.
+    expect(style.params.textbox!.x).toBe(90);
+    expect(style.params.textbox!.width).toBe(1920 - 90 * 2);
+    expect(style.params.textbox!.height).toBe(225);
+  });
+
+  it('resolves layout percentages against the containing block', () => {
+    const percent = `.TextBox_main {
+  left: 10%;
+  right: 10%;
+  bottom: 10%;
+  height: 300px;
+  font-size: 40px;
+}
+.text { }
+.outer { }
+.inner { }
+.outerName { }
+.innerName { }
+`;
+    const { style } = translateWebGalTextboxScss(percent, { sourceName: 'textbox.scss' });
+    // 10% of the 1920×1080 stage, not 10% of a 20px root font size (which made
+    // the box nearly full-screen: x=2, width=1916, y=853).
+    expect(style.params.textbox!.x).toBe(192);
+    expect(style.params.textbox!.width).toBe(1536);
+    expect(style.params.textbox!.y).toBe(747);
+  });
+
+  it('scales the nameplate outline once, matching the body outline', () => {
+    const stroked = (declaration: string) => translateWebGalTextboxScss(`.TextBox_main {
+  font-size: 40px;
+  transform: scale(2);
+}
+.text { }
+.outer { }
+.inner { -webkit-text-stroke: ${declaration}; }
+.outerName { }
+.innerName { -webkit-text-stroke: ${declaration}; }
+`, { sourceName: 'textbox.scss' }).style.params;
+
+    // `px`: raw WebGAL length, so the stage scale and the transform both apply.
+    const px = stroked('4px white');
+    expect(px.text.strokeWidth).toBe(6);
+    expect(px.speaker!.strokeWidth).toBe(px.text.strokeWidth);
+    // `em`: each element resolves it against its own font size, and the
+    // nameplate's is twice the body's (WebGAL's inline 200%). `nameSize` already
+    // carries the transform scale, so applying it again would make the plate
+    // 24px instead of 12px.
+    const em = stroked('0.1em white');
+    expect(em.text.strokeWidth).toBe(6);
+    expect(em.speaker!.strokeWidth).toBe(12);
+    // A zero outline stays zero instead of being rounded up to 1px.
+    expect(stroked('0px white').speaker!.strokeWidth).toBe(0);
   });
 });

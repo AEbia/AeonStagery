@@ -140,14 +140,69 @@ export interface ScaleInfo {
  *
  * The line-comment pass is not cosmetic: a commented-out block still contains
  * braces, and leaving them in place breaks the nesting balance in
- * {@link parseBlocks}, attaching later declarations to a garbage selector. Only
- * a `//` at the start of a line (optionally indented) is stripped, so
- * `url(https://…)` keeps working.
+ * {@link parseBlocks}, attaching later declarations to a garbage selector.
+ *
+ * A trailing `//` is legal too — `.a { left: 1px; // why` is common — and
+ * skipping only whole-line comments would let that comment swallow every
+ * declaration that follows it on the same line, silently dropping geometry.
+ * So this scans instead of matching: string literals are copied verbatim, and
+ * `url(…)` is copied as a unit, which is what keeps `url(https://…)` intact.
  */
 export function stripComments(css: string): string {
-  return css
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[\r\n])[ \t]*\/\/[^\r\n]*/g, '$1');
+  const source = String(css ?? '');
+  const out: string[] = [];
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    // A quoted string may legitimately contain `//`; copy it whole.
+    if (char === '"' || char === "'") {
+      out.push(char);
+      index += 1;
+      while (index < source.length) {
+        const inner = source[index];
+        out.push(inner);
+        index += 1;
+        if (inner === '\\') {
+          if (index < source.length) {
+            out.push(source[index]);
+            index += 1;
+          }
+          continue;
+        }
+        if (inner === char) break;
+      }
+      continue;
+    }
+    // `url(` may hold an unquoted `//`, and must not be mistaken for a
+    // comment — but only where it is the whole token, so `myurl(` is skipped.
+    const previous = index > 0 ? source[index - 1] : '';
+    if (!/[\w-]/.test(previous) && /^url\(/i.test(source.slice(index, index + 4))) {
+      const close = source.indexOf(')', index);
+      if (close >= 0) {
+        out.push(source.slice(index, close + 1));
+        index = close + 1;
+        continue;
+      }
+    }
+    if (char === '/' && source[index + 1] === '*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (char === '/' && source[index + 1] === '/') {
+      // Drop the indentation that led into the comment as well, so a trailing
+      // comment leaves the declarations before it exactly as they were.
+      while (out.length > 0 && (out[out.length - 1] === ' ' || out[out.length - 1] === '\t')) {
+        out.pop();
+      }
+      const end = source.indexOf('\n', index);
+      index = end < 0 ? source.length : end;
+      continue;
+    }
+    out.push(char);
+    index += 1;
+  }
+  return out.join('');
 }
 
 /**
@@ -348,8 +403,19 @@ export function rnd(v: number): number {
  * them twice: a `40px` parent resolves to `30px`, and `font-size: 100%` against
  * it then lands on `23px` instead of `30px`. Absolute units always need the
  * single conversion.
+ *
+ * `percentBasis` is for the other percentage case: `left` / `right` resolve
+ * against the containing block's *width* and `bottom` against its *height*, not
+ * against a font size. That basis is already an engine-stage measurement, so a
+ * percentage uses it directly — scaling it again would be the same double-count
+ * the font-size path avoids.
  */
-export function resolveLength(raw: unknown, basePx?: number, baseIsScaled = false): number | null {
+export function resolveLength(
+  raw: unknown,
+  basePx?: number,
+  baseIsScaled = false,
+  percentBasis?: number,
+): number | null {
   if (raw == null) return null;
   const base = basePx || ROOT_FONT_PX;
   const text = String(raw).trim().replace(/!\s*\w+\s*$/, '').trim();
@@ -357,6 +423,7 @@ export function resolveLength(raw: unknown, basePx?: number, baseIsScaled = fals
   if (!m) return null;
   let val = parseFloat(m[1]);
   const unit = m[2] || 'px';
+  if (unit === '%' && percentBasis != null) return rnd((percentBasis * val) / 100);
   const relative = unit === 'em' || unit === 'rem' || unit === '%';
   if (unit === 'em' || unit === 'rem') val *= base;
   else if (unit === '%') val = (base * val) / 100;
@@ -365,11 +432,11 @@ export function resolveLength(raw: unknown, basePx?: number, baseIsScaled = fals
 }
 
 /** Resolve only the first token, so `border-radius: 0 0 0 0` reads as `0`. */
-export function firstLength(raw: unknown, base?: number, baseIsScaled = false): number | null {
+export function firstLength(raw: unknown, base?: number, baseIsScaled = false, percentBasis?: number): number | null {
   if (raw == null) return null;
   const t = String(raw).trim().replace(/!\s*\w+\s*$/, '').trim().split(/\s+/)[0];
   if (!t) return null;
-  return resolveLength(t, base, baseIsScaled);
+  return resolveLength(t, base, baseIsScaled, percentBasis);
 }
 
 /**
@@ -733,9 +800,11 @@ export function parseBoxShadow(raw: unknown, base?: number): BoxShadowInfo | nul
 }
 
 /** Expand a 1–4 value `padding` / `margin` shorthand. */
-export function parseBoxSides(raw: unknown, base?: number, baseIsScaled = false): BoxSides {
+export function parseBoxSides(raw: unknown, base?: number, baseIsScaled = false, percentBasis?: number): BoxSides {
   const parts = String(raw || '').trim().split(/\s+/).map((x) => x.trim()).filter(Boolean);
-  const vals = parts.map((p) => resolveLength(p, base, baseIsScaled)).filter((v): v is number => v != null);
+  const vals = parts
+    .map((p) => resolveLength(p, base, baseIsScaled, percentBasis))
+    .filter((v): v is number => v != null);
   let out: BoxSides | null = null;
   if (vals.length === 1) out = { t: vals[0], r: vals[0], b: vals[0], l: vals[0] };
   else if (vals.length === 2) out = { t: vals[0], r: vals[1], b: vals[0], l: vals[1] };
@@ -783,10 +852,10 @@ export function parseScale(raw: unknown): ScaleInfo | null {
 }
 
 /** Merge the `padding` shorthand with its `padding-*` longhands. */
-export function sidesWithLonghand(obj: ScssDeclarations, base?: number, baseIsScaled = false): BoxSides {
-  const sides = parseBoxSides(obj.padding, base, baseIsScaled);
+export function sidesWithLonghand(obj: ScssDeclarations, base?: number, baseIsScaled = false, percentBasis?: number): BoxSides {
+  const sides = parseBoxSides(obj.padding, base, baseIsScaled, percentBasis);
   for (const key of ['top', 'right', 'bottom', 'left'] as const) {
-    const v = resolveLength(obj['padding' + key], base, baseIsScaled);
+    const v = resolveLength(obj['padding' + key], base, baseIsScaled, percentBasis);
     if (v != null) sides[key.charAt(0) as 't' | 'r' | 'b' | 'l'] = v;
   }
   return sides;

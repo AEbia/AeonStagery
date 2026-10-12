@@ -96,6 +96,7 @@ describe('WebGalScssImportButton', () => {
           packageName: '仿番剧字幕',
           contentMatch: true,
           paramsMatch: false,
+          replaceable: true,
         }],
       })),
     });

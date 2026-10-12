@@ -172,7 +172,8 @@ describe('buildWebGalTextboxTemplatePackage', () => {
       fontWeight: '400',
       align: 'left',
       strokeColor: '#FF3B72',
-      strokeWidth: 5,
+      // 6px raw WebGAL length: stage scale and the template scale(0.5) apply once each.
+      strokeWidth: 2,
     });
   });
 

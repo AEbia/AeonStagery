@@ -97,6 +97,31 @@ async function writeTemplate(
   }
 }
 
+/**
+ * A hand-made package publishing two dialogue styles, as a third-party or
+ * hand-authored template does. It has no import record, so it can only be
+ * recognised by its parameters.
+ */
+async function writeMultiStylePackage(templatesRoot: string): Promise<{ packageId: string; dir: string }> {
+  const packageId = 'user.multi-style';
+  const dir = path.join(templatesRoot, packageId);
+  await mkdir(path.join(dir, 'assets'), { recursive: true });
+  const params = (x: number) => ({ renderer: 'image-dialogue-v1', textbox: { x, width: 100 } });
+  await writeFile(
+    path.join(dir, 'manifest.v2.json'),
+    JSON.stringify({
+      template: { id: packageId, name: 'Multi Style Pack', version: '1.0.0' },
+      dialogueStyles: [
+        { id: 'multi-a', name: 'A', params: params(90) },
+        { id: 'multi-b', name: 'B', params: params(120) },
+      ],
+    }),
+    'utf8',
+  );
+  await writeFile(path.join(dir, 'assets', 'extra.svg'), '<svg viewBox="0 0 1 1"/>', 'utf8');
+  return { packageId, dir };
+}
+
 async function listPackageDirectories(templatesRoot: string): Promise<string[]> {
   const entries = await readdir(templatesRoot, { withFileTypes: true });
   return entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith('.')).map((entry) => entry.name);
@@ -249,6 +274,50 @@ describe('WebGAL SCSS template import', () => {
     expect(replaced.replaced).toBe(true);
     expect(replaced.installPath).toBe(customRoot);
     expect(await listPackageDirectories(templatesRoot)).toEqual(['custom-folder']);
+  });
+
+  it('refuses to replace a package that publishes more than one style', async () => {
+    const root = await makeRoot('aeonstagery-webgal-multistyle-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+
+    // Learn what this template converts to, then hand-build a package whose
+    // *first* style matches it — the only signal available for a package that
+    // predates source recording — while a second style depends on its own asset.
+    const imported = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    const source = JSON.parse(
+      await readFile(path.join(templatesRoot, imported.id, 'manifest.v2.json'), 'utf8'),
+    ) as { dialogueStyles: { id: string; params: unknown }[] };
+    await rm(path.join(templatesRoot, imported.id), { recursive: true, force: true });
+    const multi = await writeMultiStylePackage(templatesRoot);
+    await writeFile(
+      path.join(multi.dir, 'manifest.v2.json'),
+      JSON.stringify({
+        template: { id: multi.packageId, name: 'Multi Style Pack', version: '1.0.0' },
+        dialogueStyles: [
+          { id: 'multi-a', name: 'A', params: source.dialogueStyles[0].params },
+          { id: 'multi-b', name: 'B', params: { renderer: 'image-dialogue-v1', textbox: { x: 120, width: 100 } } },
+        ],
+      }),
+      'utf8',
+    );
+
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(inspection.conflicts).toHaveLength(1);
+    expect(inspection.conflicts[0]).toMatchObject({ packageId: multi.packageId, replaceable: false });
+
+    // Replacing would rewrite the manifest with this import's single style and
+    // drop the second one plus the asset only it uses.
+    await expect(installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: multi.packageId,
+    })).rejects.toThrow(/个对话框样式，覆盖只会写入/);
+
+    const manifest = JSON.parse(
+      await readFile(path.join(multi.dir, 'manifest.v2.json'), 'utf8'),
+    ) as { dialogueStyles: { id: string }[] };
+    expect(manifest.dialogueStyles.map((style) => style.id)).toEqual(['multi-a', 'multi-b']);
+    await expect(stat(path.join(multi.dir, 'assets', 'extra.svg'))).resolves.toBeTruthy();
   });
 
   it('adds a separate package when the user keeps the import', async () => {

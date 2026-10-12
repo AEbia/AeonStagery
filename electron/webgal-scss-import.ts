@@ -88,6 +88,12 @@ interface InstalledPackageRecord {
   packageRoot: string;
   /** Style ids the package defines, so a replace can keep the ones in use. */
   styleIds: string[];
+  /**
+   * Whether a wholesale replace is safe. An import reproduces a single dialogue
+   * style, so replacing a package that publishes several would drop the rest —
+   * their definitions and the assets only they reference.
+   */
+  replaceable: boolean;
   record: WebGalImportRecord | null;
 }
 
@@ -227,6 +233,9 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
     const styleParams = (manifest.dialogueStyles ?? [])
       .map((style: Record<string, unknown>) => style?.params)
       .filter(Boolean);
+    const styleIds = (Array.isArray(manifest.dialogueStyles) ? manifest.dialogueStyles : [])
+      .map((style: Record<string, unknown>) => String(style?.id ?? ''))
+      .filter(Boolean);
 
     records.push({
       packageId: String(manifest.template?.id ?? entry.name),
@@ -236,9 +245,11 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
       packageRoot,
       // A package id and its style id are not the same thing (`--style-id`), so
       // a replace has to keep the ids the installed styles were published under.
-      styleIds: (Array.isArray(manifest.dialogueStyles) ? manifest.dialogueStyles : [])
-        .map((style: Record<string, unknown>) => String(style?.id ?? ''))
-        .filter(Boolean),
+      styleIds,
+      // Only a package that publishes exactly one style can be rebuilt from a
+      // single WebGAL stylesheet. Anything else is a valid package this import
+      // must not overwrite.
+      replaceable: styleIds.length <= 1,
       // The sidecar records the original stylesheet hash; without it a package
       // can still be matched on the parameters it translates to.
       record: {
@@ -283,6 +294,7 @@ export async function inspectWebGalTemplateDirectory(
       packageId: entry.packageId,
       packageName: entry.packageName,
       record: entry.record,
+      replaceable: entry.replaceable,
     })),
   );
 
@@ -322,6 +334,16 @@ export async function installWebGalTemplatePackage(
     : null;
   if (input.replacePackageId && !replaceTarget) {
     throw new Error(`要覆盖的模板不存在：${input.replacePackageId}`);
+  }
+  // Guarded here as well as in the dialog: this import rebuilds the whole
+  // directory from one stylesheet, so overwriting a package that publishes
+  // several styles would delete the ones it cannot reproduce — along with the
+  // assets only they reference. The dialog does not offer it; this refuses it.
+  if (replaceTarget && !replaceTarget.replaceable) {
+    throw new Error(
+      `「${replaceTarget.packageName}」包含 ${replaceTarget.styleIds.length} 个对话框样式，`
+      + '覆盖只会写入本次导入的一个样式，其余样式与资源会被删除。请改为新增一个模板包。',
+    );
   }
 
   // Replacing keeps the existing id and style id so scenes referencing the style

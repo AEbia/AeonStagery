@@ -375,16 +375,22 @@ export function translateWebGalTextboxScss(
   // `textbox.height` pinned to the authored height, so supplying `height` keeps
   // the bottom edge fixed and grows upward — the equivalent of WebGAL's
   // `bottom: <n>px`. Supplying only `minHeight` would grow downward instead.
-  let left = resolveLength(main.left, ROOT_FONT_PX);
+  // `left` / `right` percentages resolve against the containing block's width,
+  // `bottom` against its height — never against a font size. The stage and the
+  // WebGAL canvas are both 3:4, so a percentage of either lands on the same
+  // stage pixel and the basis is used unscaled.
+  let left = resolveLength(main.left, ROOT_FONT_PX, false, STAGE_WIDTH);
   if (left == null) left = rnd(50 * STAGE_SCALE);
-  let right = resolveLength(main.right, ROOT_FONT_PX);
+  let right = resolveLength(main.right, ROOT_FONT_PX, false, STAGE_WIDTH);
   if (right == null) right = rnd(25 * STAGE_SCALE);
-  let bottom = resolveLength(main.bottom, ROOT_FONT_PX);
+  let bottom = resolveLength(main.bottom, ROOT_FONT_PX, false, STAGE_HEIGHT);
   if (bottom == null) bottom = rnd(40 * STAGE_SCALE);
   let boxX = left;
   let boxW = Math.max(320, STAGE_WIDTH - left - right);
 
-  const pads = sidesWithLonghand(main, ROOT_FONT_PX);
+  // CSS resolves every percentage padding against the containing block *width*,
+  // including the top and bottom ones.
+  const pads = sidesWithLonghand(main, ROOT_FONT_PX, false, STAGE_WIDTH);
   if (!main.padding && !main.paddingtop && !main.paddingleft) {
     pads.t = rnd(fontSize * 0.4);
     pads.b = pads.t;
@@ -398,8 +404,8 @@ export function translateWebGalTextboxScss(
     boxX = Math.round((STAGE_WIDTH - maxW) / 2);
   }
 
-  let boxH = resolveLength(declOf(main, 'height'), ROOT_FONT_PX);
-  if (boxH == null) boxH = resolveLength(declOf(main, 'minheight'), ROOT_FONT_PX);
+  let boxH = resolveLength(declOf(main, 'height'), ROOT_FONT_PX, false, STAGE_HEIGHT);
+  if (boxH == null) boxH = resolveLength(declOf(main, 'minheight'), ROOT_FONT_PX, false, STAGE_HEIGHT);
   const autoHeight = (boxH == null || boxH <= 0);
   // Tested inline rather than through `autoHeight` so the value is narrowed to a
   // number for the geometry maths below.
@@ -525,20 +531,22 @@ export function translateWebGalTextboxScss(
 
   let nameLineHeight = resolveLength(name.lineheight, nameSize, true);
   if (nameLineHeight == null) nameLineHeight = rnd(nameSize * 1.6);
-  const nameTop = resolveLength(name.top, ROOT_FONT_PX) ?? -60;
-  const nameLeft = resolveLength(name.left, ROOT_FONT_PX) ?? 20;
+  const nameTop = resolveLength(name.top, ROOT_FONT_PX, false, STAGE_HEIGHT) ?? -60;
+  const nameLeft = resolveLength(name.left, ROOT_FONT_PX, false, STAGE_WIDTH) ?? 20;
   let nameboxX = boxX + nameLeft;
   let nameboxY = boxY + nameTop;
 
   // The height must be a positive finite number: a zero would make the whole
   // template package invalid. Templates that rely on `line-height` set
   // `height: 0px`, so fall back to the line height.
-  let nameH = firstLength(declOf(name, 'height'), nameSize, true);
-  if (nameH == null || nameH <= 0) nameH = firstLength(declOf(name, 'minheight'), nameSize, true);
+  let nameH = firstLength(declOf(name, 'height'), nameSize, true, STAGE_HEIGHT);
+  if (nameH == null || nameH <= 0) {
+    nameH = firstLength(declOf(name, 'minheight'), nameSize, true, STAGE_HEIGHT);
+  }
   if (nameH == null || nameH <= 0) nameH = Math.max(nameLineHeight, rnd(nameSize * 1.9));
   if (!(nameH > 0)) nameH = Math.max(1, rnd(nameSize * 1.9));
 
-  const namePads = sidesWithLonghand(name, nameSize, true);
+  const namePads = sidesWithLonghand(name, nameSize, true, STAGE_WIDTH);
   if (!name.padding && !name.paddingleft && !name.paddingright) {
     namePads.l = rnd(nameSize * 1.5);
     namePads.r = namePads.l;
@@ -740,9 +748,15 @@ export function translateWebGalTextboxScss(
   if (nameStrokeRaw && !hasVisibilityHidden(innerName)) {
     const m = /^([\d.]+)\s*(px|em)?\s+(.+)$/.exec(String(nameStrokeRaw).trim());
     if (m) {
-      const width = m[2] === 'em'
-        ? Math.max(1, rnd(parseFloat(m[1]) * nameSize * (uniformScale || 1)))
-        : Math.max(1, rnd(parseFloat(m[1]) * STAGE_SCALE));
+      // `nameSize` already carries the transform's uniform scale, so `em` must
+      // not fold it in a second time; `px` is a raw WebGAL length that still
+      // needs both the stage scale and that same transform scale — the same
+      // split the body outline uses. A zero width stays zero rather than being
+      // rounded up to a visible outline.
+      const raw_width = m[2] === 'em'
+        ? parseFloat(m[1]) * nameSize
+        : parseFloat(m[1]) * STAGE_SCALE * (uniformScale || 1);
+      const width = raw_width > 0 ? Math.max(1, rnd(raw_width)) : 0;
       speaker.strokeColor = rgbOnly(parseColor(m[3], '#000000'));
       speaker.strokeWidth = width;
       notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\` / `

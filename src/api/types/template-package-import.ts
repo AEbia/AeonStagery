@@ -24,6 +24,16 @@ export interface WebGalScssImportConflict {
   packageName: string;
   contentMatch: boolean;
   paramsMatch: boolean;
+  /**
+   * Whether replacing this package is safe.
+   *
+   * An import writes exactly one dialogue style, so a package that publishes
+   * several cannot be overwritten wholesale: the styles this PR does not
+   * reproduce — and the assets only they reference — would be dropped, taking
+   * every scene that uses them with it. Such a package is reported as a
+   * duplicate, but only "keep as a separate package" is offered.
+   */
+  replaceable: boolean;
   importedAt?: string;
   sourcePath?: string;
 }

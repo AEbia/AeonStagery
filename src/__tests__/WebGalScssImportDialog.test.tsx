@@ -30,6 +30,7 @@ const DUPLICATE = {
   packageName: '仿番剧字幕',
   contentMatch: true,
   paramsMatch: false,
+  replaceable: true,
   importedAt: '2026-10-12T09:20:00.000Z',
 };
 

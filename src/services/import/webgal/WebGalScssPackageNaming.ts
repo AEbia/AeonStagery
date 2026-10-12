@@ -63,15 +63,12 @@ export function uniquePackageName(base: string, taken: Iterable<string>): string
  * spacing is collapsed too, which is what `{ color:red }` vs `{color: red}`
  * differs by.
  *
- * Trailing comments are stripped here rather than by {@link stripComments},
- * which only removes comments that start a line (it must not touch `//` inside a
- * value). Comparing imports wants them gone: annotating a declaration is exactly
- * the kind of edit that should still count as the same template. The `[^:]`
- * guard keeps `url(https://…)` intact.
+ * {@link stripComments} removes both block and trailing line comments while
+ * leaving string literals and `url(…)` alone, so annotating a declaration — on
+ * its own line or at the end of one — still counts as the same template.
  */
 export function normalizeScssForHashing(scss: string): string {
   return stripComments(String(scss ?? ''))
-    .replace(/(^|[^:])\/\/[^\n\r]*/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/\s*([{}:;,>~+])\s*/g, '$1');
@@ -154,6 +151,12 @@ export interface WebGalImportConflict {
   contentMatch: boolean;
   /** The translated parameters are identical (covers imports without a record). */
   paramsMatch: boolean;
+  /**
+   * Whether a wholesale replace is safe. An import reproduces a single dialogue
+   * style, so a package publishing several cannot be overwritten — the other
+   * styles and their assets would not survive it.
+   */
+  replaceable?: boolean;
   importedAt?: string;
   /** Absolute path the existing package was imported from, when recorded. */
   sourcePath?: string;
@@ -166,10 +169,18 @@ export interface WebGalImportConflict {
  * `sourceHash` is exact but only exists for packages imported since this record
  * was introduced, while `paramsSignature` is coarser but also covers older
  * packages and templates that were edited cosmetically.
+ *
+ * A match says "this is the same template", not "this package may be replaced" —
+ * callers decide the latter from {@link WebGalImportConflict.replaceable}.
  */
 export function findWebGalImportConflicts(
   candidate: { sourceHash: string; paramsSignature: string },
-  records: ReadonlyArray<{ packageId: string; packageName: string; record: WebGalImportRecord | null }>,
+  records: ReadonlyArray<{
+    packageId: string;
+    packageName: string;
+    record: WebGalImportRecord | null;
+    replaceable?: boolean;
+  }>,
 ): WebGalScssImportConflict[] {
   const conflicts: WebGalScssImportConflict[] = [];
   for (const entry of records) {
@@ -182,6 +193,9 @@ export function findWebGalImportConflicts(
       packageName: entry.packageName,
       contentMatch,
       paramsMatch,
+      // Absent means the caller does not model replaceability, so keep the
+      // historical behaviour rather than silently disabling replace.
+      replaceable: entry.replaceable ?? true,
       ...(record?.importedAt ? { importedAt: record.importedAt } : {}),
       ...(record?.sourcePath ? { sourcePath: record.sourcePath } : {}),
     });

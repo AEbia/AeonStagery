@@ -35,7 +35,9 @@ export function WebGalScssImportDialog({
 }: WebGalScssImportDialogProps) {
   const dialogRef = useModalDialog(onCancel);
   const [name, setName] = useState('');
-  const [replaceId, setReplaceId] = useState(inspection.conflicts[0]?.packageId ?? '');
+  const [replaceId, setReplaceId] = useState(
+    inspection.conflicts.find((item) => item.replaceable)?.packageId ?? '',
+  );
 
   const trimmed = name.trim();
   const effectiveName = trimmed || inspection.packageName;
@@ -47,7 +49,12 @@ export function WebGalScssImportDialog({
   );
 
   const conflicts = inspection.conflicts;
-  const selectedConflict = conflicts.find((item) => item.packageId === replaceId) ?? conflicts[0] ?? null;
+  // A package publishing several styles cannot be rebuilt from one stylesheet,
+  // so it is reported but never offered as a replace target.
+  const replaceableConflicts = conflicts.filter((item) => item.replaceable);
+  const selectedConflict = replaceableConflicts.find((item) => item.packageId === replaceId)
+    ?? replaceableConflicts[0]
+    ?? null;
   const sourceDirectory = inspection.templateRoot.split(/[\\/]/).filter(Boolean).pop() ?? inspection.templateRoot;
 
   const confirm = (mode: WebGalScssImportChoice['mode']) => {
@@ -127,19 +134,21 @@ export function WebGalScssImportDialog({
                 这份字幕看起来已经导入过（{conflicts.length} 处匹配）
               </div>
               {conflicts.length > 1 ? (
-                <select
-                  className="form-input"
-                  value={replaceId}
-                  onChange={(event) => setReplaceId(event.target.value)}
-                  disabled={busy}
-                  style={{ marginBottom: 6 }}
-                >
-                  {conflicts.map((conflict) => (
-                    <option key={conflict.packageId} value={conflict.packageId}>
-                      {conflict.packageName} — {describeConflict(conflict)}
-                    </option>
-                  ))}
-                </select>
+                replaceableConflicts.length > 0 ? (
+                  <select
+                    className="form-input"
+                    value={selectedConflict?.packageId ?? ''}
+                    onChange={(event) => setReplaceId(event.target.value)}
+                    disabled={busy}
+                    style={{ marginBottom: 6 }}
+                  >
+                    {replaceableConflicts.map((conflict) => (
+                      <option key={conflict.packageId} value={conflict.packageId}>
+                        {conflict.packageName} — {describeConflict(conflict)}
+                      </option>
+                    ))}
+                  </select>
+                ) : null
               ) : (
                 <div>
                   <span style={{ color: 'var(--text-secondary)' }}>{conflicts[0].packageName}：</span>
@@ -147,9 +156,15 @@ export function WebGalScssImportDialog({
                   {conflicts[0].importedAt ? `（导入于 ${conflicts[0].importedAt.slice(0, 10)}）` : ''}
                 </div>
               )}
-              <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>
-                选择「覆盖已有」会保留原包名与样式 ID，场景里已经引用该样式的台词不受影响。
-              </div>
+              {replaceableConflicts.length > 0 ? (
+                <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>
+                  选择「覆盖已有」会保留原包名与样式 ID，场景里已经引用该样式的台词不受影响。
+                </div>
+              ) : (
+                <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>
+                  该模板包含多个对话框样式，覆盖会删除本次无法还原的样式与资源，因此只能「另存为新的一份」。
+                </div>
+              )}
             </div>
           )}
 
@@ -181,9 +196,11 @@ export function WebGalScssImportDialog({
               <button className="btn" onClick={() => confirm('new')} disabled={busy}>
                 另存为新的一份
               </button>
-              <button className="btn btn--primary" onClick={() => confirm('overwrite')} disabled={busy}>
-                {busy ? '正在导入…' : '覆盖已有'}
-              </button>
+              {replaceableConflicts.length > 0 && (
+                <button className="btn btn--primary" onClick={() => confirm('overwrite')} disabled={busy}>
+                  {busy ? '正在导入…' : '覆盖已有'}
+                </button>
+              )}
             </>
           ) : (
             <button className="btn btn--primary" onClick={() => confirm('new')} disabled={busy}>
