@@ -102,7 +102,21 @@ function renderNamebox(
     fontSize: speakerStyle?.fontSize ?? Math.round((presentation.text.fontSize ?? config.fontSize ?? 44) * 0.9),
     fontWeight: (speakerStyle?.fontWeight || '700') as any,
     fill: color,
-    align: 'center',
+    align: speakerStyle?.align ?? 'center',
+    // Nameplate typography mirrors the body text layer so imported templates can
+    // carry their own plate outline and glow instead of a flat fill.
+    stroke: {
+      color: speakerStyle?.strokeColor ?? 'transparent',
+      width: speakerStyle?.strokeWidth ?? 0,
+    },
+    dropShadow: speakerStyle?.dropShadow
+      ? {
+          color: speakerStyle.dropShadowColor ?? '#000000',
+          alpha: speakerStyle.dropShadowAlpha ?? 1,
+          blur: speakerStyle.dropShadowBlur ?? 0,
+          distance: speakerStyle.dropShadowDistance ?? 5,
+        }
+      : false,
   } });
   speakerText.resolution = 2;
   const [paddingLeft, paddingTop, paddingRight, paddingBottom] = speakerStyle?.padding ?? [0, 0, 0, 0];
@@ -114,10 +128,13 @@ function renderNamebox(
   const panel = createImagePanel(panelStyle, panelHeight, panelWidth);
   container.addChild(panel);
 
-  speakerText.anchor.set(0.5);
+  // Alignment defaults to `center` so existing templates keep their exact layout.
+  const speakerAlign = speakerStyle?.align ?? 'center';
+  const innerWidth = Math.max(0, panelWidth - paddingLeft - paddingRight);
+  speakerText.anchor.set(speakerAlign === 'left' ? 0 : speakerAlign === 'right' ? 1 : 0.5, 0.5);
   speakerText.x = panelStyle.x
     + paddingLeft
-    + Math.max(0, panelWidth - paddingLeft - paddingRight) / 2
+    + (speakerAlign === 'left' ? 0 : speakerAlign === 'right' ? innerWidth : innerWidth / 2)
     + (speakerStyle?.textOffset?.[0] ?? 0);
   speakerText.y = panelStyle.y
     + paddingTop

@@ -190,6 +190,15 @@ class SubtitleRenderer {
     dialogueText.resolution = 2;
     dialogueText.x = layout.textX;
     dialogueText.y = layout.textY;
+    // PixiJS only honors `style.align` when a line actually wraps, so a
+    // single-line subtitle stayed flush left even when `align` was `center`.
+    // Anchor the sprite against the authored text column instead.
+    const textAlignment = (textStyle.align as string | undefined) ?? 'left';
+    const alignmentSpan = Math.max(1, layout.textWidth || metrics.maxLineWidth);
+    if (textAlignment === 'center' || textAlignment === 'right') {
+      dialogueText.anchor.x = textAlignment === 'right' ? 1 : 0.5;
+      dialogueText.x = layout.textX + alignmentSpan * (textAlignment === 'right' ? 1 : 0.5);
+    }
     container.addChild(dialogueText);
 
     const textMask = new PIXI.Graphics();
@@ -263,6 +272,8 @@ class SubtitleRenderer {
     // expose the unrevealed suffix. Wrap and alignment use the full metrics.
     if (style === 'typewriter' && config.presentation?.renderer === 'image-dialogue-v1') {
       dialogueText.mask = null;
+      // This branch positions every line itself, so undo the anchored alignment above.
+      dialogueText.anchor.x = 0;
       container.removeChild(textMask);
       textMask.destroy();
       const lineStyle = textStyle.clone();
@@ -275,7 +286,10 @@ class SubtitleRenderer {
         lineText.style = lineStyle;
         lineText.text = '';
         lineText.resolution = 2;
-        const alignmentOffset = metrics.maxLineWidth - metrics.lineWidths[index];
+        // Align inside the authored text column rather than the longest line:
+        // for a single line the two are equal, which is why centered dialogue
+        // used to drift back to the left.
+        const alignmentOffset = Math.max(0, alignmentSpan - metrics.lineWidths[index]);
         lineText.x = layout.textX + (align === 'center' ? alignmentOffset / 2 : align === 'right' ? alignmentOffset : 0);
         lineText.y = layout.textY + index * lineHeight;
         if (index > 0) container.addChild(lineText);

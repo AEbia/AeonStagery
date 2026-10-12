@@ -345,7 +345,13 @@ function parseDialogueImageSpeakerStyle(input: unknown, path: string): DialogueI
   const record = expectRecord(input, path);
   expectKeys(record, path, [
     'fontFile', 'fontFamily', 'fontSize', 'fontWeight', 'color', 'padding', 'textOffset',
+    'align', 'strokeColor', 'strokeWidth', 'dropShadow', 'dropShadowColor',
+    'dropShadowAlpha', 'dropShadowBlur', 'dropShadowDistance',
   ]);
+  const dropShadowAlpha = optionalFiniteNumber(record.dropShadowAlpha, `${path}.dropShadowAlpha`);
+  if (dropShadowAlpha !== undefined && (dropShadowAlpha < 0 || dropShadowAlpha > 1)) {
+    throw new Error(`Expected opacity between 0 and 1 at ${path}.dropShadowAlpha`);
+  }
   const parsed = compact({
     fontFile: optionalResourcePath(record.fontFile, `${path}.fontFile`),
     fontFamily: optionalString(record.fontFamily, `${path}.fontFamily`),
@@ -354,6 +360,14 @@ function parseDialogueImageSpeakerStyle(input: unknown, path: string): DialogueI
     color: optionalString(record.color, `${path}.color`),
     padding: optionalDialogueNineSlice(record.padding, `${path}.padding`),
     textOffset: optionalVec2(record.textOffset, `${path}.textOffset`),
+    align: optionalOneOf(record.align, `${path}.align`, ['left', 'center', 'right']),
+    strokeColor: optionalString(record.strokeColor, `${path}.strokeColor`),
+    strokeWidth: optionalNonNegativeNumber(record.strokeWidth, `${path}.strokeWidth`),
+    dropShadow: optionalBoolean(record.dropShadow, `${path}.dropShadow`),
+    dropShadowColor: optionalString(record.dropShadowColor, `${path}.dropShadowColor`),
+    dropShadowAlpha,
+    dropShadowBlur: optionalNonNegativeNumber(record.dropShadowBlur, `${path}.dropShadowBlur`),
+    dropShadowDistance: optionalNonNegativeNumber(record.dropShadowDistance, `${path}.dropShadowDistance`),
   });
   if (parsed.fontFile && !parsed.fontFamily) {
     throw new Error(`fontFamily is required when fontFile is set at ${path}`);

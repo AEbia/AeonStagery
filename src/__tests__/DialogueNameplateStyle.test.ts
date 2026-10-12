@@ -1,0 +1,260 @@
+/**
+ * @vitest-environment jsdom
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as PIXI from 'pixi.js';
+import gsap from 'gsap';
+import SubtitleRenderer from '../engine/SubtitleRenderer';
+import { ImageDialogueTemplate } from '../engine/ImageDialogueTemplate';
+import { parseDialogueImagePresentation } from '../services/semantic-scene/SceneStatementParamParsers';
+
+const stageState = vi.hoisted(() => ({
+  subtitleLayer: null as any,
+  executeHook: vi.fn(),
+  getSetting: vi.fn(),
+}));
+
+vi.mock('../engine/StageManager', () => ({
+  stageManager: {
+    getLayer: vi.fn((name: string) => {
+      if (name !== 'subtitle') throw new Error(`Unexpected layer ${name}`);
+      return stageState.subtitleLayer;
+    }),
+  },
+}));
+
+vi.mock('../api/hooks', () => ({
+  hookSystem: { execute: stageState.executeHook },
+}));
+
+vi.mock('../ui/SettingsStore', () => ({
+  settingsManager: { get: stageState.getSetting },
+}));
+
+/** Textbox/namebox panels read `PIXI.Texture.from(image)`; a stub keeps rendering offline. */
+function stubTextures() {
+  vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+}
+
+function collectTexts(container: PIXI.Container): PIXI.Text[] {
+  return container.children.flatMap((child) => (
+    child instanceof PIXI.Text ? [child]
+      : child instanceof PIXI.Container ? collectTexts(child)
+        : []
+  ));
+}
+
+const PANEL = { image: 'namebox.svg', x: 200, y: 600, width: 400, minHeight: 96 };
+const TEXT_LINE = { x: 260, y: 800, maxWidth: 1400, fontSize: 48, lineHeight: 68, align: 'center' as const };
+
+function presentationWith(speaker: Record<string, unknown> | undefined) {
+  return parseDialogueImagePresentation({
+    renderer: 'image-dialogue-v1',
+    styleId: 'test-style',
+    textbox: { image: 'textbox.svg', x: 177, y: 799, width: 1566, height: 228 },
+    namebox: PANEL,
+    text: TEXT_LINE,
+    speaker,
+  }, 'dialogueStyles[0].presentation');
+}
+
+function renderTemplate(presentation: ReturnType<typeof presentationWith>) {
+  const container = new PIXI.Container();
+  const layout = ImageDialogueTemplate.render(container, {
+    _id: 'nameplate', text: 'Hello', speaker: 'Hero', style: 'instant', duration: 3,
+    presentation,
+  } as any, { height: 60 } as any);
+  return { container, layout, speakerText: collectTexts(container).find((text) => text.text === 'Hero')! };
+}
+
+describe('dialogue speaker style contract', () => {
+  it('accepts the extended nameplate fields and keeps them on the presentation', () => {
+    const presentation = presentationWith({
+      color: '#FFFFFF',
+      fontSize: 46,
+      align: 'left',
+      padding: [20, 8, 20, 8],
+      strokeColor: '#FF3B72',
+      strokeWidth: 5,
+      dropShadow: true,
+      dropShadowColor: '#000000',
+      dropShadowAlpha: 0.85,
+      dropShadowBlur: 8,
+      dropShadowDistance: 0,
+    });
+    expect(presentation?.speaker).toMatchObject({
+      align: 'left',
+      strokeColor: '#FF3B72',
+      strokeWidth: 5,
+      dropShadow: true,
+      dropShadowColor: '#000000',
+      dropShadowAlpha: 0.85,
+      dropShadowBlur: 8,
+      dropShadowDistance: 0,
+    });
+  });
+
+  it('still rejects fields outside the whitelist', () => {
+    expect(() => presentationWith({ align: 'left', textStroke: 4 })).toThrow(/Unknown field/);
+  });
+
+  it('rejects an out-of-range drop shadow alpha', () => {
+    expect(() => presentationWith({ dropShadow: true, dropShadowAlpha: 1.4 })).toThrow(/between 0 and 1/);
+  });
+
+  it('rejects an unsupported alignment value', () => {
+    expect(() => presentationWith({ align: 'justify' })).toThrow(/Expected left, center, right/);
+  });
+
+  it('drops the whole speaker block when it is absent', () => {
+    expect(presentationWith(undefined)?.speaker).toBeUndefined();
+  });
+});
+
+describe('nameplate rendering', () => {
+  beforeEach(() => {
+    stubTextures();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type: any) => {
+      if (type !== '2d') return null;
+      return new Proxy({
+        canvas: document.createElement('canvas'),
+        font: '',
+        measureText: vi.fn(() => ({ width: 100 })),
+      } as Record<string, any>, {
+        get(target, prop) { return prop in target ? target[prop as string] : vi.fn(); },
+        set(target, prop, value) { target[prop as string] = value; return true; },
+      }) as any;
+    });
+    vi.spyOn(PIXI.CanvasTextMetrics, 'measureText').mockReturnValue({
+      lines: ['Hero'], lineWidths: [100], lineHeight: 60, maxLineWidth: 100, width: 100, height: 60,
+      fontProperties: { ascent: 40, descent: 20, fontSize: 60 },
+    } as any);
+  });
+
+  afterEach(() => {
+    gsap.globalTimeline.clear();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps legacy templates centered when no alignment is authored', () => {
+    const { speakerText } = renderTemplate(presentationWith({ padding: [20, 8, 20, 8] }));
+    expect(speakerText.anchor.x).toBe(0.5);
+    // panelWidth falls back to the authored width (400) when the plate is wider than the name.
+    expect(speakerText.x).toBe(PANEL.x + 20 + (400 - 40) / 2);
+  });
+
+  it('anchors the nameplate text to the left padding when alignment is left', () => {
+    const { speakerText } = renderTemplate(presentationWith({ padding: [20, 8, 20, 8], align: 'left' }));
+    expect(speakerText.anchor.x).toBe(0);
+    expect(speakerText.x).toBe(PANEL.x + 20);
+    expect(speakerText.style.align).toBe('left');
+  });
+
+  it('anchors the nameplate text to the right padding when alignment is right', () => {
+    const { speakerText } = renderTemplate(presentationWith({ padding: [20, 8, 20, 8], align: 'right' }));
+    expect(speakerText.anchor.x).toBe(1);
+    expect(speakerText.x).toBe(PANEL.x + 20 + (400 - 40));
+  });
+
+  it('passes the nameplate outline through to the text style', () => {
+    const { speakerText } = renderTemplate(presentationWith({ strokeColor: '#FF3B72', strokeWidth: 5 }));
+    expect(speakerText.style.stroke).toMatchObject({ color: '#FF3B72', width: 5 });
+  });
+
+  it('passes the nameplate glow through to the text style', () => {
+    const { speakerText } = renderTemplate(presentationWith({
+      dropShadow: true, dropShadowColor: '#102030', dropShadowAlpha: 0.85,
+      dropShadowBlur: 8, dropShadowDistance: 0,
+    }));
+    expect(speakerText.style.dropShadow).toMatchObject({
+      color: '#102030', alpha: 0.85, blur: 8, distance: 0,
+    });
+  });
+
+  it('disables the glow for plates that do not declare one', () => {
+    const { speakerText } = renderTemplate(presentationWith({ color: '#FFFFFF' }));
+    expect(speakerText.style.dropShadow).toBeFalsy();
+  });
+});
+
+describe('body text alignment', () => {
+  beforeEach(() => {
+    stageState.subtitleLayer = new PIXI.Container();
+    stageState.executeHook.mockClear();
+    stageState.getSetting.mockImplementation((key: string) => (
+      key === 'dialogueTextSpeed' ? 0.01 : ''
+    ));
+    stubTextures();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type: any) => {
+      if (type !== '2d') return null;
+      return new Proxy({
+        canvas: document.createElement('canvas'),
+        font: '',
+        measureText: vi.fn(() => ({ width: 100 })),
+      } as Record<string, any>, {
+        get(target, prop) { return prop in target ? target[prop as string] : vi.fn(); },
+        set(target, prop, value) { target[prop as string] = value; return true; },
+      }) as any;
+    });
+    vi.spyOn(PIXI.CanvasTextMetrics, 'measureText').mockReturnValue({
+      lines: ['Hello'], lineWidths: [100], lineHeight: 60, maxLineWidth: 100, width: 100, height: 60,
+      fontProperties: { ascent: 40, descent: 20, fontSize: 60 },
+    } as any);
+  });
+
+  afterEach(() => {
+    gsap.globalTimeline.clear();
+    vi.restoreAllMocks();
+    stageState.subtitleLayer.destroy({ children: true });
+    stageState.subtitleLayer = null;
+  });
+
+  function renderBody(presentation: ReturnType<typeof presentationWith>, style: 'instant' | 'typewriter') {
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: `align-${style}`, text: 'Hello', speaker: '', style, duration: 3, presentation,
+    } as any;
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    return stageState.subtitleLayer.children[0] as PIXI.Container;
+  }
+
+  it('centers a single-line subtitle inside the authored text column', () => {
+    const container = renderBody(presentationWith(undefined), 'instant');
+    const body = collectTexts(container).find((text) => text.text === 'Hello')!;
+    expect(body.anchor.x).toBe(0.5);
+    expect(body.x).toBe(TEXT_LINE.x + TEXT_LINE.maxWidth / 2);
+  });
+
+  it('keeps left-aligned copy flush with the text column', () => {
+    const presentation = parseDialogueImagePresentation({
+      renderer: 'image-dialogue-v1',
+      textbox: { image: 'textbox.svg', x: 177, y: 799, width: 1566, height: 228 },
+      text: { ...TEXT_LINE, align: 'left' },
+    }, 'dialogueStyles[0].presentation');
+    const container = renderBody(presentation, 'instant');
+    const body = collectTexts(container).find((text) => text.text === 'Hello')!;
+    expect(body.anchor.x).toBe(0);
+    expect(body.x).toBe(TEXT_LINE.x);
+  });
+
+  it('does not shift built-in templates that never author an alignment', () => {
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: 'builtin-align', text: 'Hello', speaker: '', style: 'instant', duration: 3, template: 'glass',
+    } as any;
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const body = collectTexts(container).find((text) => text.text === 'Hello')!;
+    expect(body.anchor.x).toBe(0);
+  });
+
+  it('centers every line while the typewriter reveals the body text', () => {
+    const container = renderBody(presentationWith(undefined), 'typewriter');
+    const body = collectTexts(container).find((text) => text.text === 'Hello')!;
+    // The typewriter branch positions lines itself, so the sprite anchor is reset.
+    expect(body.anchor.x).toBe(0);
+    expect(body.x).toBe(TEXT_LINE.x + (TEXT_LINE.maxWidth - 100) / 2);
+  });
+});

@@ -255,6 +255,15 @@ export interface DialogueImageSpeakerStyle {
   color?: string;
   padding?: DialogueNineSlice;
   textOffset?: Vec2;
+  /** Nameplate text alignment. Absent means `center`, matching legacy templates. */
+  align?: 'left' | 'center' | 'right';
+  strokeColor?: string;
+  strokeWidth?: number;
+  dropShadow?: boolean;
+  dropShadowColor?: string;
+  dropShadowAlpha?: number;
+  dropShadowBlur?: number;
+  dropShadowDistance?: number;
 }
 
 export interface DialogueImagePresentation {
