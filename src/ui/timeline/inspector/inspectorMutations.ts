@@ -167,6 +167,29 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
   // re-scan the library before the new style can be selected.
   const templatePackageCatalog = appContext.services?.templatePackages;
 
+  /**
+   * A freshly installed package is not in the project's enabled list yet, and
+   * the dialogue style list is filtered by it — so without this step the import
+   * reports success while its style stays missing from the dropdown until the
+   * user enables the package in the project template settings by hand.
+   */
+  const enableImportedPackage = async (packageId: string): Promise<void> => {
+    const currentTemplates = projectWorkspace?.getCurrentProject()?.metadata.templates;
+    if (!projectWorkspace || !currentTemplates) return;
+    if ((currentTemplates.enabledTemplateIds ?? []).includes(packageId)) return;
+    const availableOrder = (appContext.services?.templatePackages?.getSummaries() ?? [])
+      .map((entry) => entry.id);
+    const enabledTemplateIds = [...(currentTemplates.enabledTemplateIds ?? []), packageId]
+      .sort((left, right) => availableOrder.indexOf(left) - availableOrder.indexOf(right));
+    const result = await projectWorkspace.updateTemplateConfiguration({
+      ...currentTemplates,
+      enabledTemplateIds,
+    });
+    if (!result.success) {
+      showToast(`已导入，但未能在当前项目启用：${result.error ?? '未知错误'}`, 'error');
+    }
+  };
+
   const webGalStyleImport: WebGalStyleImportActions = {
     inspect: async () => {
       const templates = window.aeonStageryAPI?.templates;
@@ -197,6 +220,10 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
           return { ok: false, message: `导入失败：${result.error ?? '未知错误'}` };
         }
         if (templatePackageCatalog) await templatePackageCatalog.refresh();
+        // Refreshing alone is not enough: the style is only buildable once the
+        // package is enabled for the project, so enable it while persisting the
+        // project template configuration.
+        await enableImportedPackage(result.package.id);
         return {
           ok: true,
           message: `${result.package.replaced ? '已更新' : '已导入'}字幕样式：${result.package.name}`,

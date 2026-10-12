@@ -84,6 +84,10 @@ export class WebGalTemplateAlreadyInstalledError extends Error {
 interface InstalledPackageRecord {
   packageId: string;
   packageName: string;
+  /** The directory the manifest was actually read from. */
+  packageRoot: string;
+  /** Style ids the package defines, so a replace can keep the ones in use. */
+  styleIds: string[];
   record: WebGalImportRecord | null;
 }
 
@@ -227,6 +231,14 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
     records.push({
       packageId: String(manifest.template?.id ?? entry.name),
       packageName: String(manifest.template?.name ?? entry.name),
+      // Discovery does not require the directory to be named after the package
+      // id (`--out` can differ), so remember where the manifest actually lives.
+      packageRoot,
+      // A package id and its style id are not the same thing (`--style-id`), so
+      // a replace has to keep the ids the installed styles were published under.
+      styleIds: (Array.isArray(manifest.dialogueStyles) ? manifest.dialogueStyles : [])
+        .map((style: Record<string, unknown>) => String(style?.id ?? ''))
+        .filter(Boolean),
       // The sidecar records the original stylesheet hash; without it a package
       // can still be matched on the parameters it translates to.
       record: {
@@ -328,16 +340,27 @@ export async function installWebGalTemplatePackage(
         installed.map((entry) => entry.packageId),
       );
 
+  // A package id and a style id may legitimately differ (`--style-id`), so the
+  // requested one wins; replacing falls back to the id the installed package
+  // already uses, because scenes reference the style rather than the package.
+  const requestedStyleId = String(input.styleId ?? '').trim();
+
   const { build, sourceHash, sourceName } = await convertTemplate({
     ...input,
     templateRoot,
     packageName,
     packageId,
-    styleId: replaceTarget ? input.styleId ?? packageId : packageId,
+    styleId: requestedStyleId
+      || (replaceTarget ? replaceTarget.styleIds[0] ?? packageId : packageId),
     styleName: String(input.styleName ?? '').trim() || packageName,
   });
 
-  const destinationRoot = resolveInside(input.templatesRoot, packageId);
+  // Replace into the directory the package was actually found in. Deriving it
+  // from the package id instead would create a second directory — and a second
+  // package claiming the same id — whenever the installed one has another name.
+  const destinationRoot = replaceTarget
+    ? replaceTarget.packageRoot
+    : resolveInside(input.templatesRoot, packageId);
   const alreadyExists = await pathExists(destinationRoot);
   if (alreadyExists && !replaceTarget) {
     throw new WebGalTemplateAlreadyInstalledError(packageId, packageName, []);

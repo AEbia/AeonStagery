@@ -1,0 +1,129 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProjectTemplateConfiguration } from '../api/types/project';
+import type { useApp } from '../ui/context/AppContext';
+import { createInspectorMutations } from '../ui/timeline/inspector/inspectorMutations';
+
+const showToast = vi.fn();
+vi.mock('../ui/Toast', () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
+
+const IMPORTED = {
+  id: 'webgal-scss.pure',
+  name: 'pure',
+  version: '1.0.0',
+  installPath: '/templates/webgal-scss.pure',
+  replaced: false,
+};
+
+interface HarnessOptions {
+  enabledTemplateIds?: string[];
+  updateResult?: { success: boolean; error?: string };
+  summaries?: { id: string; dialogueStyles?: unknown[] }[];
+  hasProject?: boolean;
+}
+
+function harness(options: HarnessOptions = {}) {
+  const {
+    enabledTemplateIds = ['aeonstagery.default'],
+    updateResult = { success: true },
+    summaries = [{ id: 'aeonstagery.default' }, { id: IMPORTED.id }],
+    hasProject = true,
+  } = options;
+
+  const updateTemplateConfiguration = vi.fn(
+    async (_templates: ProjectTemplateConfiguration) => updateResult,
+  );
+  const refresh = vi.fn(async () => undefined);
+  const installWebgalScss = vi.fn(async () => ({ success: true as const, package: IMPORTED }));
+
+  const appContext = {
+    services: {
+      projectWorkspace: {
+        getCurrentProject: () => (hasProject
+          ? { metadata: { templates: { enabledTemplateIds } } }
+          : undefined),
+        updateTemplateConfiguration,
+        prepareDialogueStyle: vi.fn(async () => ({})),
+      },
+      templatePackages: {
+        getSummaries: () => summaries,
+        refresh,
+      },
+    },
+  } as unknown as ReturnType<typeof useApp>;
+
+  const mutations = createInspectorMutations({
+    appContext,
+    action: { id: 'action-1', semanticType: 'dialogue' } as never,
+    actionId: 'action-1',
+    actionParams: {},
+    sourceParams: {},
+    usesSourceParamForm: false,
+    sceneData: { meta: {} } as never,
+    updateParam: vi.fn(),
+    replaceSourceParams: vi.fn(),
+  });
+
+  const previous = (globalThis as { window?: unknown }).window;
+  (globalThis as { window?: unknown }).window = { aeonStageryAPI: { templates: { installWebgalScss } } };
+
+  return {
+    mutations, updateTemplateConfiguration, refresh, installWebgalScss,
+    restore: () => { (globalThis as { window?: unknown }).window = previous; },
+  };
+}
+
+afterEach(() => {
+  showToast.mockClear();
+});
+
+describe('enableImportedPackage', () => {
+  it('enables the installed package so its style becomes selectable', async () => {
+    const ctx = harness();
+    const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
+    ctx.restore();
+
+    expect(result.ok).toBe(true);
+    expect(ctx.refresh).toHaveBeenCalled();
+    // The style list is filtered by the project's enabled packages, so an
+    // import that only refreshes the catalog stays invisible.
+    expect(ctx.updateTemplateConfiguration).toHaveBeenCalledTimes(1);
+    const written = ctx.updateTemplateConfiguration.mock.calls[0]?.[0];
+    expect(written?.enabledTemplateIds).toEqual(['aeonstagery.default', IMPORTED.id]);
+  });
+
+  it('leaves the configuration alone when the package is already enabled', async () => {
+    const ctx = harness({
+      enabledTemplateIds: [IMPORTED.id],
+      summaries: [{ id: IMPORTED.id }, { id: 'aeonstagery.default' }],
+    });
+    const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
+    ctx.restore();
+
+    // Already enabled: no write at all.
+    expect(result.ok).toBe(true);
+    expect(ctx.updateTemplateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed project write without failing the import', async () => {
+    const ctx = harness({ updateResult: { success: false, error: 'No active project' } });
+    const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
+    ctx.restore();
+
+    // The package is on disk, so the import did happen; only the project-level
+    // enablement failed.
+    expect(result.ok).toBe(true);
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('未能在当前项目启用'),
+      'error',
+    );
+  });
+
+  it('does nothing when no project is open', async () => {
+    const ctx = harness({ hasProject: false });
+    const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
+    ctx.restore();
+
+    expect(result.ok).toBe(true);
+    expect(ctx.updateTemplateConfiguration).not.toHaveBeenCalled();
+  });
+});

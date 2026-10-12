@@ -331,16 +331,22 @@ export function translateWebGalTextboxScss(
   const textBlock = lookup(blocks, '.text');
 
   // ── Font size ──
-  // `.TextBox_main` inherits the root size when it declares none, so a
-  // `.text { font-size: 240% }` resolves against ROOT_FONT_PX.
+  // `.text` declares its own size, which in CSS beats the one inherited from
+  // `.TextBox_main` while its `%` / `em` resolve against that inherited value.
+  // Reading only the parent drops the child's declaration entirely: a `40px`
+  // parent with `.text { font-size: 240% }` renders at 96px, not at 40px.
   const mainFs = resolveLength(main.fontsize, ROOT_FONT_PX);
   let fontSize: number;
-  if (mainFs != null) {
+  if (textBlock.fontsize != null) {
+    // `.TextBox_main` inherits the root size when it declares none.
+    const parentFs = mainFs ?? ROOT_FONT_PX;
+    fontSize = resolveLength(textBlock.fontsize, parentFs, mainFs != null) ?? parentFs;
+    if (mainFs == null) {
+      notes.push(`\`.TextBox_main\` 未设 \`font-size\`，字号取自 \`.text\` 的 `
+        + `\`${textBlock.fontsize}\`（按 WebGAL 根字号 ${ROOT_FONT_PX}px 换算）。`);
+    }
+  } else if (mainFs != null) {
     fontSize = mainFs;
-  } else if (textBlock.fontsize != null) {
-    fontSize = resolveLength(textBlock.fontsize, ROOT_FONT_PX) ?? ROOT_FONT_PX;
-    notes.push(`\`.TextBox_main\` 未设 \`font-size\`，字号取自 \`.text\` 的 `
-      + `\`${textBlock.fontsize}\`（按 WebGAL 根字号 ${ROOT_FONT_PX}px 换算）。`);
   } else {
     fontSize = rnd(48 * STAGE_SCALE);
     notes.push(`模板未声明 \`font-size\`（靠继承），已回退到 ${fontSize}px。`);
@@ -509,15 +515,15 @@ export function translateWebGalTextboxScss(
   const nameFontSizeRaw = declOf(name, 'fontsize');
   let nameSize: number | null;
   if (nameFontSizeRaw != null && /!\s*important/i.test(String(nameFontSizeRaw))) {
-    nameSize = resolveLength(nameFontSizeRaw, mainFontSize);
+    nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
   } else if (mainFontSizeDeclared) {
     nameSize = rnd(mainFontSize * 2);
   } else {
-    nameSize = resolveLength(nameFontSizeRaw, mainFontSize);
+    nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
   }
   if (nameSize == null) nameSize = rnd(fontSize * 0.98);
 
-  let nameLineHeight = resolveLength(name.lineheight, nameSize);
+  let nameLineHeight = resolveLength(name.lineheight, nameSize, true);
   if (nameLineHeight == null) nameLineHeight = rnd(nameSize * 1.6);
   const nameTop = resolveLength(name.top, ROOT_FONT_PX) ?? -60;
   const nameLeft = resolveLength(name.left, ROOT_FONT_PX) ?? 20;
@@ -527,12 +533,12 @@ export function translateWebGalTextboxScss(
   // The height must be a positive finite number: a zero would make the whole
   // template package invalid. Templates that rely on `line-height` set
   // `height: 0px`, so fall back to the line height.
-  let nameH = firstLength(declOf(name, 'height'), nameSize);
-  if (nameH == null || nameH <= 0) nameH = firstLength(declOf(name, 'minheight'), nameSize);
+  let nameH = firstLength(declOf(name, 'height'), nameSize, true);
+  if (nameH == null || nameH <= 0) nameH = firstLength(declOf(name, 'minheight'), nameSize, true);
   if (nameH == null || nameH <= 0) nameH = Math.max(nameLineHeight, rnd(nameSize * 1.9));
   if (!(nameH > 0)) nameH = Math.max(1, rnd(nameSize * 1.9));
 
-  const namePads = sidesWithLonghand(name, nameSize);
+  const namePads = sidesWithLonghand(name, nameSize, true);
   if (!name.padding && !name.paddingleft && !name.paddingright) {
     namePads.l = rnd(nameSize * 1.5);
     namePads.r = namePads.l;

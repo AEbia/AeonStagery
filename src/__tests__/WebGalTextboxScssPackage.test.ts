@@ -159,7 +159,9 @@ describe('buildWebGalTextboxTemplatePackage', () => {
 
     expect(params.textbox).toMatchObject({ x: 525, y: 866, width: 870, height: 116, opacity: 1 });
     expect(params.namebox).toMatchObject({ x: 534, y: 839, width: 300, minHeight: 57 });
-    expect(params.text).toMatchObject({ fontSize: 15, lineHeight: 21, align: 'left', color: '#123456' });
+    // `.text { font-size: 240% }` beats the 40px it inherits from
+    // `.TextBox_main`: 30 stage px × 2.4 = 72, then the 0.5 container scale.
+    expect(params.text).toMatchObject({ fontSize: 36, lineHeight: 51, align: 'left', color: '#123456' });
     // `-webkit-text-stroke: 4px white` — the named colour has to resolve, the
     // width is a stage pixel and the container scale applies on top.
     expect(params.text).toMatchObject({ strokeColor: '#FFFFFF', strokeWidth: 2 });

@@ -157,6 +157,33 @@ export function stripComments(css: string): string {
  * declaration text would otherwise be mistaken for selectors. Handles `&`
  * concatenation and skips whole `@media` / `@keyframes` blocks.
  */
+/** `!important` wins over a later plain declaration, as it does in the cascade. */
+function isImportant(declaration: string): boolean {
+  return /!\s*important\s*$/i.test(declaration);
+}
+
+/**
+ * Merge two declaration bodies the way the cascade does: a later rule only
+ * overrides the properties it actually declares, and an earlier `!important`
+ * value survives a later plain one.
+ */
+function mergeBodies(existing: string, incoming: string): string {
+  const byProperty = new Map<string, string>();
+  for (const body of [existing, incoming]) {
+    for (const part of body.split(';')) {
+      const declaration = part.trim();
+      const colon = declaration.indexOf(':');
+      if (colon < 0) continue;
+      const property = declaration.slice(0, colon).trim().toLowerCase();
+      if (!property) continue;
+      const previous = byProperty.get(property);
+      if (previous && isImportant(previous) && !isImportant(declaration)) continue;
+      byProperty.set(property, declaration);
+    }
+  }
+  return [...byProperty.values()].join(';\n');
+}
+
 export function parseBlocks(css: string): ScssBlocks {
   const source = stripComments(css);
   const blocks: ScssBlocks = {};
@@ -186,7 +213,13 @@ export function parseBlocks(css: string): ScssBlocks {
     for (const selector of top[0]) {
       for (const full of selector.split(',')) {
         const name = full.trim();
-        if (name) blocks[name] = body; // later rules win
+        if (!name) continue;
+        const existing = blocks[name];
+        // The cascade merges: a later rule only overrides the properties it
+        // declares. Replacing the body wholesale loses everything an earlier
+        // block set — a template that repeats `.TextBox_main` to add a colour
+        // would drop the whole geometry.
+        blocks[name] = existing ? mergeBodies(existing, body) : body;
       }
     }
   };
@@ -306,7 +339,17 @@ export function rnd(v: number): number {
 }
 
 /** Length → integer stage pixels. Accepts `px` / `em` / `rem` / `pt` / `%` / bare numbers. */
-export function resolveLength(raw: unknown, basePx?: number): number | null {
+/**
+ * Resolve a CSS length into stage pixels.
+ *
+ * `baseIsScaled` marks a `basePx` the caller has **already** converted into
+ * stage pixels — a parent's resolved `font-size`, typically. `%` and `em` are
+ * relative to that base, so folding the stage scale in a second time shrinks
+ * them twice: a `40px` parent resolves to `30px`, and `font-size: 100%` against
+ * it then lands on `23px` instead of `30px`. Absolute units always need the
+ * single conversion.
+ */
+export function resolveLength(raw: unknown, basePx?: number, baseIsScaled = false): number | null {
   if (raw == null) return null;
   const base = basePx || ROOT_FONT_PX;
   const text = String(raw).trim().replace(/!\s*\w+\s*$/, '').trim();
@@ -314,18 +357,19 @@ export function resolveLength(raw: unknown, basePx?: number): number | null {
   if (!m) return null;
   let val = parseFloat(m[1]);
   const unit = m[2] || 'px';
+  const relative = unit === 'em' || unit === 'rem' || unit === '%';
   if (unit === 'em' || unit === 'rem') val *= base;
   else if (unit === '%') val = (base * val) / 100;
   else if (unit === 'pt') val *= 96 / 72;
-  return rnd(val * STAGE_SCALE);
+  return rnd(val * (relative && baseIsScaled ? 1 : STAGE_SCALE));
 }
 
 /** Resolve only the first token, so `border-radius: 0 0 0 0` reads as `0`. */
-export function firstLength(raw: unknown, base?: number): number | null {
+export function firstLength(raw: unknown, base?: number, baseIsScaled = false): number | null {
   if (raw == null) return null;
   const t = String(raw).trim().replace(/!\s*\w+\s*$/, '').trim().split(/\s+/)[0];
   if (!t) return null;
-  return resolveLength(t, base);
+  return resolveLength(t, base, baseIsScaled);
 }
 
 /**
@@ -689,9 +733,9 @@ export function parseBoxShadow(raw: unknown, base?: number): BoxShadowInfo | nul
 }
 
 /** Expand a 1–4 value `padding` / `margin` shorthand. */
-export function parseBoxSides(raw: unknown, base?: number): BoxSides {
+export function parseBoxSides(raw: unknown, base?: number, baseIsScaled = false): BoxSides {
   const parts = String(raw || '').trim().split(/\s+/).map((x) => x.trim()).filter(Boolean);
-  const vals = parts.map((p) => resolveLength(p, base)).filter((v): v is number => v != null);
+  const vals = parts.map((p) => resolveLength(p, base, baseIsScaled)).filter((v): v is number => v != null);
   let out: BoxSides | null = null;
   if (vals.length === 1) out = { t: vals[0], r: vals[0], b: vals[0], l: vals[0] };
   else if (vals.length === 2) out = { t: vals[0], r: vals[1], b: vals[0], l: vals[1] };
@@ -739,10 +783,10 @@ export function parseScale(raw: unknown): ScaleInfo | null {
 }
 
 /** Merge the `padding` shorthand with its `padding-*` longhands. */
-export function sidesWithLonghand(obj: ScssDeclarations, base?: number): BoxSides {
-  const sides = parseBoxSides(obj.padding, base);
+export function sidesWithLonghand(obj: ScssDeclarations, base?: number, baseIsScaled = false): BoxSides {
+  const sides = parseBoxSides(obj.padding, base, baseIsScaled);
   for (const key of ['top', 'right', 'bottom', 'left'] as const) {
-    const v = resolveLength(obj['padding' + key], base);
+    const v = resolveLength(obj['padding' + key], base, baseIsScaled);
     if (v != null) sides[key.charAt(0) as 't' | 'r' | 'b' | 'l'] = v;
   }
   return sides;

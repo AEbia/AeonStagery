@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -201,6 +201,54 @@ describe('WebGAL SCSS template import', () => {
     // Replacing keeps the id, so scenes referencing the style keep working.
     expect(replaced.id).toBe(first.id);
     expect(await listPackageDirectories(templatesRoot)).toEqual([first.id]);
+  });
+
+  it('keeps the installed dialogue style id when replacing', async () => {
+    const root = await makeRoot('aeonstagery-webgal-styleid-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+
+    const first = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, styleId: 'legacy-dialogue',
+    });
+    const styleIds = async () => {
+      const manifest = JSON.parse(
+        await readFile(path.join(templatesRoot, first.id, 'manifest.v2.json'), 'utf8'),
+      ) as { dialogueStyles?: { id: string }[] };
+      return (manifest.dialogueStyles ?? []).map((style) => style.id);
+    };
+    expect(await styleIds()).toEqual(['legacy-dialogue']);
+
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: first.id,
+    });
+    expect(replaced.replaced).toBe(true);
+    // Replacing must not fold the style id back onto the package id: scenes
+    // reference the style, not the package.
+    expect(await styleIds()).toEqual(['legacy-dialogue']);
+  });
+
+  it('replaces the package in the directory it actually lives in', async () => {
+    const root = await makeRoot('aeonstagery-webgal-dirname-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+
+    const first = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    // Package discovery reads the manifest, so a directory may be named freely.
+    const customRoot = path.join(templatesRoot, 'custom-folder');
+    await rename(path.join(templatesRoot, first.id), customRoot);
+
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(inspection.conflicts[0]).toMatchObject({ packageId: first.id });
+
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: first.id,
+    });
+    expect(replaced.replaced).toBe(true);
+    expect(replaced.installPath).toBe(customRoot);
+    expect(await listPackageDirectories(templatesRoot)).toEqual(['custom-folder']);
   });
 
   it('adds a separate package when the user keeps the import', async () => {

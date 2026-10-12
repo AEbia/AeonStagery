@@ -74,13 +74,18 @@ describe('translateWebGalTextboxScss', () => {
       },
       text: {
         fontFamily: 'sans-serif',
-        fontSize: 15,
+        // `.text { font-size: 240% }` is a declaration of its own, resolved
+        // against `.TextBox_main`'s 40px: 40 → 30 stage px → 96 stage px → 36
+        // once the 0.5 container scale is folded in. Reading only the parent
+        // would give 30.
+        fontSize: 36,
         fontWeight: '700',
         color: '#123456',
         x: 540,
         y: 881,
         maxWidth: 840,
-        lineHeight: 21,
+        // 1.4 × the resolved 36px body size.
+        lineHeight: 51,
         align: 'left',
         // `-webkit-text-stroke: 4px white`
         strokeColor: '#FFFFFF',
@@ -97,7 +102,10 @@ describe('translateWebGalTextboxScss', () => {
         fontWeight: '400',
         color: '#FFFFFF',
         align: 'left',
-        padding: [34, 0, 0, 0],
+        // `padding-left: 1.5em` is relative to the nameplate's own 60px size
+        // (90 → 45 once the 0.5 container scale is folded in), not to a value
+        // that already carries the stage scale.
+        padding: [45, 0, 0, 0],
         strokeColor: '#FF3B72',
         strokeWidth: 5,
       },
@@ -170,7 +178,33 @@ describe('translateWebGalTextboxScss', () => {
     const forced = translateWebGalTextboxScss(
       '.TextBox_main { font-size: 30px; }\n.TextBox_showName { font-size: 100% !important; }',
     );
-    expect(forced.style.params.speaker!.fontSize).toBe(17);
+    // `100%` resolves against the 30px parent, so 23 stage px. Rescaling it
+    // again folds the stage scale in twice and lands on 17.
+    expect(forced.style.params.speaker!.fontSize).toBe(23);
+  });
+
+  it('resolves the body font size against the parent, not the root', () => {
+    const { style } = translateWebGalTextboxScss(
+      '.TextBox_main { left: 60px; right: 60px; bottom: 40px; height: 200px; font-size: 40px; }\n'
+      + '.text { font-size: 240%; }',
+    );
+    // The parent resolves to 30 stage px, so `240%` of it is 72 — not 30 (the
+    // parent, as if `.text` had said nothing) and not 38 (the root size).
+    expect(style.params.text!.fontSize).toBe(72);
+  });
+
+  it('merges a repeated selector instead of dropping its earlier declarations', () => {
+    // Templates split one selector across blocks; CSS keeps both and lets the
+    // later rule override only the properties it declares.
+    const { style } = translateWebGalTextboxScss(`
+      .TextBox_main { left: 120px; right: 120px; height: 300px; font-size: 40px; }
+      .TextBox_Background { background: #000000; }
+      .TextBox_main { color: #ff0000; }
+    `);
+    // Without the merge the geometry is gone and `left` falls back to 50 × 0.75.
+    expect(style.params.textbox!.x).toBe(90);
+    // The stage width minus both resolved insets.
+    expect(style.params.textbox!.width).toBe(1920 - 90 * 2);
   });
 
   it('centres the text column when asked, and reports the template offset otherwise', () => {
