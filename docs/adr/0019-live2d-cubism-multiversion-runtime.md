@@ -100,3 +100,15 @@ Implementation: `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/
 Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__/Live2DStageRuntime.test.ts`, `src/__tests__/CharacterSynchronizer.test.ts`.
 
 后续 runtime 能力扩展优先填充对应 Adapter 的 init/create/model control 与能力声明，而不是继续在编排层新增 runtime 身份或私有字段分支。
+
+### 2026-10-12: Accepted runtime behavior Interface migration (planned)
+
+`Live2DRuntimeModelControls` 当前把两个 SDK 的内部结构及操作协议铺成了公共 Interface；`Live2DModelHandle` 的分组转发尚未收回调用方对 Core、子模型、focus controller 和共享时钟的知识。这是本 ADR 要求 SDK 私有操作留在 Adapter 内的 implementation gap。
+
+仓库内所有调用方迁移到绑定模型、表达完整行为的 Interface，最终删除公共 `getControls()`、raw model/Core/子模型/focus controller/采样目标 getter。初始化、动作交接、帧提交与 Seek 恢复各自封装运行时操作顺序；动作采样向调用方交付 runtime-neutral 数据。显示对象只提供类型明确的 Pixi 显示能力。时间轴选择仍由编排 Module 负责，模型池、借用取消及纹理所有权仍由资源 Module 负责。
+
+这是行为保持的重构：保留 Cubism 2 组合模型同步、动作交接、隔离采样、soft-detach，以及 Cubism 3+ 原生 offset 和零步长姿态提交的既有承诺。共享 SDK 时钟锁由运行时实现统一管理，覆盖预览、Seek、采样和 Bake，避免外围批次与模型内部操作重复取锁。参数 UI 与工作区工具改用中立参数描述和值；动作转换、缓存预热、Seek 与 Bake 均通过采样行为取得数据。
+
+选择完整行为方法，是为了让现有时间轴编排继续决定角色意图，同时由运行时 Module 收回 SDK 协议。每帧提交全部角色目标状态的声明式重写会同时改变编排状态模型，本次没有采用。迁移过程中允许旧形式暂时存在以保持验证可运行；最终删除旧公共契约是交付条件。
+
+本节记录已接受的目标，尚不声明实现完成。实施规格、完成条件与迁移切片在本地 issue tracker 的 19 号条目维护；该 tracker 按仓库约定仅用于本地流程。
