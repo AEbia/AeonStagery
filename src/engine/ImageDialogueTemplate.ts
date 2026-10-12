@@ -97,6 +97,13 @@ function renderNamebox(
   const color = speakerStyle?.color === '$characterColor'
     ? config.speakerColor || '#FFFFFF'
     : speakerStyle?.color || config.speakerColor || '#FFFFFF';
+  // Pixi's text measurement counts the stroke and the shadow *distance*, but not
+  // the shadow *blur*, so a glow gets sliced off at the texture edge. `padding`
+  // only grows the texture and leaves the text bounds alone, so reserving it here
+  // cannot disturb the plate geometry below.
+  const shadowPadding = speakerStyle?.dropShadow
+    ? Math.ceil((speakerStyle.dropShadowBlur ?? 0) + Math.abs(speakerStyle.dropShadowDistance ?? 5))
+    : 0;
   const speakerText = new PIXI.Text({ text: config.speaker, style: {
     fontFamily: speakerStyle?.fontFamily || presentation.text.fontFamily || DEFAULT_FONT_FAMILY,
     fontSize: speakerStyle?.fontSize ?? Math.round((presentation.text.fontSize ?? config.fontSize ?? 44) * 0.9),
@@ -117,6 +124,7 @@ function renderNamebox(
           distance: speakerStyle.dropShadowDistance ?? 5,
         }
       : false,
+    padding: shadowPadding,
   } });
   speakerText.resolution = 2;
   const [paddingLeft, paddingTop, paddingRight, paddingBottom] = speakerStyle?.padding ?? [0, 0, 0, 0];

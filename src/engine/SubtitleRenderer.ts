@@ -192,9 +192,14 @@ class SubtitleRenderer {
     dialogueText.y = layout.textY;
     // PixiJS only honors `style.align` when a line actually wraps, so a
     // single-line subtitle stayed flush left even when `align` was `center`.
-    // Anchor the sprite against the authored text column instead.
+    // Anchor the sprite against the column the text actually wraps to:
+    // `wordWrapWidth` above was tightened to the textbox and the stage, while
+    // the authored `maxWidth` can still reach past both.
     const textAlignment = (textStyle.align as string | undefined) ?? 'left';
-    const alignmentSpan = Math.max(1, layout.textWidth || metrics.maxLineWidth);
+    const alignmentSpan = Math.max(
+      1,
+      Number(textStyle.wordWrapWidth) || layout.textWidth || metrics.maxLineWidth,
+    );
     if (textAlignment === 'center' || textAlignment === 'right') {
       dialogueText.anchor.x = textAlignment === 'right' ? 1 : 0.5;
       dialogueText.x = layout.textX + alignmentSpan * (textAlignment === 'right' ? 1 : 0.5);

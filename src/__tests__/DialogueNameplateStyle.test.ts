@@ -175,6 +175,36 @@ describe('nameplate rendering', () => {
     const { speakerText } = renderTemplate(presentationWith({ color: '#FFFFFF' }));
     expect(speakerText.style.dropShadow).toBeFalsy();
   });
+
+  it('reserves texture padding for the glow so it cannot be clipped', () => {
+    const plain = renderTemplate(presentationWith({ strokeWidth: 0 }));
+    const glowing = renderTemplate(presentationWith({
+      strokeWidth: 0,
+      dropShadow: true, dropShadowColor: '#000000', dropShadowAlpha: 0.85,
+      dropShadowBlur: 8, dropShadowDistance: 0,
+    }));
+
+    // Pixi measures the stroke and the shadow distance, but not the blur, so the
+    // texture needs room of its own or the glow is cut off at its edge.
+    expect(plain.speakerText.style.padding).toBe(0);
+    expect(glowing.speakerText.style.padding).toBe(8);
+    // The room is texture-only: Pixi leaves the text bounds and position alone, so
+    // the plate stays the size the glyphs asked for.
+    expect(glowing.speakerText.width).toBe(plain.speakerText.width);
+    expect(glowing.speakerText.x).toBe(plain.speakerText.x);
+  });
+
+  it('leaves a left-aligned nameplate position untouched by the glow padding', () => {
+    const plain = renderTemplate(presentationWith({ align: 'left' }));
+    const glowing = renderTemplate(presentationWith({
+      align: 'left',
+      dropShadow: true, dropShadowColor: '#000000', dropShadowAlpha: 0.85,
+      dropShadowBlur: 8, dropShadowDistance: 0,
+    }));
+
+    expect(glowing.speakerText.anchor.x).toBe(0);
+    expect(glowing.speakerText.x).toBe(plain.speakerText.x);
+  });
 });
 
 describe('body text alignment', () => {
@@ -256,5 +286,37 @@ describe('body text alignment', () => {
     // The typewriter branch positions lines itself, so the sprite anchor is reset.
     expect(body.anchor.x).toBe(0);
     expect(body.x).toBe(TEXT_LINE.x + (TEXT_LINE.maxWidth - 100) / 2);
+  });
+
+  /**
+   * A right-aligned column whose authored `maxWidth` overruns its own textbox:
+   * the box ends at 1900, the column starts 50px inside it at 1650, so only
+   * 200px can be wrapped even though 600px was authored.
+   */
+  function clampedAlignPresentation() {
+    return parseDialogueImagePresentation({
+      renderer: 'image-dialogue-v1',
+      styleId: 'clamped-align',
+      textbox: { image: 'textbox.svg', x: 1600, y: 800, width: 300, height: 200 },
+      text: { ...TEXT_LINE, x: 1650, y: 850, maxWidth: 600, align: 'right' },
+    }, 'dialogueStyles[0].presentation');
+  }
+
+  it('clamps a right-aligned body line to the column it actually wraps to', () => {
+    const body = collectTexts(renderBody(clampedAlignPresentation(), 'instant'))
+      .find((text) => text.text === 'Hello')!;
+    expect(body.anchor.x).toBe(1);
+    // 1650 + 200, not 1650 + 600 (which would end 330px off the 1920px stage).
+    expect(body.x).toBe(1850);
+    expect(body.x).toBeLessThanOrEqual(1920);
+  });
+
+  it('clamps a right-aligned typewriter line to the same column', () => {
+    const body = collectTexts(renderBody(clampedAlignPresentation(), 'typewriter'))
+      .find((text) => text.text === 'Hello')!;
+    // The typewriter branch lays out each line itself against the same span.
+    expect(body.anchor.x).toBe(0);
+    expect(body.x).toBe(1650 + 200 - 100);
+    expect(body.x + 100).toBeLessThanOrEqual(1920);
   });
 });
