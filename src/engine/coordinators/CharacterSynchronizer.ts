@@ -315,7 +315,15 @@ export class CharacterSynchronizer {
 
     for (const [id, state] of desiredChars) {
       const entry = this.live2D.getAllCharacters?.().get(id);
-      if (entry?.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism' || !this.live2D.restoreSeekState || !this.live2D.hasCharacter(id)) {
+      // A cached Cubism 3+ parameter-only motion is already represented by the
+      // runtime-neutral evaluator. Restore it through that same evaluator so
+      // seek and playback keep one owner for its parameters. Native offset
+      // restoration remains the fallback for unsupported/unconverted motions
+      // and other runtime-owned state.
+      if (entry?.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism'
+        || (cachedResourceMotions.has(id) && !!this.live2D.playCustomMotion)
+        || !this.live2D.restoreSeekState
+        || !this.live2D.hasCharacter(id)) {
         continue;
       }
       const motion = state.motion && state.motion.output.kind === 'resource'
@@ -468,6 +476,10 @@ export class CharacterSynchronizer {
         if (state.motion) {
           const offset = this.getMotionOffset(id, state.motion, time);
           if (!nativeSeekIds.has(id)) {
+            const characterEntry = this.live2D.getAllCharacters?.().get(id);
+            const cachedCubism3Motion = characterEntry?.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+              ? cachedResourceMotions.get(id)
+              : undefined;
             this.playDesiredMotion(
               id,
               state.motion,
@@ -475,6 +487,7 @@ export class CharacterSynchronizer {
               time,
               skipHardReset || isScrubbing,
               customMotionHandoffSnapshots.get(id),
+              cachedCubism3Motion,
             );
           }
         } else if (!isScrubbing) {
@@ -642,12 +655,22 @@ export class CharacterSynchronizer {
     time: number,
     skipHardReset: boolean,
     handoffSnapshot?: ModelSnapshot,
+    cachedResourceMotion?: CachedResourceMotion,
   ): void {
     if (motion.output.kind === 'custom') {
       if (this.live2D.playCustomMotion) {
         this.live2D.playCustomMotion(id, motion.output, time - offset, handoffSnapshot);
         return;
       }
+      return;
+    }
+    if (cachedResourceMotion && this.live2D.playCustomMotion) {
+      this.live2D.playCustomMotion(
+        id,
+        cachedResourceMotion.motion,
+        time - offset,
+        handoffSnapshot,
+      );
       return;
     }
     if (handoffSnapshot) {

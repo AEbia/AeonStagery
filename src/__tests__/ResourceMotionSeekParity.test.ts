@@ -45,6 +45,11 @@ const cachedEntry: CachedResourceMotion = {
   evaluate: () => ({}),
 };
 
+const cachedCubism3Entry: CachedResourceMotion = {
+  ...cachedEntry,
+  key: 'untitled-pixi-live2d-engine-cubism::asset://models/char.model3.json::wave',
+};
+
 const fakeSamplerTarget = { internalModel: {}, motionManager: {} } as any;
 
 function createMockLive2D() {
@@ -75,6 +80,7 @@ function createMockLive2D() {
     isMotionLoading: vi.fn().mockReturnValue(false),
     clearAllPendingMotions: vi.fn(),
     stopAllMotions: vi.fn(),
+    restoreSeekState: vi.fn().mockResolvedValue(undefined),
     getMotionDuration: vi.fn().mockReturnValue(2),
     getMotionSamplerTargets: vi.fn(),
   };
@@ -295,6 +301,39 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
     expect(live2D.playMotion).toHaveBeenCalledWith('char1', 'wave', 3, 0.2, 0.2, false, charSnap);
     const updateCalls = live2D.updateAll.mock.calls.map((call) => call[0]);
     expect(updateCalls).toEqual([0]);
+  });
+
+  it('routes cached Cubism 3+ parameter motions through the custom evaluator instead of native replay', async () => {
+    const entry = live2D.getAllCharacters().get('char1')!;
+    entry.runtime = { adapterId: 'untitled-pixi-live2d-engine-cubism' };
+    vi.spyOn(motionCurveCache, 'get').mockReturnValue(cachedCubism3Entry);
+
+    await synchronizer.syncTo({
+      time: 120,
+      desiredChars: new Map([['char1', {
+        id: 'char1',
+        model: 'asset://models/char.model3.json',
+        config: {},
+        motion: {
+          output: { kind: 'resource', key: 'wave', fadeInSeconds: 0.5 } as CharacterMotionOutput,
+          priority: 3,
+          time: 0,
+        },
+      }]]),
+      transformationProxies: new ProxyRegistry(),
+      snapshotStore: snapshots,
+      shouldCancel: () => false,
+      skipHardReset: false,
+      isScrubbing: false,
+    });
+
+    expect(live2D.restoreSeekState).not.toHaveBeenCalled();
+    expect(live2D.playCustomMotion).toHaveBeenCalledWith(
+      'char1',
+      cachedCubism3Entry.motion,
+      0,
+      undefined,
+    );
   });
 
   it('never re-samples a permanently-rejected motion during seek (SDK fallback)', async () => {

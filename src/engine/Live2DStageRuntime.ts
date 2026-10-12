@@ -210,7 +210,11 @@ export class Live2DStageRuntime {
           const freezeNativeMotion = !this.shouldUpdate
             && !forceStep
             && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
-          if (shouldStepModels && !freezeNativeMotion) {
+          // Cubism 3+ evaluates cached motion writers and native queues inside
+          // update(), including at delta 0. A forced seek flush must commit
+          // that pose before rendering without advancing the paused clock.
+          const commitNativeSeek = forceStep && entry.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism';
+          if ((shouldStepModels || commitNativeSeek) && !freezeNativeMotion) {
             getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
           }
 
