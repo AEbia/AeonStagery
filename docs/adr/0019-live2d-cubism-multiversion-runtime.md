@@ -148,3 +148,14 @@ Implementation: `src/engine/runtime/Live2DRuntimeControlPort.ts`, `src/engine/ru
 Verification: `npm run check` passed 514 files, 5,653 tests and TypeScript on 2026-10-14. Focused integration checks passed for the runtime handle, Stage, Bake and motion controller.
 
 Implementation status: complete; no remaining runtime behavior Interface migration gaps.
+
+### 2026-10-14: Cubism 2 Expression lifecycle ownership
+
+`Cubism2ExpressionLifecycle` 是 Cubism 2 runtime 内部的私有 Module，集中普通表情播放、请求代次、队列清理与 Seek 前代表情淡入重建。`Cubism2PixiLive2DModelControls` 保留既有内部操作入口；绑定 handle 的公开 Interface、场景对前代表情的裁定和共享时钟协调继续遵循上述决策。
+
+- 普通表情加载由该 Module 在 SDK `loadExpression` 完成后复核请求代次，再提交队列，避免同名请求复用 SDK reservation 时旧结果抢占新请求。
+- 清空、idle 重置、quiesce 和直接 dispose 都使旧请求失效。清理停止真实表情队列并释放 reservation；不调用会重新入队默认表情的 SDK `resetExpression()`。idle 重置使用真实的 `internalModel.motionManager.expressionManager`。
+- Seek 保留前代表情/目标表情两阶段时钟重建、单调时钟恢复与延迟几何提交；异步加载之后和提交之前均复核请求所属模型与代次。组合角色逐具体模型处理。
+
+Implementation: `src/engine/live2d/runtime/Cubism2ExpressionLifecycle.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`.
+Verification: `src/__tests__/Cubism2ExpressionLifecycle.test.ts` 覆盖回收后的迟到加载、过期 Seek、idle 重置、同名请求竞争、借用复用、直接 soft-detach、加载拒绝和组合角色清理；既有 runtime、前代表情淡入与暂停预览测试继续覆盖公开行为。

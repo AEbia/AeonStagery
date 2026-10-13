@@ -24,6 +24,7 @@ import {
   sampleCubism2MotionCurves,
 } from '../live2d/cubism2MotionSampler';
 import { Cubism2BakeRenderCore } from '../live2d/runtime/Cubism2BakeRenderCore';
+import { Cubism2ExpressionLifecycle } from '../live2d/runtime/Cubism2ExpressionLifecycle';
 import { guardExternalGl } from '../live2d/runtime/Cubism2RenderGuardSeam';
 import { readPartOpacities, writePartOpacities } from '../live2d/runtime/Cubism2PartOpacity';
 import {
@@ -80,7 +81,7 @@ function mergePerformanceCompatibility(
 type Cubism2SamplingTarget = { readonly internalModel: any; readonly motionManager: any };
 
 export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort {
-  private readonly expressionRequestEpochs = new WeakMap<object, number>();
+  private readonly expressions: Cubism2ExpressionLifecycle;
   private readonly maskSizeProvider: () => number;
   private readonly bakeCore: Cubism2BakeRenderCore | null;
   private readonly clockProvider: () => Live2DRuntimeClock | null;
@@ -102,6 +103,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       const utSystem = (window as any).UtSystem;
       return utSystem && typeof utSystem.getUserTimeMSec === 'function' ? utSystem : null;
     });
+    this.expressions = new Cubism2ExpressionLifecycle(
+      (model) => this.getConcreteModels(model), this.clockProvider,
+    );
   }
 
   /**
@@ -128,16 +132,6 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       }
     }
     return [model];
-  }
-
-  private supersedeExpressionRequest(expressionManager: object): number {
-    const epoch = (this.expressionRequestEpochs.get(expressionManager) ?? 0) + 1;
-    this.expressionRequestEpochs.set(expressionManager, epoch);
-    return epoch;
-  }
-
-  private isCurrentExpressionRequest(expressionManager: object, epoch: number): boolean {
-    return this.expressionRequestEpochs.get(expressionManager) === epoch;
   }
 
   getCoreModel(model: any): any | null {
@@ -414,268 +408,20 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   setExpression(model: any, expressionName: string | null): void {
-    const targets = this.getConcreteModels(model);
-
-    if (!expressionName) {
-      for (const target of targets) {
-        const internalModel = target?.internalModel as any;
-        const expMgr = internalModel?.motionManager?.expressionManager;
-        // A destroyed manager is already torn down: poking its internals is
-        // pointless and can race the SDK's own teardown.
-        if (!expMgr || expMgr.destroyed) continue;
-
-        this.supersedeExpressionRequest(expMgr);
-        expMgr.queueManager?.stopAllMotions?.();
-        expMgr._motionQueueManager?.stopAllMotions?.();
-        if (expMgr.defaultExpression) expMgr.currentExpression = expMgr.defaultExpression;
-        expMgr.reserveExpressionIndex = -1;
-        expMgr._currentExpression = null;
-        expMgr.activeExpression = null;
-        if (expMgr._motions) expMgr._motions = [];
-        if (expMgr.motions) expMgr.motions = [];
-        if (expMgr.state) {
-          expMgr.state.currentGroup = undefined;
-          expMgr.state.reservedGroup = undefined;
-        }
-        if (expMgr._motionQueueManager) {
-          expMgr._motionQueueManager.stopAllMotions?.();
-          if (expMgr._motionQueueManager._motions) expMgr._motionQueueManager._motions = [];
-        }
-      }
-      return;
-    }
-
-    for (const target of targets) {
-      const internalModel = target?.internalModel;
-      const expMgr = internalModel?.motionManager?.expressionManager;
-      // A manager that was destroyed is already torn down (caches nulled):
-      // touching it would throw — or worse, write into freed state asynchronously
-      // — and the SDK's own rejection must not escape here. Without any manager
-      // the legacy delegation below is a no-op in the SDK, so keep calling it
-      // for API parity.
-      if (expMgr) {
-        if (expMgr.destroyed) continue;
-        this.supersedeExpressionRequest(expMgr);
-      }
-      const expressionIndex = expMgr?.getExpressionIndex?.(expressionName) ?? -1;
-      const currentIndex = Array.isArray(expMgr?.expressions)
-        ? expMgr.expressions.indexOf(expMgr.currentExpression)
-        : -1;
-
-      // pixi-live2d-display ignores setExpression() when the requested key is
-      // already current. Motion startup has queued the default expression at
-      // this point, so explicitly restore the current expression instead.
-      if (expressionIndex >= 0 && expressionIndex === currentIndex && typeof expMgr?.restoreExpression === 'function') {
-        expMgr.restoreExpression();
-      } else {
-        // The SDK expression pipeline is async (XHR fetch + fade queue) and
-        // can reject with an abort/TypeError when the model is destroyed
-        // mid-load. This call site is intentionally fire-and-forget, so the
-        // promise must never escape as an unhandled rejection.
-        const pending = target?.expression?.(expressionName);
-        if (pending && typeof (pending as Promise<unknown>).catch === 'function') {
-          (pending as Promise<unknown>).catch(() => {
-            /* teardown aborts are expected and already logged by the SDK */
-          });
-        }
-      }
-    }
+    this.expressions.set(model, expressionName);
   }
 
-  async setExpressionForSeek(
+  setExpressionForSeek(
     model: any,
     expressionName: string | null,
     elapsedSeconds: number,
-    /**
-     * Expression that was in effect immediately before the target's start time.
-     * `null` means "none" (the seek target has no predecessor in the scene);
-     * `undefined` means "unknown" and falls back to the model's live entry.
-     */
     previousExpressionKey?: string | null,
     isCurrent: () => boolean = () => true,
     transaction?: Live2DClockTransaction,
   ): Promise<void> {
-    const prepared = await Promise.all(this.getConcreteModels(model).map(async (target) => {
-      if (!isCurrent()) return null;
-      const internalModel = target?.internalModel;
-      const coreModel = internalModel?.coreModel;
-      const expressionManager = internalModel?.motionManager?.expressionManager;
-      if (!coreModel || target?.destroyed || expressionManager?.destroyed) return null;
-      if (!expressionManager) {
-        // Models without expressions still need the restored pose committed
-        // to their drawable geometry. v8 skips internalModel.update when the
-        // accumulated delta is zero. Use the same minimal deferred flush as
-        // the expression path below, inside the vendor's guarded render pass.
-        target.update?.(0.001);
-        return null;
-      }
-      const requestEpoch = this.supersedeExpressionRequest(expressionManager);
-
-      expressionManager.queueManager?.stopAllMotions?.();
-      expressionManager._motionQueueManager?.stopAllMotions?.();
-      expressionManager.reserveExpressionIndex = -1;
-
-      if (!expressionName) {
-        if (expressionManager.defaultExpression) {
-          expressionManager.currentExpression = expressionManager.defaultExpression;
-        }
-        return { target, expressionManager, expression: null, previousExpression: null, previousKnown: true, requestEpoch };
-      }
-
-      const index = expressionManager.getExpressionIndex?.(expressionName) ?? -1;
-      if (index < 0 || typeof expressionManager.loadExpression !== 'function') {
-        if (expressionManager.defaultExpression) {
-          expressionManager.currentExpression = expressionManager.defaultExpression;
-        }
-        return { target, expressionManager, expression: null, requestEpoch };
-      }
-
-      let expression: unknown;
-      try {
-        expression = await expressionManager.loadExpression(index);
-      } catch {
-        // Teardown aborted the load (destroy() cancels the in-flight XHR and
-        // nulls the manager's caches, so the SDK's own continuation can also
-        // fail). The seek target is moot — drop it like the superseded
-        // request path below.
-        return null;
-      }
-      if (!isCurrent()) return null;
-      // The model may have been destroyed while the expression fetch was in
-      // flight; the manager's caches are gone by now.
-      if (expressionManager.destroyed) return null;
-      if (!this.isCurrentExpressionRequest(expressionManager, requestEpoch)) return null;
-      // A fire-and-forget expression request issued by motion restoration may
-      // have shared this load. Invalidate its reservation again after await so
-      // it cannot enqueue an older expression after this seek target.
-      expressionManager.reserveExpressionIndex = -1;
-      expressionManager.queueManager?.stopAllMotions?.();
-      expressionManager._motionQueueManager?.stopAllMotions?.();
-      if (!expression && expressionManager.defaultExpression) {
-        expressionManager.currentExpression = expressionManager.defaultExpression;
-      }
-      // Resolve the predecessor the seeked frame must blend out of. Taking the
-      // model's live `currentExpression` reads whatever the previous playback
-      // position left behind — including an expression that only exists later
-      // in the scene — which is exactly the stale data a seek must not reuse.
-      const previousKnown = previousExpressionKey !== undefined;
-      let previousExpression: unknown = null;
-      if (previousKnown && previousExpressionKey && previousExpressionKey !== expressionName) {
-        const previousIndex = expressionManager.getExpressionIndex?.(previousExpressionKey) ?? -1;
-        if (previousIndex >= 0) {
-          try {
-            previousExpression = await expressionManager.loadExpression(previousIndex);
-          } catch {
-            previousExpression = null;
-          }
-          if (!isCurrent()) return null;
-          if (expressionManager.destroyed) return null;
-          if (!this.isCurrentExpressionRequest(expressionManager, requestEpoch)) return null;
-          // Re-clear the queue: the predecessor's own load may have queued it.
-          expressionManager.reserveExpressionIndex = -1;
-          expressionManager.queueManager?.stopAllMotions?.();
-          expressionManager._motionQueueManager?.stopAllMotions?.();
-        }
-      }
-      return {
-        target,
-        expressionManager,
-        expression: expression ?? null,
-        previousExpression,
-        previousKnown,
-        requestEpoch,
-      };
-    }));
-
-    const targets = prepared.filter((target): target is NonNullable<typeof target> => !!target);
-    if (targets.length === 0) return;
-
-    await withSharedRuntimeClock(this.clockProvider(), isCurrent, async (lease) => {
-      if (!isCurrent()) return;
-      const currentTargets = targets.filter(({ target, expressionManager, requestEpoch }) => (
-        !target?.destroyed
-        && !expressionManager.destroyed
-        && this.isCurrentExpressionRequest(expressionManager, requestEpoch)
-      ));
-      if (currentTargets.length === 0) return;
-
-      const utSystem = getSharedRuntimeClockForTransaction(lease);
-      const nowMs = utSystem?.getUserTimeMSec() ?? performance.now();
-      const elapsedMs = Number.isFinite(elapsedSeconds)
-        ? Math.max(0, elapsedSeconds) * 1000
-        : 24 * 60 * 60 * 1000;
-      try {
-        const hasExpression = currentTargets.some((target) => !!target.expression);
-
-        if (utSystem && hasExpression) {
-          // Playback keeps the previous expression in the queue (pixi's
-          // _setExpression never stops the old entry), so switching from A to
-          // B blends A's exclusive parameters out only where B owns them, and
-          // the seeked frame matches the playback frame exactly. The seek
-          // reconstruction re-creates that same queue shape with two clock
-          // phases: the previous expression's entry starts far enough in the
-          // past to be fully faded in (weight 1, resident writer), while the
-          // target expression starts at the seeked elapsed so its fade weight
-          // reconstructs in-window and continues from that progress.
-          const PREVIOUS_EXPRESSION_AGE_MS = 6000;
-          for (const target of currentTargets) {
-            if (!isCurrent()) break;
-            if (!target.expression) continue;
-            // `previousKnown` means the caller resolved the predecessor from
-            // the scene: never fall back to the model's live entry, whose
-            // `currentExpression` belongs to whatever position playback or the
-            // previous seek left behind.
-            const previous = target.previousKnown
-              ? (target.previousExpression ?? null)
-              : target.expressionManager.currentExpression;
-            const previousIndex = Array.isArray(target.expressionManager.expressions)
-              ? target.expressionManager.expressions.indexOf(previous)
-              : -1;
-            const previousIsLoadedExpression = !!previous
-              && previous !== target.expression
-              && (previousIndex >= 0
-                ? target.expressionManager.definitions?.[previousIndex]?.name !== undefined
-                // A runtime that does not cache loaded expressions in
-                // `expressions` still produced the object we asked for.
-                : previous === target.previousExpression);
-            if (previousIsLoadedExpression) {
-              // Phase 1: latch the previous expression's entry at a clock that
-              // has its fade-in long completed, then evaluate it so the core
-              // records that start time (weight becomes 1, it stays resident).
-              utSystem.setUserTimeMSec(nowMs - elapsedMs - PREVIOUS_EXPRESSION_AGE_MS);
-              target.expressionManager._setExpression?.(previous);
-              target.expressionManager.update?.(
-                target.target?.internalModel?.coreModel,
-                nowMs - elapsedMs - PREVIOUS_EXPRESSION_AGE_MS,
-              );
-            }
-            // Phase 2: latch the target expression at the seeked elapsed and
-            // evaluate it so the seeked frame shows its in-progress fade.
-            if (!isCurrent()) break;
-            utSystem.setUserTimeMSec(nowMs - elapsedMs);
-            target.expressionManager.currentExpression = target.expression;
-            target.expressionManager._setExpression?.(target.expression);
-            target.expressionManager.update?.(
-              target.target?.internalModel?.coreModel,
-              nowMs - elapsedMs,
-            );
-          }
-        }
-      } finally {
-        if (utSystem) {
-          const currentTimeMs = utSystem.getUserTimeMSec();
-          utSystem.setUserTimeMSec(Number.isFinite(currentTimeMs) ? Math.max(currentTimeMs, nowMs) : nowMs);
-        }
-      }
-
-      // Live2DModel.update() only accumulates delta. The SDK performs the
-      // actual motion/expression/core update inside its native _render(),
-      // where Cubism's WebGL state is isolated from Pixi's filter programs.
-      for (const { target } of currentTargets) {
-        if (!isCurrent()) break;
-        target.update?.(0.001);
-      }
-    }, transaction);
+    return this.expressions.restoreForSeek(
+      model, expressionName, elapsedSeconds, previousExpressionKey, isCurrent, transaction,
+    );
   }
 
   setInjectedParameter(model: any, paramName: string, value: number): void {
@@ -984,6 +730,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     transaction?: Live2DClockTransaction,
   ): Promise<void> {
     const { keepFocus = false, idleSnapshot = null } = options;
+    if (!isCurrent()) return;
+    this.expressions.clear(model);
     const sdkClock = this.clockProvider();
 
     await withSharedRuntimeClock(sdkClock, isCurrent, async (activeTransaction) => {
@@ -1029,12 +777,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
           }
         }
 
-        if (internalModel.expressionManager) {
-          internalModel.expressionManager.stopAllExpressions();
-          if (internalModel.expressionManager.state) {
-            internalModel.expressionManager.state.currentGroup = undefined;
-          }
-        }
+        this.expressions.clear(targetModel);
 
         if (internalModel.coreModel) {
           if (idleSnapshot) {
@@ -1249,6 +992,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
 
   quiesceModel(model: any): void {
     if (!model) return;
+    this.expressions.clear(model);
     Reflect.deleteProperty(model, '_characterEntry');
     for (const concrete of this.getConcreteModels(model)) {
       Reflect.deleteProperty(concrete, '_characterEntry');
@@ -1258,13 +1002,12 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       if (internalModel.coreModel) Reflect.deleteProperty(internalModel.coreModel, '_characterEntry');
       internalModel.motionManager?.stopAllMotions?.();
       internalModel.motionManager?._motionQueueManager?.stopAllMotions?.();
-      const expMgr = internalModel.motionManager?.expressionManager;
-      if (expMgr && typeof expMgr.resetExpression === 'function') expMgr.resetExpression();
     }
   }
 
   disposeModel(model: any, options: Live2DDisposeOptions): void {
     if (!model) return;
+    this.expressions.clear(model);
 
     if (options.detach) {
       try {

@@ -1131,6 +1131,10 @@ describe('Live2DRuntimeAdapter', () => {
           _userTimeMSec: 0,
         },
         expressionManager: {
+          defaultExpression: { name: 'default' },
+          currentExpression: { name: 'smile' },
+          reserveExpressionIndex: 0,
+          queueManager: { stopAllMotions: vi.fn() },
           stopAllExpressions: vi.fn(),
           state: { currentGroup: undefined },
           resetExpression: vi.fn(),
@@ -1179,11 +1183,6 @@ describe('Live2DRuntimeAdapter', () => {
           targetY: 0,
           vx: 0,
           vy: 0,
-        },
-        expressionManager: {
-          stopAllExpressions: vi.fn(),
-          state: { currentGroup: undefined },
-          resetExpression: vi.fn(),
         },
         on: () => {},
         off: () => {},
@@ -1404,7 +1403,9 @@ describe('Live2DRuntimeAdapter', () => {
       expect(params[1]).toBeCloseTo(0.2, 5);
       expect(opacities[0]).toBeCloseTo(0.9, 5);
       expect(opacities[1]).toBeCloseTo(0.8, 5);
-      expect(internalModel.expressionManager.stopAllExpressions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.queueManager.stopAllMotions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.currentExpression).toBe(motionManager.expressionManager.defaultExpression);
+      expect(motionManager.expressionManager.reserveExpressionIndex).toBe(-1);
       expect(internalModel.focusController.focus).toHaveBeenCalledWith(0, 0, true);
     });
 
@@ -1529,7 +1530,10 @@ describe('Live2DRuntimeAdapter', () => {
 
       expect(motionManager.stopAllMotions).toHaveBeenCalled();
       expect(motionManager._motionQueueManager.stopAllMotions).toHaveBeenCalled();
-      expect(motionManager.expressionManager.resetExpression).toHaveBeenCalled();
+      expect(motionManager.expressionManager.queueManager.stopAllMotions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.currentExpression).toBe(motionManager.expressionManager.defaultExpression);
+      expect(motionManager.expressionManager.reserveExpressionIndex).toBe(-1);
+      expect(motionManager.expressionManager.resetExpression).not.toHaveBeenCalled();
       expect(internalModel.motionManager).toBe(motionManager);
     });
 
