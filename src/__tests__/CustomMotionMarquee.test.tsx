@@ -303,6 +303,28 @@ describe('custom motion marquee interactions', () => {
     expect(callbacks.size).toBe(0);
     expect(onCommit).not.toHaveBeenCalled();
   });
+  it.each(['pointercancel', 'blur'])('restores the Shift marquee baseline on %s', (reason) => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++id, callback); return id; });
+    vi.stubGlobal('cancelAnimationFrame', (frame: number) => { frames.delete(frame); });
+    const { canvases, editor, onCommit } = setup();
+    pointer(canvases[0].querySelector('[data-kf="0"]')!, 'pointerdown');
+    pointer(window, 'pointerup');
+    pointer(canvases[0], 'pointerdown', 90, 5, true);
+    pointer(window, 'pointermove', 210, 50, true);
+    act(() => { const pending = [...frames.values()]; frames.clear(); pending.forEach((callback) => callback(16)); });
+    expect(editor.querySelectorAll('[data-selected="true"]')).toHaveLength(5);
+    expect(editor.querySelector('.cme__marquee')).not.toBeNull();
+    fireEvent(window, new Event(reason));
+    pointer(window, 'pointerup', 210, 50);
+    expect(editor.querySelectorAll('[data-selected="true"]')).toHaveLength(1);
+    expect(editor.querySelector('[data-f0="true"][data-selected="true"]')).not.toBeNull();
+    expect(editor.querySelector('.cme__marquee')).toBeNull();
+    expect(frames.size).toBe(0);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it('renders only viewport markers for a 20,000-keyframe motion', () => {
     const scroller = document.createElement('div');
     Object.defineProperty(scroller, 'clientWidth', { value: 220 });

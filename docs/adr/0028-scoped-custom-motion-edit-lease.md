@@ -149,3 +149,13 @@ release-before-acquire、晚到授权、目标删除和 Motion 版本冲突、24
 - 契约与边界测试位于 `CustomMotionEditing.test.ts`、`CustomMotionEditAuthority.test.ts`、
   `CustomMotionConversionCommand.test.ts`、`ScriptEngineCustomMotionPreview.test.ts`；
   React 测试继续验证用户手势与薄桥接。
+
+### UI gesture alignment（2026-10-14）
+
+- `src/ui/timeline/useCustomMotionGestures.ts` 是编辑器私有的手势生命周期所有者，统一
+  框选、关键帧移动和 Bezier 控制柄的指针身份、RAF、候选回滚、失效与单次提交；播放头、
+  FPS、只读状态、视图/过滤变化和卸载的取消规则也留在该模块内。
+- `CustomMotionDisplay.tsx` 与 `CustomMotionReadouts.tsx` 只负责内部显示，消费手势状态和
+  操作入口；租约、规范 Motion、文档写入及 authoring transaction 仍由 `CustomMotionEditing`
+  管理，不新增 authority adapter。共享手势行为通过 `CustomMotionEditorSession.test.tsx`
+  的真实编辑器/会话接口验证，已有 authoring 接口契约测试继续保留。
