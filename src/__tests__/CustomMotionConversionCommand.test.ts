@@ -14,7 +14,7 @@ import { SemanticAuthoringApplicationService } from '../services/timeline-author
 import { DocumentStore } from '../ui/store/DocumentStore';
 import type { SemanticDocumentProjectionRuntimePort } from '../services/document/DocumentProjectionPorts';
 import { sceneDocumentCodec } from '../services/semantic-scene';
-import { Cubism2MotionSamplingError, type Cubism2MotionCurve } from '../engine/live2d/cubism2MotionSampler';
+import type { Live2DMotionSampledCurve } from '../engine/runtime/Live2DRuntimeContracts';
 
 function makeRuntime(): SemanticDocumentProjectionRuntimePort {
   return {
@@ -76,7 +76,7 @@ function makeDocument(): CurrentSceneDocument {
 }
 
 function makeSampler(overrides: Partial<CustomMotionConversionSampler> = {}): CustomMotionConversionSampler {
-  const curveOf = (parameterId: string, values: readonly number[]): Cubism2MotionCurve => ({
+  const curveOf = (parameterId: string, values: readonly number[]): Live2DMotionSampledCurve => ({
     parameterId,
     samples: values.map((value, index) => ({ time: index / 30, value })),
   });
@@ -85,17 +85,10 @@ function makeSampler(overrides: Partial<CustomMotionConversionSampler> = {}): Cu
       curveOf('PARAM_ANGLE_X', [0, 5, 10, 5, 0]),
       curveOf('PARAM_EYE_OPEN', [1, 1, 1, 1, 1]),
     ]),
-    merge: vi.fn((perModel) => perModel[0] ?? []),
     resolveMeta: vi.fn(async () => ({ durationSeconds: 2, fadeInSeconds: 0.4, fadeOutSeconds: 0.2 })),
     ...overrides,
   };
 }
-
-const samplerTargets = vi.fn((characterId: string) => (
-  characterId === 'alice'
-    ? [{ internalModel: { coreModel: {} }, motionManager: { loadMotion: vi.fn() } }]
-    : []
-));
 
 function paramsOf(document: CurrentSceneDocument | null, statementId: string): CharacterPerformanceParams {
   const statement = document?.statements.find((candidate) => candidate.id === statementId);
@@ -129,7 +122,6 @@ describe('CustomMotionConversionCommand', () => {
     const sampler = makeSampler();
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler,
     });
 
@@ -177,7 +169,7 @@ describe('CustomMotionConversionCommand', () => {
         },
       ]),
     });
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler });
+    const command = new CustomMotionConversionCommand({ authoring, sampler });
 
     // The conversion adapter funnels the produced motion through the
     // canonical contract; a non-finite sampled value surfaces as a
@@ -223,7 +215,6 @@ describe('CustomMotionConversionCommand', () => {
     await coordinator.applyDocument(document);
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler({
         resolveMeta: vi.fn(async () => ({ durationSeconds: 1, fadeInSeconds: 0.4, fadeOutSeconds: 0.2 })),
       }),
@@ -255,7 +246,6 @@ describe('CustomMotionConversionCommand', () => {
     await coordinator.applyDocument(document);
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler(),
     });
 
@@ -272,7 +262,7 @@ describe('CustomMotionConversionCommand', () => {
     });
     // Reset to a fresh resource motion for the default-fade path.
     await coordinator.applyDocument(document);
-    const command2 = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: noSourceFade });
+    const command2 = new CustomMotionConversionCommand({ authoring, sampler: noSourceFade });
     const result2 = await command2.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
       density: 'standard',
@@ -285,7 +275,7 @@ describe('CustomMotionConversionCommand', () => {
   it('converts a dialogue companion motion in place', async () => {
     const { store, coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler() });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler() });
 
     const result = await command.convert({
       locator: { kind: 'companion', statementId: 'dialogue-1', companionId: 'perf-2' },
@@ -304,7 +294,7 @@ describe('CustomMotionConversionCommand', () => {
   it('refuses when the entity, motion source, or loaded character is unavailable', async () => {
     const { coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler() });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler() });
 
     await expect(command.convert({
       locator: { kind: 'statement', statementId: 'missing' },
@@ -331,11 +321,7 @@ describe('CustomMotionConversionCommand', () => {
   it('refuses when the character is not loaded and keeps the document unchanged', async () => {
     const { store, coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
-    const command = new CustomMotionConversionCommand({
-      authoring,
-      samplerTargets: vi.fn(() => []),
-      sampler: makeSampler(),
-    });
+    const command = new CustomMotionConversionCommand({ authoring });
     const before = store.getCurrentSceneDocumentSnapshot();
 
     await expect(command.convert({
@@ -354,10 +340,9 @@ describe('CustomMotionConversionCommand', () => {
     await coordinator.applyDocument(makeDocument());
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler({
         resolveMeta: vi.fn(async () => {
-          throw new Cubism2MotionSamplingError('mock motion missing', 'motion-not-found');
+          throw new Error('mock motion missing');
         }),
       }),
     });
@@ -370,10 +355,9 @@ describe('CustomMotionConversionCommand', () => {
 
     const command2 = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler({
         resolveMeta: vi.fn(async () => ({ durationSeconds: 1 })),
-        merge: vi.fn(() => []),
+        sample: vi.fn(async () => []),
       }),
     });
     await expect(command2.convert({
@@ -388,7 +372,6 @@ describe('CustomMotionConversionCommand', () => {
     await coordinator.applyDocument(makeDocument());
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler({
         sample: vi.fn(async () => {
           throw new CustomMotionConversionError('mock motion missing', 'sampling-failed', { code: 'motion-not-found' });
@@ -410,7 +393,7 @@ describe('CustomMotionConversionCommand', () => {
     await coordinator.applyDocument(makeDocument());
 
     const gate = makeAuthority(false);
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority: gate });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler(), authority: gate });
     await expect(command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
       density: 'standard',
@@ -424,7 +407,6 @@ describe('CustomMotionConversionCommand', () => {
     const granted = makeAuthority(true);
     const command2 = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler(),
       authority: granted,
     });
@@ -463,7 +445,7 @@ describe('CustomMotionConversionCommand', () => {
       return decision.promise;
     });
     const signal = new AbortController().signal;
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler, authority });
+    const command = new CustomMotionConversionCommand({ authoring, sampler, authority });
     const pending = command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
       density: 'standard', origin: 'timeline-editor', signal,
@@ -505,7 +487,7 @@ describe('CustomMotionConversionCommand', () => {
       return authorTransaction(...args);
     });
     const controller = new AbortController();
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler(), authority });
     const pending = command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
       density: 'standard', origin: 'timeline-editor', signal: controller.signal,
@@ -526,7 +508,7 @@ describe('CustomMotionConversionCommand', () => {
     const { store, coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());
     const authority = makeAuthority(true);
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler(), authority });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler(), authority });
     const handoff = vi.fn(async (lease: HeldCustomMotionLease) => {
       expect(lease).toBe(authority.lease);
       expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion).toMatchObject({ kind: 'custom' });
@@ -548,7 +530,7 @@ describe('CustomMotionConversionCommand', () => {
     document.meta.durationSeconds = 5;
     (document.statements[0] as { time: number }).time = 4.5;
     await coordinator.applyDocument(document);
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler: makeSampler() });
+    const command = new CustomMotionConversionCommand({ authoring, sampler: makeSampler() });
 
     await command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
@@ -581,7 +563,7 @@ describe('CustomMotionConversionCommand', () => {
         ];
       }),
     });
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler });
+    const command = new CustomMotionConversionCommand({ authoring, sampler });
 
     await command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
@@ -619,7 +601,7 @@ describe('CustomMotionConversionCommand', () => {
         ];
       }),
     });
-    const command = new CustomMotionConversionCommand({ authoring, samplerTargets, sampler });
+    const command = new CustomMotionConversionCommand({ authoring, sampler });
 
     await expect(command.convert({
       locator: { kind: 'statement', statementId: 'perf-1' },
@@ -658,7 +640,6 @@ describe('CustomMotionConversionCommand', () => {
     });
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler,
       authority: gate,
     });
@@ -678,7 +659,6 @@ describe('CustomMotionConversionCommand', () => {
     const before = store.getCurrentSceneDocumentSnapshot();
     const command = new CustomMotionConversionCommand({
       authoring,
-      samplerTargets,
       sampler: makeSampler({
         sample: vi.fn(async () => [{
           parameterId: 'A',

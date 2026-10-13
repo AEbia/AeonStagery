@@ -5,7 +5,7 @@ import { Live2DModelResources, type Live2DResourceModel, type LoadedLive2DModel 
 import { WmdlConfigRegistry } from '../engine/WmdlConfigRegistry';
 import * as sdk from '../engine/CubismPixiSdk';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
-import { cubism2Live2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
 function deferred<T>() {
@@ -28,7 +28,7 @@ function fixture(purpose: 'stage' | 'bake' = 'stage') {
     disposeModel: vi.fn((model: Live2DResourceModel) => model.destroy()),
   });
   const adapter = mockAdapter({
-    getControls: () => controls,
+    createTestControls: () => controls,
     createModel: vi.fn(async () => makeModel()),
   });
   const resources = new Live2DModelResources(() => '/project', () => adapter, purpose);
@@ -188,7 +188,7 @@ describe('Live2D model resource ownership', () => {
   });
 
   it('removes the previous bake parameter writer before a pooled SDK model is reused', async () => {
-    const controls = cubism2Live2DAdapter.getControls();
+    const controls = new Cubism2PixiLive2DModelControls();
     const values = new Float32Array([0]);
     const core = {
       getParamIndex: () => 0,
@@ -200,7 +200,7 @@ describe('Live2D model resource ownership', () => {
       coreModel: core, parameterValues: values,
       motionManager: { stopAllMotions: vi.fn() },
     } });
-    const adapter = mockAdapter({ getControls: () => controls, createModel: async () => instance });
+    const adapter = mockAdapter({ createTestControls: () => controls, createModel: async () => instance });
     const resources = new Live2DModelResources(() => '/project', () => adapter, 'bake');
     let old!: LoadedLive2DModel;
     await resources.loadCharacter('old', 'hero.model.json', async loaded => {

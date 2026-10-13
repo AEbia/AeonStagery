@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
 /**
@@ -93,7 +94,7 @@ function createStageCapableModel(initial: Record<string, number>) {
 function makeAdapterCoreControls(overrides: Record<string, unknown>) {
   // The stage installer lives inside the runtime adapter; delegate to the real
   // cubism2 controls so the emitter-seam model gets a working stage handle.
-  const realControls = runtimeAdapter.cubism2Live2DAdapter.getControls();
+  const realControls = new Cubism2PixiLive2DModelControls();
   // The manager's updateAll advances via controls.advanceFrame; drive the
   // model update so the afterMotionUpdate emitter fires (ADR-0029 stage).
   const advanceFrame = (model: any, deltaMs: number) => {
@@ -115,7 +116,7 @@ function makeManager(entry: any, controls: any) {
     const spy = vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(
       mockAdapter({
         id: 'pixi-live2d-display-cubism2',
-        getControls: () => controls,
+        createTestControls: () => controls,
       }) as any,
     );
     (manager as any).characters = new Map([['char1', entry]]);

@@ -22,7 +22,7 @@ function createManager() {
   const advanceFrame = vi.fn();
   const controls = mockControls({ setExpressionForSeek, advanceFrame });
   vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(
-    mockAdapter({ getControls: () => controls }) as any,
+    mockAdapter({ createTestControls: () => controls }) as any,
   );
   return { manager: new Live2DManager(), controls, setExpressionForSeek, advanceFrame };
 }

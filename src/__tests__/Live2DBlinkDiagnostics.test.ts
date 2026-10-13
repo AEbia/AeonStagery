@@ -2,7 +2,7 @@ import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { applyBehaviorFixes, applyParameterOverride } from '../engine/Live2DModelSetup';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { computeSceneStateAtTime } from '../engine/RuntimeSceneState';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
@@ -36,7 +36,7 @@ describe('Blink diagnostics and regression', () => {
       applyParameterOverride(entry, coreModel, internalModel, false);
 
       const model = { internalModel };
-      const controls = getLive2DRuntimeAdapter(undefined).getControls();
+      const controls = new Cubism2PixiLive2DModelControls();
 
       // Enable blink and advance to a blink frame
       controls.setBlink(model, true, 1000, 0.8, 0);
@@ -73,7 +73,7 @@ describe('Blink diagnostics and regression', () => {
       applyParameterOverride(entry, coreModel, internalModel, false);
 
       const model = { internalModel };
-      const controls = getLive2DRuntimeAdapter(undefined).getControls();
+      const controls = new Cubism2PixiLive2DModelControls();
 
       controls.setBlink(model, false, 1000, 0.8, 0);
       internalModel.updateNaturalMovements(800, 0);

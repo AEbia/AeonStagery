@@ -1,9 +1,11 @@
+import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
+import type { Live2DClockTransaction } from './Live2DRuntimeClockCoordinator';
 import { resetCoreParams } from '../../Live2DConfig';
 import type {
   Live2DIdleBaseline, Live2DInitializationInput, Live2DInitializationResult,
-  Live2DClockTransaction, Live2DRuntimeModelControls, Live2DRuntimeResetInput,
+  Live2DRuntimeResetInput,
 } from '../../runtime/Live2DRuntimeContracts';
-import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
+import type { Live2DModelHandle, Live2DInternalRuntimeCapabilities } from './Live2DRuntimeControlModule';
 import { readPartOpacities, writePartOpacities } from './Cubism2PartOpacity';
 import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
 
@@ -78,7 +80,7 @@ function restoreBoundNeutralPose(model: object, fallback: Live2DIdleBaseline | n
  * before publication. Neither phase acquires resource or texture ownership.
  */
 export function createBoundModelInitialization(
-  id: string, model: object, controls: Live2DRuntimeModelControls, capabilities: Live2DRuntimeCapabilities,
+  id: string, model: object, controls: Live2DRuntimeControlPort, capabilities: Live2DInternalRuntimeCapabilities,
 ): Pick<Live2DModelHandle, 'initialize' | 'bindRuntimeSource' | 'resetRuntimeState' | 'quiesce' | 'dispose'> {
   const resetRuntimeState = (input: Live2DRuntimeResetInput = {}): void => {
     if (input.stopPlayback !== false) {
@@ -94,6 +96,8 @@ export function createBoundModelInitialization(
   };
   return {
     async initialize(input: Live2DInitializationInput): Promise<Live2DInitializationResult> {
+      if (!input.isCurrent()) return { status: 'cancelled' };
+      controls.prepareModelResources(model);
       if (!input.isCurrent()) return { status: 'cancelled' };
       if (input.mode === 'live') {
         captureModelNeutralPoseOnce(model);

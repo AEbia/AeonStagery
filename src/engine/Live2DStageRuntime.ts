@@ -6,12 +6,10 @@
  * Live2DModelResources; motion policy remains in Live2DMotionController.
  */
 
-import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
+import { advanceLive2DStageClock, getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import * as PIXI from 'pixi.js';
 import {
-  advanceSharedRuntimeClock,
   isSharedRuntimeClockLocked,
-  isSharedRuntimeClockTransactionActive,
 } from './live2d/runtime/Live2DRuntimeClockCoordinator';
 import type { CharacterTransformConfig } from '../api/types/character';
 import type { CharacterEntry } from './Live2DConfig';
@@ -22,7 +20,6 @@ import type { ResolvedRimLightState } from './RimLightResolver';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { applyCustomMotionValues, evaluateCustomMotionRuntime } from './live2d/customMotionRuntime';
 import type { MotionRequest } from './Live2DMotionController';
-import type { Live2DClockTransaction } from './runtime/Live2DRuntimeContracts';
 
 export type PendingCustomMotion = {
   motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
@@ -134,15 +131,15 @@ export class Live2DStageRuntime {
     dt: number,
     forceStep: boolean = false,
     manualTimeMs?: number,
-    transaction?: Live2DClockTransaction,
   ): Promise<void> {
-    const transactionActive = isSharedRuntimeClockTransactionActive(transaction);
-    const sharedClockLocked = isSharedRuntimeClockLocked() && !transactionActive;
+    const sharedClockLocked = isSharedRuntimeClockLocked();
 
     this.pendingMotionCount = 0;
     for (const entry of this.characters.values()) {
-      const capabilities = getLive2DRuntimeCapabilities(entry);
-      if (isSharedRuntimeClockLocked() && (capabilities.usesSharedSdkClock || !capabilities.supportsMotion)) continue;
+      if (sharedClockLocked) {
+        const runtime = getBoundRuntimeHandle(entry);
+        if (!runtime || runtime.frame.shouldDeferPreview()) continue;
+      }
       const request = (entry as any)._pendingPlayMotion as MotionRequest | undefined;
       if (!request) continue;
       (entry as any)._pendingPlayMotion = undefined;
@@ -170,16 +167,16 @@ export class Live2DStageRuntime {
     deltaInMs = shouldStepModels ? Math.min(50, Math.max(0.001, deltaInMs)) : 0;
 
     if (!sharedClockLocked && this.jumpingCharacters.size === 0 && manualTimeMs === undefined) {
-      advanceSharedRuntimeClock(deltaInMs);
+      advanceLive2DStageClock(deltaInMs);
     }
 
     const scriptEngine = this.callbacks.getScriptEngine();
     for (const entry of this.characters.values()) {
       const capabilities = getLive2DRuntimeCapabilities(entry);
-      if (sharedClockLocked && (capabilities.usesSharedSdkClock || !capabilities.supportsMotion)) continue;
+      if (sharedClockLocked && !capabilities.supportsMotion) continue;
       if (!entry.model) continue;
       let runtime = getBoundRuntimeHandle(entry);
-      if (!runtime || runtime.frame.shouldDeferPreview(transaction)) continue;
+      if (!runtime || runtime.frame.shouldDeferPreview()) continue;
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !scriptEngine?.isReconstructing) {
         entry.filterWarmupFrames = Math.max(0, entry.filterWarmupFrames - 1);
       }
@@ -192,7 +189,7 @@ export class Live2DStageRuntime {
       }
       if (!entry.model) continue;
       runtime = getBoundRuntimeHandle(entry);
-      if (!runtime || runtime.frame.shouldDeferPreview(transaction)) continue;
+      if (!runtime || runtime.frame.shouldDeferPreview()) continue;
 
       if (!entry.isCorrupted) {
         try {
@@ -240,7 +237,6 @@ export class Live2DStageRuntime {
             forceZeroDeltaCommit: commitNativeSeek,
             forceStep,
             manualTimeMs,
-            transaction,
             injectedParameters,
             handoffBoundarySnapshot: manualTimeMs === undefined ? null : boundarySnapshot,
             isCurrent: () => this.characters.get(entry.id) === entry && entry.model === runtime.displayObject,

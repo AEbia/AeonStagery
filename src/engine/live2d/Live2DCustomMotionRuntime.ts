@@ -1,11 +1,9 @@
 /** Owns custom-motion takeover, handoff identity and Motion-stage installation. */
-import { getLive2DRuntimeCapabilities } from './runtime/Live2DRuntimeControlModule';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import type { CharacterEntry, ModelSnapshot } from '../Live2DConfig';
 import { getBoundRuntimeHandle } from './runtime/BoundRuntimeAccess';
 import { customMotionControlledParameterIds, selectHandoffPoseValues, type CustomMotionHandoffPose } from './customMotionRuntime';
 import { releaseCustomMotionOwnership, reclaimControlledInjectedParams } from './customMotionOwnership';
-import { restoreNeutralModelPose } from './characterStatePurge';
 
 export class Live2DCustomMotionRuntime {
   /** Equal seek handoffs retain the deterministic fade cache across purges. */
@@ -122,16 +120,7 @@ export class Live2DCustomMotionRuntime {
    */
   private restoreCustomMotionBaseline(entry: CharacterEntry): void {
     if (!entry.model) return;
-    if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls && getLive2DRuntimeCapabilities(entry).supportsSnapshot) {
-      if (entry.idleSnapshot) {
-        getBoundRuntimeHandle(entry)?.snapshot.applySnapshot(entry.idleSnapshot);
-      }
-      return;
-    }
-    // Cubism 2 often exposes its live arrays only through the private model
-    // context. `restoreNeutralModelPose` handles both public and private
-    // layouts and, importantly, restores every concrete model in a composite.
-    restoreNeutralModelPose(entry, entry.model);
+    getBoundRuntimeHandle(entry)?.parameters.restoreIdleBaseline(entry.idleSnapshot ?? null);
   }
 
   private captureCustomMotionHandoff(

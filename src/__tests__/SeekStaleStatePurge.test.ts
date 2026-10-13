@@ -12,7 +12,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
-import { Cubism2PixiLive2DModelControls } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { Live2DModelResources } from '../engine/Live2DModelResources';
 import { mockAdapter } from './helpers/mockLive2DRuntimeAdapter';
 import { evaluateCustomMotionRuntime } from '../engine/live2d/customMotionRuntime';
@@ -188,7 +188,7 @@ describe('seek to a time before the character entrance', () => {
     const manager = makeManager(char);
     const adapter = mockAdapter({
       createModel: vi.fn(async () => char.model),
-      getControls: () => new Cubism2PixiLive2DModelControls(),
+      createTestControls: () => new Cubism2PixiLive2DModelControls(),
     });
     Reflect.set(window, 'aeonStageryAPI', {
       fs: { readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }) },

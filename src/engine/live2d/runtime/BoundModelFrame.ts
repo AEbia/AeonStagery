@@ -1,15 +1,15 @@
+import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
+import type { Live2DClockTransaction } from './Live2DRuntimeClockCoordinator';
 import {
   isSharedRuntimeClockLocked,
   isSharedRuntimeClockTransactionActive,
 } from './Live2DRuntimeClockCoordinator';
 import type {
-  Live2DClockTransaction,
   Live2DBakeFrameInput,
   Live2DFrameSubmissionInput,
   Live2DFrameSubmissionResult,
-  Live2DRuntimeModelControls,
 } from '../../runtime/Live2DRuntimeContracts';
-import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
+import type { Live2DModelHandle, Live2DInternalRuntimeCapabilities } from './Live2DRuntimeControlModule';
 
 function isDefaultPose(params: Float32Array | null | undefined): boolean {
   if (!params?.length) return true;
@@ -22,19 +22,20 @@ function isDefaultPose(params: Float32Array | null | undefined): boolean {
 export function createBoundModelFrame(
   id: string,
   model: object,
-  controls: Live2DRuntimeModelControls,
-  capabilities: Live2DRuntimeCapabilities,
-): Pick<Live2DModelHandle, 'frame'> {
-  function shouldDeferPreview(transaction?: Live2DClockTransaction): boolean {
-    return capabilities.usesSharedSdkClock
-      && isSharedRuntimeClockLocked()
-      && !isSharedRuntimeClockTransactionActive(transaction);
+  controls: Live2DRuntimeControlPort,
+  capabilities: Live2DInternalRuntimeCapabilities,
+): {
+  frame: Pick<Live2DModelHandle, 'frame'>['frame'];
+  submitBakeInTransaction(input: Live2DBakeFrameInput, transaction?: Live2DClockTransaction): Live2DFrameSubmissionResult;
+} {
+  function shouldDeferPreview(): boolean {
+    return capabilities.usesSharedSdkClock && isSharedRuntimeClockLocked();
   }
 
   function submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult {
     const isCurrent = input.isCurrent ?? (() => true);
     if (!isCurrent()) return { status: 'cancelled' };
-    if (shouldDeferPreview(input.transaction)) return { status: 'deferred' };
+    if (shouldDeferPreview()) return { status: 'deferred' };
 
     let retainedHandoffBoundary: boolean | undefined;
     if (input.handoffBoundarySnapshot && input.manualTimeMs !== undefined) {
@@ -63,10 +64,10 @@ export function createBoundModelFrame(
     return { status: 'submitted', retainedHandoffBoundary };
   }
 
-  function submitBake(input: Live2DBakeFrameInput): Live2DFrameSubmissionResult {
+  function submitBake(input: Live2DBakeFrameInput, transaction?: Live2DClockTransaction): Live2DFrameSubmissionResult {
     if (!input.isCurrent()) return { status: 'cancelled' };
     if (capabilities.usesSharedSdkClock
-      && !isSharedRuntimeClockTransactionActive(input.transaction)) {
+      && !isSharedRuntimeClockTransactionActive(transaction)) {
       return { status: 'deferred' };
     }
 
@@ -84,5 +85,8 @@ export function createBoundModelFrame(
     return input.isCurrent() ? { status: 'submitted' } : { status: 'cancelled' };
   }
 
-  return { frame: { shouldDeferPreview, submit, submitBake } };
+  return {
+    frame: { shouldDeferPreview, submit },
+    submitBakeInTransaction: submitBake,
+  };
 }

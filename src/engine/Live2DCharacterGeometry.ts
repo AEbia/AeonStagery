@@ -6,7 +6,7 @@ import type { Vec2 } from '../api/types/common';
 import type { CharacterEntry } from './Live2DConfig';
 import { STAGE_WIDTH, STAGE_HEIGHT } from './Live2DConfig';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
-import { getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
+import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { projectToScreen } from './Projection';
 import { resolveVec2 } from './utils/math';
 import type { TransformationProxy } from './actions/types';
@@ -158,7 +158,9 @@ export class Live2DCharacterGeometry {
           const centerX = bounds.x + bounds.width * 0.5;
           const centerY = bounds.y + bounds.height * 0.5;
           const headAnchor = pointName === 'head'
-            ? getLive2DRuntimeAdapter(entry.runtime).getControls().getHeadAnchor(model)
+            ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
+                entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
+              )
             : null;
 
           let x = centerX;

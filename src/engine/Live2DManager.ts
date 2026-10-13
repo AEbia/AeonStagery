@@ -35,7 +35,6 @@ import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAd
 import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
-import type { Live2DClockTransaction } from './runtime/Live2DRuntimeContracts';
 import type { CustomMotionHandoffPose } from './live2d/customMotionRuntime';
 import { motionCurveCache } from './live2d/motionCurveCache';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
@@ -1003,8 +1002,7 @@ class Live2DManager {
 
     // Eye-blink channel manipulation (updater wrap, multiplier, interval) is
     // owned by the runtime adapter.
-    getLive2DRuntimeAdapter(entry.runtime).getControls().setBlink(
-      entry.model,
+    getBoundRuntimeHandle(entry)?.blink.set(
       enabled,
       intervalMs,
       sceneTimeSeconds,
@@ -1111,8 +1109,7 @@ class Live2DManager {
     if (!entry) return [];
 
     try {
-      return entry.runtimeHandle?.motion.getAvailableMotions()
-        ?? getLive2DRuntimeAdapter(entry.runtime).getControls().getAvailableMotions(entry.model);
+      return getBoundRuntimeHandle(entry)?.motion.getAvailableMotions() ?? [];
     } catch (e) {
       console.warn(`[Live2D] Failed to get motions for "${id}":`, e);
     }
@@ -1139,8 +1136,7 @@ class Live2DManager {
     if (!entry) return [];
 
     try {
-      return entry.runtimeHandle?.expression.getAvailableExpressions()
-        ?? getLive2DRuntimeAdapter(entry.runtime).getControls().getAvailableExpressions(entry.model);
+      return getBoundRuntimeHandle(entry)?.expression.getAvailableExpressions() ?? [];
     } catch (e) {
       console.warn(`[Live2D] Failed to get expressions for "${id}":`, e);
     }
@@ -1275,14 +1271,14 @@ class Live2DManager {
     if (!entry) return;
     console.log(
       `[Live2D Debug] Motion State for "${id}":`,
-      getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionDebugState(entry.model),
+      getBoundRuntimeHandle(entry)?.motion.getMotionDebugState() ?? null,
     );
   }
 
   logModelParameters(id: string): void {
     const entry = this.characters.get(id);
     if (!entry) return;
-    const values = getLive2DRuntimeAdapter(entry.runtime).getControls().getParameterValues(entry.model);
+    const values = getBoundRuntimeHandle(entry)?.parameters.getParameterValues();
     if (!values) return;
 
     console.group(`[Live2D] Parameters for "${id}"`);
@@ -1332,8 +1328,7 @@ class Live2DManager {
   }
 
   private describeInvalidModelState(entry: CharacterEntry): string | null {
-    return entry.runtimeHandle?.diagnostics.describeInvalidState()
-      ?? getLive2DRuntimeAdapter(entry.runtime).getControls().describeInvalidState(entry.model);
+    return getBoundRuntimeHandle(entry)?.diagnostics.describeInvalidState() ?? null;
   }
 
   private async repairCorruptedModel(entry: CharacterEntry, reason: string, waitForRepair: boolean): Promise<void> {
@@ -1388,9 +1383,8 @@ class Live2DManager {
     dt: number,
     forceStep: boolean = false,
     manualTimeMs?: number,
-    transaction?: Live2DClockTransaction,
   ): Promise<void> {
-    await this.stageRuntime.step(dt, forceStep, manualTimeMs, transaction);
+    await this.stageRuntime.step(dt, forceStep, manualTimeMs);
   }
 
   /**

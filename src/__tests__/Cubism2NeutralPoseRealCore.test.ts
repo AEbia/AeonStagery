@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import fs from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { captureModelNeutralPoseOnce, resetModelToNeutralPose } from '../engine/live2d/characterStatePurge';
 import Live2DManager from '../engine/Live2DManager';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
@@ -62,7 +62,7 @@ describe.skipIf(!cubism2CorePath)('neutral pose through the packaged Cubism 2.1 
 
   it('snapshot restoration restores parts and keeps parameter lookup stable over repeated seeks', () => {
     const { core, model } = createModel();
-    const controls = getLive2DRuntimeAdapter(runtime).getControls();
+    const controls = new Cubism2PixiLive2DModelControls();
     const snapshot = controls.captureIdleSnapshot(model)!;
     expect(snapshot).not.toBeNull();
     expect(Array.from(snapshot.opacities)).toEqual([1]);
@@ -93,7 +93,7 @@ describe.skipIf(!cubism2CorePath)('neutral pose through the packaged Cubism 2.1 
     };
     model.updateDrawableBounds = vi.fn();
     captureModelNeutralPoseOnce(model);
-    const controls = getLive2DRuntimeAdapter(runtime).getControls();
+    const controls = new Cubism2PixiLive2DModelControls();
     const manager = new Live2DManager();
     const entry: any = { id: 'hero', model, runtime, modelPath: 'hero.model.json', config: {}, injectedParams: {}, lipSyncParameterIds: new Set(), idleSnapshot: controls.captureIdleSnapshot(model) };
     (manager as any).characters.set('hero', entry);

@@ -16,8 +16,9 @@ import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/s
 import { BakeEngine } from '../engine/BakeEngine';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
-import type { Live2DClockTransaction } from '../engine/runtime/Live2DRuntimeContracts';
 import { motionCurveCache } from '../engine/live2d/motionCurveCache';
+import type { Live2DClockTransaction } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { mockControls, mockAdapter } from './helpers/mockLive2DRuntimeAdapter';
 
 const SOURCE_MODEL = 'figure/soyo/model.json';
@@ -209,7 +210,7 @@ function cubism2Controls(model: ReturnType<typeof createCubism2BakeModel>) {
   // cubism2 controls contain the relocated legacy logic (advance-without-render
   // fast path, snapshot capture, neutral sampling), so delegate to them to keep
   // the mock model driven exactly as the engine used to drive it.
-  const realControls = runtimeAdapter.cubism2Live2DAdapter.getControls();
+  const realControls = new Cubism2PixiLive2DModelControls();
   return mockControls({
     getCoreModel: () => model.coreModel,
     getMotionDuration: () => 2,
@@ -248,19 +249,15 @@ function installCubism2BakeRuntime(modelFactory: () => ReturnType<typeof createC
   });
   vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'init').mockResolvedValue(undefined as never);
   vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'isReady').mockReturnValue(true);
-  vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'getModelClass').mockReturnValue({
-    config: { cubism2: { maskSize: 1024 } },
-  });
   vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation(() => {
     const current = created[created.length - 1];
     return mockAdapter({
-      getModelClass: vi.fn(() => null),
       createModel: vi.fn(async () => {
         const next = modelFactory();
         created.push(next);
         return next.model;
       }),
-      getControls: () => cubism2Controls(created[created.length - 1] ?? current),
+      createTestControls: () => cubism2Controls(created[created.length - 1] ?? current),
     } as any);
   });
   vi.stubGlobal('fetch', vi.fn(fetchMotionFiles) as any);

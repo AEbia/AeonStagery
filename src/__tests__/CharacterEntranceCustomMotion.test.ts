@@ -1,6 +1,7 @@
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cubism2Live2DAdapter, type Live2DRuntimeModelControls } from '../engine/Live2DRuntimeAdapter';
+import { cubism2Live2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import type { Live2DRuntimeControlPort } from '../engine/runtime/Live2DRuntimeControlPort';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
 if (typeof window === 'undefined') {
@@ -63,13 +64,13 @@ function createFakeModel() {
   };
 }
 
-function createHandle(id: string, model: object, controls: Live2DRuntimeModelControls) {
+function createHandle(id: string, model: object, controls: Live2DRuntimeControlPort) {
   return createLive2DModelHandle({ id, model, runtime: RUNTIME, controls });
 }
 
 interface Harness {
   manager: any;
-  controls: Live2DRuntimeModelControls;
+  controls: Live2DRuntimeControlPort;
 }
 
 /**
@@ -88,9 +89,7 @@ async function createHarness(): Promise<Harness> {
 
   vi.spyOn(cubism2Live2DAdapter, 'init').mockResolvedValue(undefined as any);
   vi.spyOn(cubism2Live2DAdapter, 'isReady').mockReturnValue(true);
-  vi.spyOn(cubism2Live2DAdapter, 'getModelClass').mockReturnValue(function FakeModel() {} as any);
   vi.spyOn(cubism2Live2DAdapter, 'createModel').mockResolvedValue(model as any);
-  vi.spyOn(cubism2Live2DAdapter, 'getControls').mockReturnValue(controls);
   vi.spyOn(cubism2Live2DAdapter, 'createModelHandle').mockImplementation((id: string) => createHandle(id, model, controls));
 
   vi.stubGlobal('window', { aeonStageryAPI: { fs: {
@@ -127,7 +126,7 @@ const MID_CURVE_SCENE_TIME_MS = 11_000;
  */
 async function expectCharacterNotPerformingCustomMotion(
   manager: any,
-  controls: Live2DRuntimeModelControls,
+  controls: Live2DRuntimeControlPort,
 ): Promise<void> {
   const entry = await enterCharacter(manager);
   await manager.updateAll(0, true, MID_CURVE_SCENE_TIME_MS);

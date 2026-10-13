@@ -1,7 +1,7 @@
+import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
 import type { Live2DParameterEdit, Live2DParameterEditResult, Live2DParameterInspection } from '../../../api/types/live2d-parameter-animation';
-import type { Live2DRuntimeModelControls } from '../../runtime/Live2DRuntimeContracts';
 
-export function createBoundModelParameters(model: object, controls: Live2DRuntimeModelControls) {
+export function createBoundModelParameters(model: object, controls: Live2DRuntimeControlPort) {
   function inspectParameters(): readonly Live2DParameterInspection[] | null {
     const values = controls.getParameterValues(model);
     if (!values) return null;

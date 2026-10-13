@@ -15,15 +15,10 @@ export type {
   Live2DSeekRestoreTier,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
-  Live2DRuntimeClock,
-  Live2DMotionStartOptions,
-  Live2DMotionStartResult,
   Live2DModelResetOptions,
-  Live2DModelPrepareOptions,
   Live2DDisposeOptions,
   Live2DFocusInput,
   Live2DFocusOptions,
-  Live2DRuntimeModelControls,
   Live2DPerformanceKind,
   Live2DPerformanceRuntimeFamily,
   Live2DPerformanceMetadata,
@@ -39,7 +34,6 @@ export type {
 } from './runtime/Live2DRuntimeContracts';
 export { Live2DPerformanceRegistry } from './runtime/Live2DPerformanceRegistry';
 export { Cubism2PixiLive2DAdapter } from './runtime/Cubism2PixiLive2DAdapter';
-export { Cubism2PixiLive2DModelControls } from './runtime/Cubism2PixiLive2DModelControls';
 export { CubismPixiLive2DAdapter } from './runtime/CubismPixiLive2DAdapter';
 export {
   parseCubism3MotionBuffer,

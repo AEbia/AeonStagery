@@ -10,7 +10,6 @@ import {
 import {
   registerSharedRuntimeClockProvider,
 } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
-import { cubism2Live2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import type { CachedResourceMotion } from '../engine/live2d/motionCurveCache';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
@@ -70,7 +69,7 @@ function installSharedClock(initialTimeMs: number) {
 describe('BakeEngine resource motion parity through BakeMotionRuntime', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    registerSharedRuntimeClockProvider(() => cubism2Live2DAdapter.getClock());
+    registerSharedRuntimeClockProvider(() => null);
   });
 
   it('routes a cached resource motion through the shared custom-motion evaluator without SDK pending play', async () => {

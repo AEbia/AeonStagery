@@ -4,12 +4,9 @@ import type {
   Live2DPerformanceResource,
   PerformanceCompatibility,
   PreparedPerformance,
-  Live2DRuntimeAdapter,
 } from './Live2DRuntimeContracts';
 
 export interface Live2DPerformanceRegistryOptions {
-  /** Optional default adapter for bindings that only provide a model. */
-  adapter?: Live2DRuntimeAdapter;
   resolveModel?: (modelId: string) => Live2DPerformanceModelBinding | null | Promise<Live2DPerformanceModelBinding | null>;
 }
 type ModelResolver = NonNullable<Live2DPerformanceRegistryOptions['resolveModel']>;
@@ -51,7 +48,6 @@ export class Live2DPerformanceRegistry {
   private readonly registeredByModel = new Map<string, Set<string>>();
   private readonly modelGenerations = new Map<string, number>();
   private readonly resolveModel?: ModelResolver;
-  private readonly defaultAdapter?: Live2DRuntimeAdapter;
 
   constructor(options: Live2DPerformanceRegistryOptions | ModelResolver = {}) {
     if (typeof options === 'function') {
@@ -59,7 +55,6 @@ export class Live2DPerformanceRegistry {
       return;
     }
     this.resolveModel = options.resolveModel;
-    this.defaultAdapter = options.adapter;
   }
 
   /** Register or replace a project prepared resource by its stable runtime key. */
@@ -74,8 +69,7 @@ export class Live2DPerformanceRegistry {
         if (!keys.has(resource.runtimeKey)) continue;
         const binding = this.models.get(modelId);
         if (binding) {
-          const controls = (binding.adapter ?? this.defaultAdapter)?.getControls();
-          controls?.unregisterExternalPerformance(binding.model, resource.runtimeKey);
+          binding.handle.externalPerformances.unregister(resource.runtimeKey);
         }
         keys.delete(resource.runtimeKey);
       }
@@ -107,21 +101,13 @@ export class Live2DPerformanceRegistry {
       ));
     }
 
-    const controls = (binding.adapter ?? this.defaultAdapter)?.getControls();
-    if (!controls) {
-      compatibility = mergeCompatibility(compatibility, incompatible('Live2D runtime adapter controls are unavailable.'));
-      return { resource, compatibility, registered: false };
-    }
-
-    compatibility = mergeCompatibility(compatibility, this.checkRequiredParameters(binding.model, resource));
+    compatibility = mergeCompatibility(compatibility, this.checkRequiredParameters(binding.handle, resource));
     if (compatibility.status === 'incompatible') {
       return { resource, compatibility, registered: false };
     }
 
     try {
-      const report = resource.kind === 'motion'
-        ? await controls.registerExternalMotion(binding.model, resource.runtimeKey, resource.asset, resource.metadata)
-        : await controls.registerExternalExpression(binding.model, resource.runtimeKey, resource.asset, resource.metadata);
+      const report = await binding.handle.externalPerformances.register(resource);
       compatibility = mergeCompatibility(compatibility, report);
       const required = resource.metadata?.requiredParameterIds ?? [];
       const partialRequired = report.missingParameterIds.some((id) => required.includes(id));
@@ -136,9 +122,8 @@ export class Live2DPerformanceRegistry {
       ));
     }
 
-    if ((this.modelGenerations.get(modelId) ?? 0) !== generation || this.models.get(modelId)?.model !== binding.model) {
-      const controls = (binding.adapter ?? this.defaultAdapter)?.getControls();
-      controls?.unregisterExternalPerformance(binding.model, resource.runtimeKey);
+    if ((this.modelGenerations.get(modelId) ?? 0) !== generation || this.models.get(modelId)?.handle !== binding.handle) {
+      binding.handle.externalPerformances.unregister(resource.runtimeKey);
       return {
         resource,
         compatibility: incompatible(`Live2D model "${modelId}" was released during performance preparation.`),
@@ -162,10 +147,7 @@ export class Live2DPerformanceRegistry {
     const binding = this.models.get(modelId);
     const keys = this.registeredByModel.get(modelId);
     if (binding && keys) {
-      const controls = (binding.adapter ?? this.defaultAdapter)?.getControls();
-      if (controls) {
-        for (const key of keys) controls.unregisterExternalPerformance(binding.model, key);
-      }
+      for (const key of keys) binding.handle.externalPerformances.unregister(key);
     }
     this.registeredByModel.delete(modelId);
     this.models.delete(modelId);
@@ -182,20 +164,15 @@ export class Live2DPerformanceRegistry {
   }
 
   private checkRequiredParameters(
-    model: unknown,
+    handle: Live2DPerformanceModelBinding['handle'],
     resource: Live2DPerformanceResource,
   ): PerformanceCompatibility {
     const required = resource.metadata?.requiredParameterIds ?? [];
     if (required.length === 0) return { status: 'compatible', missingParameterIds: [], ignoredParameterIds: [], diagnostics: [] };
 
-    // Parameter metadata is queried by the adapter during prepare; this registry
-    // only performs the portable required-id check when a model exposes a core
-    // parameter list through its adapter controls.
-    const modelEntry = Array.from(this.models.values()).find((entry) => entry.model === model);
-    const controls = modelEntry?.adapter?.getControls() ?? this.defaultAdapter?.getControls();
-    const values = controls?.getParameterValues(model);
-    const metadata = controls?.getParameterMetadata(model);
-    const available = new Set((metadata ?? values ?? []).map((parameter) => 'id' in parameter ? parameter.id : parameter.name));
+    const metadata = handle.parameters.getParameterMetadata();
+    const inspected = handle.inspectParameters();
+    const available = new Set((metadata ?? inspected ?? []).map(parameter => parameter.id));
     if (available.size === 0) {
       const allowPartial = resource.metadata?.allowPartial === true;
       return {

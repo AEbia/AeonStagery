@@ -1,3 +1,5 @@
+import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
+import type { Live2DClockTransaction } from './Live2DRuntimeClockCoordinator';
 import type * as PIXI from 'pixi.js';
 import { createBoundModelInitialization } from './BoundModelInitialization';
 import { createBoundModelParameters } from './BoundModelParameters';
@@ -17,13 +19,14 @@ import type {
   Live2DRuntimeResetInput,
   Live2DDisposeOptions,
   Live2DDeterminismCapabilities,
-  Live2DRuntimeModelControls,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
   Live2DMotionSamplingOptions,
   Live2DMotionSamplingResult,
   Live2DPerformanceTransitionInput,
   Live2DPerformanceTransitionResult,
+  Live2DPerformanceResource,
+  PerformanceCompatibility,
   Live2DSeekMotionOffsetInput,
   Live2DSeekMotionOffsetResult,
   Live2DFocusAnimationAction,
@@ -31,7 +34,6 @@ import type {
   Live2DFrameSubmissionInput,
   Live2DFrameSubmissionResult,
   Live2DModelResetOptions,
-  Live2DClockTransaction,
   Live2DBakeFrameBatchInput,
   Live2DBakeFrameBatchResult,
   Live2DBakeFrameInput,
@@ -40,6 +42,7 @@ import {
   getSharedRuntimeClock,
   getSharedRuntimeClockForTransaction,
   withSharedRuntimeClock,
+  advanceSharedRuntimeClock,
 } from './Live2DRuntimeClockCoordinator';
 
 export interface Live2DRuntimeCapabilities {
@@ -50,15 +53,19 @@ export interface Live2DRuntimeCapabilities {
   readonly supportsParameterInjection: boolean;
   readonly supportsSnapshot: boolean;
   readonly supportsBakeRender: boolean;
-  readonly usesCubism2PrivateControls: boolean;
-  readonly usesSharedSdkClock: boolean;
   /** update(0) evaluates motion/expression writers and commits the pose. */
   readonly evaluatesPoseOnZeroDelta: boolean;
   readonly supportsMotionHandoff: boolean;
   readonly supportsCompositeModels: boolean;
   readonly supportsFallbackModel: boolean;
-  readonly requiresIdleMotionFlush: boolean;
   readonly determinism: Live2DDeterminismCapabilities;
+}
+
+/** SDK-specific implementation facts never cross the bound handle boundary. */
+export interface Live2DInternalRuntimeCapabilities extends Live2DRuntimeCapabilities {
+  readonly usesCubism2PrivateControls: boolean;
+  readonly usesSharedSdkClock: boolean;
+  readonly requiresIdleMotionFlush: boolean;
 }
 
 function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeterminismCapabilities {
@@ -98,8 +105,7 @@ function resolveDeterminismCapabilities(adapterId: Live2DAdapterId): Live2DDeter
   };
 }
 
-/** Capability classification stays here, including before a model is loaded. */
-export function resolveLive2DRuntimeCapabilities(runtime: Live2DRuntimeDescriptor): Live2DRuntimeCapabilities {
+function resolveInternalCapabilities(runtime: Live2DRuntimeDescriptor): Live2DInternalRuntimeCapabilities {
   const usesCubism2PrivateControls = runtime.adapterId === 'pixi-live2d-display-cubism2';
   const isCubism3 = runtime.adapterId === 'untitled-pixi-live2d-engine-cubism';
   const supported = runtime.supported && (usesCubism2PrivateControls || isCubism3);
@@ -122,6 +128,13 @@ export function resolveLive2DRuntimeCapabilities(runtime: Live2DRuntimeDescripto
   };
 }
 
+/** Capability classification stays here, including before a model is loaded. */
+export function resolveLive2DRuntimeCapabilities(runtime: Live2DRuntimeDescriptor): Live2DRuntimeCapabilities {
+  const { usesCubism2PrivateControls: _cubism2, usesSharedSdkClock: _clock, requiresIdleMotionFlush: _flush, ...capabilities } =
+    resolveInternalCapabilities(runtime);
+  return capabilities;
+}
+
 /** Loaded handles are authoritative; descriptor-only legacy entries retain Cubism 2 defaults. */
 export function getLive2DRuntimeCapabilities(entry: {
   runtime?: Live2DRuntimeDescriptor | null;
@@ -140,14 +153,13 @@ export interface Live2DLifecycleInterface {
   resetToIdle(
     options?: Live2DModelResetOptions,
     isCurrent?: () => boolean,
-    transaction?: Live2DClockTransaction,
   ): Promise<boolean>;
+  restoreIdleBaseline(idleSnapshot?: ModelSnapshot | null): void;
   /** Restore Bake's idle baseline and optional idle start before an appearance. */
   prepareForBakePlayback(
     idleSnapshot: ModelSnapshot,
     restartIdleMotion: boolean,
     isCurrent: () => boolean,
-    transaction?: Live2DClockTransaction,
   ): Promise<boolean>;
 }
 
@@ -157,7 +169,7 @@ export interface Live2DMotionInterface {
   getMotionDuration(motionKey: string): number;
   getMotionDebugState(): Record<string, unknown> | null;
   preloadMotion(motionKey: string, isCurrent?: () => boolean): Promise<boolean>;
-  sampleMotion(motionKey: string, options: Live2DMotionSamplingOptions, transaction?: Live2DClockTransaction): Promise<Live2DMotionSamplingResult>;
+  sampleMotion(motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult>;
   getPlaybackState(): { currentGroup: string | null; playing: boolean };
 }
 
@@ -169,7 +181,6 @@ export interface Live2DExpressionInterface {
     elapsedSeconds: number,
     previousExpressionKey: string | null | undefined,
     isCurrent: () => boolean,
-    transaction?: Live2DClockTransaction,
   ): Promise<boolean>;
 }
 
@@ -178,6 +189,7 @@ export interface Live2DParameterInterface {
   getParameterMetadata(): readonly Live2DParameterMetadata[] | null;
   setInjectedParameter(paramName: string, value: number): void;
   syncInputParameters(): void;
+  restoreIdleBaseline(idleSnapshot?: ModelSnapshot | null): void;
 }
 
 export interface Live2DSnapshotInterface {
@@ -187,7 +199,7 @@ export interface Live2DSnapshotInterface {
 }
 
 export interface Live2DPerformanceInterface {
-  transition(input: Live2DPerformanceTransitionInput, transaction?: Live2DClockTransaction): Promise<Live2DPerformanceTransitionResult>;
+  transition(input: Live2DPerformanceTransitionInput): Promise<Live2DPerformanceTransitionResult>;
   seekMotionOffset(input: Live2DSeekMotionOffsetInput): Promise<Live2DSeekMotionOffsetResult>;
   restoreSeekState(input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult>;
   restoreExpression(
@@ -195,14 +207,12 @@ export interface Live2DPerformanceInterface {
     elapsedSeconds: number,
     previousExpressionKey: string | null | undefined,
     isCurrent: () => boolean,
-    transaction?: Live2DClockTransaction,
   ): Promise<boolean>;
 }
 
 export interface Live2DFrameInterface {
-  shouldDeferPreview(transaction?: Live2DClockTransaction): boolean;
+  shouldDeferPreview(): boolean;
   submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult;
-  submitBake(input: Live2DBakeFrameInput): Live2DFrameSubmissionResult;
 }
 
 export interface Live2DFocusInterface {
@@ -215,11 +225,24 @@ export interface Live2DCustomMotionInterface {
 }
 
 export interface Live2DRenderInterface {
-  renderForBake(renderer: any, label?: string, renderTexture?: any): void;
+  renderForBake(renderer: PIXI.Renderer, label?: string, renderTexture?: PIXI.RenderTexture): void;
 }
 
 export interface Live2DDiagnosticsInterface {
   describeInvalidState(): string | null;
+}
+
+export interface Live2DExternalPerformanceInterface {
+  register(resource: Live2DPerformanceResource): Promise<PerformanceCompatibility>;
+  unregister(runtimeKey: string): void;
+}
+
+export interface Live2DBlinkInterface {
+  set(enabled: boolean, intervalMs?: number, sceneTimeSeconds?: number, startTimeSeconds?: number, intervalRangeMs?: number): void;
+}
+
+export interface Live2DCharacterBehaviorInterface {
+  getHeadAnchor(target?: 'head' | 'main'): { x: number; y: number } | null;
 }
 
 export interface Live2DModelHandle {
@@ -227,6 +250,8 @@ export interface Live2DModelHandle {
   readonly runtime: Live2DRuntimeDescriptor;
   readonly displayObject: PIXI.Container;
   readonly capabilities: Live2DRuntimeCapabilities;
+  readonly blink: Live2DBlinkInterface;
+  readonly character: Live2DCharacterBehaviorInterface;
   inspectParameters(): readonly Live2DParameterInspection[] | null;
   editParameters(edits: readonly Live2DParameterEdit[]): Live2DParameterEditResult;
   initialize(input: Live2DInitializationInput): Promise<Live2DInitializationResult>;
@@ -245,13 +270,50 @@ export interface Live2DModelHandle {
   readonly snapshot: Live2DSnapshotInterface;
   readonly render: Live2DRenderInterface;
   readonly diagnostics: Live2DDiagnosticsInterface;
+  readonly externalPerformances: Live2DExternalPerformanceInterface;
 }
 
-export interface Live2DModelHandleCreateOptions {
+interface Live2DModelHandleCreateOptions {
   id: string;
-  model: any;
+  model: object;
   runtime: Live2DRuntimeDescriptor;
-  controls: Live2DRuntimeModelControls;
+  controls: Live2DRuntimeControlPort;
+}
+
+interface PrivateHandleOperations {
+  prepareForBakePlayback(
+    idleSnapshot: ModelSnapshot,
+    restartIdleMotion: boolean,
+    isCurrent: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean>;
+  transitionInTransaction(
+    input: Live2DPerformanceTransitionInput,
+    transaction?: Live2DClockTransaction,
+  ): Promise<Live2DPerformanceTransitionResult>;
+  submitBakeInTransaction(
+    input: Live2DBakeFrameInput,
+    transaction?: Live2DClockTransaction,
+  ): Live2DFrameSubmissionResult;
+}
+
+const privateHandleOperations = new WeakMap<Live2DModelHandle, PrivateHandleOperations>();
+const privateHandleCapabilities = new WeakMap<Live2DModelHandle, Live2DInternalRuntimeCapabilities>();
+
+/** Advance the runtime clock for one ordinary Stage frame without exposing the SDK clock. */
+export function advanceLive2DStageClock(deltaMs: number): void {
+  advanceSharedRuntimeClock(deltaMs);
+}
+
+/** Advance the shared SDK clock monotonically for export and return its new baseline. */
+export function advanceLive2DExportClock(deltaMs: number, minimumTimeMs = 0): number | null {
+  const clock = getSharedRuntimeClock();
+  if (!clock) return null;
+  const current = clock.getUserTimeMSec();
+  const baseline = Math.max(Number.isFinite(current) ? current : 0, Number.isFinite(minimumTimeMs) ? minimumTimeMs : 0);
+  const next = baseline + (Number.isFinite(deltaMs) && deltaMs > 0 ? deltaMs : 0);
+  if (next !== current) clock.setUserTimeMSec(next);
+  return next;
 }
 
 export function createLive2DModelHandle({
@@ -260,40 +322,64 @@ export function createLive2DModelHandle({
   runtime,
   controls,
 }: Live2DModelHandleCreateOptions): Live2DModelHandle {
-  const capabilities = resolveLive2DRuntimeCapabilities(runtime);
-  const performance = createBoundModelPerformance(id, model, controls, capabilities).performance;
+  const capabilities = resolveInternalCapabilities(runtime);
+  const { usesCubism2PrivateControls: _cubism2, usesSharedSdkClock: _clock, requiresIdleMotionFlush: _flush, ...publicCapabilities } = capabilities;
+  const performanceBinding = createBoundModelPerformance(id, model, controls, capabilities);
+  const performance = performanceBinding.performance;
+  const frameBinding = createBoundModelFrame(id, model, controls, capabilities);
+  const initialization = createBoundModelInitialization(id, model, controls, capabilities);
+  const prepareForBakePlayback = async (
+    idleSnapshot: ModelSnapshot,
+    restartIdleMotion: boolean,
+    isCurrent: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean> => {
+    const prepare = async () => {
+      if (!isCurrent()) return false;
+      controls.stopAllMotions(model);
+      controls.clearMotionState(model);
+      performanceBinding.resetMotionTracking();
+      if (!isCurrent()) return false;
+      controls.applySnapshot(model, idleSnapshot);
+      if (restartIdleMotion) {
+        await controls.restartIdleMotion(model);
+        if (!isCurrent()) return false;
+      }
+      return isCurrent();
+    };
+    if (!capabilities.usesSharedSdkClock) return prepare();
+    const result = await withSharedRuntimeClock(getSharedRuntimeClock(), isCurrent, prepare, transaction);
+    return result ?? false;
+  };
 
-  return {
+  const handle: Live2DModelHandle = {
     id,
     runtime,
     displayObject: model as PIXI.Container,
-    capabilities,
+    capabilities: publicCapabilities,
     ...createBoundModelParameters(model, controls),
-    ...createBoundModelInitialization(id, model, controls, capabilities),
+    ...initialization,
+    resetRuntimeState: (input) => {
+      initialization.resetRuntimeState(input);
+      if (input?.stopPlayback !== false) performanceBinding.resetMotionTracking();
+    },
     lifecycle: {
-      clearMotionState: () => controls.clearMotionState(model),
-      stopAllMotions: () => controls.stopAllMotions(model),
-      prepareForBakePlayback: async (idleSnapshot, restartIdleMotion, isCurrent, transaction) => {
-        const prepare = async () => {
-          if (!isCurrent()) return false;
-          controls.stopAllMotions(model);
-          controls.clearMotionState(model);
-          if (!isCurrent()) return false;
-          controls.applySnapshot(model, idleSnapshot);
-          if (restartIdleMotion) {
-            await controls.restartIdleMotion(model);
-            if (!isCurrent()) return false;
-          }
-          return isCurrent();
-        };
-        if (!capabilities.usesSharedSdkClock) return prepare();
-        const result = await withSharedRuntimeClock(getSharedRuntimeClock(), isCurrent, prepare, transaction);
-        return result ?? false;
+      clearMotionState: () => {
+        controls.clearMotionState(model);
+        performanceBinding.resetMotionTracking();
       },
-      resetToIdle: async (options = {}, isCurrent = () => true, transaction) => {
+      stopAllMotions: () => {
+        controls.stopAllMotions(model);
+        performanceBinding.resetMotionTracking();
+      },
+      prepareForBakePlayback: (idleSnapshot, restartIdleMotion, isCurrent) =>
+        prepareForBakePlayback(idleSnapshot, restartIdleMotion, isCurrent),
+      restoreIdleBaseline: (idleSnapshot = null) => controls.applyIdleBaseline(model, idleSnapshot),
+      resetToIdle: async (options = {}, isCurrent = () => true) => {
         if (!isCurrent()) return false;
         if (!capabilities.usesCubism2PrivateControls) {
-          await controls.resetModelToIdle(model, options, isCurrent, transaction);
+          await controls.resetModelToIdle(model, options, isCurrent);
+          if (isCurrent()) performanceBinding.resetMotionTracking();
           return isCurrent();
         }
         const result = await withSharedRuntimeClock(
@@ -303,9 +389,9 @@ export function createLive2DModelHandle({
             await controls.resetModelToIdle(model, options, isCurrent, activeTransaction ?? undefined);
             if (!isCurrent()) return false;
             controls.advanceFrame(model, 16);
+            performanceBinding.resetMotionTracking();
             return isCurrent();
           },
-          transaction,
         );
         return result ?? false;
       },
@@ -320,7 +406,7 @@ export function createLive2DModelHandle({
         await controls.preloadMotion(model, motionKey);
         return isCurrent();
       },
-      sampleMotion: (motionKey, options, transaction) => controls.sampleMotion(model, motionKey, options, transaction),
+      sampleMotion: (motionKey, options) => controls.sampleMotion(model, motionKey, options),
       getPlaybackState: () => {
         const state = controls.getMotionDebugState(model);
         return {
@@ -333,10 +419,10 @@ export function createLive2DModelHandle({
     expression: {
       getAvailableExpressions: () => controls.getAvailableExpressions(model),
       setExpression: (expressionName) => controls.setExpression(model, expressionName),
-      restoreAtSceneTime: (expressionName, elapsedSeconds, previousExpressionKey, isCurrent, transaction) =>
-        performance.restoreExpression(expressionName, elapsedSeconds, previousExpressionKey, isCurrent, transaction),
+      restoreAtSceneTime: (expressionName, elapsedSeconds, previousExpressionKey, isCurrent) =>
+        performance.restoreExpression(expressionName, elapsedSeconds, previousExpressionKey, isCurrent),
     },
-    ...createBoundModelFrame(id, model, controls, capabilities),
+    frame: frameBinding.frame,
     ...createBoundModelFocus(model, controls),
     ...createBoundModelCustomMotion(model, controls),
     parameters: {
@@ -344,6 +430,7 @@ export function createLive2DModelHandle({
       getParameterMetadata: () => controls.getParameterMetadata(model),
       setInjectedParameter: (paramName, value) => controls.setInjectedParameter(model, paramName, value),
       syncInputParameters: () => controls.syncInputParameters(model),
+      restoreIdleBaseline: (idleSnapshot = null) => controls.applyIdleBaseline(model, idleSnapshot),
     },
     snapshot: {
       captureSnapshot: (motionStartTime) => controls.captureSnapshot(id, model, motionStartTime),
@@ -356,7 +443,27 @@ export function createLive2DModelHandle({
     diagnostics: {
       describeInvalidState: () => controls.describeInvalidState(model),
     },
+    blink: {
+      set: (enabled, intervalMs, sceneTimeSeconds, startTimeSeconds, intervalRangeMs) =>
+        controls.setBlink(model, enabled, intervalMs, sceneTimeSeconds, startTimeSeconds, intervalRangeMs),
+    },
+    character: {
+      getHeadAnchor: target => controls.getHeadAnchor(model, target),
+    },
+    externalPerformances: {
+      register: resource => resource.kind === 'motion'
+        ? controls.registerExternalMotion(model, resource.runtimeKey, resource.asset, resource.metadata)
+        : controls.registerExternalExpression(model, resource.runtimeKey, resource.asset, resource.metadata),
+      unregister: runtimeKey => controls.unregisterExternalPerformance(model, runtimeKey),
+    },
   };
+  privateHandleOperations.set(handle, {
+    prepareForBakePlayback,
+    transitionInTransaction: performanceBinding.transitionInTransaction,
+    submitBakeInTransaction: frameBinding.submitBakeInTransaction,
+  });
+  privateHandleCapabilities.set(handle, capabilities);
+  return handle;
 }
 
 /** Run complete Bake work for a frame as one runtime-owned clock transaction. */
@@ -372,7 +479,8 @@ export async function submitLive2DBakeFrameBatch(
   }
 
   const transitions = new Map<string, Live2DPerformanceTransitionResult>();
-  const usesSharedClock = input.operations.some(operation => operation.handle.capabilities.usesSharedSdkClock);
+  const usesSharedClock = input.operations.some(operation =>
+    privateHandleCapabilities.get(operation.handle)?.usesSharedSdkClock === true);
   const run = async (transaction: Live2DClockTransaction | null): Promise<Live2DBakeFrameBatchResult> => {
     const clock = getSharedRuntimeClockForTransaction(transaction);
     const clockTimeAtStart = clock?.getUserTimeMSec();
@@ -388,7 +496,7 @@ export async function submitLive2DBakeFrameBatch(
           if (!current()) return { status: 'cancelled', transitions };
         }
         if (operation.resetForPlayback) {
-          const reset = await operation.handle.lifecycle.prepareForBakePlayback(
+          const reset = await privateHandleOperations.get(operation.handle)!.prepareForBakePlayback(
             operation.resetForPlayback.idleSnapshot,
             operation.resetForPlayback.restartIdleMotion,
             current,
@@ -415,7 +523,7 @@ export async function submitLive2DBakeFrameBatch(
         if (!motionStart) continue;
         const current = () => input.isCurrent() && operation.isCurrent();
         if (!current()) return { status: 'cancelled', transitions };
-        const result = await operation.handle.performance.transition(
+        const result = await privateHandleOperations.get(operation.handle)!.transitionInTransaction(
           { ...motionStart, isCurrent: current },
           transaction ?? undefined,
         );
@@ -436,14 +544,13 @@ export async function submitLive2DBakeFrameBatch(
         if (operation.submitFrame === false) continue;
         const current = () => input.isCurrent() && operation.isCurrent();
         if (!current()) return { status: 'cancelled', transitions };
-        const result = operation.handle.frame.submitBake({
+        const result = privateHandleOperations.get(operation.handle)!.submitBakeInTransaction({
           deltaMs: input.deltaMs,
           renderer: operation.renderer,
           label: operation.handle.id,
           flushCore: operation.flushCore,
           isCurrent: current,
-          transaction: transaction ?? undefined,
-        });
+        }, transaction ?? undefined);
         if (result.status !== 'submitted') return { status: 'cancelled', transitions };
       }
       completed = true;

@@ -11,12 +11,6 @@ import { readPartOpacities } from './live2d/runtime/Cubism2PartOpacity';
 export const STAGE_WIDTH = 1920;
 export const STAGE_HEIGHT = 1080;
 
-export {
-  acquireUtSystemLock,
-  isUtSystemLockActive,
-  releaseUtSystemLock,
-} from './live2d/runtime/Live2DRuntimeClockCoordinator';
-
 /**
  * Standard Cubism 2 parameter names and their idle default values.
  * The Cubism 2 SDK (Live2DModelWebGL) does NOT have getParamCount()/getParamDefault(),
@@ -231,7 +225,6 @@ export interface CharacterEntry {
   rimProxy?: { alpha: number };
   motionStartTime?: number;
   motionEpoch: number;
-  motionStartUtTime?: number;
   pendingMotionGroup?: string;
   lastOffset?: number;
   _pendingPlayMotion?: {

@@ -2,7 +2,8 @@ import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
 import Live2DManager from '../engine/Live2DManager';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
 function createMockLive2D() {
   return {
@@ -108,14 +109,23 @@ describe('CharacterBlink Synchronization & Playback (Seam 3)', () => {
       };
 
       const setBlinkSpy = vi.fn();
-      const controls = getLive2DRuntimeAdapter(undefined).getControls();
-      const originalSetBlink = controls.setBlink;
-      controls.setBlink = setBlinkSpy;
+      const runtime = {
+        runtimeFamily: 'cubism2' as const,
+        adapterId: 'pixi-live2d-display-cubism2' as const,
+        supported: true,
+      };
+      const runtimeHandle = createLive2DModelHandle({
+        id: 'tomori',
+        model: mockModel,
+        runtime,
+        controls: mockControls({ setBlink: setBlinkSpy }),
+      });
 
       try {
         (manager as any).characters.set('tomori', {
           model: mockModel,
-          runtime: undefined,
+          runtime,
+          runtimeHandle,
         });
 
         manager.setBlink('tomori', true, 5000, 2.0, 1.0, 500);
@@ -129,7 +139,7 @@ describe('CharacterBlink Synchronization & Playback (Seam 3)', () => {
           500,
         );
       } finally {
-        controls.setBlink = originalSetBlink;
+        vi.restoreAllMocks();
       }
     });
 

@@ -7,6 +7,7 @@ import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
 import { captureModelSnapshot } from '../engine/Live2DConfig';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import { createV8GuardRenderer } from './helpers/v8GuardRendererStub';
 
@@ -168,14 +169,11 @@ describe('BakeEngine runtime routing', () => {
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => controls,
+      createTestControls: () => controls,
     }));
 
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -235,6 +233,7 @@ describe('BakeEngine runtime routing', () => {
         const params = new Float32Array([0.1]);
         const opacities = new Float32Array([1]);
         const model = new PIXI.Container() as PIXI.Container & {
+          anchor: PIXI.ObservablePoint;
           internalModel: {
             coreModel: {
               getParameterValues: () => Float32Array;
@@ -252,6 +251,7 @@ describe('BakeEngine runtime routing', () => {
           render: ReturnType<typeof vi.fn>;
           startMotion: ReturnType<typeof vi.fn>;
         };
+        model.anchor = new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0);
         model.internalModel = {
           coreModel: {
             getParameterValues: () => params,
@@ -303,14 +303,11 @@ describe('BakeEngine runtime routing', () => {
         supported: true,
         init: vi.fn(async () => {}),
         isReady: vi.fn(() => true),
-        getModelClass: vi.fn(() => null),
-        getConfig: vi.fn(() => null),
         getUnsupportedMessage: vi.fn(() => null),
         createModel,
-        getClock: () => null,
         createFallbackModel: () => null,
         disposeBakeRenderTexture: () => {},
-        getControls: () => controls,
+        createTestControls: () => controls,
       }));
       vi.stubGlobal('fetch', vi.fn(async () => new Response(
         JSON.stringify({ FileReferences: { Moc: 'rana.moc3' } }),
@@ -391,14 +388,11 @@ describe('BakeEngine runtime routing', () => {
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getCoreModel: (model: any) => model.internalModel.coreModel,
         captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
       }),
@@ -468,14 +462,11 @@ describe('BakeEngine runtime routing', () => {
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls(),
+      createTestControls: () => mockControls(),
     }));
 
     const wmdlRegistry = {
@@ -569,14 +560,11 @@ describe('BakeEngine runtime routing', () => {
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: createRuntimeModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({ renderForBake, installBakeRenderGuards, prepareModel }),
+      createTestControls: () => mockControls({ renderForBake, installBakeRenderGuards, prepareModel }),
     }));
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
 
@@ -704,7 +692,8 @@ describe('BakeEngine runtime routing', () => {
       renderLive2D: vi.fn(),
     };
 
-    runtimeAdapter.cubism2Live2DAdapter.getControls().stepBakeFrame(model, 16, renderer, 'offscreen-test', false);
+    new Cubism2PixiLive2DModelControls({ bakeCore: new Cubism2BakeRenderCore() })
+      .stepBakeFrame(model, 16, renderer, 'offscreen-test', false);
 
     expect(createRenderTexture).toHaveBeenCalledWith({ width: 1920, height: 1080 });
     expect(renderer.render).toHaveBeenCalledWith(model, {
@@ -734,7 +723,7 @@ describe('BakeEngine runtime routing', () => {
       renderLive2D: vi.fn(),
     };
 
-    runtimeAdapter.cubism2Live2DAdapter.getControls().stepBakeFrame(model, 16, renderer, 'cubism2-offscreen-test', false);
+    new Cubism2PixiLive2DModelControls().stepBakeFrame(model, 16, renderer, 'cubism2-offscreen-test', false);
 
     expect(internalUpdate).toHaveBeenCalledWith(16, 128);
     expect(model.deltaTime).toBe(0);

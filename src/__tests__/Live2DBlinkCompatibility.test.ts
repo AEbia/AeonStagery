@@ -74,13 +74,13 @@ describe('Task 2 Live2D blink compatibility', () => {
   it('forwards scene-time blink state through the official Cubism adapter', async () => {
     const { getLive2DRuntimeAdapter } = await import('../engine/Live2DRuntimeAdapter');
     const setBlink = vi.fn();
-    const controls = getLive2DRuntimeAdapter({
+    const adapter = getLive2DRuntimeAdapter({
       runtimeFamily: 'cubism3-plus',
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
-    }).getControls();
+    });
 
-    controls.setBlink({ setBlink }, true, 1500, 2.5, 1);
+    adapter.createModelHandle('cubism3', { setBlink }).blink.set(true, 1500, 2.5, 1);
 
     expect(setBlink).toHaveBeenCalledWith(true, 1500, 2.5, 1);
   });

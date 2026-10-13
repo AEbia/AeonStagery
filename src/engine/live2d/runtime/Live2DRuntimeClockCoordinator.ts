@@ -95,16 +95,3 @@ export function advanceSharedRuntimeClock(deltaMs: number): void {
   if (!clock) return;
   clock.setUserTimeMSec(clock.getUserTimeMSec() + deltaMs);
 }
-
-/** Compatibility surface for Bake and legacy runtime helpers during migration. */
-export function acquireUtSystemLock(): Promise<void> {
-  return acquireSharedRuntimeClockLock();
-}
-
-export function releaseUtSystemLock(): void {
-  releaseSharedRuntimeClockLock();
-}
-
-export function isUtSystemLockActive(): boolean {
-  return isSharedRuntimeClockLocked();
-}

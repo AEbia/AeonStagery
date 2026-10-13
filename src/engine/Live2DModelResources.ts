@@ -15,13 +15,9 @@ import { Live2DCompositeModel } from './Live2DCompositeModel';
 import { getUnsupportedLive2DRuntimeMessage } from './Live2DRuntimeResolver';
 import type { Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
 import { resolveLive2DRuntimeDescriptor } from './Live2DRuntimeResolver';
-import { captureModelNeutralPoseOnce } from './live2d/runtime/BoundModelInitialization';
+import type { Live2DModelDisplayObject } from './runtime/Live2DRuntimeContracts';
 
-export type Live2DResourceModel = PIXI.Container & {
-  anchor: PIXI.ObservablePoint;
-  autoUpdate?: boolean;
-  tint?: number;
-};
+export type Live2DResourceModel = Live2DModelDisplayObject;
 
 export type LoadedLive2DModel = {
   model: Live2DResourceModel;
@@ -105,7 +101,7 @@ export class Live2DModelResources {
     id: string,
     modelPath: string,
     deliver: (loaded: LoadedLive2DModel) => Promise<void>,
-    fallbackRenderer?: () => unknown,
+    fallbackRenderer?: () => PIXI.Renderer,
     sourcePath: string = modelPath,
   ): Promise<void> {
     if (this.closed) return;
@@ -284,7 +280,7 @@ export class Live2DModelResources {
   }
 
   private async createConcrete(
-    url: string, runtime: Live2DRuntimeDescriptor, epoch: number, fallbackRenderer?: () => unknown,
+    url: string, runtime: Live2DRuntimeDescriptor, epoch: number, fallbackRenderer?: () => PIXI.Renderer,
   ): Promise<Live2DResourceModel> {
     // Reserve before await: an existing instance must not destroy textures while
     // another instance using that URL is still being constructed.
@@ -303,7 +299,6 @@ export class Live2DModelResources {
       }
       if (!model) throw new Error(`Live2D runtime returned no model for ${url}`);
       this.owned.set(model, { url, runtime, adapter, epoch, pooled: false, reusable: () => true });
-      captureModelNeutralPoseOnce(model);
       this.resetVisualState(model);
       return model;
     } catch (error) {
@@ -315,7 +310,7 @@ export class Live2DModelResources {
 
   private async takeConcrete(
     url: string, runtime: Live2DRuntimeDescriptor, epoch: number, isCurrent: () => boolean,
-    fallbackRenderer?: () => unknown, reusable: () => boolean = () => true,
+    fallbackRenderer?: () => PIXI.Renderer, reusable: () => boolean = () => true,
   ): Promise<Live2DResourceModel | null> {
     const preload = this.preloads.get(url);
     if (preload) await preload;
@@ -333,7 +328,7 @@ export class Live2DModelResources {
   }
 
   private async acquire(
-    modelPath: string, epoch: number, isCurrent: () => boolean, fallbackRenderer?: () => unknown,
+    modelPath: string, epoch: number, isCurrent: () => boolean, fallbackRenderer?: () => PIXI.Renderer,
     reusable: () => boolean = () => true, sourcePath: string = modelPath,
   ): Promise<LoadedLive2DModel | null> {
     if (!modelPath) return null;
@@ -406,10 +401,6 @@ export class Live2DModelResources {
       }
       if (!isCurrent()) return null;
       this.resetVisualState(model);
-      if (resolveLive2DRuntimeCapabilities(runtime).usesCubism2PrivateControls) {
-        const controls = adapter.getControls();
-        for (const concrete of controls.getConcreteModels(model)) controls.isolateMask(concrete);
-      }
       const borrowed = model;
       const owner = this.owned.get(borrowed)!;
       return {

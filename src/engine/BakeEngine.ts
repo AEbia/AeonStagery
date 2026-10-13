@@ -384,7 +384,7 @@ export class BakeEngine {
               ? {
                   resetForPlayback: {
                     idleSnapshot: entry.idleSnapshot as ModelSnapshot,
-                    restartIdleMotion: entry.runtimeHandle.capabilities.requiresIdleMotionFlush,
+                    restartIdleMotion: true,
                   },
                 }
               : {}),
@@ -662,7 +662,7 @@ export class BakeEngine {
   private discardBakeBatchBorrows(operations: readonly Live2DBakeFrameOperation[]): void {
     for (const operation of operations) {
       const entry = this.models.get(operation.handle.id);
-      if (entry?.runtimeHandle === operation.handle) this.removeModel(entry.id);
+      if (entry && entry.runtimeHandle === operation.handle) this.removeModel(entry.id);
     }
   }
 

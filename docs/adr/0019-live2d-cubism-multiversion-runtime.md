@@ -101,7 +101,7 @@ Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__
 
 后续 runtime 能力扩展优先填充对应 Adapter 的 init/create/model control 与能力声明，而不是继续在编排层新增 runtime 身份或私有字段分支。
 
-### 2026-10-12: Accepted runtime behavior Interface migration (planned)
+### 2026-10-12: Accepted runtime behavior Interface migration
 
 `Live2DRuntimeModelControls` 当前把两个 SDK 的内部结构及操作协议铺成了公共 Interface；`Live2DModelHandle` 的分组转发尚未收回调用方对 Core、子模型、focus controller 和共享时钟的知识。这是本 ADR 要求 SDK 私有操作留在 Adapter 内的 implementation gap。
 
@@ -111,7 +111,7 @@ Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__
 
 选择完整行为方法，是为了让现有时间轴编排继续决定角色意图，同时由运行时 Module 收回 SDK 协议。每帧提交全部角色目标状态的声明式重写会同时改变编排状态模型，本次没有采用。迁移过程中允许旧形式暂时存在以保持验证可运行；最终删除旧公共契约是交付条件。
 
-本节记录已接受的目标，尚不声明实现完成。实施规格、完成条件与迁移切片在本地 issue tracker 的 19 号条目维护；该 tracker 按仓库约定仅用于本地流程。
+这段记录了 2026-10-12 的已接受目标；当日实现尚未完成。最终集成结果见下方 2026-10-14 记录。实施规格、完成条件与迁移切片仍由本地 issue tracker 的 19 号条目维护。
 
 ### 2026-10-12: Bound initialization and neutral character inspection (implemented slices)
 
@@ -133,3 +133,18 @@ Combined verification for these slices: `npm run check` passed 514 files, 5625 t
 运行时 handle 现在提供 `motion.sampleMotion`，由 Adapter 在私有 SDK seam 内完成动作元数据解析、Cubism 2 隔离队列采样与组合模型曲线合并，Cubism 3+ 返回保留原曲线段的中立 custom motion。转换、曲线缓存预热、Seek-side cache ensure 与 Bake plan 通过该行为取得数据；不支持的曲线/运行时返回 typed unsupported 结果，缓存继续记录永久 miss 并回退原生动作路径。旧 sampler target 仍只作为分阶段迁移的私有 fallback，计划在后续删除公共 controls contract 时移除。
 
 Implementation: `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`, `src/engine/runtime/CubismPixiLive2DAdapter.ts`, `src/engine/live2d/motionCurveCache.ts`, `src/services/timeline-authoring/CustomMotionConversionCommand.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`, `src/engine/BakeMotionRuntime.ts`.
+
+### 2026-10-14: Legacy public interface removed and integration verified
+
+19 号规格的最终集成已完成。旧的 `Live2DRuntimeModelControls` 公共契约已从 `Live2DRuntimeContracts` 和 `Live2DRuntimeAdapter` 移除；SDK 操作端口只留在 runtime 内部实现目录。Adapter 不再提供 controls、model class、SDK config 或 clock getter，绑定 handle 只暴露类型明确的 Pixi display object、参数/角色信息、neutral sampling 数据及完整行为。
+
+外部 capability 只报告支持的行为和确定性保证。Cubism 2 controls、共享 SDK clock、idle flush 与内部 replay timestamp 留在 runtime implementation；Stage、Motion、Seek、参数工具和 Bake 不传递 transaction token 或 SDK start time。Bake frame batch 在绑定 handle 内协调同一时钟，公开帧行为不接受 transaction 参数。
+
+转换命令、曲线缓存、Seek 与 Bake 通过 neutral motion sampling 取数据，authoring 不再读取 sampler targets。Blink、focus 生命周期、idle baseline、外部 performance 注册、参数批量提交和 head anchor 查询也通过绑定 handle 行为完成。针对公共行为的 pass-through assertions 已改为结果、状态和提交顺序检查；少数 Cubism 2 测试仍直接测试内部端口，以保护 SDK 专属保证。
+
+最终 production audit 未发现 `getControls()`、公开 raw model/Core/sampler target 字段、SDK strategy capability flags 或 SDK clock/replay sequencing 的外围调用。组合模型和 setup hook 中的 Core 遍历/更新仍属于 runtime model 实现本身；资源池、借用校验与纹理所有权仍由资源 Module 管理。迁移 tickets 20–25 的验收项均已勾选。
+
+Implementation: `src/engine/runtime/Live2DRuntimeControlPort.ts`, `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/live2d/runtime/BoundModelPerformance.ts`, `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/Live2DManager.ts`, `src/engine/Live2DMotionController.ts`, `src/engine/BakeEngine.ts`, `src/engine/export/FrameCaptureEngine.ts`, `src/services/timeline-authoring/CustomMotionConversionCommand.ts`.
+Verification: `npm run check` passed 514 files, 5,653 tests and TypeScript on 2026-10-14. Focused integration checks passed for the runtime handle, Stage, Bake and motion controller.
+
+Implementation status: complete; no remaining runtime behavior Interface migration gaps.

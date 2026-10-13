@@ -366,10 +366,11 @@ describe('Live2DModelResources', () => {
       initialized: false,
       message: null,
     });
-    const officialCreate = vi.fn(async () => ({
+    const officialCreate = vi.fn(async () => Object.assign(new Container(), {
+      anchor: new ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+      autoUpdate: false,
       visible: true,
       alpha: 1,
-      update: () => {},
       internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } },
     }));
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
@@ -377,14 +378,8 @@ describe('Live2DModelResources', () => {
       supported: true,
       init: async () => {},
       isReady: () => true,
-      getModelClass: () => null,
-      getConfig: () => null,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
-        getCoreModel: () => null,
-      }),
       createModelHandle: (id, model, runtime) => createLive2DModelHandle({
         id, model, runtime: runtime ?? { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
         controls: mockControls(),

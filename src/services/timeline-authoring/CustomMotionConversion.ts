@@ -62,7 +62,6 @@ export class CustomMotionConversion {
     const command = new CustomMotionConversionCommand({
       authoring: this.options.authoring,
       ...(this.options.sampleMotion ? { sampleMotion: this.options.sampleMotion } : {}),
-      ...(this.options.samplerTargets ? { samplerTargets: this.options.samplerTargets } : {}),
       ...(this.options.sampler ? { sampler: this.options.sampler } : {}), authority,
     });
     return command.convert({ locator, density, origin: 'timeline-editor', signal }, openEditor

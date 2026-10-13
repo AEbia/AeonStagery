@@ -350,10 +350,9 @@ describe('CustomMotionEditing session interface', () => {
     const acquire = vi.spyOn(authority, 'acquire'); const release = vi.spyOn(authority, 'release');
     const source = document(); (source.statements[0].params as CharacterPerformanceParams).motion = { kind: 'resource', key: 'wave' };
     const { editing, store, authoring } = await harness(authority, source);
-    const conversion = new CustomMotionConversion({ store, editing, authoring, samplerTargets: () => [{} as never], sampler: {
+    const conversion = new CustomMotionConversion({ store, editing, authoring, sampler: {
       resolveMeta: vi.fn(async () => ({ durationSeconds: 2, fadeInSeconds: 0.1 })),
       sample: vi.fn(async () => [{ parameterId: 'ANGLE', samples: [{ time: 0, value: 0 }, { time: 2, value: 10 }] }]),
-      merge: vi.fn((tracks) => tracks.flat()),
     } });
     const receipt = await conversion.convert({ statementId: 'performance' }, 'standard');
     expect(receipt.motion.kind).toBe('custom');
@@ -409,10 +408,9 @@ describe('CustomMotionEditing session interface', () => {
     const acquire = vi.spyOn(authority, 'acquire');
     const { editing, store, authoring } = await harness(authority);
     const sampled = deferred<void>(); const sampling = deferred<void>();
-    const conversion = new CustomMotionConversion({ store, editing, authoring, samplerTargets: () => [{} as never], sampler: {
+    const conversion = new CustomMotionConversion({ store, editing, authoring, sampler: {
       resolveMeta: vi.fn(async () => ({ durationSeconds: 2, fadeInSeconds: 0.1 })),
       sample: vi.fn(async () => { sampling.resolve(); await sampled.promise; return [{ parameterId: 'ANGLE', samples: [{ time: 0, value: 0 }, { time: 2, value: 10 }] }]; }),
-      merge: vi.fn((tracks) => tracks.flat()),
     } });
     const converting = conversion.convert({ statementId: 'performance' }, 'standard');
     const failed = expect(converting).rejects.toMatchObject({ code: 'lease-denied' });
@@ -428,10 +426,9 @@ describe('CustomMotionEditing session interface', () => {
   it('releases a cancelled conversion grant before requesting the editor lease', async () => {
     const gate = delayedAuthority();
     const { editing, store, authoring } = await harness(gate.authority);
-    const conversion = new CustomMotionConversion({ store, editing, authoring, samplerTargets: () => [{} as never], sampler: {
+    const conversion = new CustomMotionConversion({ store, editing, authoring, sampler: {
       resolveMeta: vi.fn(async () => ({ durationSeconds: 2, fadeInSeconds: 0.1 })),
       sample: vi.fn(async () => [{ parameterId: 'ANGLE', samples: [{ time: 0, value: 0 }, { time: 2, value: 10 }] }]),
-      merge: vi.fn((tracks) => tracks.flat()),
     } });
     const converting = conversion.convert({ statementId: 'performance' }, 'standard');
     const failed = expect(converting).rejects.toMatchObject({ code: 'entity-changed' });

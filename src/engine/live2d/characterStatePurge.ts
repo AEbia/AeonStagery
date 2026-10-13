@@ -72,7 +72,6 @@ export function purgeCharacterRuntimeState(
 
   if (clearMotionBookkeeping) {
     entry.motionStartTime = undefined;
-    entry.motionStartUtTime = undefined;
     entry.lastOffset = undefined;
     // The seek-boundary snapshot is re-applied every frame while the playhead
     // sits inside the handoff window: keeping it across a seek makes the

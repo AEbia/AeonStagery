@@ -11,17 +11,12 @@ import {
   type CustomMotionDensity,
   type CustomMotionSampledTrack,
 } from '../../engine/live2d/customMotionConversion';
-import {
-  Cubism2MotionSamplingError,
-  mergeCubism2SampledCurves,
-  resolveCubism2MotionMeta,
-  sampleCubism2MotionCurves,
-  type Cubism2MotionCurve,
-  type Cubism2MotionMeta,
-  type Cubism2MotionSamplerTarget,
-  type Cubism2MotionSamplingOptions,
-} from '../../engine/live2d/cubism2MotionSampler';
-import type { Live2DMotionSamplingResult } from '../../engine/runtime/Live2DRuntimeContracts';
+import type {
+  Live2DMotionSampledCurve,
+  Live2DMotionSamplingMetadata,
+  Live2DMotionSamplingOptions,
+  Live2DMotionSamplingResult,
+} from '../../engine/runtime/Live2DRuntimeContracts';
 import { SemanticAuthoringApplicationService } from './SemanticAuthoringApplicationService';
 import { InMemoryCustomMotionEditAuthority, type CustomMotionEditAuthority, type HeldCustomMotionLease } from './CustomMotionEditAuthority';
 import { customMotionFingerprint } from './customMotionKeyframeEdits';
@@ -58,13 +53,8 @@ export interface CustomMotionConversionReceipt {
 export interface CustomMotionConversionPorts {
   /** Existing atomic authoring service; the converted motion commits through it. */
   authoring: SemanticAuthoringApplicationService;
-  /**
-   * Concrete Cubism 2.1 sampler targets of a character. Empty when the
-   * character is not loaded or is not a Cubism 2.1 runtime.
-   */
-  samplerTargets?: (characterId: string) => readonly Cubism2MotionSamplerTarget[];
   /** Preferred bound-runtime sampling behavior. */
-  sampleMotion?: (characterId: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }) => Promise<Live2DMotionSamplingResult>;
+  sampleMotion?: (characterId: string, motionKey: string, options: Live2DMotionSamplingOptions) => Promise<Live2DMotionSamplingResult>;
   /** Shared application authority; standalone callers use in-memory ownership. */
   authority?: CustomMotionEditAuthority;
   /**
@@ -75,9 +65,8 @@ export interface CustomMotionConversionPorts {
 }
 
 export interface CustomMotionConversionSampler {
-  sample: typeof sampleCubism2MotionCurves;
-  merge: typeof mergeCubism2SampledCurves;
-  resolveMeta: typeof resolveCubism2MotionMeta;
+  sample(characterId: string, motionKey: string, options: Live2DMotionSamplingOptions): Promise<readonly Live2DMotionSampledCurve[]>;
+  resolveMeta(characterId: string, motionKey: string): Promise<Live2DMotionSamplingMetadata>;
 }
 
 export type CustomMotionConversionErrorCode =
@@ -116,16 +105,12 @@ interface CharacterPerformanceParamsLike {
  * refused.
  */
 export class CustomMotionConversionCommand {
-  private readonly samplerImpl: CustomMotionConversionSampler;
+  private readonly samplerImpl?: CustomMotionConversionSampler;
   private readonly authority: CustomMotionEditAuthority;
 
   constructor(private readonly ports: CustomMotionConversionPorts) {
     this.authority = ports.authority ?? new InMemoryCustomMotionEditAuthority();
-    this.samplerImpl = ports.sampler ?? {
-      sample: sampleCubism2MotionCurves,
-      merge: mergeCubism2SampledCurves,
-      resolveMeta: resolveCubism2MotionMeta,
-    };
+    this.samplerImpl = ports.sampler;
   }
 
   async convert(request: CustomMotionConversionRequest, handoff?: (lease: HeldCustomMotionLease) => Promise<boolean>): Promise<CustomMotionConversionReceipt> {
@@ -143,23 +128,16 @@ export class CustomMotionConversionCommand {
 
     const motionKey = source.motionKey;
     const characterId = resolveCharacterId(document, request.locator, params);
-    console.log(`[CustomMotionConvert] 开始转换 motion="${motionKey}" character="${characterId}"`);
-    const targets = this.ports.samplerTargets?.(characterId) ?? [];
-    console.log(`[CustomMotionConvert] samplerTargets 数量=${targets.length}`);
-    if (!this.ports.sampleMotion && targets.length === 0) {
+    if (!this.ports.sampleMotion && !this.samplerImpl) {
       throw new CustomMotionConversionError(
-        `Character "${characterId}" is not loaded as a Cubism 2.1 model; conversion requires a loaded concrete model`,
+        `Character "${characterId}" is not loaded for motion sampling`,
         'character-not-loaded',
         { characterId },
       );
     }
-    targets.forEach((target, index) => {
-      const mm = target.motionManager;
-      console.log(`[CustomMotionConvert] target[${index}] 有 motionManager=${!!mm}, 有 settings=${!!mm?.settings}, settings.motions 键=${mm?.settings?.motions ? Object.keys(mm.settings.motions).join(',') : '(无)'}`);
-    });
 
-    let meta: Cubism2MotionMeta;
-    let merged: readonly Cubism2MotionCurve[];
+    let meta: Live2DMotionSamplingMetadata;
+    let merged: readonly Live2DMotionSampledCurve[];
     try {
       if (this.ports.sampleMotion) {
         const sampled = await this.ports.sampleMotion(characterId, motionKey, {
@@ -176,29 +154,21 @@ export class CustomMotionConversionCommand {
             samples: track.keyframes.map((keyframe) => ({ time: keyframe.time, value: keyframe.value })),
           }));
         } else {
-          merged = (sampled.curves ?? []).map((curve) => ({ parameterId: curve.parameterId, samples: curve.samples }));
+          merged = sampled.curves ?? [];
         }
       } else {
-        meta = await this.samplerImpl.resolveMeta(targets[0], motionKey);
-        const samplingOptions: Cubism2MotionSamplingOptions = {
+        const sampler = this.samplerImpl!;
+        meta = await sampler.resolveMeta(characterId, motionKey);
+        merged = await sampler.sample(characterId, motionKey, {
           fps: document.meta.fps ?? DEFAULT_SCENE_FPS,
-          durationSeconds: meta.durationSeconds,
-          fadeInSeconds: meta.fadeInSeconds,
-          fadeOutSeconds: meta.fadeOutSeconds,
-        };
-        const perModel = await Promise.all(
-          targets.map((target) => this.samplerImpl.sample(target, motionKey, samplingOptions)),
-        );
-        merged = this.samplerImpl.merge(perModel);
+          zeroSourceFades: true,
+        });
       }
-      console.log(`[CustomMotionConvert] resolveMeta 成功: duration=${meta.durationSeconds}s fadeIn=${meta.fadeInSeconds} fadeOut=${meta.fadeOutSeconds}`);
     } catch (error) {
-      console.error(`[CustomMotionConvert] resolveMeta 失败:`, error);
       throw wrapSamplingError(error, characterId, motionKey);
     }
 
     const fps = document.meta.fps ?? DEFAULT_SCENE_FPS;
-    console.log(`[CustomMotionConvert] 采样成功: ${merged.length} 条曲线`);
 
     const sampledTracks: CustomMotionSampledTrack[] = merged.map((curve) => ({
       parameterId: curve.parameterId,
@@ -272,9 +242,6 @@ export class CustomMotionConversionCommand {
                 ...(error.details ? { details: error.details } : {}),
               },
             );
-          }
-          if (error instanceof Cubism2MotionSamplingError) {
-            throw wrapSamplingError(error, characterId, motionKey);
           }
           if (error instanceof Error && /track|parameter/i.test(error.message)) {
             throw new CustomMotionConversionError(
@@ -409,11 +376,10 @@ function wrapSamplingError(
   characterId: string,
   motionKey: string,
 ): CustomMotionConversionError {
-  const code = error instanceof Cubism2MotionSamplingError ? error.code : 'queue-evaluation-failed';
   const message = error instanceof Error ? error.message : String(error);
   return new CustomMotionConversionError(
     `Sampling motion "${motionKey}" on character "${characterId}" failed: ${message}`,
     'sampling-failed',
-    { characterId, motionKey, code },
+    { characterId, motionKey },
   );
 }

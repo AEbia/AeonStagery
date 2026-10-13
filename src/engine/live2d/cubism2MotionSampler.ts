@@ -18,7 +18,7 @@ const PARTS_CURVE_PREFIX = 'VISIBLE:';
 const LAYOUT_CURVE_PREFIX = 'LAYOUT:';
 const PARAMETER_CURVE_TYPE = 0;
 
-export interface Cubism2MotionSamplerTarget {
+interface Cubism2MotionSamplerTarget {
   /** pixi-live2d-display internalModel (holds coreModel + motionManager). */
   readonly internalModel: any;
   /** pixi-live2d-display motion manager (Cubism2MotionManager). */

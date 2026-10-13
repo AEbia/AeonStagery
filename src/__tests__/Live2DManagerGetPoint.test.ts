@@ -3,6 +3,11 @@ import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { Live2DCompositeModel } from '../engine/Live2DCompositeModel';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import {
+  acquireSharedRuntimeClockLock,
+  registerSharedRuntimeClockProvider,
+  releaseSharedRuntimeClockLock,
+} from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 
 vi.mock('../engine/Live2DMotionController', () => ({
   Live2DMotionController: class {
@@ -25,6 +30,7 @@ vi.mock('../engine/Live2DMotionController', () => ({
 describe('Live2DManager.getPoint', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    registerSharedRuntimeClockProvider(() => null);
   });
 
   it('prefers model hit areas for the head anchor when available', async () => {
@@ -438,7 +444,7 @@ describe('Live2DManager.getPoint', () => {
     const syncInputParameters = vi.fn();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         setInjectedParameter,
         syncInputParameters,
       }),
@@ -481,15 +487,16 @@ describe('Live2DManager.getPoint', () => {
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
       runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
-        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
-        : mockAdapter({ getControls: () => cubism2Controls })
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => cubism5Controls })
+        : mockAdapter({ createTestControls: () => cubism2Controls })
     ) as any);
 
     let cubism2ClockMs = 1_000;
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'getClock').mockReturnValue({
+    const sharedClock = {
       getUserTimeMSec: () => cubism2ClockMs,
       setUserTimeMSec: (value: number) => { cubism2ClockMs = value; },
-    });
+    };
+    registerSharedRuntimeClockProvider(() => sharedClock);
 
     const createEntry = (id: string, adapterId: string, runtimeFamily: string) => ({
       id,
@@ -523,7 +530,7 @@ describe('Live2DManager.getPoint', () => {
     const manager = new Live2DManager();
     const controls = mockControls();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'untitled-pixi-live2d-engine-cubism', getControls: () => controls,
+      id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => controls,
     }));
     const model = { internalModel: { coreModel: {} } };
     (manager as any).characters = new Map([['haru', {
@@ -547,7 +554,6 @@ describe('Live2DManager.getPoint', () => {
 
   it('defers ordinary and forced updates while the global UtSystem lock is active', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
-    const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');
     const manager = new Live2DManager();
     const model = {
       update: vi.fn(),
@@ -571,7 +577,7 @@ describe('Live2DManager.getPoint', () => {
       _hardReset: vi.fn(async () => {}),
     };
 
-    await acquireUtSystemLock();
+    await acquireSharedRuntimeClockLock();
     try {
       await manager.updateAll(1);
       expect(model.update).not.toHaveBeenCalled();
@@ -579,14 +585,13 @@ describe('Live2DManager.getPoint', () => {
       await manager.updateAll(16, true, 1000);
       expect(model.update).not.toHaveBeenCalled();
     } finally {
-      releaseUtSystemLock();
+      releaseSharedRuntimeClockLock();
     }
   });
 
   it('keeps the official Cubism Web model updating while Cubism 2 owns the global clock lock', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const runtimeAdapter = await import('../engine/Live2DRuntimeAdapter');
-    const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');
     const manager = new Live2DManager();
 
     const cubism2AdvanceFrame = vi.fn();
@@ -595,8 +600,8 @@ describe('Live2DManager.getPoint', () => {
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
       runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
-        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
-        : mockAdapter({ getControls: () => cubism2Controls })
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => cubism5Controls })
+        : mockAdapter({ createTestControls: () => cubism2Controls })
     ) as any);
 
     const createEntry = (id: string, adapterId: string, runtimeFamily: string) => ({
@@ -627,11 +632,11 @@ describe('Live2DManager.getPoint', () => {
       _hardReset: vi.fn(async () => {}),
     };
 
-    await acquireUtSystemLock();
+    await acquireSharedRuntimeClockLock();
     try {
       await manager.updateAll(16);
     } finally {
-      releaseUtSystemLock();
+      releaseSharedRuntimeClockLock();
     }
 
     expect(cubism2AdvanceFrame).not.toHaveBeenCalled();
@@ -690,7 +695,7 @@ describe('Live2DManager.getPoint', () => {
     }];
     const adapterSpy = vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getParameterValues: () => [{ index: 2, name: 'PARAM_FALLBACK', value: 0.25 }],
         getParameterMetadata: () => metadata,
       }),

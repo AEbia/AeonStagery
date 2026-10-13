@@ -10,14 +10,14 @@ import { installCustomMotionStage, type InstallCustomMotionStageInput } from '..
 import { loadCubism3Motion } from '../live2d/cubism3MotionSampler';
 import type {
   Live2DModelCreateOptions,
-  Live2DRuntimeClock,
-  Live2DRuntimeModelControls,
+  Live2DModelDisplayObject,
   MutableNumericArrayLike,
   Live2DRuntimeAdapter,
   Live2DPerformanceMetadata,
   PerformanceCompatibility,
   PreparedAssetRef,
 } from './Live2DRuntimeContracts';
+import type { Live2DRuntimeControlPort } from './Live2DRuntimeControlPort';
 import { finiteOrUndefined, resolveCubismParameterId, resolveHeadAnchorFromSettings } from './modelMetadata';
 
 async function registerExternalPerformance(
@@ -68,9 +68,8 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     return getCubismPixiSdkStatus().available;
   }
   private ready = false;
-  private engine: any = null;
   private initPromise: Promise<void> | null = null;
-  private readonly controls: Live2DRuntimeModelControls = {
+  private readonly controls: Live2DRuntimeControlPort = {
     getCoreModel: (model) => model?.internalModel?.coreModel ?? null,
     describeInvalidState: (model) => {
       const internalModel = model?.internalModel;
@@ -122,9 +121,6 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         playing: motionManager.playing,
         isFinished: !motionManager.playing,
         queueLength: motionManager.state?.queue?.length ?? 0,
-        internalModel: model?.internalModel ?? null,
-        motionManager,
-        queueManager: motionManager.state?.queue ?? [],
       };
     },
     getParameterValues: (model) => {
@@ -489,6 +485,9 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       // before Core.update(); retain the character/bake entry it should read.
       model._characterEntry = options.injectedParamsSource;
     },
+    prepareModelResources: () => {
+      // Native Cubism 3+ models own their clipping buffers.
+    },
     isolateMask: () => {
       // The vendor owns a clipping manager per model.
     },
@@ -516,7 +515,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
 
     this.initPromise = (async () => {
       await initCubismPixiSdk();
-      this.engine = await loadCubismEngineModule();
+      await loadCubismEngineModule();
       this.ready = true;
     })();
 
@@ -531,21 +530,9 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     return this.ready;
   }
 
-  getModelClass(): any {
-    return this.engine?.Live2DModel ?? null;
-  }
-
-  getConfig(): any {
-    return this.engine?.config ?? null;
-  }
-
-  getControls(): Live2DRuntimeModelControls {
-    return this.controls;
-  }
-
   createModelHandle(
     id: string,
-    model: any,
+    model: object,
     runtime: Live2DRuntimeDescriptor = {
       runtimeFamily: 'cubism3-plus',
       adapterId: this.id,
@@ -560,7 +547,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     });
   }
 
-  async createModel(modelUrl: string, options: Live2DModelCreateOptions = {}): Promise<any> {
+  async createModel(modelUrl: string, options: Live2DModelCreateOptions = {}): Promise<Live2DModelDisplayObject> {
     if (!this.ready) {
       await this.init();
     }
@@ -576,11 +563,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     });
   }
 
-  getClock(): Live2DRuntimeClock | null {
-    return null;
-  }
-
-  createFallbackModel(): any {
+  createFallbackModel(): Live2DModelDisplayObject | null {
     return null;
   }
 

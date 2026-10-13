@@ -162,11 +162,6 @@ interface Live2DMuscle {
   getMotionDuration?(id: string, key: string): number;
 }
 
-declare const UtSystem: {
-  getUserTimeMSec(): number;
-  setUserTimeMSec(ms: number): void;
-} | undefined;
-
 export class CharacterSynchronizer {
   private live2D: Live2DMuscle;
 

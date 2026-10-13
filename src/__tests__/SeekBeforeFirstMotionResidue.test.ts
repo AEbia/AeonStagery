@@ -19,7 +19,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { captureModelNeutralPoseOnce, resetModelToNeutralPose } from '../engine/live2d/characterStatePurge';
 import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
 
@@ -36,7 +36,7 @@ const RUNTIME = {
 } as any;
 
 function controls() {
-  return getLive2DRuntimeAdapter(RUNTIME).getControls();
+  return new Cubism2PixiLive2DModelControls();
 }
 
 function createRealLayoutSdkModel() {

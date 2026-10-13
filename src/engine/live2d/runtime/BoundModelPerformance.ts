@@ -1,16 +1,16 @@
+import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
+import type { Live2DClockTransaction } from './Live2DRuntimeClockCoordinator';
+import type { Live2DRuntimeClock } from './Live2DRuntimeClockCoordinator';
 import type { ModelSnapshot } from '../../Live2DConfig';
 import type {
   Live2DPerformanceTransitionInput,
   Live2DPerformanceTransitionResult,
-  Live2DRuntimeClock,
-  Live2DClockTransaction,
-  Live2DRuntimeModelControls,
   Live2DSeekMotionOffsetInput,
   Live2DSeekMotionOffsetResult,
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
 } from '../../runtime/Live2DRuntimeContracts';
-import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
+import type { Live2DModelHandle, Live2DInternalRuntimeCapabilities } from './Live2DRuntimeControlModule';
 import {
   getSharedRuntimeClock,
   getSharedRuntimeClockForTransaction,
@@ -28,9 +28,15 @@ function isDefaultPose(snapshot: ModelSnapshot | null): boolean {
 export function createBoundModelPerformance(
   id: string,
   model: object,
-  controls: Live2DRuntimeModelControls,
-  capabilities: Live2DRuntimeCapabilities,
-): Pick<Live2DModelHandle, 'performance'> {
+  controls: Live2DRuntimeControlPort,
+  capabilities: Live2DInternalRuntimeCapabilities,
+): {
+  performance: Pick<Live2DModelHandle, 'performance'>['performance'];
+  transitionInTransaction(input: Live2DPerformanceTransitionInput, transaction?: Live2DClockTransaction): Promise<Live2DPerformanceTransitionResult>;
+  resetMotionTracking(): void;
+} {
+  let motionStartUtTimeMs: number | undefined;
+
   async function transition(
     input: Live2DPerformanceTransitionInput,
     transaction?: Live2DClockTransaction,
@@ -58,7 +64,7 @@ export function createBoundModelPerformance(
         clock: replaying ? clock : null,
         fadeInSeconds: input.fadeInSeconds,
         clearQueueFirst: input.clearQueueFirst,
-        stepAfterStartMs: input.stepAfterStartMs,
+        stepAfterStartMs: replaying && !input.clearQueueFirst && input.offsetSeconds <= 0 ? 16 : undefined,
         isCurrent: input.isCurrent,
         beforeReplay: replaying && handoff
           ? () => {
@@ -71,6 +77,7 @@ export function createBoundModelPerformance(
         return { status: 'cancelled', offsetReplayMs: started.offsetReplayMs } as const;
       }
       if (!started.ok) return { status: 'missing', offsetReplayMs: started.offsetReplayMs } as const;
+      motionStartUtTimeMs = started.motionStartUtTimeMs;
 
       if (input.finalSnapshot && !replaying) controls.applySnapshot(model, input.finalSnapshot);
       if (input.expressionKey !== undefined) {
@@ -87,7 +94,6 @@ export function createBoundModelPerformance(
       return {
         status: 'started',
         offsetReplayMs: started.offsetReplayMs,
-        motionStartUtTimeMs: started.motionStartUtTimeMs,
         retainedHandoffBoundary,
       } as const;
     };
@@ -107,7 +113,10 @@ export function createBoundModelPerformance(
     return runStart(null, null);
   }
 
-  async function seekMotionOffset(input: Live2DSeekMotionOffsetInput): Promise<Live2DSeekMotionOffsetResult> {
+  async function seekMotionOffset(
+    input: Live2DSeekMotionOffsetInput,
+    transaction?: Live2DClockTransaction,
+  ): Promise<Live2DSeekMotionOffsetResult> {
     if (!capabilities.usesSharedSdkClock) return { status: 'unsupported' };
     if (!input.isCurrent()) return { status: 'cancelled' };
     const result = await withSharedRuntimeClock(getSharedRuntimeClock(), input.isCurrent, async (transaction) => {
@@ -115,8 +124,9 @@ export function createBoundModelPerformance(
       if (!clock) return { status: 'unsupported' } as const;
       if (!input.isCurrent()) return { status: 'cancelled' } as const;
       const offsetMs = Math.max(0, input.offsetSeconds) * 1000;
-      const motionStartUtTimeMs = input.motionStartUtTimeMs ?? clock.getUserTimeMSec() - offsetMs;
-      const targetUtTimeMs = motionStartUtTimeMs + offsetMs;
+      const motionStart = motionStartUtTimeMs ?? clock.getUserTimeMSec() - offsetMs;
+      const targetUtTimeMs = motionStart + offsetMs;
+      motionStartUtTimeMs = motionStart;
       clock.setUserTimeMSec(targetUtTimeMs);
       if (!input.isCurrent()) return { status: 'cancelled' } as const;
       controls.advanceMotionOnly(model, targetUtTimeMs);
@@ -128,8 +138,8 @@ export function createBoundModelPerformance(
         else retainedHandoffBoundary = false;
         if (isDefaultPose(current)) retainedHandoffBoundary = true;
       }
-      return { status: 'advanced', motionStartUtTimeMs, retainedHandoffBoundary } as const;
-    }, input.transaction);
+      return { status: 'advanced', retainedHandoffBoundary } as const;
+    }, transaction);
     return result ?? { status: 'cancelled' };
   }
 
@@ -138,6 +148,13 @@ export function createBoundModelPerformance(
     if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     const result = await controls.restoreSeekState(model, { ...input, id, isCurrent });
     if (!isCurrent()) return { status: 'cancelled', tierUsed: result.tierUsed, diagnostics: result.diagnostics };
+    if (input.motion && capabilities.usesSharedSdkClock) {
+      const clock = getSharedRuntimeClock();
+      const offsetMs = Math.max(0, input.motion.offset) * 1000;
+      motionStartUtTimeMs = clock ? clock.getUserTimeMSec() - offsetMs : undefined;
+    } else {
+      motionStartUtTimeMs = undefined;
+    }
     return result;
   }
 
@@ -161,10 +178,13 @@ export function createBoundModelPerformance(
 
   return {
     performance: {
-      transition,
-      seekMotionOffset,
+      transition: (input) => transition(input),
+      seekMotionOffset: (input) => seekMotionOffset(input),
       restoreSeekState,
-      restoreExpression,
+      restoreExpression: (expressionKey, elapsedSeconds, previousExpressionKey, isCurrent) =>
+        restoreExpression(expressionKey, elapsedSeconds, previousExpressionKey, isCurrent),
     },
+    transitionInTransaction: transition,
+    resetMotionTracking: () => { motionStartUtTimeMs = undefined; },
   };
 }

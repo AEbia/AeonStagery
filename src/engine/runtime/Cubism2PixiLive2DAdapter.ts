@@ -1,3 +1,4 @@
+import type { Live2DRuntimeClock } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
 import * as PIXI from 'pixi.js';
 import type { Live2DRuntimeDescriptor } from '../Live2DRuntimeResolver';
 import { getUnsupportedLive2DRuntimeMessage, isLive2DCubism2RuntimeAvailable } from '../Live2DRuntimeResolver';
@@ -8,8 +9,7 @@ import { registerSharedRuntimeClockProvider } from '../live2d/runtime/Live2DRunt
 import { loadLive2DEngineModule } from '../Live2DEngineBridge';
 import type {
   Live2DModelCreateOptions,
-  Live2DRuntimeClock,
-  Live2DRuntimeModelControls,
+  Live2DModelDisplayObject,
   Live2DRuntimeAdapter,
 } from './Live2DRuntimeContracts';
 import { Cubism2PixiLive2DModelControls } from './Cubism2PixiLive2DModelControls';
@@ -91,21 +91,13 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     return this.ready;
   }
 
-  getModelClass(): any {
-    return this.modelClass;
-  }
-
-  getConfig(): any {
+  private getConfig(): any {
     return this.modelClass?.config ?? this.moduleConfig;
-  }
-
-  getControls(): Live2DRuntimeModelControls {
-    return this.controls;
   }
 
   createModelHandle(
     id: string,
-    model: any,
+    model: object,
     runtime: Live2DRuntimeDescriptor = defaultCubism2RuntimeDescriptor,
   ): Live2DModelHandle {
     return createLive2DModelHandle({
@@ -116,7 +108,7 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     });
   }
 
-  async createModel(modelUrl: string, options: Live2DModelCreateOptions): Promise<any> {
+  async createModel(modelUrl: string, options: Live2DModelCreateOptions): Promise<Live2DModelDisplayObject> {
     await this.init();
     if (!this.modelClass?.from) {
       throw new Error('Cubism 2 Live2DModel class is not available.');
@@ -132,14 +124,14 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     });
   }
 
-  getClock(): Live2DRuntimeClock | null {
+  private getClock(): Live2DRuntimeClock | null {
     if (typeof window === 'undefined') return null;
     const utSystem = (window as any).UtSystem;
     if (!utSystem || typeof utSystem.getUserTimeMSec !== 'function') return null;
     return utSystem;
   }
 
-  createFallbackModel(renderer?: any): any {
+  createFallbackModel(renderer?: PIXI.Renderer): Live2DModelDisplayObject {
     const graphics = new PIXI.Graphics();
     graphics.beginFill(0x222222, 0.8);
     graphics.lineStyle(6, 0xffaa00);
@@ -155,7 +147,11 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     const tex = typeof renderer?.generateTexture === 'function'
       ? renderer.generateTexture(graphics)
       : PIXI.Texture.EMPTY;
-    const model: any = new PIXI.Sprite(tex);
+    const model: PIXI.Sprite & Live2DModelDisplayObject & {
+      update?: () => void;
+      internalModel?: object;
+      unregisterExternalPerformance?: () => void;
+    } = new PIXI.Sprite(tex);
 
     // Mock the runtime surface the adapter's own controls call into, so the
     // placeholder survives the standard lifecycle hooks (update, snapshot,

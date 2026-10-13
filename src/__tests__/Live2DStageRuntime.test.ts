@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Live2DStageRuntime } from '../engine/Live2DStageRuntime';
 import type { CharacterEntry } from '../engine/Live2DConfig';
-import type { Live2DRuntimeAdapter, Live2DRuntimeModelControls } from '../engine/runtime/Live2DRuntimeContracts';
+import type { Live2DRuntimeAdapter } from '../engine/runtime/Live2DRuntimeContracts';
+import type { Live2DRuntimeControlPort } from '../engine/runtime/Live2DRuntimeControlPort';
 import type { Live2DRuntimeDescriptor } from '../engine/Live2DRuntimeResolver';
 import type { MotionRequest } from '../engine/Live2DMotionController';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
-import { acquireUtSystemLock, releaseUtSystemLock } from '../engine/Live2DConfig';
-import { withSharedRuntimeClock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
+import { acquireSharedRuntimeClockLock, releaseSharedRuntimeClockLock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 
 const runtime = {
   runtimeFamily: 'cubism2' as const,
@@ -34,26 +35,26 @@ function makeEntry(id: string, model: Record<string, unknown>): CharacterEntry {
 }
 
 describe('Live2DStageRuntime', () => {
-  let advanceFrame: ReturnType<typeof vi.fn>;
-  let setInjectedParameter: ReturnType<typeof vi.fn>;
-  let syncInputParameters: ReturnType<typeof vi.fn>;
+  let advanceFrame: ReturnType<typeof vi.fn<(model: object, deltaMs: number) => void>>;
+  let setInjectedParameter: ReturnType<typeof vi.fn<(model: object, name: string, value: number) => void>>;
+  let syncInputParameters: ReturnType<typeof vi.fn<(model: object) => void>>;
   let dispatchMotion: ReturnType<typeof vi.fn<(id: string, request: MotionRequest) => Promise<void>>>;
   let adapter: Live2DRuntimeAdapter;
+  let controls: Live2DRuntimeControlPort;
 
   beforeEach(() => {
-    advanceFrame = vi.fn();
-    setInjectedParameter = vi.fn();
-    syncInputParameters = vi.fn();
+    advanceFrame = vi.fn<(model: object, deltaMs: number) => void>();
+    setInjectedParameter = vi.fn<(model: object, name: string, value: number) => void>();
+    syncInputParameters = vi.fn<(model: object) => void>();
     dispatchMotion = vi.fn().mockResolvedValue(undefined);
-    const controls = {
+    controls = mockControls({
       advanceFrame,
       setInjectedParameter,
       syncInputParameters,
       captureSnapshot: vi.fn(() => null),
       applySnapshot: vi.fn(),
-    } as unknown as Live2DRuntimeModelControls;
+    });
     adapter = {
-      getControls: () => controls,
       createModelHandle: (id: string, model: object, modelRuntime?: Live2DRuntimeDescriptor) => createLive2DModelHandle({
         id,
         model,
@@ -132,7 +133,7 @@ describe('Live2DStageRuntime', () => {
         runtime: entry.id === 'independent'
           ? { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true }
           : runtime,
-        controls: adapter.getControls(),
+        controls,
       });
       entry._pendingPlayMotion = {
         key: 'wave', priority: 3, offset: 0, sceneTime: 0, skipHardReset: false, reqEpoch: 1,
@@ -140,7 +141,7 @@ describe('Live2DStageRuntime', () => {
       stage.characters.set(entry.id, entry);
     }
     // Both entries say Cubism 2; only the loaded handle declares an independent clock.
-    await acquireUtSystemLock();
+    await acquireSharedRuntimeClockLock();
     try {
       await stage.step(16);
       expect(dispatchMotion).toHaveBeenCalledTimes(1);
@@ -149,11 +150,11 @@ describe('Live2DStageRuntime', () => {
       expect(advanceFrame).toHaveBeenCalledWith(independent.model, 16);
       expect(shared._pendingPlayMotion).toBeDefined();
     } finally {
-      releaseUtSystemLock();
+      releaseSharedRuntimeClockLock();
     }
   });
 
-  it('requires an active transaction before forced or manual frames can bypass the shared clock lock', async () => {
+  it('defers forced and manual stage frames while the shared clock is locked', async () => {
     const stage = new Live2DStageRuntime({
       dispatchMotion,
       describeInvalidModelState: () => null,
@@ -167,21 +168,19 @@ describe('Live2DStageRuntime', () => {
       id: entry.id,
       model: entry.model,
       runtime,
-      controls: adapter.getControls(),
+      controls,
     });
     stage.characters.set(entry.id, entry);
 
-    const clock = { getUserTimeMSec: () => 100, setUserTimeMSec: vi.fn() };
-    await withSharedRuntimeClock(clock, () => true, async (transaction) => {
-      expect(transaction).not.toBeNull();
+    await acquireSharedRuntimeClockLock();
+    try {
       await stage.step(16, false, 1000);
       await stage.step(16, true);
       expect(advanceFrame).not.toHaveBeenCalled();
       expect(syncInputParameters).not.toHaveBeenCalled();
-
-      await stage.step(16, true, undefined, transaction ?? undefined);
-      expect(advanceFrame).toHaveBeenCalledExactlyOnceWith(entry.model, 16);
-    });
+    } finally {
+      releaseSharedRuntimeClockLock();
+    }
   });
 
   it('commits and freezes zero-delta evaluation according to the handle', async () => {
@@ -194,7 +193,7 @@ describe('Live2DStageRuntime', () => {
       getScriptEngine: () => null,
     });
     const entry = makeEntry('hero', {});
-    const handle = createLive2DModelHandle({ id: entry.id, model: entry.model, runtime, controls: adapter.getControls() });
+    const handle = createLive2DModelHandle({ id: entry.id, model: entry.model, runtime, controls });
     entry.runtimeHandle = {
       ...handle,
       capabilities: { ...handle.capabilities, evaluatesPoseOnZeroDelta: true },
@@ -210,7 +209,6 @@ describe('Live2DStageRuntime', () => {
   it('commits cached Cubism 3+ motion poses on paused zero-delta seeks', async () => {
     const { model, internal, drawn } = createCubismModelFixture();
     const adapter = new CubismPixiLive2DAdapter();
-    const controls = adapter.getControls();
     vi.mocked(runtimeAdapter.getLive2DRuntimeAdapter).mockReturnValue(adapter);
     const stage = new Live2DStageRuntime({
       dispatchMotion,
@@ -223,6 +221,7 @@ describe('Live2DStageRuntime', () => {
     const entry = makeEntry('hero', model);
     entry.runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true };
     entry.adapterId = entry.runtime.adapterId;
+    entry.runtimeHandle = adapter.createModelHandle(entry.id, model, entry.runtime);
     entry.customMotion = {
       motion: {
         kind: 'custom', durationSeconds: 2, fadeInSeconds: 0,
@@ -233,7 +232,7 @@ describe('Live2DStageRuntime', () => {
       controlledParameterIds: ['ParamAngleX'],
     };
     entry.customMotionHandoff = { values: { ParamAngleX: 0 } };
-    entry.customMotionStage = controls.installCustomMotionStage(model, {
+    entry.customMotionStage = entry.runtimeHandle.customMotion.installStage({
       getState: () => entry.customMotion && entry.customMotionHandoff
         ? { motion: entry.customMotion.motion, startSceneTime: 0, handoff: entry.customMotionHandoff, controlledParameterIds: ['ParamAngleX'] }
         : null,
@@ -270,8 +269,8 @@ describe('Live2DStageRuntime', () => {
     });
     const failingModel = { autoUpdate: false, id: 'failing' };
     const healthyModel = { autoUpdate: false, id: 'healthy' };
-    advanceFrame.mockImplementation((model: { id: string }) => {
-      if (model.id === 'failing') throw new Error('sdk failure');
+    advanceFrame.mockImplementation((model: object) => {
+      if ((model as { id: string }).id === 'failing') throw new Error('sdk failure');
     });
     stage.characters.set('failing', makeEntry('failing', failingModel));
     stage.characters.set('healthy', makeEntry('healthy', healthyModel));

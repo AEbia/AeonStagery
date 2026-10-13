@@ -89,7 +89,8 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
   });
   it('commits a batch of injected parameters with one Core geometry update', async () => {
     const model = await createModel();
-    const controls = new CubismPixiLive2DAdapter().getControls();
+    const runtime = new CubismPixiLive2DAdapter();
+    const handle = runtime.createModelHandle('cubism-web', model);
     const core = model.internalModel.coreModel;
     model.update(0);
     const positions = core.getModel().drawables.vertexPositions as readonly Float32Array[];
@@ -97,9 +98,9 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     const update = vi.spyOn(core, 'update');
     const values = { ParamAngleX: 15, ParamAngleY: 10, ParamMouthOpenY: 0.75 };
     try {
-      for (const [id, value] of Object.entries(values)) controls.setInjectedParameter(model, id, value);
+      for (const [id, value] of Object.entries(values)) handle.parameters.setInjectedParameter(id, value);
       expect(update).not.toHaveBeenCalled();
-      controls.syncInputParameters(model);
+      handle.parameters.syncInputParameters();
       expect(update).toHaveBeenCalledOnce();
       expect(positions.some((vertices, index) => vertices.some((value, vertex) => value !== before[index][vertex]))).toBe(true);
       const ids = core.getParameterIds();

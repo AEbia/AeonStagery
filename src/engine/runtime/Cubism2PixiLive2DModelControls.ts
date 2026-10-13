@@ -1,3 +1,6 @@
+import type { Live2DRuntimeControlPort } from './Live2DRuntimeControlPort';
+import type { Live2DRuntimeClock } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
+import type { Live2DMotionStartOptions, Live2DModelPrepareOptions } from './Live2DRuntimeControlPort';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import type { ModelSnapshot } from '../Live2DConfig';
@@ -19,7 +22,6 @@ import {
   mergeCubism2SampledCurves,
   resolveCubism2MotionMeta,
   sampleCubism2MotionCurves,
-  type Cubism2MotionSamplerTarget,
 } from '../live2d/cubism2MotionSampler';
 import { Cubism2BakeRenderCore } from '../live2d/runtime/Cubism2BakeRenderCore';
 import { guardExternalGl } from '../live2d/runtime/Cubism2RenderGuardSeam';
@@ -40,16 +42,11 @@ import {
 import type {
   Live2DSeekRestoreInput,
   Live2DSeekRestoreResult,
-  Live2DRuntimeClock,
-  Live2DMotionStartOptions,
-  Live2DMotionStartResult,
   Live2DModelResetOptions,
-  Live2DModelPrepareOptions,
   Live2DDisposeOptions,
   Live2DFocusInput,
   Live2DFocusOptions,
   Live2DFocusAnimationAction,
-  Live2DRuntimeModelControls,
   Live2DMotionSamplingOptions,
   Live2DMotionSamplingResult,
   MutableNumericArrayLike,
@@ -57,6 +54,7 @@ import type {
   PerformanceCompatibility,
   PreparedAssetRef,
 } from './Live2DRuntimeContracts';
+import type { Live2DInternalMotionStartResult } from './Live2DRuntimeControlPort';
 import {
   finiteOrUndefined,
   getCubism2ModelContext,
@@ -79,7 +77,9 @@ function mergePerformanceCompatibility(
   };
 }
 
-export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControls {
+type Cubism2SamplingTarget = { readonly internalModel: any; readonly motionManager: any };
+
+export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort {
   private readonly expressionRequestEpochs = new WeakMap<object, number>();
   private readonly maskSizeProvider: () => number;
   private readonly bakeCore: Cubism2BakeRenderCore | null;
@@ -233,9 +233,6 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       playing: mm?.playing,
       isFinished: mq?.isFinished?.(),
       queueLength: (mq?.motions || mq?._motions || []).length,
-      internalModel,
-      motionManager: mm,
-      queueManager: mq,
     };
   }
 
@@ -1118,7 +1115,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     priority: number,
     offsetSeconds: number,
     options: Live2DMotionStartOptions = {},
-  ): Promise<Live2DMotionStartResult> {
+  ): Promise<Live2DInternalMotionStartResult> {
     if (options.isCurrent && !options.isCurrent()) {
       return { ok: false, offsetReplayMs: 0, cancelled: true };
     }
@@ -1184,8 +1181,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     };
   }
 
-  #getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[] {
-    const targets: Cubism2MotionSamplerTarget[] = [];
+  #getMotionSamplingTargets(model: any): readonly Cubism2SamplingTarget[] {
+    const targets: Cubism2SamplingTarget[] = [];
     for (const instance of this.getConcreteModels(model)) {
       const internalModel = instance?.internalModel;
       const motionManager = internalModel?.motionManager;
@@ -1361,6 +1358,10 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     }
   }
 
+  prepareModelResources(model: any): void {
+    for (const concreteModel of this.getConcreteModels(model)) this.isolateMask(concreteModel);
+  }
+
   isolateMask(model: any): void {
     const internalModel = model?.internalModel;
     const maskSize = Math.max(1, Math.floor(this.maskSizeProvider()));
@@ -1502,10 +1503,13 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     }
   }
 
-  getHeadAnchor(model: any): { x: number; y: number } | null {
+  getHeadAnchor(model: any, target: 'head' | 'main' = 'main'): { x: number; y: number } | null {
     // Shared hit-area math — see resolveHeadAnchorFromSettings (used by both
     // runtime adapters so the layout math cannot drift apart).
-    return resolveHeadAnchorFromSettings(model?.internalModel?.settings);
+    const source = target === 'head'
+      ? model?.subModels?.[0] ?? model?.mainModel ?? model
+      : model?.mainModel ?? model;
+    return resolveHeadAnchorFromSettings(source?.internalModel?.settings);
   }
 
   private static readonly DEFAULT_LOOK_AT_EASE = 'power1.out';

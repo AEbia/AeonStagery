@@ -71,10 +71,6 @@ export class Live2DMotionController {
     private getScriptEngine: () => any,
   ) {}
 
-  private usesPrivateMotionControls(entry: CharacterEntry): boolean {
-    return getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls;
-  }
-
   private getGeneration(entry: CharacterEntry): number {
     return entry.lifecycleGeneration ?? 0;
   }
@@ -262,7 +258,6 @@ export class Live2DMotionController {
           sceneTime,
         });
         if (restartDecision.needsRestart) {
-          const isCubism2 = runtime.capabilities.usesCubism2PrivateControls;
           const firstMotionAfterPurge = skipReset
             && entry.motionStartTime === undefined
             && entry.lastSnapshot === undefined
@@ -297,10 +292,9 @@ export class Live2DMotionController {
             clearQueueFirst: skipReset,
             fadeInSeconds: undefined,
             handoffSnapshot,
-            finalSnapshot: !isCubism2 && skipReset ? handoffSnapshot ?? entry.lastSnapshot : undefined,
+            finalSnapshot: skipReset ? handoffSnapshot ?? entry.lastSnapshot : undefined,
             expressionKey: expressionWasReset ? entry.expressionKey : undefined,
             restoreHandoffBoundary: skipReset && isLive2DMotionHandoffOffset(offset),
-            stepAfterStartMs: isCubism2 && !skipReset && offset <= 0 ? 16 : undefined,
             isCurrent,
           });
           if (transition.status === 'cancelled' || !isCurrent()) return;
@@ -310,7 +304,6 @@ export class Live2DMotionController {
           }
 
           entry.motionStartTime = sceneTime - offset;
-          entry.motionStartUtTime = transition.motionStartUtTimeMs;
           if (handoffSnapshot && skipReset) entry.lastSnapshot = handoffSnapshot;
           if (transition.retainedHandoffBoundary && handoffSnapshot) {
             entry.pendingSeekBoundarySnapshot = handoffSnapshot;
@@ -319,16 +312,14 @@ export class Live2DMotionController {
           } else {
             clearPendingSeekBoundary(entry);
           }
-        } else if (skipReset && runtime.capabilities.usesSharedSdkClock) {
+        } else if (skipReset && runtime.capabilities.determinism.supportsMotionOffsetReplay) {
           const seekResult = await runtime.performance.seekMotionOffset({
-            motionStartUtTimeMs: entry.motionStartUtTime,
             offsetSeconds: offset,
             handoffBoundarySnapshot: entry.pendingSeekBoundarySnapshot,
             isCurrent,
           });
           if (seekResult.status === 'cancelled' || !isCurrent()) return;
           if (seekResult.status === 'advanced') {
-            entry.motionStartUtTime = seekResult.motionStartUtTimeMs;
             if (entry.pendingSeekBoundarySnapshot && !seekResult.retainedHandoffBoundary) {
               clearPendingSeekBoundary(entry);
             }
@@ -554,7 +545,7 @@ export class Live2DMotionController {
       if (!reset || !this.isEntryCurrent(id, entry, generationAtRequest, model)) return;
 
       if (entry) {
-        if (!this.usesPrivateMotionControls(entry)) {
+        if (!runtime.capabilities.determinism.supportsMotionOffsetReplay) {
           entry.motionStartTime = undefined;
           entry.lastOffset = undefined;
           entry.lastSnapshot = undefined;

@@ -36,7 +36,7 @@ function fixture(registry?: WmdlConfigRegistry) {
   const controls = mockControls({
     captureSnapshot: () => ({ params: new Float32Array([0.25]), opacities: new Float32Array([1]) }),
   });
-  const adapter = mockAdapter({ getControls: () => controls, createModel: vi.fn(async () => model()) });
+  const adapter = mockAdapter({ createTestControls: () => controls, createModel: vi.fn(async () => model()) });
   vi.spyOn(runtimeAdapters, 'getLive2DRuntimeAdapter').mockReturnValue(adapter);
   const engine = new BakeEngine({ renderer: {} } as unknown as PIXI.Application, registry);
   const bake = (token: number) => engine.bakePreparedRange(scene(), new Map(), token, 0, 0, 0.1, undefined, true);

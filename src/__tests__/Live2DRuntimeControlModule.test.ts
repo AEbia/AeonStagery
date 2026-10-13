@@ -10,13 +10,12 @@ import {
   isSharedRuntimeClockLocked,
   registerSharedRuntimeClockProvider,
   withSharedRuntimeClock,
-  type Live2DClockTransaction,
 } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
-import { cubism2Live2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import type {
-  Live2DRuntimeModelControls,
-  Live2DSeekRestoreResult,
-} from '../engine/Live2DRuntimeAdapter';
+  Live2DRuntimeControlPort,
+} from '../engine/runtime/Live2DRuntimeControlPort';
+import type { Live2DSeekRestoreResult } from '../engine/runtime/Live2DRuntimeContracts';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import { Live2DCompositeModel } from '../engine/Live2DCompositeModel';
 
@@ -37,10 +36,10 @@ function createClock(initialTime: number) {
 }
 
 afterEach(() => {
-  registerSharedRuntimeClockProvider(() => cubism2Live2DAdapter.getClock());
+  registerSharedRuntimeClockProvider(() => null);
 });
 
-function createControls(): Live2DRuntimeModelControls {
+function createControls(): Live2DRuntimeControlPort {
   return mockControls({
     restoreSeekState: vi.fn(async (): Promise<Live2DSeekRestoreResult> => ({
       status: 'unsupported',
@@ -57,12 +56,10 @@ describe('createLive2DModelHandle', () => {
       supported: true,
     });
     expect(capabilities).toMatchObject({
-      usesSharedSdkClock: false,
       evaluatesPoseOnZeroDelta: true,
       supportsMotionHandoff: true,
       supportsCompositeModels: false,
       supportsFallbackModel: false,
-      requiresIdleMotionFlush: false,
       determinism: {
         supportsNativeMotionOffset: true,
         supportsMotionOffsetReplay: false,
@@ -81,7 +78,7 @@ describe('createLive2DModelHandle', () => {
       runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
       runtimeHandle: { capabilities },
     })).toBe(capabilities);
-    expect(getLive2DRuntimeCapabilities({}).usesCubism2PrivateControls).toBe(true);
+    expect(getLive2DRuntimeCapabilities({})).not.toHaveProperty('usesCubism2PrivateControls');
   });
 
   it('does not advertise controls for an unsupported composite runtime', () => {
@@ -124,13 +121,10 @@ describe('createLive2DModelHandle', () => {
       supportsParameterInjection: true,
       supportsSnapshot: true,
       supportsBakeRender: true,
-      usesCubism2PrivateControls: true,
-      usesSharedSdkClock: true,
       evaluatesPoseOnZeroDelta: false,
       supportsMotionHandoff: false,
       supportsCompositeModels: true,
       supportsFallbackModel: true,
-      requiresIdleMotionFlush: true,
       determinism: {
         tier: 'offset-replay-deterministic',
         supportsParameterCurves: true,
@@ -160,7 +154,6 @@ describe('createLive2DModelHandle', () => {
       supportsParameterInjection: false,
       supportsSnapshot: false,
       supportsBakeRender: false,
-      usesCubism2PrivateControls: false,
       determinism: {
         tier: 'unsupported',
         supportsParameterCurves: false,
@@ -437,8 +430,8 @@ describe('createLive2DModelHandle', () => {
 
   it('delegates bake rendering and invalid-state diagnostics', () => {
     const model = { name: 'render-model' };
-    const renderer = { name: 'renderer' };
-    const renderTexture = { name: 'texture' };
+    const renderer = { name: 'renderer' } as unknown as PIXI.Renderer;
+    const renderTexture = { name: 'texture' } as unknown as PIXI.RenderTexture;
     const controls = createControls();
     vi.mocked(controls.describeInvalidState).mockReturnValue('primary param[0]=NaN');
     const handle = createLive2DModelHandle({
@@ -459,7 +452,7 @@ describe('createLive2DModelHandle', () => {
     expect(controls.describeInvalidState).toHaveBeenCalledWith(model);
   });
 
-  it('reuses an explicit clock transaction without recursively acquiring the lock', async () => {
+  it('defers ordinary frame submission while the runtime clock is locked', async () => {
     let time = 100;
     const clock = {
       getUserTimeMSec: () => time,
@@ -472,26 +465,12 @@ describe('createLive2DModelHandle', () => {
       runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
       controls,
     });
-    const nestedOperation = vi.fn((transaction: Live2DClockTransaction | null) => {
-      if (!transaction) return null;
-      return {
-        token: transaction.token,
-        frameStatus: handle.frame.submit({ deltaMs: 16, shouldAdvance: true, transaction }).status,
-      };
-    });
-
-    const result = await withSharedRuntimeClock(clock, () => true, async (outer) => {
-      if (!outer) throw new Error('Expected an acquired clock transaction.');
-      expect(outer).not.toHaveProperty('clock');
+    await withSharedRuntimeClock(clock, () => true, async () => {
       expect(isSharedRuntimeClockLocked()).toBe(true);
       expect(handle.frame.submit({ deltaMs: 16, shouldAdvance: true }).status).toBe('deferred');
-      const token = await withSharedRuntimeClock(clock, () => true, nestedOperation, outer);
-      return token;
     });
 
-    expect(result).toMatchObject({ frameStatus: 'submitted' });
-    expect(nestedOperation).toHaveBeenCalledTimes(1);
-    expect(controls.advanceFrame).toHaveBeenCalledTimes(1);
+    expect(controls.advanceFrame).not.toHaveBeenCalled();
     expect(isSharedRuntimeClockLocked()).toBe(false);
   });
 });
@@ -772,7 +751,7 @@ describe('submitLive2DBakeFrameBatch', () => {
     subModel.internalModel = { coreModel: coreModel() };
     subModel.update = vi.fn(() => { order.push('sub'); });
     const composite = new Live2DCompositeModel(mainModel, [subModel]);
-    const controls = cubism2Live2DAdapter.getControls();
+    const controls = new Cubism2PixiLive2DModelControls();
     const frame = vi.spyOn(controls, 'stepBakeFrame');
     const handle = createLive2DModelHandle({ id: 'composite-bake', model: composite, runtime: cubism2Runtime, controls });
 
