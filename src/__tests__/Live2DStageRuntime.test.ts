@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Live2DStageRuntime } from '../engine/Live2DStageRuntime';
 import type { CharacterEntry } from '../engine/Live2DConfig';
 import type { Live2DRuntimeAdapter, Live2DRuntimeModelControls } from '../engine/runtime/Live2DRuntimeContracts';
+import type { Live2DRuntimeDescriptor } from '../engine/Live2DRuntimeResolver';
 import type { MotionRequest } from '../engine/Live2DMotionController';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
@@ -50,7 +51,15 @@ describe('Live2DStageRuntime', () => {
       captureSnapshot: vi.fn(() => null),
       applySnapshot: vi.fn(),
     } as unknown as Live2DRuntimeModelControls;
-    adapter = { getControls: () => controls } as unknown as Live2DRuntimeAdapter;
+    adapter = {
+      getControls: () => controls,
+      createModelHandle: (id: string, model: object, modelRuntime?: Live2DRuntimeDescriptor) => createLive2DModelHandle({
+        id,
+        model,
+        runtime: modelRuntime ?? runtime,
+        controls,
+      }),
+    } as unknown as Live2DRuntimeAdapter;
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(adapter);
   });
 
@@ -115,18 +124,21 @@ describe('Live2DStageRuntime', () => {
     const shared = makeEntry('shared', {});
     for (const entry of [independent, shared]) {
       entry.runtimeHandle = createLive2DModelHandle({
-        id: entry.id, model: entry.model, runtime, controls: adapter.getControls(),
+        id: entry.id,
+        model: entry.model,
+        // Keep the entry descriptor at Cubism 2 while making the loaded handle
+        // authoritative for the independent model's clock behavior.
+        runtime: entry.id === 'independent'
+          ? { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true }
+          : runtime,
+        controls: adapter.getControls(),
       });
       entry._pendingPlayMotion = {
         key: 'wave', priority: 3, offset: 0, sceneTime: 0, skipHardReset: false, reqEpoch: 1,
       };
       stage.characters.set(entry.id, entry);
     }
-    // Both descriptors say Cubism 2; only the handle declares an independent clock.
-    independent.runtimeHandle = {
-      ...independent.runtimeHandle!,
-      capabilities: { ...independent.runtimeHandle!.capabilities, usesSharedSdkClock: false },
-    };
+    // Both entries say Cubism 2; only the loaded handle declares an independent clock.
     await acquireUtSystemLock();
     try {
       await stage.step(16);
@@ -165,8 +177,9 @@ describe('Live2DStageRuntime', () => {
 
   it('commits cached Cubism 3+ motion poses on paused zero-delta seeks', async () => {
     const { model, internal, drawn } = createCubismModelFixture();
-    const controls = new CubismPixiLive2DAdapter().getControls();
-    vi.mocked(runtimeAdapter.getLive2DRuntimeAdapter).mockReturnValue({ getControls: () => controls } as Live2DRuntimeAdapter);
+    const adapter = new CubismPixiLive2DAdapter();
+    const controls = adapter.getControls();
+    vi.mocked(runtimeAdapter.getLive2DRuntimeAdapter).mockReturnValue(adapter);
     const stage = new Live2DStageRuntime({
       dispatchMotion,
       describeInvalidModelState: () => null,

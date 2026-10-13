@@ -52,6 +52,10 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     restartIdleMotion: vi.fn(async () => {}),
     hasMotionGroup: vi.fn(() => true),
     startMotion: vi.fn(async () => ({ ok: true, offsetReplayMs: 0 })),
+    withSharedClock: vi.fn(async (_model, isCurrent, operation) => {
+      if (!isCurrent()) return undefined;
+      return operation(null, null);
+    }),
     getMotionSamplingTargets: vi.fn(() => []),
     sampleMotion: vi.fn(async () => ({ status: 'unsupported' as const })),
     installCustomMotionStage: vi.fn(() => null),
@@ -63,6 +67,7 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     setBlink: vi.fn(),
     applyFocus: vi.fn(),
     getFocusControllers: vi.fn(() => []),
+    manageFocusAnimations: vi.fn(),
     getHeadAnchor: vi.fn(() => null),
     ...overrides,
   };

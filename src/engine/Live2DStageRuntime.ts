@@ -8,24 +8,16 @@
 
 import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import * as PIXI from 'pixi.js';
-import { isUtSystemLockActive } from './Live2DConfig';
+import { advanceSharedRuntimeClock, isSharedRuntimeClockLocked } from './live2d/runtime/Live2DRuntimeClockCoordinator';
 import type { CharacterTransformConfig } from '../api/types/character';
 import type { CharacterEntry } from './Live2DConfig';
 import type { ModelSnapshot } from './Live2DConfig';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import type { RimLightStyleState } from '../api/types/visual';
 import type { ResolvedRimLightState } from './RimLightResolver';
-import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
+import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { applyCustomMotionValues, evaluateCustomMotionRuntime } from './live2d/customMotionRuntime';
 import type { MotionRequest } from './Live2DMotionController';
-
-function isDefaultLive2DPose(snapshot: ModelSnapshot | null): boolean {
-  if (!snapshot?.params?.length) return true;
-  for (let i = 0; i < snapshot.params.length; i++) {
-    if (snapshot.params[i] !== 0) return false;
-  }
-  return true;
-}
 
 export type PendingCustomMotion = {
   motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
@@ -134,7 +126,7 @@ export class Live2DStageRuntime {
   }
 
   async step(dt: number, forceStep: boolean = false, manualTimeMs?: number): Promise<void> {
-    const sharedClockLocked = isUtSystemLockActive() && !forceStep && manualTimeMs === undefined;
+    const sharedClockLocked = isSharedRuntimeClockLocked() && !forceStep && manualTimeMs === undefined;
 
     this.pendingMotionCount = 0;
     for (const entry of this.characters.values()) {
@@ -166,15 +158,17 @@ export class Live2DStageRuntime {
     const shouldStepModels = deltaInMs > 0;
     deltaInMs = shouldStepModels ? Math.min(50, Math.max(0.001, deltaInMs)) : 0;
 
-    const sdkClock = cubism2Live2DAdapter.getClock();
-    if (sdkClock && !sharedClockLocked && this.jumpingCharacters.size === 0 && manualTimeMs === undefined) {
-      sdkClock.setUserTimeMSec(sdkClock.getUserTimeMSec() + deltaInMs);
+    if (!sharedClockLocked && this.jumpingCharacters.size === 0 && manualTimeMs === undefined) {
+      advanceSharedRuntimeClock(deltaInMs);
     }
 
     const scriptEngine = this.callbacks.getScriptEngine();
     for (const entry of this.characters.values()) {
       const capabilities = getLive2DRuntimeCapabilities(entry);
       if (sharedClockLocked && (capabilities.usesSharedSdkClock || !capabilities.supportsMotion)) continue;
+      if (!entry.model) continue;
+      let runtime = getBoundRuntimeHandle(entry);
+      if (!runtime || runtime.frame.shouldDeferPreview(forceStep, manualTimeMs)) continue;
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0 && !scriptEngine?.isReconstructing) {
         entry.filterWarmupFrames = Math.max(0, entry.filterWarmupFrames - 1);
       }
@@ -185,6 +179,9 @@ export class Live2DStageRuntime {
         const invalidBeforeUpdate = this.callbacks.describeInvalidModelState(entry);
         if (invalidBeforeUpdate) await this.callbacks.repairCorruptedModel(entry, invalidBeforeUpdate, forceStep);
       }
+      if (!entry.model) continue;
+      runtime = getBoundRuntimeHandle(entry);
+      if (!runtime || runtime.frame.shouldDeferPreview(forceStep, manualTimeMs)) continue;
 
       if (!entry.isCorrupted) {
         try {
@@ -193,22 +190,11 @@ export class Live2DStageRuntime {
             this.callbacks.maybeInstallCustomMotionStage(entry);
             entry.customMotionStage?.setSceneTime(this.callbacks.resolveCustomMotionSceneTime(entry, manualTimeMs));
           }
-          if (entry.pendingSeekBoundarySnapshot) {
-            if (manualTimeMs === undefined) {
-              entry.pendingSeekBoundarySnapshot = undefined;
-              entry.pendingSeekBoundaryMotionStartTime = undefined;
-              entry.pendingSeekBoundaryDuration = undefined;
-            } else {
-              const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-              const currentSnapshot = controls.captureSnapshot(entry.id, entry.model, entry.motionStartTime);
-              if (isDefaultLive2DPose(currentSnapshot)) {
-                controls.applySnapshot(entry.model, entry.pendingSeekBoundarySnapshot);
-              } else {
-                entry.pendingSeekBoundarySnapshot = undefined;
-                entry.pendingSeekBoundaryMotionStartTime = undefined;
-                entry.pendingSeekBoundaryDuration = undefined;
-              }
-            }
+          const boundarySnapshot = entry.pendingSeekBoundarySnapshot;
+          if (boundarySnapshot && manualTimeMs === undefined) {
+            entry.pendingSeekBoundarySnapshot = undefined;
+            entry.pendingSeekBoundaryMotionStartTime = undefined;
+            entry.pendingSeekBoundaryDuration = undefined;
           }
 
           const freezeNativeMotion = !this.shouldUpdate
@@ -217,9 +203,40 @@ export class Live2DStageRuntime {
           // Cubism 3+ evaluates cached motion writers and native queues inside
           // update(), including at delta 0. A forced seek flush must commit
           // that pose before rendering without advancing the paused clock.
-          const commitNativeSeek = forceStep && capabilities.evaluatesPoseOnZeroDelta;
-          if ((shouldStepModels || commitNativeSeek) && !freezeNativeMotion) {
-            getLive2DRuntimeAdapter(entry.runtime).getControls().advanceFrame(entry.model, deltaInMs);
+          const commitNativeSeek = forceStep
+            && manualTimeMs !== undefined
+            && capabilities.evaluatesPoseOnZeroDelta;
+          const injectedParameters = entry.injectedParams;
+          if (!entry.customMotionStage && entry.customMotion && entry.customMotionHandoff) {
+            const sceneTime = this.callbacks.resolveCustomMotionSceneTime(entry, manualTimeMs);
+            const evaluation = evaluateCustomMotionRuntime(
+              entry.customMotion.motion,
+              entry.customMotion.startSceneTime,
+              sceneTime,
+              entry.customMotionHandoff,
+            );
+            applyCustomMotionValues(
+              entry.injectedParams,
+              entry.customMotion.controlledParameterIds,
+              evaluation.values,
+              entry.lipSyncParameterIds,
+            );
+          }
+
+          const frameResult = runtime.frame.submit({
+            deltaMs: deltaInMs,
+            shouldAdvance: (shouldStepModels || commitNativeSeek) && !freezeNativeMotion,
+            forceZeroDeltaCommit: commitNativeSeek,
+            forceStep,
+            manualTimeMs,
+            injectedParameters,
+            handoffBoundarySnapshot: manualTimeMs === undefined ? null : boundarySnapshot,
+            isCurrent: () => this.characters.get(entry.id) === entry && entry.model === runtime.displayObject,
+          });
+          if (boundarySnapshot && frameResult.status === 'submitted' && !frameResult.retainedHandoffBoundary) {
+            entry.pendingSeekBoundarySnapshot = undefined;
+            entry.pendingSeekBoundaryMotionStartTime = undefined;
+            entry.pendingSeekBoundaryDuration = undefined;
           }
 
           const invalidAfterUpdate = this.callbacks.describeInvalidModelState(entry);
@@ -230,29 +247,6 @@ export class Live2DStageRuntime {
       }
 
       if (entry.isCorrupted) continue;
-      if (!entry.customMotionStage && entry.customMotion && entry.customMotionHandoff) {
-        const sceneTime = this.callbacks.resolveCustomMotionSceneTime(entry, manualTimeMs);
-        const evaluation = evaluateCustomMotionRuntime(
-          entry.customMotion.motion,
-          entry.customMotion.startSceneTime,
-          sceneTime,
-          entry.customMotionHandoff,
-        );
-        applyCustomMotionValues(
-          entry.injectedParams,
-          entry.customMotion.controlledParameterIds,
-          evaluation.values,
-          entry.lipSyncParameterIds,
-        );
-      }
-
-      if (entry.injectedParams) {
-        const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-        for (const [key, value] of Object.entries(entry.injectedParams)) {
-          controls.setInjectedParameter(entry.model, key, value);
-        }
-        controls.syncInputParameters(entry.model);
-      }
 
       if (entry.pendingLipSyncRelease && entry.pendingLipSyncRelease.size > 0) {
         for (const parameterId of entry.pendingLipSyncRelease) delete entry.injectedParams[parameterId];

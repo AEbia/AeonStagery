@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createLive2DModelHandle, getLive2DRuntimeCapabilities, resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import {
+  isSharedRuntimeClockLocked,
+  withSharedRuntimeClock,
+  type Live2DClockTransaction,
+} from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import type {
   Live2DRuntimeModelControls,
   Live2DSeekRestoreResult,
@@ -265,7 +270,107 @@ describe('createLive2DModelHandle', () => {
 
     expect(controls.captureSnapshot).toHaveBeenCalledWith('snapshot', model, 3.5);
     expect(controls.applySnapshot).toHaveBeenCalledWith(model, snapshot);
-    expect(controls.restoreSeekState).toHaveBeenCalledWith(model, seekInput);
+    expect(controls.restoreSeekState).toHaveBeenCalledWith(model, expect.objectContaining({
+      ...seekInput,
+      id: 'snapshot',
+      isCurrent: expect.any(Function),
+    }));
+  });
+
+  it('owns preload, snapshot handoff, replay and expression restoration in a bound transition', async () => {
+    const model = { name: 'transition-model' };
+    const controls = createControls();
+    const order: string[] = [];
+    const handoff = { params: new Float32Array([0.5]), opacities: new Float32Array([1]) };
+    vi.mocked(controls.preloadMotion).mockImplementation(async () => { order.push('preload'); });
+    vi.mocked(controls.startMotion).mockImplementation(async (_model, _key, _priority, _offset, options) => {
+      order.push('start');
+      await options?.beforeReplay?.({ motionStartUtTimeMs: 10 });
+      return { ok: true, offsetReplayMs: 50, motionStartUtTimeMs: 10 };
+    });
+    vi.mocked(controls.applySnapshot).mockImplementation(() => { order.push('snapshot'); });
+    vi.mocked(controls.setExpression).mockImplementation(() => { order.push('expression'); });
+    vi.mocked(controls.captureSnapshot).mockReturnValue({
+      params: new Float32Array([0]),
+      opacities: new Float32Array([1]),
+    });
+    const handle = createLive2DModelHandle({
+      id: 'transition',
+      model,
+      runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls,
+    });
+
+    const result = await handle.performance.transition({
+      motionKey: 'wave', priority: 3, offsetSeconds: 0.05, sceneTimeSeconds: 2,
+      handoffSnapshot: handoff, expressionKey: 'smile', restoreHandoffBoundary: true, isCurrent: () => true,
+    });
+
+    expect(result).toMatchObject({ status: 'started', offsetReplayMs: 50, retainedHandoffBoundary: true });
+    expect(order).toEqual(['preload', 'start', 'snapshot', 'expression', 'snapshot']);
+    expect(controls.startMotion).toHaveBeenCalledWith(model, 'wave', 3, 0.05, expect.objectContaining({
+      clearQueueFirst: undefined,
+      isCurrent: expect.any(Function),
+      beforeReplay: expect.any(Function),
+    }));
+  });
+
+  it('drops a transition after preload when its operation is no longer current', async () => {
+    const controls = createControls();
+    let current = true;
+    vi.mocked(controls.preloadMotion).mockImplementation(async () => { current = false; });
+    const handle = createLive2DModelHandle({
+      id: 'stale-transition',
+      model: {},
+      runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
+      controls,
+    });
+
+    await expect(handle.performance.transition({
+      motionKey: 'wave', priority: 3, offsetSeconds: 0, sceneTimeSeconds: 1, isCurrent: () => current,
+    })).resolves.toMatchObject({ status: 'cancelled' });
+    expect(controls.startMotion).not.toHaveBeenCalled();
+    expect(controls.applySnapshot).not.toHaveBeenCalled();
+  });
+
+  it('submits frame parameters after advancement and commits geometry once per batch', () => {
+    const model = { name: 'frame-model' };
+    const controls = createControls();
+    const order: string[] = [];
+    vi.mocked(controls.advanceFrame).mockImplementation(() => { order.push('advance'); });
+    vi.mocked(controls.setInjectedParameter).mockImplementation((_model, id) => { order.push(id); });
+    vi.mocked(controls.syncInputParameters).mockImplementation(() => { order.push('commit'); });
+    const handle = createLive2DModelHandle({
+      id: 'frame',
+      model,
+      runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
+      controls,
+    });
+
+    expect(handle.frame.submit({
+      deltaMs: 16,
+      shouldAdvance: true,
+      injectedParameters: { PARAM_ANGLE_X: 0.2, PARAM_MOUTH_OPEN_Y: 0.7 },
+    })).toEqual({ status: 'submitted', retainedHandoffBoundary: undefined });
+    expect(order).toEqual(['advance', 'PARAM_ANGLE_X', 'PARAM_MOUTH_OPEN_Y', 'commit']);
+  });
+
+  it('restores focus updater lifecycle through the bound focus behavior', () => {
+    const controls = createControls();
+    const handle = createLive2DModelHandle({
+      id: 'focus',
+      model: {},
+      runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls,
+    });
+
+    handle.focus.manageAnimations('stop');
+    handle.focus.manageAnimations('pause');
+    handle.focus.manageAnimations('resume');
+
+    expect(controls.manageFocusAnimations).toHaveBeenNthCalledWith(1, expect.anything(), 'stop');
+    expect(controls.manageFocusAnimations).toHaveBeenNthCalledWith(2, expect.anything(), 'pause');
+    expect(controls.manageFocusAnimations).toHaveBeenNthCalledWith(3, expect.anything(), 'resume');
   });
 
   it('delegates bake rendering and invalid-state diagnostics', () => {
@@ -290,5 +395,40 @@ describe('createLive2DModelHandle', () => {
     expect(handle.diagnostics.describeInvalidState()).toBe('primary param[0]=NaN');
     expect(controls.renderForBake).toHaveBeenCalledWith(model, renderer, 'frame-24', renderTexture);
     expect(controls.describeInvalidState).toHaveBeenCalledWith(model);
+  });
+
+  it('reuses an explicit clock transaction without recursively acquiring the lock', async () => {
+    let time = 100;
+    const clock = {
+      getUserTimeMSec: () => time,
+      setUserTimeMSec: (next: number) => { time = next; },
+    };
+    const controls = createControls();
+    const handle = createLive2DModelHandle({
+      id: 'transaction-frame',
+      model: {},
+      runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls,
+    });
+    const nestedOperation = vi.fn((transaction: Live2DClockTransaction | null) => {
+      if (!transaction) return null;
+      return {
+        token: transaction.token,
+        frameStatus: handle.frame.submit({ deltaMs: 16, shouldAdvance: true, transaction }).status,
+      };
+    });
+
+    const result = await withSharedRuntimeClock(clock, () => true, async (outer) => {
+      if (!outer) throw new Error('Expected an acquired clock transaction.');
+      expect(isSharedRuntimeClockLocked()).toBe(true);
+      expect(handle.frame.submit({ deltaMs: 16, shouldAdvance: true }).status).toBe('deferred');
+      const token = await withSharedRuntimeClock(clock, () => true, nestedOperation, outer);
+      return token;
+    });
+
+    expect(result).toMatchObject({ frameStatus: 'submitted' });
+    expect(nestedOperation).toHaveBeenCalledTimes(1);
+    expect(controls.advanceFrame).toHaveBeenCalledTimes(1);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
   });
 });

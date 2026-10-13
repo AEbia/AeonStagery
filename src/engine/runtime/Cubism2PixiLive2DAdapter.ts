@@ -4,6 +4,7 @@ import { getUnsupportedLive2DRuntimeMessage, isLive2DCubism2RuntimeAvailable } f
 import { waitForLive2DRuntimeBootstrap } from '../Live2DRuntimeAvailability';
 import { createLive2DModelHandle, type Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlModule';
 import { Cubism2BakeRenderCore } from '../live2d/runtime/Cubism2BakeRenderCore';
+import { registerSharedRuntimeClockProvider } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
 import { loadLive2DEngineModule } from '../Live2DEngineBridge';
 import type {
   Live2DModelCreateOptions,
@@ -41,6 +42,7 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     // as the render pipe — see Live2DEngineBridge.
     private readonly loadModule: Cubism2ModuleLoader = () => loadLive2DEngineModule(),
   ) {
+    registerSharedRuntimeClockProvider(() => this.getClock());
     this.controls = new Cubism2PixiLive2DModelControls({
       maskSize: () => this.getConfig()?.cubism2?.maskSize ?? 1024,
       bakeCore: this.bakeCore,

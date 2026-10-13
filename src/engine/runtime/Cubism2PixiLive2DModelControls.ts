@@ -2,14 +2,16 @@ import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import type { ModelSnapshot } from '../Live2DConfig';
 import {
-  acquireUtSystemLock,
   CUBISM2_DEFAULT_PARAMS,
   captureModelSnapshot,
   findFirstNonFinite,
-  releaseUtSystemLock,
   resetCoreParams,
   resolveNumericArrayLike,
 } from '../Live2DConfig';
+import {
+  withSharedRuntimeClock,
+  type Live2DClockTransaction,
+} from '../live2d/runtime/Live2DRuntimeClockCoordinator';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
 import { Cubism2NativeMotionSession, stepMotionQueuesAt } from '../live2d/Cubism2NativeMotionSession';
 import {
@@ -45,6 +47,7 @@ import type {
   Live2DDisposeOptions,
   Live2DFocusInput,
   Live2DFocusOptions,
+  Live2DFocusAnimationAction,
   Live2DRuntimeModelControls,
   Live2DMotionSamplingOptions,
   Live2DMotionSamplingResult,
@@ -491,8 +494,11 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
      * `undefined` means "unknown" and falls back to the model's live entry.
      */
     previousExpressionKey?: string | null,
+    isCurrent: () => boolean = () => true,
+    transaction?: Live2DClockTransaction,
   ): Promise<void> {
     const prepared = await Promise.all(this.getConcreteModels(model).map(async (target) => {
+      if (!isCurrent()) return null;
       const internalModel = target?.internalModel;
       const coreModel = internalModel?.coreModel;
       const expressionManager = internalModel?.motionManager?.expressionManager;
@@ -536,6 +542,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
         // request path below.
         return null;
       }
+      if (!isCurrent()) return null;
       // The model may have been destroyed while the expression fetch was in
       // flight; the manager's caches are gone by now.
       if (expressionManager.destroyed) return null;
@@ -563,6 +570,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           } catch {
             previousExpression = null;
           }
+          if (!isCurrent()) return null;
           if (expressionManager.destroyed) return null;
           if (!this.isCurrentExpressionRequest(expressionManager, requestEpoch)) return null;
           // Re-clear the queue: the predecessor's own load may have queued it.
@@ -584,8 +592,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     const targets = prepared.filter((target): target is NonNullable<typeof target> => !!target);
     if (targets.length === 0) return;
 
-    await acquireUtSystemLock();
-    try {
+    await withSharedRuntimeClock(this.clockProvider(), isCurrent, async (lease) => {
+      if (!isCurrent()) return;
       const currentTargets = targets.filter(({ target, expressionManager, requestEpoch }) => (
         !target?.destroyed
         && !expressionManager.destroyed
@@ -593,8 +601,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       ));
       if (currentTargets.length === 0) return;
 
-      const utSystem = typeof window !== 'undefined' ? (window as any).UtSystem : undefined;
-      const nowMs = utSystem?.getUserTimeMSec?.() ?? performance.now();
+      const utSystem = lease?.clock ?? null;
+      const nowMs = utSystem?.getUserTimeMSec() ?? performance.now();
       const elapsedMs = Number.isFinite(elapsedSeconds)
         ? Math.max(0, elapsedSeconds) * 1000
         : 24 * 60 * 60 * 1000;
@@ -613,6 +621,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           // reconstructs in-window and continues from that progress.
           const PREVIOUS_EXPRESSION_AGE_MS = 6000;
           for (const target of currentTargets) {
+            if (!isCurrent()) break;
             if (!target.expression) continue;
             // `previousKnown` means the caller resolved the predecessor from
             // the scene: never fall back to the model's live entry, whose
@@ -644,6 +653,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
             }
             // Phase 2: latch the target expression at the seeked elapsed and
             // evaluate it so the seeked frame shows its in-progress fade.
+            if (!isCurrent()) break;
             utSystem.setUserTimeMSec(nowMs - elapsedMs);
             target.expressionManager.currentExpression = target.expression;
             target.expressionManager._setExpression?.(target.expression);
@@ -661,11 +671,20 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       // actual motion/expression/core update inside its native _render(),
       // where Cubism's WebGL state is isolated from Pixi's filter programs.
       for (const { target } of currentTargets) {
+        if (!isCurrent()) break;
         target.update?.(0.001);
       }
-    } finally {
-      releaseUtSystemLock();
-    }
+    }, transaction);
+  }
+
+  withSharedClock<T>(
+    _model: any,
+    isCurrent: () => boolean,
+    operation: (clock: Live2DRuntimeClock | null, transaction: Live2DClockTransaction | null) => Promise<T> | T,
+    transaction?: Live2DClockTransaction,
+  ): Promise<T | undefined> {
+    return withSharedRuntimeClock(this.clockProvider(), isCurrent, (lease) =>
+      operation(lease?.clock ?? null, lease), transaction);
   }
 
   setInjectedParameter(model: any, paramName: string, value: number): void {
@@ -717,12 +736,16 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
   }
 
   async restoreSeekState(model: any, input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> {
+    const isCurrent = input.isCurrent ?? (() => true);
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     if (input.snapshot) {
       this.applySnapshot(model, input.snapshot);
     }
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     if (input.motion) {
       await this.preloadMotion(model, input.motion.key);
     }
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     return {
       status: 'fallback',
       tierUsed: 'snapshot-forward',
@@ -898,7 +921,11 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     return advanced;
   }
 
-  async flushIdleState(model: any, isCurrent: () => boolean = () => true): Promise<void> {
+  async flushIdleState(
+    model: any,
+    isCurrent: () => boolean = () => true,
+    transaction?: Live2DClockTransaction,
+  ): Promise<void> {
     if (!isCurrent()) return;
     const internalModel = model?.internalModel;
     const coreModel = internalModel?.coreModel;
@@ -918,15 +945,14 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           // 物理引擎会遇到巨大的负 dt，导致瞬间 NaN 坍缩。这里只前进 16ms 跑一帧。
           const sdkClock = this.clockProvider();
           if (sdkClock) {
-            await acquireUtSystemLock();
-            try {
+            await withSharedRuntimeClock(sdkClock, isCurrent, (lease) => {
               if (!isCurrent()) return;
-              const t = sdkClock.getUserTimeMSec();
-              sdkClock.setUserTimeMSec(t + 16);
+              const clock = lease?.clock;
+              if (!clock) return;
+              const t = clock.getUserTimeMSec();
+              clock.setUserTimeMSec(t + 16);
               model.update?.(16);
-            } finally {
-              releaseUtSystemLock();
-            }
+            }, transaction);
           } else {
             for (let i = 0; i < 40; i++) model.update?.(50);
           }
@@ -960,10 +986,15 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     }
   }
 
-  async resetModelToIdle(model: any, options: Live2DModelResetOptions = {}): Promise<void> {
+  async resetModelToIdle(
+    model: any,
+    options: Live2DModelResetOptions = {},
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> {
     const { keepFocus = false, idleSnapshot = null } = options;
 
     for (const targetModel of this.getConcreteModels(model)) {
+      if (!isCurrent()) return;
       const internalModel = targetModel?.internalModel;
       if (!internalModel) continue;
 
@@ -985,6 +1016,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           const idleGroup = this.resolveIdleMotionGroup(internalModel);
           if (idleGroup) {
             await internalModel.motionManager.startMotion(idleGroup, 0, 3);
+            if (!isCurrent()) return;
             // 与旧实现一致：idle 洗刷推进 16ms（时钟经 adapter 句柄访问，与
             // flushIdleState 同通道；此处历史上有意不加全局锁——见旧代码）。
             const sdkClock = this.clockProvider();
@@ -1024,6 +1056,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
         }
       }
 
+      if (!isCurrent()) return;
       if (!keepFocus && internalModel.focusController) {
         internalModel.focusController.focus(0, 0, true);
       }
@@ -1089,6 +1122,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     offsetSeconds: number,
     options: Live2DMotionStartOptions = {},
   ): Promise<Live2DMotionStartResult> {
+    if (options.isCurrent && !options.isCurrent()) {
+      return { ok: false, offsetReplayMs: 0, cancelled: true };
+    }
     const targets = this.getConcreteModels(model)
       .map((target) => ({
         model: target,
@@ -1107,6 +1143,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
 
     if (options.clearQueueFirst) {
       for (const { motionManager } of targets) {
+        if (options.isCurrent && !options.isCurrent()) {
+          return { ok: false, offsetReplayMs: 0, cancelled: true };
+        }
         motionManager.stopAllMotions?.();
         motionManager._motionQueueManager?.stopAllMotions?.();
         if (motionManager.state) {
@@ -1124,6 +1163,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       priority,
       offsetSeconds,
       clock: options.clock ?? null,
+      isCurrent: options.isCurrent,
       beforeReplay: options.beforeReplay
         ? async (context) => options.beforeReplay!(context)
         : undefined,
@@ -1132,6 +1172,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     // Legacy ordinary-playback path: a zero-offset non-skip start stepped one
     // frame inside the locked clock window (physics was already restored by
     // the session's finally, so the step sees a positive dt — safe).
+    if (options.isCurrent && !options.isCurrent()) {
+      return { ok: false, offsetReplayMs: result.offsetReplayMs, cancelled: true };
+    }
     if (options.stepAfterStartMs && !(offsetSeconds > 0)) {
       this.advanceFrame(model, options.stepAfterStartMs);
     }
@@ -1140,6 +1183,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       ok: result.started,
       offsetReplayMs: result.offsetReplayMs,
       motionStartUtTimeMs: result.motionStartUtTimeMs,
+      cancelled: result.cancelled,
     };
   }
 
@@ -1158,6 +1202,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     model: any,
     motionKey: string,
     options: Live2DMotionSamplingOptions,
+    transaction?: Live2DClockTransaction,
   ): Promise<Live2DMotionSamplingResult> {
     const targets = this.getMotionSamplingTargets(model);
     if (targets.length === 0) {
@@ -1169,14 +1214,23 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       ...firstMeta,
       ...(metas.some((candidate) => candidate.hasNonParameterCurves) ? { hasNonParameterCurves: true } : {}),
     };
-    const curves = await Promise.all(targets.map((target) => sampleCubism2MotionCurves(target, motionKey, {
+    const sampleOptions = {
       fps: options.fps,
       durationSeconds: meta.durationSeconds,
       zeroSourceFades: options.zeroSourceFades,
       skipMissingParameters: options.skipMissingParameters,
       fadeInSeconds: meta.fadeInSeconds,
       fadeOutSeconds: meta.fadeOutSeconds,
-    })));
+    };
+    const curves = transaction
+      ? await (async () => {
+          const results: Array<Awaited<ReturnType<typeof sampleCubism2MotionCurves>>> = [];
+          for (const target of targets) {
+            results.push(await sampleCubism2MotionCurves(target, motionKey, sampleOptions, transaction));
+          }
+          return results;
+        })()
+      : await Promise.all(targets.map((target) => sampleCubism2MotionCurves(target, motionKey, sampleOptions)));
     return {
       status: 'sampled',
       metadata: meta,
@@ -1435,6 +1489,20 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       if (focusController) controllers.push(focusController);
     }
     return controllers;
+  }
+
+  manageFocusAnimations(model: any, action: Live2DFocusAnimationAction): void {
+    for (const focusController of this.getFocusControllers(model)) {
+      if (action === 'stop') {
+        gsap.killTweensOf(focusController);
+        this.restoreLookAtFocusUpdate(focusController);
+      } else {
+        gsap.getTweensOf(focusController).forEach((tween) => {
+          if (action === 'pause') tween.pause();
+          else tween.resume();
+        });
+      }
+    }
   }
 
   getHeadAnchor(model: any): { x: number; y: number } | null {

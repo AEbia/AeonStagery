@@ -1,9 +1,14 @@
 import type * as PIXI from 'pixi.js';
 import { createBoundModelInitialization } from './BoundModelInitialization';
 import { createBoundModelParameters } from './BoundModelParameters';
+import { createBoundModelPerformance } from './BoundModelPerformance';
+import { createBoundModelFrame } from './BoundModelFrame';
+import { createBoundModelFocus } from './BoundModelFocus';
+import { createBoundModelCustomMotion } from './BoundModelCustomMotion';
 import type { Live2DParameterEdit, Live2DParameterEditResult, Live2DParameterInspection } from '../../../api/types/live2d-parameter-animation';
 import type { Live2DParameterMetadata } from '../../../api/types/live2d-parameter-animation';
 import type { ModelSnapshot } from '../../Live2DConfig';
+import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../customMotionStage';
 import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../../Live2DRuntimeResolver';
 import type {
   Live2DInitializationInput,
@@ -17,6 +22,16 @@ import type {
   Live2DSeekRestoreResult,
   Live2DMotionSamplingOptions,
   Live2DMotionSamplingResult,
+  Live2DPerformanceTransitionInput,
+  Live2DPerformanceTransitionResult,
+  Live2DSeekMotionOffsetInput,
+  Live2DSeekMotionOffsetResult,
+  Live2DFocusAnimationAction,
+  Live2DFocusInput,
+  Live2DFrameSubmissionInput,
+  Live2DFrameSubmissionResult,
+  Live2DModelResetOptions,
+  Live2DClockTransaction,
 } from '../../runtime/Live2DRuntimeContracts';
 
 export interface Live2DRuntimeCapabilities {
@@ -114,19 +129,28 @@ export function getLive2DRuntimeCapabilities(entry: {
 export interface Live2DLifecycleInterface {
   clearMotionState(): void;
   stopAllMotions(): void;
+  resetToIdle(options?: Live2DModelResetOptions, isCurrent?: () => boolean): Promise<boolean>;
 }
 
 export interface Live2DMotionInterface {
   getAvailableMotions(): string[];
   getMotionDuration(motionKey: string): number;
   getMotionDebugState(): Record<string, unknown> | null;
-  preloadMotion(motionKey: string): Promise<void>;
-  sampleMotion(motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult>;
+  preloadMotion(motionKey: string, isCurrent?: () => boolean): Promise<boolean>;
+  sampleMotion(motionKey: string, options: Live2DMotionSamplingOptions, transaction?: Live2DClockTransaction): Promise<Live2DMotionSamplingResult>;
+  getPlaybackState(): { currentGroup: string | null; playing: boolean };
 }
 
 export interface Live2DExpressionInterface {
   getAvailableExpressions(): string[];
   setExpression(expressionName: string | null): void;
+  restoreAtSceneTime(
+    expressionName: string | null,
+    elapsedSeconds: number,
+    previousExpressionKey: string | null | undefined,
+    isCurrent: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean>;
 }
 
 export interface Live2DParameterInterface {
@@ -140,6 +164,33 @@ export interface Live2DSnapshotInterface {
   captureSnapshot(motionStartTime?: number): ModelSnapshot | null;
   applySnapshot(snapshot: ModelSnapshot): void;
   restoreSeekState(input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult>;
+}
+
+export interface Live2DPerformanceInterface {
+  transition(input: Live2DPerformanceTransitionInput, transaction?: Live2DClockTransaction): Promise<Live2DPerformanceTransitionResult>;
+  seekMotionOffset(input: Live2DSeekMotionOffsetInput): Promise<Live2DSeekMotionOffsetResult>;
+  restoreSeekState(input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult>;
+  restoreExpression(
+    expressionName: string | null,
+    elapsedSeconds: number,
+    previousExpressionKey: string | null | undefined,
+    isCurrent: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean>;
+}
+
+export interface Live2DFrameInterface {
+  shouldDeferPreview(forceStep?: boolean, manualTimeMs?: number, transaction?: Live2DClockTransaction): boolean;
+  submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult;
+}
+
+export interface Live2DFocusInterface {
+  apply(input: Live2DFocusInput): void;
+  manageAnimations(action: Live2DFocusAnimationAction): void;
+}
+
+export interface Live2DCustomMotionInterface {
+  installStage(input: Omit<InstallCustomMotionStageInput, 'targets'>): CustomMotionStageHandle | null;
 }
 
 export interface Live2DRenderInterface {
@@ -166,6 +217,10 @@ export interface Live2DModelHandle {
   readonly lifecycle: Live2DLifecycleInterface;
   readonly motion: Live2DMotionInterface;
   readonly expression: Live2DExpressionInterface;
+  readonly performance: Live2DPerformanceInterface;
+  readonly frame: Live2DFrameInterface;
+  readonly focus: Live2DFocusInterface;
+  readonly customMotion: Live2DCustomMotionInterface;
   readonly parameters: Live2DParameterInterface;
   readonly snapshot: Live2DSnapshotInterface;
   readonly render: Live2DRenderInterface;
@@ -186,6 +241,7 @@ export function createLive2DModelHandle({
   controls,
 }: Live2DModelHandleCreateOptions): Live2DModelHandle {
   const capabilities = resolveLive2DRuntimeCapabilities(runtime);
+  const performance = createBoundModelPerformance(id, model, controls, capabilities).performance;
 
   return {
     id,
@@ -198,18 +254,42 @@ export function createLive2DModelHandle({
     lifecycle: {
       clearMotionState: () => controls.clearMotionState(model),
       stopAllMotions: () => controls.stopAllMotions(model),
+      resetToIdle: async (options = {}, isCurrent = () => true) => {
+        if (!isCurrent()) return false;
+        await controls.resetModelToIdle(model, options, isCurrent);
+        if (!isCurrent()) return false;
+        if (capabilities.usesCubism2PrivateControls) controls.advanceFrame(model, 16);
+        return isCurrent();
+      },
     },
     motion: {
       getAvailableMotions: () => controls.getAvailableMotions(model),
       getMotionDuration: (motionKey) => controls.getMotionDuration(model, motionKey),
       getMotionDebugState: () => controls.getMotionDebugState(model),
-      preloadMotion: (motionKey) => controls.preloadMotion(model, motionKey),
-      sampleMotion: (motionKey, options) => controls.sampleMotion(model, motionKey, options),
+      preloadMotion: async (motionKey, isCurrent = () => true) => {
+        if (!isCurrent()) return false;
+        await controls.preloadMotion(model, motionKey);
+        return isCurrent();
+      },
+      sampleMotion: (motionKey, options, transaction) => controls.sampleMotion(model, motionKey, options, transaction),
+      getPlaybackState: () => {
+        const state = controls.getMotionDebugState(model);
+        return {
+          currentGroup: typeof state?.currentGroup === 'string' ? state.currentGroup : null,
+          playing: state?.playing === true,
+        };
+      },
     },
+    performance,
     expression: {
       getAvailableExpressions: () => controls.getAvailableExpressions(model),
       setExpression: (expressionName) => controls.setExpression(model, expressionName),
+      restoreAtSceneTime: (expressionName, elapsedSeconds, previousExpressionKey, isCurrent, transaction) =>
+        performance.restoreExpression(expressionName, elapsedSeconds, previousExpressionKey, isCurrent, transaction),
     },
+    ...createBoundModelFrame(id, model, controls, capabilities),
+    ...createBoundModelFocus(model, controls),
+    ...createBoundModelCustomMotion(model, controls),
     parameters: {
       getParameterValues: () => controls.getParameterValues(model),
       getParameterMetadata: () => controls.getParameterMetadata(model),
@@ -219,7 +299,7 @@ export function createLive2DModelHandle({
     snapshot: {
       captureSnapshot: (motionStartTime) => controls.captureSnapshot(id, model, motionStartTime),
       applySnapshot: (snapshot) => controls.applySnapshot(model, snapshot),
-      restoreSeekState: (input) => controls.restoreSeekState(model, input),
+      restoreSeekState: (input) => performance.restoreSeekState(input),
     },
     render: {
       renderForBake: (renderer, label, renderTexture) => controls.renderForBake(model, renderer, label, renderTexture),

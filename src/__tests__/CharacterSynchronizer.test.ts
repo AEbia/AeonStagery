@@ -619,6 +619,7 @@ describe('CharacterSynchronizer', () => {
       // No authored predecessor on a hand-built desired state: unknown, so the
       // adapter must not invent one.
       undefined,
+      expect.any(Function),
     );
     expect(live2D.setExpression).not.toHaveBeenCalled();
     expect(order).toEqual(['prepare', 'play', 'flush', 'expression']);
@@ -653,6 +654,7 @@ describe('CharacterSynchronizer', () => {
       'expression2',
       0,
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -682,6 +684,7 @@ describe('CharacterSynchronizer', () => {
       'expression2',
       expect.closeTo(0.2, 5),
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -706,7 +709,7 @@ describe('CharacterSynchronizer', () => {
     });
 
     expect(live2D.stopAllMotions).toHaveBeenCalledWith('char1');
-    expect(setExpressionForSeek).toHaveBeenCalledWith('char1', null, Number.POSITIVE_INFINITY, undefined);
+    expect(setExpressionForSeek).toHaveBeenCalledWith('char1', null, Number.POSITIVE_INFINITY, undefined, expect.any(Function));
   });
 
   it('does not advance snapshot motion during a visible seek', async () => {

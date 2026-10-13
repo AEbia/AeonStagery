@@ -11,46 +11,11 @@ import { readPartOpacities } from './live2d/runtime/Cubism2PartOpacity';
 export const STAGE_WIDTH = 1920;
 export const STAGE_HEIGHT = 1080;
 
-// Robust FIFO queue-based mutex protecting UtSystem.setUserTimeMSec() spoofing.
-// Only ONE character (across Live2DManager AND BakeEngine) may manipulate
-// the shared Cubism SDK clock at a time.
-interface MutexRequest {
-  resolve: () => void;
-}
-
-const lockQueue: MutexRequest[] = [];
-let isLocked = false;
-let criticalDepth = 0;
-
-export function acquireUtSystemLock(): Promise<void> {
-  if (!isLocked) {
-    isLocked = true;
-    criticalDepth++;
-    return Promise.resolve();
-  }
-  return new Promise<void>(resolve => {
-    lockQueue.push({
-      resolve: () => {
-        criticalDepth++;
-        resolve();
-      },
-    });
-  });
-}
-
-export function releaseUtSystemLock(): void {
-  criticalDepth = Math.max(0, criticalDepth - 1);
-  const next = lockQueue.shift();
-  if (next) {
-    next.resolve();
-  } else {
-    isLocked = false;
-  }
-}
-
-export function isUtSystemLockActive(): boolean {
-  return criticalDepth > 0;
-}
+export {
+  acquireUtSystemLock,
+  isUtSystemLockActive,
+  releaseUtSystemLock,
+} from './live2d/runtime/Live2DRuntimeClockCoordinator';
 
 /**
  * Standard Cubism 2 parameter names and their idle default values.

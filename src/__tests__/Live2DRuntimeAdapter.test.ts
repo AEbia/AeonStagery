@@ -1502,6 +1502,20 @@ describe('Live2DRuntimeAdapter', () => {
       expect(controls.getHeadAnchor(model)).toBeNull();
     });
 
+    it('restores the SDK focus updater when a focus tween is stopped', () => {
+      const controls = new Cubism2PixiLive2DModelControls();
+      const { model, internalModel } = cubism2DeepModel();
+      const originalUpdate = vi.fn();
+      internalModel.focusController.update = originalUpdate;
+
+      controls.applyFocus(model, { focusX: 0.8, focusY: -0.4, duration: 1 });
+      expect(internalModel.focusController.update).not.toBe(originalUpdate);
+
+      controls.manageFocusAnimations(model, 'stop');
+
+      expect(internalModel.focusController.update).toBe(originalUpdate);
+    });
+
     it('exposes the SDK clock handle and bake texture disposal on the adapter', async () => {
       delete (globalThis as any).window;
       const adapter = new Cubism2PixiLive2DAdapter(async () => ({

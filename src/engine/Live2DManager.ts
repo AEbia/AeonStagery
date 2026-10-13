@@ -9,6 +9,7 @@
  */
 
 import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
+import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { stageManager } from './StageManager';
@@ -677,25 +678,26 @@ class Live2DManager {
     }
 
     try {
-      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
+      const runtime = getBoundRuntimeHandle(entry);
+      if (!runtime) return;
       if (!this._shouldUpdate
         && getLive2DRuntimeCapabilities(entry).evaluatesPoseOnZeroDelta
-        && controls.setExpressionForSeek) {
+      ) {
         // An explicit inspector preview should show the final expression while
         // the timeline is paused. Re-evaluate at the same motion timestamp so
         // displaying it does not advance the scene or accumulate motion fades.
-        const model = entry.model;
-        void controls.setExpressionForSeek(model, expressionName, Number.POSITIVE_INFINITY)
-          .then(() => {
-            if (this.characters.get(id) === entry && entry.model === model && entry.expressionKey === expressionName) {
-              controls.advanceFrame(model, 0);
-            }
-          })
+        const generation = entry.lifecycleGeneration ?? 0;
+        void runtime.performance.restoreExpression(
+          expressionName,
+          Number.POSITIVE_INFINITY,
+          undefined,
+          () => this.characters.get(id) === entry
+            && (entry.lifecycleGeneration ?? 0) === generation
+            && entry.expressionKey === expressionName,
+        )
           .catch((err) => console.error(`[Live2D] Failed to preview expression on "${id}":`, err));
-      } else if (entry.runtimeHandle) {
-        entry.runtimeHandle.expression.setExpression(expressionName);
       } else {
-        getLive2DRuntimeAdapter(entry.runtime).getControls().setExpression(entry.model, expressionName);
+        runtime.expression.setExpression(expressionName);
       }
       hookSystem.execute('character:expression', { id, expressionName: expressionName || '' });
       console.log(expressionName
@@ -720,6 +722,7 @@ class Live2DManager {
     expressionName: string | null,
     elapsedSeconds: number,
     previousExpressionKey?: string | null,
+    isCurrentOperation: () => boolean = () => true,
   ): Promise<void> {
     const entry = this.characters.get(id);
     if (!entry?.model) return;
@@ -728,12 +731,18 @@ class Live2DManager {
     this.pendingExpressions.delete(id);
 
     try {
-      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-      if (controls.setExpressionForSeek) {
-        await controls.setExpressionForSeek(entry.model, expressionName, elapsedSeconds, previousExpressionKey);
-      } else {
-        controls.setExpression(entry.model, expressionName);
-      }
+      const runtime = getBoundRuntimeHandle(entry);
+      if (!runtime) return;
+      const generation = entry.lifecycleGeneration ?? 0;
+      await runtime.expression.restoreAtSceneTime(
+        expressionName,
+        elapsedSeconds,
+        previousExpressionKey,
+        () => this.characters.get(id) === entry
+          && (entry.lifecycleGeneration ?? 0) === generation
+          && isCurrentOperation(),
+      );
+      if (this.characters.get(id) !== entry || (entry.lifecycleGeneration ?? 0) !== generation || !isCurrentOperation()) return;
       hookSystem.execute('character:expression', { id, expressionName: expressionName || '' });
     } catch (err) {
       console.error(`[Live2D] Failed to restore expression "${expressionName}" on "${id}" during seek:`, err);
@@ -948,7 +957,7 @@ class Live2DManager {
 
     // The focus-controller interpolation (GSAP ownership, frame writes, SDK
     // focus fallback) is entirely owned by the runtime adapter.
-    getLive2DRuntimeAdapter(entry.runtime).getControls().applyFocus(entry.model, {
+    getBoundRuntimeHandle(entry)?.focus.apply({
       focusX,
       focusY,
       duration,
@@ -1194,8 +1203,7 @@ class Live2DManager {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return null;
     if (!getLive2DRuntimeCapabilities(entry).supportsSnapshot) return null;
-    return entry.runtimeHandle?.snapshot.captureSnapshot(entry.motionStartTime)
-      ?? getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(id, entry.model, entry.motionStartTime);
+    return getBoundRuntimeHandle(entry)?.snapshot.captureSnapshot(entry.motionStartTime) ?? null;
   }
 
   /**
@@ -1217,12 +1225,17 @@ class Live2DManager {
       expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
+      isCurrent?: () => boolean;
     },
   ): Promise<void> {
     const entry = this.characters.get(id);
     if (!entry?.model) return;
     const lifecycleGeneration = entry.lifecycleGeneration ?? 0;
-    const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
+    const runtime = getBoundRuntimeHandle(entry);
+    if (!runtime) return;
+    const isCurrent = () => this.characters.get(id) === entry
+      && (entry.lifecycleGeneration ?? 0) === lifecycleGeneration
+      && (input.isCurrent?.() ?? true);
     let result;
     try {
       const restoreInput = {
@@ -1236,12 +1249,11 @@ class Live2DManager {
         idleSnapshot: entry.idleSnapshot ?? null,
         isScrubbing: input.isScrubbing,
         preserveMotionForPlayback: input.preserveMotionForPlayback,
+        isCurrent,
       };
-      result = entry.runtimeHandle
-        ? await entry.runtimeHandle.snapshot.restoreSeekState(restoreInput)
-        : await controls.restoreSeekState(entry.model, restoreInput);
+      result = await runtime.performance.restoreSeekState(restoreInput);
     } catch (err) {
-      if (this.characters.get(id) !== entry || (entry.lifecycleGeneration ?? 0) !== lifecycleGeneration) {
+      if (!isCurrent()) {
         return;
       }
       console.warn(`[Live2D] Seek restore failed for "${id}"; preserving timeline execution.`, err);
@@ -1251,9 +1263,7 @@ class Live2DManager {
         diagnostics: [err instanceof Error ? err.message : String(err)],
       };
     }
-    if (this.characters.get(id) !== entry || (entry.lifecycleGeneration ?? 0) !== lifecycleGeneration) {
-      return;
-    }
+    if (!isCurrent() || result.status === 'cancelled') return;
     if (input.snapshot) {
       entry.lastSnapshot = input.snapshot;
     }

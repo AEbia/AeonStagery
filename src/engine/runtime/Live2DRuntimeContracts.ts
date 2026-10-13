@@ -8,7 +8,9 @@ import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler'
 import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type { PreparedAssetRef } from '../../api/types/semantic-scene';
 import type { CustomMotionSamplePoint } from '../live2d/customMotionConversion';
+import type { Live2DRuntimeClock, Live2DClockTransaction } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
 export type { PreparedAssetRef } from '../../api/types/semantic-scene';
+export type { Live2DRuntimeClock, Live2DClockTransaction } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
 
 export type Live2DPerformanceKind = 'motion' | 'expression';
 export type Live2DPerformanceRuntimeFamily = 'cubism2' | 'cubism3-plus' | 'wmdl';
@@ -140,22 +142,14 @@ export interface Live2DSeekRestoreInput {
   idleSnapshot?: Pick<ModelSnapshot, 'params' | 'opacities'> | null;
   isScrubbing?: boolean;
   preserveMotionForPlayback?: boolean;
+  /** Revalidated by the bound behavior after each asynchronous operation. */
+  isCurrent?: () => boolean;
 }
 
 export interface Live2DSeekRestoreResult {
-  status: 'restored' | 'fallback' | 'unsupported';
+  status: 'restored' | 'fallback' | 'unsupported' | 'cancelled';
   tierUsed: Live2DSeekRestoreTier;
   diagnostics?: string[];
-}
-
-/**
- * Compatibility clock over the runtime's global SDK time. The Cubism 2
- * adapter exposes the shared UtSystem behind this opaque handle so engine
- * modules can keep the monotonic-clock discipline without touching the SDK.
- */
-export interface Live2DRuntimeClock {
-  getUserTimeMSec(): number;
-  setUserTimeMSec(ms: number): void;
 }
 
 export interface Live2DMotionStartOptions {
@@ -179,13 +173,71 @@ export interface Live2DMotionStartOptions {
    * the locked clock window.
    */
   stepAfterStartMs?: number;
+  /** Runtime transition validity, checked between asynchronous SDK steps. */
+  isCurrent?: () => boolean;
 }
 
 export interface Live2DMotionStartResult {
   ok: boolean;
   offsetReplayMs: number;
   motionStartUtTimeMs?: number;
+  cancelled?: boolean;
 }
+
+export interface Live2DPerformanceTransitionInput {
+  motionKey: string;
+  priority: number;
+  offsetSeconds: number;
+  sceneTimeSeconds: number;
+  fadeInSeconds?: number;
+  clearQueueFirst?: boolean;
+  handoffSnapshot?: ModelSnapshot | null;
+  finalSnapshot?: ModelSnapshot | null;
+  expressionKey?: string | null;
+  restoreHandoffBoundary?: boolean;
+  stepAfterStartMs?: number;
+  isCurrent: () => boolean;
+}
+
+export interface Live2DPerformanceTransitionResult {
+  status: 'started' | 'missing' | 'cancelled';
+  offsetReplayMs: number;
+  motionStartUtTimeMs?: number;
+  retainedHandoffBoundary?: boolean;
+}
+
+export interface Live2DSeekMotionOffsetInput {
+  motionStartUtTimeMs?: number;
+  offsetSeconds: number;
+  handoffBoundarySnapshot?: ModelSnapshot | null;
+  isCurrent: () => boolean;
+}
+
+export interface Live2DSeekMotionOffsetResult {
+  status: 'advanced' | 'cancelled' | 'unsupported';
+  motionStartUtTimeMs?: number;
+  retainedHandoffBoundary?: boolean;
+}
+
+export interface Live2DFrameSubmissionInput {
+  deltaMs: number;
+  shouldAdvance: boolean;
+  forceZeroDeltaCommit?: boolean;
+  forceStep?: boolean;
+  manualTimeMs?: number;
+  injectedParameters?: Readonly<Record<string, number>>;
+  handoffBoundarySnapshot?: ModelSnapshot | null;
+  isCurrent?: () => boolean;
+  /** Allow frame work already owned by an acquired shared-clock transaction. */
+  transaction?: Live2DClockTransaction;
+}
+
+export interface Live2DFrameSubmissionResult {
+  status: 'submitted' | 'deferred' | 'cancelled';
+  retainedHandoffBoundary?: boolean;
+}
+
+export type Live2DFocusAnimationAction = 'stop' | 'pause' | 'resume';
 
 /** Neutral entrance pose; composite snapshots describe the main model. */
 export type Live2DIdleBaseline = Pick<ModelSnapshot, 'params' | 'opacities'>;
@@ -289,6 +341,8 @@ export interface Live2DRuntimeModelControls {
     expressionName: string | null,
     elapsedSeconds: number,
     previousExpressionKey?: string | null,
+    isCurrent?: () => boolean,
+    transaction?: Live2DClockTransaction,
   ): Promise<void>;
   /** Write parameter input only; callers commit geometry once after a batch. */
   setInjectedParameter(model: any, paramName: string, value: number): void;
@@ -322,9 +376,9 @@ export interface Live2DRuntimeModelControls {
     flushCore?: boolean,
   ): void;
   /** Load-time idle flush: start the idle group once, step 16ms, then stop it. */
-  flushIdleState(model: any, isCurrent?: () => boolean): Promise<void>;
+  flushIdleState(model: any, isCurrent?: () => boolean, transaction?: Live2DClockTransaction): Promise<void>;
   /** Hard reset to idle: stop motions/expressions, restore idle pose, reset focus. */
-  resetModelToIdle(model: any, options?: Live2DModelResetOptions): Promise<void>;
+  resetModelToIdle(model: any, options?: Live2DModelResetOptions, isCurrent?: () => boolean): Promise<void>;
   /** Restore only the idle parameter baseline (uncovered-parameter ownership handoff). */
   applyIdleBaseline(model: any, idleSnapshot: Pick<ModelSnapshot, 'params' | 'opacities'> | null): void;
   /** Capture the load-time idle parameter/opacity arrays and persist core params. */
@@ -339,6 +393,12 @@ export interface Live2DRuntimeModelControls {
     offsetSeconds: number,
     options?: Live2DMotionStartOptions,
   ): Promise<Live2DMotionStartResult>;
+  withSharedClock<T>(
+    model: any,
+    isCurrent: () => boolean,
+    operation: (clock: Live2DRuntimeClock | null, transaction: Live2DClockTransaction | null) => Promise<T> | T,
+    transaction?: Live2DClockTransaction,
+  ): Promise<T | undefined>;
   /**
    * Internal sampling seam for the engine's own motion-curve cache pre-warm
    * and authoring helpers (resolve-to-opaque-targets; not a pass-through).
@@ -349,6 +409,7 @@ export interface Live2DRuntimeModelControls {
     model: any,
     motionKey: string,
     options: Live2DMotionSamplingOptions,
+    transaction?: Live2DClockTransaction,
   ): Promise<Live2DMotionSamplingResult>;
   /**
    * Install the Motion-stage writer on every attachable concrete model.
@@ -372,6 +433,8 @@ export interface Live2DRuntimeModelControls {
   applyFocus(model: any, input: Live2DFocusInput): void;
   /** Internal handle seam for engine-side GSAP tween lifecycle around focus. */
   getFocusControllers(model: any): any[];
+  /** Stop/pause/resume focus tweens without exposing their SDK targets. */
+  manageFocusAnimations(model: any, action: Live2DFocusAnimationAction): void;
   /** Read the authored head hit-area anchor (model.json layout data). */
   getHeadAnchor(model: any): { x: number; y: number } | null;
 }

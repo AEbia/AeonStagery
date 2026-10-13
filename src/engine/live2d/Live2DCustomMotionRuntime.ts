@@ -2,7 +2,7 @@
 import { getLive2DRuntimeCapabilities } from './runtime/Live2DRuntimeControlModule';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import type { CharacterEntry, ModelSnapshot } from '../Live2DConfig';
-import { getLive2DRuntimeAdapter } from '../Live2DRuntimeAdapter';
+import { getBoundRuntimeHandle } from './runtime/BoundRuntimeAccess';
 import { customMotionControlledParameterIds, selectHandoffPoseValues, type CustomMotionHandoffPose } from './customMotionRuntime';
 import { releaseCustomMotionOwnership, reclaimControlledInjectedParams } from './customMotionOwnership';
 import { restoreNeutralModelPose } from './characterStatePurge';
@@ -53,13 +53,15 @@ export class Live2DCustomMotionRuntime {
     // 放在 model 守卫之前：模型未就绪的接管同样要清掉陈旧值。
     reclaimControlledInjectedParams(entry);
     if (!entry.model) return;
-    const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-    controls.stopAllMotions(entry.model);
+    const runtime = getBoundRuntimeHandle(entry);
+    if (!runtime) return;
+    runtime.lifecycle.stopAllMotions();
     this.restoreCustomMotionBaseline(entry);
-    for (const [parameterId, value] of Object.entries(entry.customMotionHandoff?.values ?? {})) {
-      controls.setInjectedParameter(entry.model, parameterId, value);
-    }
-    controls.syncInputParameters(entry.model);
+    runtime.frame.submit({
+      deltaMs: 0,
+      shouldAdvance: false,
+      injectedParameters: entry.customMotionHandoff?.values ?? {},
+    });
     this.ensureStage(entry);
   }
 
@@ -97,7 +99,9 @@ export class Live2DCustomMotionRuntime {
     if (!entry.model) return;
     // Concrete-target resolution and the emitter/parameter checks live in the
     // runtime adapter; the stage handle type is unchanged.
-    entry.customMotionStage = getLive2DRuntimeAdapter(entry.runtime).getControls().installCustomMotionStage(entry.model, {
+    const runtime = getBoundRuntimeHandle(entry);
+    if (!runtime) return;
+    entry.customMotionStage = runtime.customMotion.installStage({
       getState: () => entry.customMotion && entry.customMotionHandoff
         ? {
             motion: entry.customMotion.motion,
@@ -120,7 +124,7 @@ export class Live2DCustomMotionRuntime {
     if (!entry.model) return;
     if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls && getLive2DRuntimeCapabilities(entry).supportsSnapshot) {
       if (entry.idleSnapshot) {
-        getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, entry.idleSnapshot);
+        getBoundRuntimeHandle(entry)?.snapshot.applySnapshot(entry.idleSnapshot);
       }
       return;
     }
@@ -137,8 +141,7 @@ export class Live2DCustomMotionRuntime {
     const values: Record<string, number> = {};
     const state = entry.customMotion;
     if (!state) return { values };
-    const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-    const parameters = controls.getParameterValues(entry.model) ?? [];
+    const parameters = getBoundRuntimeHandle(entry)?.parameters.getParameterValues() ?? [];
     const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
     // Effect-channel parameters (an in-flight lip-sync mouth value) are
     // excluded so the transient effect output is not baked into the fade-in

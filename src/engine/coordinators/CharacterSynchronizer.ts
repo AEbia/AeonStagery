@@ -112,6 +112,7 @@ interface Live2DMuscle {
     expression?: Live2DSeekExpressionState | null;
     isScrubbing?: boolean;
     preserveMotionForPlayback?: boolean;
+    isCurrent?: () => boolean;
   }): Promise<any>;
   playMotion(
     id: string,
@@ -131,7 +132,13 @@ interface Live2DMuscle {
   resetToIdle(id: string): void;
   setExpression(id: string, key: string): void;
   prepareExpressionForSeek?(id: string, key: string | null): void;
-  setExpressionForSeek?(id: string, key: string | null, elapsedSeconds: number, previousKey?: string | null): Promise<void>;
+  setExpressionForSeek?(
+    id: string,
+    key: string | null,
+    elapsedSeconds: number,
+    previousKey?: string | null,
+    isCurrent?: () => boolean,
+  ): Promise<void>;
   /**
    * Concrete Cubism 2 sampling targets of a loaded character. Used by the
    * seek-side `motionCurveCache.ensure` to convert a not-yet-cached resource
@@ -309,14 +316,15 @@ export class CharacterSynchronizer {
       if (modelSnap) nativeMotionHandoffSnapshots.set(id, modelSnap);
     }
     const nativeSeekInputs = new Map<string, {
-      snapshot?: any;
-      handoffSnapshot?: any;
+      snapshot?: ModelSnapshot | null;
+      handoffSnapshot?: ModelSnapshot | null;
       targetSceneTime: number;
       focus?: readonly [number, number];
       motion?: { key: string; priority?: number; offset: number; sceneTime: number } | null;
       expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
+      isCurrent: () => boolean;
     }>();
     const nativeSeekIds = new Set<string>();
     const pendingSeekExpressions: Array<{
@@ -365,6 +373,7 @@ export class CharacterSynchronizer {
         expression: resolveSeekExpression(state.expression, time),
         isScrubbing,
         preserveMotionForPlayback: !isScrubbing,
+        isCurrent: () => !shouldCancel() && this.live2D.hasCharacter(id),
       });
     }
 
@@ -441,6 +450,7 @@ export class CharacterSynchronizer {
             },
             expression: resolveSeekExpression(previous.expression, motionStartTime),
             isScrubbing: true,
+            isCurrent: () => !shouldCancel() && this.live2D.hasCharacter(id),
           });
           if (shouldCancel()) return;
           restoreInput.handoffSnapshot = this.live2D.captureSnapshot(id) ?? restoreInput.handoffSnapshot;
@@ -643,6 +653,7 @@ export class CharacterSynchronizer {
         // playback continues the fade from that very progress.
         expression.elapsedSeconds,
         expression.previousKey,
+        () => !shouldCancel() && this.live2D.hasCharacter(expression.id),
       );
       if (shouldCancel()) return;
     }

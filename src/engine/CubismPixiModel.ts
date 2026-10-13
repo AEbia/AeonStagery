@@ -357,10 +357,17 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     manager.playing = false;
     for (const parallel of internal.parallelMotionManager ?? []) parallel.stopAllMotions?.();
   };
-  model.startMotion = async (key: string, index = 0, priority = 3, offsetSeconds = 0, fadeInSeconds?: number) => {
+  model.startMotion = async (
+    key: string,
+    index = 0,
+    priority = 3,
+    offsetSeconds = 0,
+    fadeInSeconds?: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
     const external = externalMotions.get(key);
     if (external) {
-      if (disposed) return false;
+      if (disposed || !isCurrent()) return false;
       if (fadeInSeconds !== undefined) external.setFadeInTime?.(fadeInSeconds);
       model.stopAllMotions();
       const queue = manager.queueManager;
@@ -385,7 +392,7 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     }
     const group = resolveGroup(key);
     const motion = await model.preloadMotion(group, index);
-    if (!motion || disposed) return false;
+    if (!motion || disposed || !isCurrent()) return false;
     if (!sourceFadeIns.has(motion)) sourceFadeIns.set(motion, motion.getFadeInTime());
     const override = typeof fadeInSeconds === 'number' && Number.isFinite(fadeInSeconds) && fadeInSeconds >= 0;
     motion.setFadeInTime(override ? fadeInSeconds : sourceFadeIns.get(motion));
@@ -401,7 +408,7 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     motion.setOffsetTime(0);
     model.stopAllMotions();
     const started = await manager.startMotion(group, index, priority, { loop: false, resetExpression: false });
-    if (!started || disposed) return false;
+    if (!started || disposed || !isCurrent()) return false;
     const entry = queueEntries(manager.queueManager).find((candidate) => candidate?._motion === motion);
     if (!entry) {
       model.stopAllMotions();
@@ -416,11 +423,17 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     entry.setLastCheckEventSeconds(start);
     return true;
   };
-  const setExpression = async (key: string | null, elapsedSeconds?: number) => {
+  const setExpression = async (
+    key: string | null,
+    elapsedSeconds?: number,
+    _previousExpressionKey?: string | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     // The character API and inspector use an empty string to clear expressions.
     key = key || null;
     const epoch = ++expressionEpoch;
     expressionKey = key;
+    if (!isCurrent()) return;
     if (!expressionManager) return;
     expressionManager.reserveExpressionIndex = -1;
     if (key === null || elapsedSeconds !== undefined) {
@@ -449,10 +462,10 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     const index = expressionManager.getExpressionIndex(key);
     if (index < 0) return;
     const expression = await expressionManager.loadExpression(index);
-    if (disposed || epoch !== expressionEpoch || !expression) return;
+    if (disposed || epoch !== expressionEpoch || !expression || !isCurrent()) return;
     if (expressionManager.currentExpression === expression) expressionManager.restoreExpression();
     else await expressionManager.setExpression(index);
-    if (disposed || epoch !== expressionEpoch) return;
+    if (disposed || epoch !== expressionEpoch || !isCurrent()) return;
     if (elapsedSeconds !== undefined) {
       const now = model.elapsedTime / 1000;
       // A legacy state without a start timestamp requests the final latch.
@@ -497,6 +510,8 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     core.update();
   };
   model.restoreAtSceneTime = async (input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> => {
+    const isCurrent = input.isCurrent ?? (() => true);
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     model.stopAllMotions();
     // Native Cubism queues already support an absolute offset by setting the
     // queue entry's start timestamp. Keep the scene clock at the target while
@@ -513,18 +528,29 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     const motionOffset = input.motion && Number.isFinite(input.motion.offset)
       ? Math.max(0, input.motion.offset)
       : 0;
-    const started = !input.motion || await model.startMotion(
-      input.motion.key,
-      0,
-      input.motion.priority ?? 3,
-      motionOffset,
-      input.motion.fadeInSeconds,
-    );
+    const started = !input.motion || await (input.isCurrent
+      ? model.startMotion(
+          input.motion.key,
+          0,
+          input.motion.priority ?? 3,
+          motionOffset,
+          input.motion.fadeInSeconds,
+          isCurrent,
+        )
+      : model.startMotion(
+          input.motion.key,
+          0,
+          input.motion.priority ?? 3,
+          motionOffset,
+          input.motion.fadeInSeconds,
+        ));
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     const key = input.expression !== undefined
       ? input.expression?.key ?? null
       : input.snapshot?.expression?.key ?? null;
     const expressionElapsed = input.expression?.elapsedSeconds;
-    await setExpression(key, expressionElapsed ?? Number.POSITIVE_INFINITY);
+    await setExpression(key, expressionElapsed ?? Number.POSITIVE_INFINITY, undefined, isCurrent);
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     // `startMotion` and `setExpression` have already installed their absolute
     // queue offsets. One zero-delta update commits both queues and runs the
     // normal state hooks without simulating every elapsed frame.

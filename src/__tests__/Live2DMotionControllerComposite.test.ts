@@ -880,7 +880,13 @@ describe('Live2DMotionController composite motion fallback', () => {
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({ preloadMotion }),
+      getControls: () => mockControls({
+        preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
+      }),
     }) as any);
 
     const controller = new Live2DMotionController(
@@ -935,6 +941,10 @@ describe('Live2DMotionController composite motion fallback', () => {
         preloadMotion,
         captureSnapshot,
         applySnapshot,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
 
@@ -983,6 +993,10 @@ describe('Live2DMotionController composite motion fallback', () => {
       getControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
 
@@ -1075,6 +1089,10 @@ describe('Live2DMotionController composite motion fallback', () => {
       getControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
     const characters = new Map<string, any>([['rana', oldEntry]]);

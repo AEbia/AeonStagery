@@ -206,9 +206,13 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     setExpression: (model, expressionName) => {
       model?.setExpression?.(expressionName ?? null);
     },
-    setExpressionForSeek: async (model, expressionName, elapsedSeconds) => {
-      if (model?.setExpressionForSeek) await model.setExpressionForSeek(expressionName, elapsedSeconds);
-      else model?.setExpression?.(expressionName ?? null);
+    setExpressionForSeek: async (model, expressionName, elapsedSeconds, previousExpressionKey, isCurrent = () => true) => {
+      if (!isCurrent()) return;
+      if (model?.setExpressionForSeek) {
+        await model.setExpressionForSeek(expressionName, elapsedSeconds, previousExpressionKey, isCurrent);
+      } else if (isCurrent()) {
+        model?.setExpression?.(expressionName ?? null);
+      }
     },
     setInjectedParameter: (model, paramName, value) => {
       const coreModel = model?.internalModel?.coreModel;
@@ -286,6 +290,8 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         return model.restoreAtSceneTime(input);
       }
 
+      const isCurrent = input.isCurrent ?? (() => true);
+      if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
       const diagnostics: string[] = ['Cubism model does not expose restoreAtSceneTime; using bounded fallback.'];
       if (input.handoffSnapshot) {
         this.controls.applySnapshot(model, input.handoffSnapshot as ModelSnapshot);
@@ -296,20 +302,15 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       }
 
       if (input.motion) {
-        if (input.motion.fadeInSeconds !== undefined) {
-          await model?.startMotion?.(
-            input.motion.key,
-            0,
-            input.motion.priority ?? 3,
-            input.motion.offset,
-            input.motion.fadeInSeconds,
-          );
-        } else {
-          await model?.startMotion?.(input.motion.key, 0, input.motion.priority ?? 3, input.motion.offset);
-        }
+        await this.controls.startMotion(model, input.motion.key, input.motion.priority ?? 3, input.motion.offset, {
+          fadeInSeconds: input.motion.fadeInSeconds,
+          isCurrent,
+        });
+        if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported', diagnostics };
       } else {
         model?.stopAllMotions?.();
       }
+      if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported', diagnostics };
       model?.setExpression?.(input.expression?.key ?? null);
       model?.update?.(16);
       model?.renderForBake?.(null);
@@ -349,9 +350,11 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       model?.stopAllMotions?.();
       model?.update?.(16);
     },
-    resetModelToIdle: async (model, options) => {
+    resetModelToIdle: async (model, options, isCurrent = () => true) => {
+      if (!isCurrent()) return;
       model?.stopAllMotions?.();
       this.controls.clearMotionState(model);
+      if (!isCurrent()) return;
       if (options?.idleSnapshot) {
         this.controls.applySnapshot(model, options.idleSnapshot as ModelSnapshot);
         console.log('[Live2D] Character restored from runtime idle snapshot.');
@@ -360,7 +363,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         const focusController = model?.internalModel?.focusController;
         focusController?.focus?.(0, 0, true);
       }
-      model?.update?.(16);
+      if (isCurrent()) model?.update?.(16);
     },
     applyIdleBaseline: (model, idleSnapshot) => {
       if (idleSnapshot) {
@@ -383,10 +386,18 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         || (model?.getExternalPerformanceKeys?.('motion') ?? []).includes(motionKey);
     },
     startMotion: async (model, motionKey, priority, offsetSeconds, options) => {
-      const started = options?.fadeInSeconds !== undefined
-        ? await model?.startMotion?.(motionKey, 0, priority, offsetSeconds, options.fadeInSeconds)
-        : await model?.startMotion?.(motionKey, 0, priority, offsetSeconds);
+      if (options?.isCurrent && !options.isCurrent()) return { ok: false, offsetReplayMs: 0, cancelled: true };
+      const started = options?.isCurrent
+        ? await model?.startMotion?.(motionKey, 0, priority, offsetSeconds, options.fadeInSeconds, options.isCurrent)
+        : options?.fadeInSeconds !== undefined
+          ? await model?.startMotion?.(motionKey, 0, priority, offsetSeconds, options.fadeInSeconds)
+          : await model?.startMotion?.(motionKey, 0, priority, offsetSeconds);
+      if (options?.isCurrent && !options.isCurrent()) return { ok: false, offsetReplayMs: 0, cancelled: true };
       return { ok: !!started, offsetReplayMs: 0 };
+    },
+    withSharedClock: async (_model, isCurrent, operation) => {
+      if (!isCurrent()) return undefined;
+      return operation(null, null);
     },
     getMotionSamplingTargets: (model): readonly Cubism2MotionSamplerTarget[] => {
       const targets: Cubism2MotionSamplerTarget[] = [];
@@ -515,6 +526,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       // Retain the previous Cubism 3+ focus control contract.
     },
     getFocusControllers: () => [],
+    manageFocusAnimations: () => {},
     getHeadAnchor: (model) => resolveHeadAnchorFromSettings(model?.internalModel?.settings),
   };
 

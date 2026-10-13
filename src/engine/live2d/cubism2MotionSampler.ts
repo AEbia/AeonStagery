@@ -1,4 +1,4 @@
-import { acquireUtSystemLock, releaseUtSystemLock } from '../Live2DConfig';
+import { withSharedRuntimeClock, type Live2DClockTransaction } from './runtime/Live2DRuntimeClockCoordinator';
 import type { CustomMotionSamplePoint } from './customMotionConversion';
 
 /**
@@ -259,6 +259,7 @@ export async function sampleCubism2MotionCurves(
   target: Cubism2MotionSamplerTarget,
   motionKey: string,
   options: Cubism2MotionSamplingOptions,
+  transaction?: Live2DClockTransaction,
 ): Promise<readonly Cubism2MotionCurve[]> {
   const { motionManager, internalModel } = target;
   if (!motionManager || !internalModel) {
@@ -304,7 +305,7 @@ export async function sampleCubism2MotionCurves(
     }
   }
 
-  const samples = await sampleIsolatedMotion(coreModel, motion, parameterIds, options);
+  const samples = await sampleIsolatedMotion(coreModel, motion, parameterIds, options, transaction);
   if (!samples) {
     throw new Cubism2MotionSamplingError('Motion queue evaluation failed while sampling', 'queue-evaluation-failed');
   }
@@ -412,62 +413,66 @@ async function sampleIsolatedMotion(
   motion: any,
   parameterIds: readonly string[],
   options: Cubism2MotionSamplingOptions,
+  transaction?: Live2DClockTransaction,
 ): Promise<Record<string, number[]> | null> {
   const MotionQueueManager = (window as any).MotionQueueManager;
   const UtSystem = (window as any).UtSystem;
   if (typeof MotionQueueManager !== 'function' || !UtSystem) return null;
   if (typeof UtSystem.getUserTimeMSec !== 'function' || typeof UtSystem.setUserTimeMSec !== 'function') return null;
 
-  await acquireUtSystemLock();
-  const utBase = UtSystem.getUserTimeMSec();
-  const queue = new MotionQueueManager();
-  try {
-    const samplingModel = createSamplingModel(coreModel, parameterIds);
-    const motionId = queue.startMotion?.(motion);
-    if (motionId === undefined || Number(motionId) < 0 || typeof queue.updateParam !== 'function') return null;
+  const result = await withSharedRuntimeClock(UtSystem, () => true, async (lease) => {
+    const clock = lease?.clock ?? UtSystem;
+    if (!clock) return null;
+    const utBase = clock.getUserTimeMSec();
+    const queue = new MotionQueueManager();
+    try {
+      const samplingModel = createSamplingModel(coreModel, parameterIds);
+      const motionId = queue.startMotion?.(motion);
+      if (motionId === undefined || Number(motionId) < 0 || typeof queue.updateParam !== 'function') return null;
 
-    const frameDurationMs = 1000 / options.fps;
-    const frameCount = Math.max(2, Math.round(options.durationSeconds * options.fps) + 1);
-    const valuesByParameter: Record<string, number[]> = {};
-    for (const parameterId of parameterIds) valuesByParameter[parameterId] = [];
+      const frameDurationMs = 1000 / options.fps;
+      const frameCount = Math.max(2, Math.round(options.durationSeconds * options.fps) + 1);
+      const valuesByParameter: Record<string, number[]> = {};
+      for (const parameterId of parameterIds) valuesByParameter[parameterId] = [];
 
-    for (let frame = 0; frame < frameCount; frame++) {
-      UtSystem.setUserTimeMSec(utBase + frame * frameDurationMs);
-      samplingModel.beginFrame();
-      let updated = false;
-      try {
-        updated = queue.updateParam(samplingModel.model) !== false;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Cubism2MotionSamplingError(
-          `Motion queue evaluation threw while sampling frame ${frame}: ${message}`,
-          'queue-evaluation-failed',
-        );
+      for (let frame = 0; frame < frameCount; frame++) {
+        clock.setUserTimeMSec(utBase + frame * frameDurationMs);
+        samplingModel.beginFrame();
+        let updated = false;
+        try {
+          updated = queue.updateParam(samplingModel.model) !== false;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Cubism2MotionSamplingError(
+            `Motion queue evaluation threw while sampling frame ${frame}: ${message}`,
+            'queue-evaluation-failed',
+          );
+        }
+        if (!updated) {
+          throw new Cubism2MotionSamplingError(
+            `Motion queue stopped updating while sampling frame ${frame}`,
+            'queue-evaluation-failed',
+          );
+        }
+        if (!samplingModel.hasCompleteFrame()) {
+          const missing = parameterIds.filter((parameterId) => !samplingModel.hasWritten(parameterId));
+          throw new Cubism2MotionSamplingError(
+            `Motion queue never wrote parameter(s): ${missing.join(', ')}`,
+            'queue-evaluation-failed',
+          );
+        }
+        for (const parameterId of parameterIds) {
+          valuesByParameter[parameterId].push(samplingModel.read(parameterId));
+        }
       }
-      if (!updated) {
-        throw new Cubism2MotionSamplingError(
-          `Motion queue stopped updating while sampling frame ${frame}`,
-          'queue-evaluation-failed',
-        );
-      }
-      if (!samplingModel.hasCompleteFrame()) {
-        const missing = parameterIds.filter((parameterId) => !samplingModel.hasWritten(parameterId));
-        throw new Cubism2MotionSamplingError(
-          `Motion queue never wrote parameter(s): ${missing.join(', ')}`,
-          'queue-evaluation-failed',
-        );
-      }
-      for (const parameterId of parameterIds) {
-        valuesByParameter[parameterId].push(samplingModel.read(parameterId));
-      }
+
+      return valuesByParameter;
+    } finally {
+      queue.stopAllMotions?.();
+      clock.setUserTimeMSec(utBase);
     }
-
-    return valuesByParameter;
-  } finally {
-    queue.stopAllMotions?.();
-    UtSystem.setUserTimeMSec(utBase);
-    releaseUtSystemLock();
-  }
+  }, transaction);
+  return result ?? null;
 }
 
 export function mergeCubism2SampledCurves(

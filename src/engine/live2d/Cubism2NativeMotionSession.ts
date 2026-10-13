@@ -29,6 +29,7 @@ export interface Cubism2NativeMotionStartOptions {
   /** Motion-local offset in seconds (clamped to >= 0). */
   readonly offsetSeconds: number;
   readonly clock: Cubism2NativeMotionClock | null;
+  readonly isCurrent?: () => boolean;
   /**
    * Invoked after every target's motion is enqueued and the clock is parked at
    * the motion start time, but BEFORE the offset fast-forward replay. Seek
@@ -45,6 +46,7 @@ export interface Cubism2NativeMotionStartResult {
   readonly offsetReplayMs: number;
   /** True when at least one concrete target accepted the motion start. */
   readonly started: boolean;
+  readonly cancelled?: boolean;
 }
 
 export const CUBISM2_NATIVE_OFFSET_STEP_MS = 50;
@@ -120,6 +122,10 @@ export class Cubism2NativeMotionSession {
     const offsetMs = Math.max(0, options.offsetSeconds) * 1000;
     const clock = options.clock;
 
+    if (options.isCurrent && !options.isCurrent()) {
+      return { motionStartUtTimeMs: 0, offsetReplayMs: 0, started: false, cancelled: true };
+    }
+
     const motionStartUtTimeMs = clock
       ? clock.getUserTimeMSec() - offsetMs
       : 0;
@@ -145,6 +151,9 @@ export class Cubism2NativeMotionSession {
         targets.map(({ motionManager }) => motionManager.startMotion(options.motionKey, 0, options.priority)),
       );
       const started = startResults.some((result) => result.status === 'fulfilled' && result.value !== false);
+      if (options.isCurrent && !options.isCurrent()) {
+        return { motionStartUtTimeMs, offsetReplayMs: 0, started: false, cancelled: true };
+      }
 
       // Contract: beforeReplay must NOT mutate the SDK clock. It runs while
       // the clock is parked at `motionStartUtTimeMs` (entry value - offsetMs),
@@ -155,6 +164,9 @@ export class Cubism2NativeMotionSession {
       // stays parked until the engine's next per-frame monotonic advance,
       // which recovers the discipline without ever jumping backwards.
       await options.beforeReplay?.({ motionStartUtTimeMs });
+      if (options.isCurrent && !options.isCurrent()) {
+        return { motionStartUtTimeMs, offsetReplayMs: 0, started: false, cancelled: true };
+      }
 
       if (!clock || offsetMs <= 0) {
         return {
@@ -167,6 +179,9 @@ export class Cubism2NativeMotionSession {
       const utBase = clock.getUserTimeMSec() + offsetMs;
       let currentMs = 0;
       while (currentMs < offsetMs) {
+        if (options.isCurrent && !options.isCurrent()) {
+          return { motionStartUtTimeMs, offsetReplayMs: currentMs, started, cancelled: true };
+        }
         const dt = Math.min(CUBISM2_NATIVE_OFFSET_STEP_MS, offsetMs - currentMs);
         currentMs += dt;
         const spoofedTime = motionStartUtTimeMs + currentMs;

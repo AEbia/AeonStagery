@@ -62,7 +62,14 @@ describe('Live2D paused expression preview', () => {
     await vi.waitFor(() => expect(setExpressionForSeek).toHaveBeenCalledTimes(1));
     // Infinity asks the model for the expression's final pose; the frame is then
     // re-evaluated at delta 0 so the preview cannot advance the scene.
-    expect(setExpressionForSeek).toHaveBeenCalledWith(model, 'smile', Number.POSITIVE_INFINITY);
+    expect(setExpressionForSeek).toHaveBeenCalledWith(
+      model,
+      'smile',
+      Number.POSITIVE_INFINITY,
+      undefined,
+      expect.any(Function),
+      undefined,
+    );
     await vi.waitFor(() => expect(advanceFrame).toHaveBeenCalledTimes(1));
     expect(advanceFrame).toHaveBeenCalledWith(model, 0);
   });
