@@ -11,8 +11,6 @@ import { motionCurveCache } from '../engine/live2d/motionCurveCache';
 import type { RuntimeTimelineScene } from '../engine/RuntimeTimelineScene';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
 
-const fakeTarget = { internalModel: {}, motionManager: {} } as any;
-
 function makeScene(): RuntimeTimelineScene {
   return {
     sceneId: 'motion-prewarm',
@@ -68,24 +66,29 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
     const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
-    const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([fakeTarget]);
+    const sampleMotion = vi.spyOn(live2DManager, 'sampleMotion').mockResolvedValue({ status: 'unsupported' });
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue({} as any);
 
     try {
       await (engine as any).prewarmMotionCurves(scene);
 
       expect(ensure).toHaveBeenCalledTimes(2);
-      expect(ensure).toHaveBeenCalledWith({
+      expect(ensure).toHaveBeenCalledWith(expect.objectContaining({
         adapterId: 'pixi-live2d-display-cubism2',
         modelRuntimePath: 'asset://models/char.model3.json',
         motionKey: 'wave',
-        targets: [fakeTarget],
         fps: 30,
+        sample: expect.any(Function),
+      }));
+      const source = ensure.mock.calls[0][0];
+      await source.sample?.({ fps: 30, zeroSourceFades: true, skipMissingParameters: true });
+      expect(sampleMotion).toHaveBeenCalledWith('char1', 'wave', {
+        fps: 30, zeroSourceFades: true, skipMissingParameters: true,
       });
       expect(ensure).toHaveBeenCalledWith(expect.objectContaining({ motionKey: 'smile' }));
     } finally {
       getCharacterInfo.mockRestore();
-      getSamplerTargets.mockRestore();
+      sampleMotion.mockRestore();
       ensure.mockRestore();
     }
   });
@@ -94,7 +97,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
     const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
-    const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([fakeTarget]);
+    const sampleMotion = vi.spyOn(live2DManager, 'sampleMotion').mockResolvedValue({ status: 'unsupported' });
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockRejectedValue(new Error('sample explosion'));
 
     try {
@@ -102,16 +105,15 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
       expect(ensure).toHaveBeenCalled();
     } finally {
       getCharacterInfo.mockRestore();
-      getSamplerTargets.mockRestore();
+      sampleMotion.mockRestore();
       ensure.mockRestore();
     }
   });
 
-  it('skips characters without a loaded model or without Cubism 2 targets', async () => {
+  it('skips characters without a loaded model', async () => {
     const engine = new ScriptEngine();
     const scene = makeScene();
-    const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockImplementation(id => id === 'char1' ? characterInfoFixture({ id, modelPath: 'asset://models/char.model3.json' }, id) : null);
-    const getSamplerTargets = vi.spyOn(live2DManager, 'getMotionSamplerTargets').mockReturnValue([]);
+    const getCharacterInfo = vi.spyOn(live2DManager, 'getCharacterInfo').mockReturnValue(null);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue({} as any);
 
     try {
@@ -119,7 +121,6 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
       expect(ensure).not.toHaveBeenCalled();
     } finally {
       getCharacterInfo.mockRestore();
-      getSamplerTargets.mockRestore();
       ensure.mockRestore();
     }
   });

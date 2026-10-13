@@ -11,6 +11,7 @@ import type {
   Live2DSeekRestoreResult,
 } from '../../runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
+import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
 
 function isDefaultPose(snapshot: ModelSnapshot | null): boolean {
   if (!snapshot?.params?.length) return true;
@@ -38,7 +39,10 @@ export function createBoundModelPerformance(
     await controls.preloadMotion(model, input.motionKey);
     if (!input.isCurrent()) return { status: 'cancelled', offsetReplayMs: 0 };
 
-    const runStart = async (clock: Live2DRuntimeClock | null) => {
+    const runStart = async (
+      clock: Live2DRuntimeClock | null,
+      activeTransaction: Live2DClockTransaction | null,
+    ) => {
       if (!input.isCurrent()) return { status: 'cancelled', offsetReplayMs: 0 } as const;
 
       const handoff = input.handoffSnapshot ?? null;
@@ -65,8 +69,9 @@ export function createBoundModelPerformance(
       if (!started.ok) return { status: 'missing', offsetReplayMs: started.offsetReplayMs } as const;
 
       if (input.finalSnapshot && !replaying) controls.applySnapshot(model, input.finalSnapshot);
-      if (input.expressionKey !== undefined && input.isCurrent()) {
-        controls.setExpression(model, input.expressionKey);
+      if (input.expressionKey !== undefined) {
+        const restored = await restoreExpression(input.expressionKey, 0, undefined, input.isCurrent, activeTransaction ?? undefined);
+        if (!restored) return { status: 'cancelled', offsetReplayMs: started.offsetReplayMs } as const;
       }
 
       let retainedHandoffBoundary = false;
@@ -84,17 +89,22 @@ export function createBoundModelPerformance(
     };
 
     if (capabilities.usesSharedSdkClock) {
-      const result = await controls.withSharedClock(model, input.isCurrent, runStart, transaction);
+      const result = await withSharedRuntimeClock(
+        getSharedRuntimeClock(),
+        input.isCurrent,
+        (activeTransaction) => runStart(activeTransaction?.clock ?? null, activeTransaction),
+        transaction,
+      );
       return result ?? { status: 'cancelled', offsetReplayMs: 0 };
     }
-    const result = await controls.withSharedClock(model, input.isCurrent, runStart, transaction);
-    return result ?? { status: 'cancelled', offsetReplayMs: 0 };
+    return runStart(null, null);
   }
 
   async function seekMotionOffset(input: Live2DSeekMotionOffsetInput): Promise<Live2DSeekMotionOffsetResult> {
     if (!capabilities.usesSharedSdkClock) return { status: 'unsupported' };
     if (!input.isCurrent()) return { status: 'cancelled' };
-    const result = await controls.withSharedClock(model, input.isCurrent, async (clock) => {
+    const result = await withSharedRuntimeClock(getSharedRuntimeClock(), input.isCurrent, async (transaction) => {
+      const clock = transaction?.clock ?? null;
       if (!clock) return { status: 'unsupported' } as const;
       if (!input.isCurrent()) return { status: 'cancelled' } as const;
       const offsetMs = Math.max(0, input.offsetSeconds) * 1000;
@@ -112,7 +122,7 @@ export function createBoundModelPerformance(
         if (isDefaultPose(current)) retainedHandoffBoundary = true;
       }
       return { status: 'advanced', motionStartUtTimeMs, retainedHandoffBoundary } as const;
-    });
+    }, input.transaction);
     return result ?? { status: 'cancelled' };
   }
 

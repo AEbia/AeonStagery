@@ -35,8 +35,8 @@ import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAd
 import type { Live2DSeekExpressionState } from './Live2DRuntimeAdapter';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
+import type { Live2DClockTransaction } from './runtime/Live2DRuntimeContracts';
 import type { CustomMotionHandoffPose } from './live2d/customMotionRuntime';
-import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import { motionCurveCache } from './live2d/motionCurveCache';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
 import { purgeCharacterRuntimeState } from './live2d/characterStatePurge';
@@ -792,21 +792,6 @@ class Live2DManager {
     return entry?.runtimeHandle?.displayObject ?? entry?.model ?? null;
   }
 
-  /**
-   * Enumerate the concrete Cubism 2.1 model sampling targets of a loaded
-   * character. Composite characters expose every constituent model; plain
-   * characters expose the model itself. Returns an empty list when the
-   * character is not loaded, is not a Cubism 2.1 runtime, or has no usable
-   * motion manager — callers treat that as "conversion not applicable".
-   */
-  getCubism2SamplerTargets(characterId: string): Cubism2MotionSamplerTarget[] {
-    const entry = this.characters.get(characterId);
-    if (!entry?.model) return [];
-    if (!getLive2DRuntimeCapabilities(entry).usesCubism2PrivateControls) return [];
-
-    return [...getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model)];
-  }
-
   async sampleMotion(
     characterId: string,
     motionKey: string,
@@ -816,7 +801,8 @@ class Live2DManager {
     if (!entry?.model) {
       return { status: 'unsupported', diagnostics: [`Character "${characterId}" is not loaded.`] };
     }
-    const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(characterId, entry.model, entry.runtime);
+    const handle = getBoundRuntimeHandle(entry);
+    if (!handle) return { status: 'unsupported', diagnostics: [`Character "${characterId}" is not loaded.`] };
     return handle.motion.sampleMotion(motionKey, options);
   }
 
@@ -1076,15 +1062,6 @@ class Live2DManager {
   getMotionDuration(id: string, motionKey: string): number {
     this.ensureMotionController();
     return this.motionController!.getMotionDuration(id, motionKey);
-  }
-
-  /**
-   * Return Cubism 2.1 sampling targets used by the runtime motion curve cache.
-   * The motion controller owns the concrete-model/motion-manager seam.
-   */
-  getMotionSamplerTargets(id: string): readonly import('./live2d/cubism2MotionSampler').Cubism2MotionSamplerTarget[] {
-    this.ensureMotionController();
-    return this.motionController!.getMotionSamplerTargets(id);
   }
 
   /**
@@ -1407,8 +1384,13 @@ class Live2DManager {
    * @param dt Delta time in milliseconds. PixiJS ticker callers must pass deltaMS.
    * @param forceStep If true, bypass the pause-throttle and perform a full update.
    */
-  async updateAll(dt: number, forceStep: boolean = false, manualTimeMs?: number): Promise<void> {
-    await this.stageRuntime.step(dt, forceStep, manualTimeMs);
+  async updateAll(
+    dt: number,
+    forceStep: boolean = false,
+    manualTimeMs?: number,
+    transaction?: Live2DClockTransaction,
+  ): Promise<void> {
+    await this.stageRuntime.step(dt, forceStep, manualTimeMs, transaction);
   }
 
   /**

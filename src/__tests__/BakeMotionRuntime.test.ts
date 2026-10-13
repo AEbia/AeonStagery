@@ -43,7 +43,6 @@ function makeCache() {
 function makeHost(overrides: Partial<BakeMotionRuntimeHost> = {}): BakeMotionRuntimeHost {
   return {
     fps: 30,
-    getSamplingTargets: vi.fn(() => []),
     preloadMotion: vi.fn(async () => {}),
     getBaseValues: vi.fn(() => ({})),
     stopNativeMotion: vi.fn(),

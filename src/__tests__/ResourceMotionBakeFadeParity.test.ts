@@ -144,14 +144,14 @@ function createCubism2BakeModel() {
 function cubism2Controls(model: ReturnType<typeof createCubism2BakeModel>) {
   // The bake loop delegates every behavior to the adapter's controls; the real
   // cubism2 controls contain the relocated legacy logic (advance-without-render
-  // fast path, snapshot capture, sampler targets), so delegate to them to keep
+  // fast path, snapshot capture, neutral sampling), so delegate to them to keep
   // the mock model driven exactly as the engine used to drive it.
   const realControls = runtimeAdapter.cubism2Live2DAdapter.getControls();
   return mockControls({
     getCoreModel: () => model.coreModel,
     getMotionDuration: () => 2,
     getParameterValues: () => [{ index: 0, name: 'PARAM_ANGLE_X', value: model.params[0] }],
-    getMotionSamplingTargets: (m: any) => realControls.getMotionSamplingTargets(m),
+    sampleMotion: (m: any, key, options, transaction) => realControls.sampleMotion(m, key, options, transaction),
     stepBakeFrame: (m: any, deltaMs: number, renderer?: any, label?: string, flushCore?: boolean) =>
       realControls.stepBakeFrame(m, deltaMs, renderer, label, flushCore),
     captureSnapshot: (id: string, m: any, motionStartTime?: number) =>

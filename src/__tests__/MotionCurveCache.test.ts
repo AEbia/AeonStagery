@@ -16,11 +16,7 @@ import {
   type MotionCurveCacheSource,
   type CachedResourceMotion,
 } from '../engine/live2d/motionCurveCache';
-import type { Cubism2MotionSamplerTarget } from '../engine/live2d/cubism2MotionSampler';
-
-function fakeTarget(): Cubism2MotionSamplerTarget {
-  return { internalModel: {}, motionManager: {} } as unknown as Cubism2MotionSamplerTarget;
-}
+import type { Live2DMotionSamplingResult } from '../engine/runtime/Live2DRuntimeContracts';
 
 function waveCurves() {
   return [
@@ -52,7 +48,6 @@ function makeSource(overrides: Partial<MotionCurveCacheSource> = {}): MotionCurv
     adapterId: 'pixi-live2d-display-cubism2',
     modelRuntimePath: 'asset://models/char.model3.json',
     motionKey: 'wave',
-    targets: [fakeTarget()],
     fps: 2,
     ...overrides,
   };
@@ -60,9 +55,20 @@ function makeSource(overrides: Partial<MotionCurveCacheSource> = {}): MotionCurv
 
 function makeSampler(overrides: Partial<MotionCurveCacheSampler> = {}): MotionCurveCacheSampler {
   return {
-    resolveMeta: vi.fn(async () => ({ durationSeconds: 2, fadeInSeconds: 0.5, fadeOutSeconds: 0.25 })),
-    sample: vi.fn(async () => waveCurves()),
-    merge: vi.fn((curves) => (curves[0] ?? []) as readonly any[]),
+    sample: vi.fn(async () => ({
+      status: 'sampled' as const,
+      metadata: { durationSeconds: 2, fadeInSeconds: 0.5, fadeOutSeconds: 0.25 },
+      curves: waveCurves(),
+    })),
+    ...overrides,
+  };
+}
+
+function sampledResult(overrides: Partial<Live2DMotionSamplingResult> = {}): Live2DMotionSamplingResult {
+  return {
+    status: 'sampled',
+    metadata: { durationSeconds: 2, fadeInSeconds: 0.5, fadeOutSeconds: 0.25 },
+    curves: waveCurves(),
     ...overrides,
   };
 }
@@ -72,59 +78,43 @@ afterEach(() => {
 });
 
 describe('motionCurveCache service', () => {
-  it('builds a Cubism 3+ resource motion from model settings without the Cubism 2 sampler', async () => {
-    const document = {
-      Version: 3,
-      Meta: { Duration: 1, FadeInTime: 0.1, FadeOutTime: 0.2 },
-      Curves: [{ Target: 'Parameter', Id: 'ParamAngleX', Segments: [0, 0, 0, 1, 30] }],
+  it('caches Cubism 3+ neutral sampled motion data', async () => {
+    const motion = {
+      kind: 'custom' as const,
+      durationSeconds: 1,
+      fadeInSeconds: 0.1,
+      derivedFrom: { key: 'wave', fadeInSeconds: 0.1, fadeOutSeconds: 0.2 },
+      tracks: [{
+        parameterId: 'ParamAngleX',
+        keyframes: [{ time: 0, value: 0 }, { time: 1, value: 30 }],
+      }],
     };
-    const bytes = new TextEncoder().encode(JSON.stringify(document)).buffer;
-    const fetchFile = vi.fn(async (url: string) => {
-      expect(url).toBe('asset://model/wave.motion3.json');
-      return { ok: true, arrayBuffer: async () => bytes };
-    });
-    vi.stubGlobal('fetch', fetchFile);
-    const cubism3Target = {
-      kind: 'cubism3-plus' as const,
-      settings: {
-        motions: { wave: [{ File: 'wave.motion3.json' }] },
-        resolveURL: (file: string) => `asset://model/${file}`,
-      },
-    };
+    const sample = vi.fn(async () => sampledResult({
+      metadata: { durationSeconds: 1, fadeInSeconds: 0.1, fadeOutSeconds: 0.2 },
+      motion,
+    }));
     const cache = new MotionCurveCacheService();
     const entry = await cache.ensure(makeSource({
       adapterId: 'untitled-pixi-live2d-engine-cubism',
-      targets: [cubism3Target as unknown as Cubism2MotionSamplerTarget],
+      sample,
     }));
 
     expect(entry?.motion.tracks[0].parameterId).toBe('ParamAngleX');
     expect(entry?.motion.derivedFrom).toEqual({ key: 'wave', fadeInSeconds: 0.1, fadeOutSeconds: 0.2 });
     expect(entry?.evaluate(0.5)).toEqual({ ParamAngleX: 15 });
-    expect(fetchFile).toHaveBeenCalledTimes(1);
+    expect(sample).toHaveBeenCalledWith({ fps: 2, zeroSourceFades: true, skipMissingParameters: true });
   });
 
-  it('keeps Cubism 3+ motions with non-parameter curves on native fallback', async () => {
-    const document = {
-      Version: 3,
-      Meta: { Duration: 1 },
-      Curves: [
-        { Target: 'Parameter', Id: 'ParamAngleX', Segments: [0, 0, 0, 1, 30] },
-        { Target: 'PartOpacity', Id: 'PartBody', Segments: [0, 1, 0, 1, 0] },
-      ],
-    };
-    const bytes = new TextEncoder().encode(JSON.stringify(document)).buffer;
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => bytes })));
-    const cubism3Target = {
-      kind: 'cubism3-plus' as const,
-      settings: { motions: { wave: [{ File: 'wave.motion3.json' }] } },
-    };
+  it('keeps sampled motions with non-parameter curves on native fallback', async () => {
     const source = makeSource({
       adapterId: 'untitled-pixi-live2d-engine-cubism',
-      targets: [cubism3Target as unknown as Cubism2MotionSamplerTarget],
+      sample: async () => sampledResult({
+        metadata: { durationSeconds: 1, hasNonParameterCurves: true },
+      }),
     });
     const cache = new MotionCurveCacheService();
     await expect(cache.ensure(source)).resolves.toBeNull();
-    expect(cache.missReason(source)).toBe('unsupported-curve-target');
+    expect(cache.missReason(source)).toBe('parts-layout-curves');
   });
 
   it('builds a per-frame derived custom motion and caches it', async () => {
@@ -184,7 +174,7 @@ describe('motionCurveCache service', () => {
 
   it('returns null when no convertible curves are merged', async () => {
     const sampler = makeSampler({
-      merge: vi.fn(() => []),
+      sample: vi.fn(async () => sampledResult({ curves: [] })),
     });
     const cache = new MotionCurveCacheService(sampler);
     await expect(cache.ensure(makeSource())).resolves.toBeNull();
@@ -220,7 +210,7 @@ describe('motionCurveCache service', () => {
     const sampler = makeSampler();
     sampler.sample = vi.fn()
       .mockRejectedValueOnce(new Error('boom'))
-      .mockImplementation(async () => waveCurves());
+      .mockImplementation(async () => sampledResult());
     const cache = new MotionCurveCacheService(sampler);
     const source = makeSource();
     await expect(cache.ensure(source)).resolves.toBeNull();
@@ -234,15 +224,17 @@ describe('motionCurveCache service', () => {
 
   it('keeps a motion with parts/layout curves on the SDK path (parity guard)', async () => {
     const sampler = makeSampler({
-      resolveMeta: vi.fn(async () => ({ durationSeconds: 2, hasNonParameterCurves: true })),
+      sample: vi.fn(async () => sampledResult({
+        metadata: { durationSeconds: 2, hasNonParameterCurves: true },
+      })),
     });
     const cache = new MotionCurveCacheService(sampler);
     const source = makeSource();
     await expect(cache.ensure(source)).resolves.toBeNull();
     // The source motion animates parts/layouts the pure evaluator cannot
     // represent; converting it would silently lose visuals, so it is rejected
-    // without even sampling the parameter curves.
-    expect(sampler.sample).not.toHaveBeenCalled();
+    // before derived parameters are cached.
+    expect(sampler.sample).toHaveBeenCalledOnce();
     expect(cache.missReason(source)).toBe('parts-layout-curves');
   });
 

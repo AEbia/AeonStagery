@@ -545,7 +545,7 @@ describe('Live2DManager.getPoint', () => {
     expect(controls.advanceFrame).toHaveBeenCalledWith(model, 16);
   });
 
-  it('skips ordinary ticker updates while the global UtSystem lock is active but allows force updates', async () => {
+  it('defers ordinary and forced updates while the global UtSystem lock is active', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');
     const manager = new Live2DManager();
@@ -577,7 +577,7 @@ describe('Live2DManager.getPoint', () => {
       expect(model.update).not.toHaveBeenCalled();
 
       await manager.updateAll(16, true, 1000);
-      expect(model.update).toHaveBeenCalledWith(16);
+      expect(model.update).not.toHaveBeenCalled();
     } finally {
       releaseUtSystemLock();
     }

@@ -4,7 +4,6 @@ import type { Live2DAdapterId, Live2DRuntimeDescriptor } from '../Live2DRuntimeR
 import type { ModelSnapshot } from '../Live2DConfig';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
 import type { Live2DModelHandle } from '../live2d/runtime/Live2DRuntimeControlModule';
-import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type { PreparedAssetRef } from '../../api/types/semantic-scene';
 import type { CustomMotionSamplePoint } from '../live2d/customMotionConversion';
@@ -211,6 +210,7 @@ export interface Live2DSeekMotionOffsetInput {
   offsetSeconds: number;
   handoffBoundarySnapshot?: ModelSnapshot | null;
   isCurrent: () => boolean;
+  transaction?: Live2DClockTransaction;
 }
 
 export interface Live2DSeekMotionOffsetResult {
@@ -378,7 +378,12 @@ export interface Live2DRuntimeModelControls {
   /** Load-time idle flush: start the idle group once, step 16ms, then stop it. */
   flushIdleState(model: any, isCurrent?: () => boolean, transaction?: Live2DClockTransaction): Promise<void>;
   /** Hard reset to idle: stop motions/expressions, restore idle pose, reset focus. */
-  resetModelToIdle(model: any, options?: Live2DModelResetOptions, isCurrent?: () => boolean): Promise<void>;
+  resetModelToIdle(
+    model: any,
+    options?: Live2DModelResetOptions,
+    isCurrent?: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<void>;
   /** Restore only the idle parameter baseline (uncovered-parameter ownership handoff). */
   applyIdleBaseline(model: any, idleSnapshot: Pick<ModelSnapshot, 'params' | 'opacities'> | null): void;
   /** Capture the load-time idle parameter/opacity arrays and persist core params. */
@@ -393,17 +398,6 @@ export interface Live2DRuntimeModelControls {
     offsetSeconds: number,
     options?: Live2DMotionStartOptions,
   ): Promise<Live2DMotionStartResult>;
-  withSharedClock<T>(
-    model: any,
-    isCurrent: () => boolean,
-    operation: (clock: Live2DRuntimeClock | null, transaction: Live2DClockTransaction | null) => Promise<T> | T,
-    transaction?: Live2DClockTransaction,
-  ): Promise<T | undefined>;
-  /**
-   * Internal sampling seam for the engine's own motion-curve cache pre-warm
-   * and authoring helpers (resolve-to-opaque-targets; not a pass-through).
-   */
-  getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[];
   /** Evaluate a resource motion in isolation and return SDK-neutral data. */
   sampleMotion(
     model: any,

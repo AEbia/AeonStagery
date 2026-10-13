@@ -51,8 +51,6 @@ const cachedCubism3Entry: CachedResourceMotion = {
   key: 'untitled-pixi-live2d-engine-cubism::asset://models/char.model3.json::wave',
 };
 
-const fakeSamplerTarget = { internalModel: {}, motionManager: {} } as any;
-
 function createMockLive2D() {
   const characterEntry = {
     id: 'char1',
@@ -83,7 +81,7 @@ function createMockLive2D() {
     stopAllMotions: vi.fn(),
     restoreSeekState: vi.fn().mockResolvedValue(undefined),
     getMotionDuration: vi.fn().mockReturnValue(2),
-    getMotionSamplerTargets: vi.fn(),
+    sampleMotion: vi.fn(async () => ({ status: 'unsupported' as const })),
   };
   return live2D;
 }
@@ -253,7 +251,6 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(null);
     vi.spyOn(motionCurveCache, 'missReason').mockReturnValue(null);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue(cachedEntry);
-    live2D.getMotionSamplerTargets.mockReturnValue([fakeSamplerTarget]);
 
     const charSnap = {
       params: new Float32Array([0, 0, 0, 0]),
@@ -286,15 +283,19 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
       fps: 30,
     });
 
-    // The seek resolves the convertible miss through the shared sampler once:
-    expect(live2D.getMotionSamplerTargets).toHaveBeenCalledWith('char1');
+    // The seek asks the bound domain behavior to sample the resource motion.
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(ensure).toHaveBeenCalledWith({
       adapterId: 'pixi-live2d-display-cubism2',
       modelRuntimePath: 'asset://models/char.model3.json',
       motionKey: 'wave',
-      targets: [fakeSamplerTarget],
       fps: 30,
+      sample: expect.any(Function),
+    });
+    const source = ensure.mock.calls[0][0];
+    await source.sample?.({ fps: 30, zeroSourceFades: true, skipMissingParameters: true });
+    expect(live2D.sampleMotion).toHaveBeenCalledWith('char1', 'wave', {
+      fps: 30, zeroSourceFades: true, skipMissingParameters: true,
     });
     // The freshly built curve entry feeds Phase 3 exactly like a pre-warmed
     // hit: one desired-motion playMotion with the motion-start handoff.
@@ -343,7 +344,6 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(null);
     vi.spyOn(motionCurveCache, 'missReason').mockReturnValue('parts-layout-curves');
     const ensure = vi.spyOn(motionCurveCache, 'ensure');
-    live2D.getMotionSamplerTargets.mockReturnValue([fakeSamplerTarget]);
 
     await synchronizer.syncTo({
       time: 0.2,

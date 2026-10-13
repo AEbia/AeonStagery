@@ -523,11 +523,6 @@ export class BakeEngine {
         }
         return entry.runtimeHandle.motion.sampleMotion(motionKey, options);
       },
-      getSamplingTargets: (charId) => {
-        const entry = this.models.get(charId);
-        if (!isCurrent() || !entry) return [];
-        return getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model);
-      },
       preloadMotion: (charId, motionKey) => isCurrent() ? this.preloadMotion(charId, motionKey) : Promise.resolve(),
       getBaseValues: (charId, parameterIds, excludeParameterIds) => {
         const entry = this.models.get(charId);

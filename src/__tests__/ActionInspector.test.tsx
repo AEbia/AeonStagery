@@ -38,6 +38,7 @@ const testState = vi.hoisted(() => {
     },
     characterAdapter: {
       getModelDataFromPath,
+      hasCharacter: vi.fn(() => true),
       playMotion: vi.fn(),
       stopAllMotions: vi.fn(),
       setExpression: vi.fn(),

@@ -7,6 +7,7 @@ import {
   CubismPixiLive2DAdapter,
 } from '../engine/Live2DRuntimeAdapter';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { isSharedRuntimeClockLocked, withSharedRuntimeClock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
 import * as sdk from '../engine/CubismPixiSdk';
 import { setLive2DCubism2RuntimeAvailable } from '../engine/Live2DRuntimeResolver';
@@ -1290,13 +1291,13 @@ describe('Live2DRuntimeAdapter', () => {
       expect(motionManager._motionQueueManager.stopAllMotions).toHaveBeenCalled();
     });
 
-    it('reports motion groups and sampling targets from concrete models', () => {
+    it('reports motion groups without exposing SDK sampler targets', () => {
       const controls = new Cubism2PixiLive2DModelControls();
-      const { model, internalModel, motionManager } = cubism2DeepModel();
+      const { model } = cubism2DeepModel();
 
       expect(controls.hasMotionGroup(model, 'wave')).toBe(true);
       expect(controls.hasMotionGroup(model, 'sad')).toBe(false);
-      expect(controls.getMotionSamplingTargets(model)).toEqual([{ internalModel, motionManager }]);
+      expect(controls).not.toHaveProperty('getMotionSamplingTargets');
     });
 
     it('flushes the idle state inside the global SDK clock lock', async () => {
@@ -1358,6 +1359,31 @@ describe('Live2DRuntimeAdapter', () => {
       expect(opacities[1]).toBeCloseTo(0.8, 5);
       expect(internalModel.expressionManager.stopAllExpressions).toHaveBeenCalled();
       expect(internalModel.focusController.focus).toHaveBeenCalledWith(0, 0, true);
+    });
+
+    it('coordinates idle reset clock updates and reuses an active transaction', async () => {
+      let utTime = 3000;
+      const clock = {
+        getUserTimeMSec: () => utTime,
+        setUserTimeMSec: (value: number) => { utTime = value; },
+      };
+      const controls = new Cubism2PixiLive2DModelControls({ clock: () => clock });
+      const { model, motionManager } = cubism2DeepModel();
+      motionManager.startMotion.mockImplementation(async () => {
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+        return true;
+      });
+
+      await controls.resetModelToIdle(model);
+      expect(utTime).toBe(3016);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
+
+      await withSharedRuntimeClock(clock, () => true, async (transaction) => {
+        await controls.resetModelToIdle(model, {}, () => true, transaction ?? undefined);
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+      });
+      expect(utTime).toBe(3032);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
     });
 
     it('resets core parameters when no idle snapshot exists and keeps focus on request', async () => {

@@ -8,6 +8,7 @@ import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { acquireUtSystemLock, releaseUtSystemLock } from '../engine/Live2DConfig';
+import { withSharedRuntimeClock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 
 const runtime = {
@@ -150,6 +151,37 @@ describe('Live2DStageRuntime', () => {
     } finally {
       releaseUtSystemLock();
     }
+  });
+
+  it('requires an active transaction before forced or manual frames can bypass the shared clock lock', async () => {
+    const stage = new Live2DStageRuntime({
+      dispatchMotion,
+      describeInvalidModelState: () => null,
+      repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
+      maybeInstallCustomMotionStage: vi.fn(),
+      resolveCustomMotionSceneTime: () => 0,
+      getScriptEngine: () => null,
+    });
+    const entry = makeEntry('shared', { autoUpdate: false });
+    entry.runtimeHandle = createLive2DModelHandle({
+      id: entry.id,
+      model: entry.model,
+      runtime,
+      controls: adapter.getControls(),
+    });
+    stage.characters.set(entry.id, entry);
+
+    const clock = { getUserTimeMSec: () => 100, setUserTimeMSec: vi.fn() };
+    await withSharedRuntimeClock(clock, () => true, async (transaction) => {
+      expect(transaction).not.toBeNull();
+      await stage.step(16, false, 1000);
+      await stage.step(16, true);
+      expect(advanceFrame).not.toHaveBeenCalled();
+      expect(syncInputParameters).not.toHaveBeenCalled();
+
+      await stage.step(16, true, undefined, transaction ?? undefined);
+      expect(advanceFrame).toHaveBeenCalledExactlyOnceWith(entry.model, 16);
+    });
   });
 
   it('commits and freezes zero-delta evaluation according to the handle', async () => {

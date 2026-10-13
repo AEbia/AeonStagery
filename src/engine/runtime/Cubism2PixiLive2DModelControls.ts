@@ -677,16 +677,6 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     }, transaction);
   }
 
-  withSharedClock<T>(
-    _model: any,
-    isCurrent: () => boolean,
-    operation: (clock: Live2DRuntimeClock | null, transaction: Live2DClockTransaction | null) => Promise<T> | T,
-    transaction?: Live2DClockTransaction,
-  ): Promise<T | undefined> {
-    return withSharedRuntimeClock(this.clockProvider(), isCurrent, (lease) =>
-      operation(lease?.clock ?? null, lease), transaction);
-  }
-
   setInjectedParameter(model: any, paramName: string, value: number): void {
     const coreModel = this.getCoreModel(model);
     if (!coreModel?.getParamIndex || !coreModel?.setParamFloat) return;
@@ -990,79 +980,82 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     model: any,
     options: Live2DModelResetOptions = {},
     isCurrent: () => boolean = () => true,
+    transaction?: Live2DClockTransaction,
   ): Promise<void> {
     const { keepFocus = false, idleSnapshot = null } = options;
+    const sdkClock = this.clockProvider();
 
-    for (const targetModel of this.getConcreteModels(model)) {
-      if (!isCurrent()) return;
-      const internalModel = targetModel?.internalModel;
-      if (!internalModel) continue;
+    await withSharedRuntimeClock(sdkClock, isCurrent, async (activeTransaction) => {
+      const clock = activeTransaction?.clock ?? sdkClock;
+      for (const targetModel of this.getConcreteModels(model)) {
+        if (!isCurrent()) return;
+        const internalModel = targetModel?.internalModel;
+        if (!internalModel) continue;
 
-      if (internalModel.motionManager) {
-        internalModel.motionManager.stopAllMotions();
-        if (internalModel.motionManager._motionQueueManager) {
-          internalModel.motionManager._motionQueueManager.stopAllMotions();
-        }
-        if (internalModel.motionManager.state) {
-          internalModel.motionManager.state.currentGroup = undefined;
-          internalModel.motionManager.state.reservedGroup = undefined;
-          (internalModel.motionManager.state as any).queue = [];
+        if (internalModel.motionManager) {
+          internalModel.motionManager.stopAllMotions();
           if (internalModel.motionManager._motionQueueManager) {
-            (internalModel.motionManager._motionQueueManager as any)._userTimeMSec = 0;
+            internalModel.motionManager._motionQueueManager.stopAllMotions();
           }
-        }
-
-        try {
-          const idleGroup = this.resolveIdleMotionGroup(internalModel);
-          if (idleGroup) {
-            await internalModel.motionManager.startMotion(idleGroup, 0, 3);
-            if (!isCurrent()) return;
-            // 与旧实现一致：idle 洗刷推进 16ms（时钟经 adapter 句柄访问，与
-            // flushIdleState 同通道；此处历史上有意不加全局锁——见旧代码）。
-            const sdkClock = this.clockProvider();
-            if (sdkClock) {
-              sdkClock.setUserTimeMSec(sdkClock.getUserTimeMSec() + 16);
-              targetModel.update?.(16);
-            } else {
-              targetModel.update?.(16);
-            }
-            internalModel.motionManager.stopAllMotions();
+          if (internalModel.motionManager.state) {
+            internalModel.motionManager.state.currentGroup = undefined;
+            internalModel.motionManager.state.reservedGroup = undefined;
+            (internalModel.motionManager.state as any).queue = [];
             if (internalModel.motionManager._motionQueueManager) {
-              internalModel.motionManager._motionQueueManager.stopAllMotions();
+              (internalModel.motionManager._motionQueueManager as any)._userTimeMSec = 0;
             }
           }
-        } catch {
-          // Ignore — idle group may not exist on this target.
-        }
-      }
 
-      if (internalModel.expressionManager) {
-        internalModel.expressionManager.stopAllExpressions();
-        if (internalModel.expressionManager.state) {
-          internalModel.expressionManager.state.currentGroup = undefined;
-        }
-      }
-
-      if (internalModel.coreModel) {
-        if (idleSnapshot) {
           try {
-            this.applySnapshot(targetModel, idleSnapshot as ModelSnapshot);
-            console.log('[Live2D] Character restored from deep idle snapshot.');
+            const idleGroup = this.resolveIdleMotionGroup(internalModel);
+            if (idleGroup) {
+              await internalModel.motionManager.startMotion(idleGroup, 0, 3);
+              if (!isCurrent()) return;
+              // Preserve the idle flush step while sharing the runtime clock lease.
+              if (clock) {
+                clock.setUserTimeMSec(clock.getUserTimeMSec() + 16);
+                targetModel.update?.(16);
+              } else {
+                targetModel.update?.(16);
+              }
+              internalModel.motionManager.stopAllMotions();
+              if (internalModel.motionManager._motionQueueManager) {
+                internalModel.motionManager._motionQueueManager.stopAllMotions();
+              }
+            }
           } catch {
+            // Ignore — idle group may not exist on this target.
+          }
+        }
+
+        if (internalModel.expressionManager) {
+          internalModel.expressionManager.stopAllExpressions();
+          if (internalModel.expressionManager.state) {
+            internalModel.expressionManager.state.currentGroup = undefined;
+          }
+        }
+
+        if (internalModel.coreModel) {
+          if (idleSnapshot) {
+            try {
+              this.applySnapshot(targetModel, idleSnapshot as ModelSnapshot);
+              console.log('[Live2D] Character restored from deep idle snapshot.');
+            } catch {
+              resetCoreParams(internalModel.coreModel);
+            }
+          } else {
             resetCoreParams(internalModel.coreModel);
           }
-        } else {
-          resetCoreParams(internalModel.coreModel);
         }
-      }
 
-      if (!isCurrent()) return;
-      if (!keepFocus && internalModel.focusController) {
-        internalModel.focusController.focus(0, 0, true);
-      }
+        if (!isCurrent()) return;
+        if (!keepFocus && internalModel.focusController) {
+          internalModel.focusController.focus(0, 0, true);
+        }
 
-      targetModel.update?.(16);
-    }
+        targetModel.update?.(16);
+      }
+    }, transaction);
   }
 
   applyIdleBaseline(model: any, idleSnapshot: Pick<ModelSnapshot, 'params' | 'opacities'> | null): void {
@@ -1187,7 +1180,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     };
   }
 
-  getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[] {
+  #getMotionSamplingTargets(model: any): readonly Cubism2MotionSamplerTarget[] {
     const targets: Cubism2MotionSamplerTarget[] = [];
     for (const instance of this.getConcreteModels(model)) {
       const internalModel = instance?.internalModel;
@@ -1204,7 +1197,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     options: Live2DMotionSamplingOptions,
     transaction?: Live2DClockTransaction,
   ): Promise<Live2DMotionSamplingResult> {
-    const targets = this.getMotionSamplingTargets(model);
+    const targets = this.#getMotionSamplingTargets(model);
     if (targets.length === 0) {
       return { status: 'unsupported', diagnostics: ['Cubism 2 motion sampling requires a loaded motion manager.'] };
     }

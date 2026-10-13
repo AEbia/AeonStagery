@@ -7,7 +7,6 @@ import type { Live2DSeekExpressionState } from '../Live2DRuntimeAdapter';
 import { resolveLookAtFocus } from '../lookAtFocus';
 import { seekProfiler } from '../SeekProfiler';
 import { motionCurveCache, type CachedResourceMotion, type MotionCurveCacheSource } from '../live2d/motionCurveCache';
-import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
 import type { Live2DMotionSamplingResult } from '../runtime/Live2DRuntimeContracts';
 
 interface DesiredCharState {
@@ -139,12 +138,6 @@ interface Live2DMuscle {
     previousKey?: string | null,
     isCurrent?: () => boolean,
   ): Promise<void>;
-  /**
-   * Concrete Cubism 2 sampling targets of a loaded character. Used by the
-   * seek-side `motionCurveCache.ensure` to convert a not-yet-cached resource
-   * motion on demand (ADR-0033). Absent on runtimes without the sampler.
-   */
-  getMotionSamplerTargets?(id: string): readonly Cubism2MotionSamplerTarget[];
   sampleMotion?(id: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   lookAt(id: string, x: number, y: number, duration: number, options?: {
     fromX?: number;
@@ -226,10 +219,6 @@ export class CharacterSynchronizer {
           fps,
           sample: (options) => this.live2D.sampleMotion!(id, resourceMotionKey, options),
         } });
-      } else {
-        const targets = this.live2D.getMotionSamplerTargets?.(id) ?? [];
-        if (targets.length === 0) continue;
-        ensureTargets.push({ id, source: { ...cacheKey, targets, fps } });
       }
     }
 

@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   compiledScene: null as any,
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: [], expressions: [] })),
+    hasCharacter: vi.fn(() => true),
     playMotion: vi.fn(),
     setExpression: vi.fn(),
   },

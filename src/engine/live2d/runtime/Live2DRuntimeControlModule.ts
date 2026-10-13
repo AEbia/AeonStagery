@@ -33,6 +33,7 @@ import type {
   Live2DModelResetOptions,
   Live2DClockTransaction,
 } from '../../runtime/Live2DRuntimeContracts';
+import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
 
 export interface Live2DRuntimeCapabilities {
   readonly runtimeFamily: Live2DRuntimeDescriptor['runtimeFamily'];
@@ -129,7 +130,11 @@ export function getLive2DRuntimeCapabilities(entry: {
 export interface Live2DLifecycleInterface {
   clearMotionState(): void;
   stopAllMotions(): void;
-  resetToIdle(options?: Live2DModelResetOptions, isCurrent?: () => boolean): Promise<boolean>;
+  resetToIdle(
+    options?: Live2DModelResetOptions,
+    isCurrent?: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean>;
 }
 
 export interface Live2DMotionInterface {
@@ -180,7 +185,7 @@ export interface Live2DPerformanceInterface {
 }
 
 export interface Live2DFrameInterface {
-  shouldDeferPreview(forceStep?: boolean, manualTimeMs?: number, transaction?: Live2DClockTransaction): boolean;
+  shouldDeferPreview(transaction?: Live2DClockTransaction): boolean;
   submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult;
 }
 
@@ -205,7 +210,6 @@ export interface Live2DModelHandle {
   readonly id: string;
   readonly runtime: Live2DRuntimeDescriptor;
   readonly displayObject: PIXI.Container;
-  readonly rawModel: any;
   readonly capabilities: Live2DRuntimeCapabilities;
   inspectParameters(): readonly Live2DParameterInspection[] | null;
   editParameters(edits: readonly Live2DParameterEdit[]): Live2DParameterEditResult;
@@ -247,19 +251,30 @@ export function createLive2DModelHandle({
     id,
     runtime,
     displayObject: model as PIXI.Container,
-    rawModel: model,
     capabilities,
     ...createBoundModelParameters(model, controls),
     ...createBoundModelInitialization(id, model, controls, capabilities),
     lifecycle: {
       clearMotionState: () => controls.clearMotionState(model),
       stopAllMotions: () => controls.stopAllMotions(model),
-      resetToIdle: async (options = {}, isCurrent = () => true) => {
+      resetToIdle: async (options = {}, isCurrent = () => true, transaction) => {
         if (!isCurrent()) return false;
-        await controls.resetModelToIdle(model, options, isCurrent);
-        if (!isCurrent()) return false;
-        if (capabilities.usesCubism2PrivateControls) controls.advanceFrame(model, 16);
-        return isCurrent();
+        if (!capabilities.usesCubism2PrivateControls) {
+          await controls.resetModelToIdle(model, options, isCurrent, transaction);
+          return isCurrent();
+        }
+        const result = await withSharedRuntimeClock(
+          getSharedRuntimeClock(),
+          isCurrent,
+          async (activeTransaction) => {
+            await controls.resetModelToIdle(model, options, isCurrent, activeTransaction ?? undefined);
+            if (!isCurrent()) return false;
+            controls.advanceFrame(model, 16);
+            return isCurrent();
+          },
+          transaction,
+        );
+        return result ?? false;
       },
     },
     motion: {

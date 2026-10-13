@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
       motions: ['wave', 'nod', 'mygo/alice/greet', 'mygo/alice/bow', 'mygo/bob/idle'],
       expressions: ['smile', 'happy', 'mygo/alice/happy', 'mygo/bob/sad'],
     })),
+    hasCharacter: vi.fn(() => true),
     playMotion: vi.fn(), stopAllMotions: vi.fn(), setExpression: vi.fn(),
   },
 }));

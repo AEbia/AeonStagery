@@ -24,18 +24,16 @@ export function createBoundModelFrame(
   controls: Live2DRuntimeModelControls,
   capabilities: Live2DRuntimeCapabilities,
 ): Pick<Live2DModelHandle, 'frame'> {
-  function shouldDeferPreview(forceStep = false, manualTimeMs?: number, transaction?: Live2DClockTransaction): boolean {
+  function shouldDeferPreview(transaction?: Live2DClockTransaction): boolean {
     return capabilities.usesSharedSdkClock
       && isSharedRuntimeClockLocked()
-      && !isSharedRuntimeClockTransactionActive(transaction)
-      && !forceStep
-      && manualTimeMs === undefined;
+      && !isSharedRuntimeClockTransactionActive(transaction);
   }
 
   function submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult {
     const isCurrent = input.isCurrent ?? (() => true);
     if (!isCurrent()) return { status: 'cancelled' };
-    if (shouldDeferPreview(input.forceStep, input.manualTimeMs, input.transaction)) return { status: 'deferred' };
+    if (shouldDeferPreview(input.transaction)) return { status: 'deferred' };
 
     let retainedHandoffBoundary: boolean | undefined;
     if (input.handoffBoundarySnapshot && input.manualTimeMs !== undefined) {

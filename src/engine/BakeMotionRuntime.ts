@@ -20,7 +20,6 @@
  */
 
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
-import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import {
   motionCurveCache,
   motionCurveCacheKey,
@@ -81,7 +80,6 @@ export interface BakeMotionModelInfo {
 export interface BakeMotionRuntimeHost {
   /** Scene frame rate used for on-demand curve cache sampling. */
   readonly fps: number;
-  getSamplingTargets?(charId: string): readonly Cubism2MotionSamplerTarget[];
   sampleMotion?(charId: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   preloadMotion(charId: string, motionKey: string): Promise<void>;
   getBaseValues(
@@ -220,10 +218,9 @@ export class BakeMotionRuntime {
           const source: MotionCurveCacheSource = {
             ...cacheKey,
             fps: this.host.fps,
-            targets: this.host.getSamplingTargets?.(request.charId) ?? [],
             ...(this.host.sampleMotion
               ? { sample: (options) => this.host.sampleMotion!(request.charId, request.motionKey, options) }
-              : { targets: this.host.getSamplingTargets?.(request.charId) ?? [] }),
+              : {}),
           };
           const cacheEntry = await this.cache.ensure(source);
           if (cacheEntry) {

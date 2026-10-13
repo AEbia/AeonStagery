@@ -86,7 +86,7 @@ describe('createLive2DModelHandle', () => {
     expect(handle.id).toBe('tomori');
     expect(handle.runtime.runtimeFamily).toBe('cubism2');
     expect(handle.displayObject).toBe(model);
-    expect(handle.rawModel).toBe(model);
+    expect(handle).not.toHaveProperty('rawModel');
     expect(handle.capabilities).toEqual({
       runtimeFamily: 'cubism2',
       adapterId: 'pixi-live2d-display-cubism2',
@@ -289,7 +289,7 @@ describe('createLive2DModelHandle', () => {
       return { ok: true, offsetReplayMs: 50, motionStartUtTimeMs: 10 };
     });
     vi.mocked(controls.applySnapshot).mockImplementation(() => { order.push('snapshot'); });
-    vi.mocked(controls.setExpression).mockImplementation(() => { order.push('expression'); });
+    vi.mocked(controls.setExpressionForSeek!).mockImplementation(async () => { order.push('expression'); });
     vi.mocked(controls.captureSnapshot).mockReturnValue({
       params: new Float32Array([0]),
       opacities: new Float32Array([1]),
@@ -308,6 +308,9 @@ describe('createLive2DModelHandle', () => {
 
     expect(result).toMatchObject({ status: 'started', offsetReplayMs: 50, retainedHandoffBoundary: true });
     expect(order).toEqual(['preload', 'start', 'snapshot', 'expression', 'snapshot']);
+    expect(controls.setExpressionForSeek).toHaveBeenCalledWith(
+      model, 'smile', 0, undefined, expect.any(Function), expect.objectContaining({ token: expect.any(Symbol) }),
+    );
     expect(controls.startMotion).toHaveBeenCalledWith(model, 'wave', 3, 0.05, expect.objectContaining({
       clearQueueFirst: undefined,
       isCurrent: expect.any(Function),
@@ -331,6 +334,36 @@ describe('createLive2DModelHandle', () => {
     })).resolves.toMatchObject({ status: 'cancelled' });
     expect(controls.startMotion).not.toHaveBeenCalled();
     expect(controls.applySnapshot).not.toHaveBeenCalled();
+  });
+
+  it('waits for cancellable expression restoration and suppresses a stale result', async () => {
+    const controls = createControls();
+    const model = {};
+    let current = true;
+    let finishExpression!: () => void;
+    const expressionLoad = new Promise<void>((resolve) => { finishExpression = resolve; });
+    const appliedExpressions: Array<string | null> = [];
+    vi.mocked(controls.setExpressionForSeek!).mockImplementation(async (_model, expression, _elapsed, _previous, isCurrent) => {
+      await expressionLoad;
+      if (isCurrent?.()) appliedExpressions.push(expression);
+    });
+    const handle = createLive2DModelHandle({
+      id: 'stale-expression-transition',
+      model,
+      runtime: { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
+      controls,
+    });
+
+    const transition = handle.performance.transition({
+      motionKey: 'wave', priority: 3, offsetSeconds: 0, sceneTimeSeconds: 1,
+      expressionKey: 'smile', isCurrent: () => current,
+    });
+    await vi.waitFor(() => expect(controls.setExpressionForSeek).toHaveBeenCalledOnce());
+    current = false;
+    finishExpression();
+
+    await expect(transition).resolves.toMatchObject({ status: 'cancelled' });
+    expect(appliedExpressions).toEqual([]);
   });
 
   it('submits frame parameters after advancement and commits geometry once per batch', () => {

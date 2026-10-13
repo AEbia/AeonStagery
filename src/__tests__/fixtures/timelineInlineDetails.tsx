@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   openCustomMotionEditor: vi.fn(),
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({ motions: ['wave'], expressions: ['smile'] })),
+    hasCharacter: vi.fn(() => true),
     playMotion: vi.fn(), stopAllMotions: vi.fn(), setExpression: vi.fn(),
   },
 }));

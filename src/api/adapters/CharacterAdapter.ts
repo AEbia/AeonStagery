@@ -63,9 +63,6 @@ export class CharacterAdapter implements ICharacterAdapter {
   listCharacterInfo() { return this.manager.listCharacterInfo(); }
   getDisplayObject(id: string) { return this.manager.getDisplayObject(id); }
   hasCharacter(id: string): boolean { return this.manager.hasCharacter(id); }
-  getCubism2SamplerTargets(characterId: string): readonly import('../../engine/live2d/cubism2MotionSampler').Cubism2MotionSamplerTarget[] {
-    return this.manager.getCubism2SamplerTargets(characterId);
-  }
   sampleMotion(characterId: string, motionKey: string, options: Live2DMotionSamplingOptions): Promise<Live2DMotionSamplingResult> {
     return this.manager.sampleMotion(characterId, motionKey, options);
   }

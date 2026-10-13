@@ -532,14 +532,14 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
 
   if (isResourceMotion) {
     const charId = actionParams.id || actionParams.target;
-    const cubism2Loaded = !!charId && (characterAdapter.getCubism2SamplerTargets?.(charId)?.length ?? 0) > 0;
-    const canConvert = !!customMotionConversion && !!charId && cubism2Loaded;
+    const characterLoaded = !!charId && characterAdapter.hasCharacter(charId);
+    const canConvert = !!customMotionConversion && !!charId && characterLoaded;
     return (
       <div className="inspector-section" data-testid="resource-motion-conversion">
         <div className="inspector-section-title">
           自定义动作
-          {!cubism2Loaded && (
-            <InfoTip content="需要角色已加载为 Cubism 2.1 模型才能转换。" />
+          {!characterLoaded && (
+            <InfoTip content="需要角色已加载才能转换。" />
           )}
         </div>
         <button type="button" className="btn btn--primary" style={{ width: '100%' }} onClick={openConversionDialog} disabled={!canConvert}>

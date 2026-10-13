@@ -11,9 +11,7 @@ import gsap from 'gsap';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
 import { describeInvalidModelSnapshot } from './Live2DConfig';
 import { hookSystem } from '../api/hooks';
-import { getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
-import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
 import { purgeCharacterRuntimeState } from './live2d/characterStatePurge';
 import {
@@ -103,16 +101,6 @@ export class Live2DMotionController {
       console.warn(`[Live2D] Cannot get motion duration for ${id}/${motionKey}:`, e);
       return 0;
     }
-  }
-
-  /**
-   * Return the concrete Cubism 2.1 sampling targets for a loaded character.
-   * Used by the runtime motion curve cache pre-warm and seek integration.
-   */
-  getMotionSamplerTargets(id: string): readonly Cubism2MotionSamplerTarget[] {
-    const entry = this.characters.get(id);
-    if (!entry?.model) return [];
-    return getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model);
   }
 
   /**

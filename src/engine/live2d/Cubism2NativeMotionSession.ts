@@ -129,6 +129,7 @@ export class Cubism2NativeMotionSession {
     const motionStartUtTimeMs = clock
       ? clock.getUserTimeMSec() - offsetMs
       : 0;
+    const initialClockTimeMs = clock?.getUserTimeMSec();
 
     if (clock) {
       clock.setUserTimeMSec(motionStartUtTimeMs);
@@ -160,9 +161,8 @@ export class Cubism2NativeMotionSession {
       // and the replay baseline below is derived as `parked + offsetMs` — any
       // setUserTimeMSec() inside the callback would silently shift the replay
       // window. Current callers only apply snapshots (plain parameter arrays).
-      // If beforeReplay throws, the finally still restores physics; the clock
-      // stays parked until the engine's next per-frame monotonic advance,
-      // which recovers the discipline without ever jumping backwards.
+      // Cleanup restores the monotonic clock baseline even if cancellation or
+      // an exception interrupts the replay while the clock is parked.
       await options.beforeReplay?.({ motionStartUtTimeMs });
       if (options.isCurrent && !options.isCurrent()) {
         return { motionStartUtTimeMs, offsetReplayMs: 0, started: false, cancelled: true };
@@ -198,6 +198,9 @@ export class Cubism2NativeMotionSession {
         started,
       };
     } finally {
+      if (clock && initialClockTimeMs !== undefined && Number.isFinite(initialClockTimeMs)) {
+        clock.setUserTimeMSec(Math.max(clock.getUserTimeMSec(), initialClockTimeMs));
+      }
       for (const { internalModel, physics } of physicsStates) {
         if (internalModel) {
           internalModel.physics = physics;
