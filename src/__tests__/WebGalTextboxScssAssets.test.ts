@@ -172,4 +172,29 @@ describe('WebGalTextboxScssAssets', () => {
     expect(rewritten.textbox!.image).toBe(table['wg-textbox'].relPath);
     expect(rewritten.namebox!.image).toBe(table['wg-namebox'].relPath);
   });
+  it('drops active content from an inlined ornament but keeps the rest', () => {
+    // An ornament is markup that goes into a generated asset, so it should not
+    // carry anything a renderer could act on.
+    const hostile = [
+      `<svg viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg">`,
+      `<script>fetch("https://example.invalid")</script>`,
+      `<foreignObject><body xmlns="http://www.w3.org/1999/xhtml">hi</body></foreignObject>`,
+      `<path d="M0 0" onload="steal()" onclick='go()' onmouseover=run()>`,
+      `<use href="#wgd-star"/>`,
+      `<image href="https://example.invalid/pixel.png"/>`,
+      `</svg>`,
+    ].join('');
+    const out = inlineSvg(hostile, 0, 0, 10, 10, 0);
+    expect(out).not.toContain('script');
+    expect(out).not.toContain('foreignObject');
+    expect(out).not.toContain('onload');
+    expect(out).not.toContain('onclick');
+    expect(out).not.toContain('onmouseover');
+    expect(out).not.toContain('example.invalid');
+    // A same-document reference is legitimate markup and must survive.
+    expect(out).toContain('#wgd-star');
+    // Ordinary drawing instructions are untouched.
+    expect(out).toContain('M0 0');
+  });
+
 });

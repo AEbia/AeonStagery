@@ -87,6 +87,28 @@ export function namespaceSvgIds(svgText: string, prefix: string): string {
  * PIXI loads an SVG as an image, so referenced files are never fetched — the
  * ornament has to be inlined.
  */
+/**
+ * Drop the constructs an ornament never needs and a renderer must never honour.
+ *
+ * The file comes from a template the user picked locally and Pixi rasterises SVG
+ * instead of executing it, so this is defence in depth rather than the fix for
+ * a live vulnerability. It is deliberately narrow: real ornaments are made of
+ * `defs` / `g` / `path` and use `clip-path="url(#id)"`, so nothing here can bite
+ * them — `href="#id"` is kept for `<use>`, only references that leave the
+ * document are removed.
+ */
+function stripActiveSvg(markup: string): string {
+  return String(markup)
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*\/?>/gi, '')
+    .replace(/<foreignObject\b[\s\S]*?<\/foreignObject\s*>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    .replace(/\s(?:xlink:)?href\s*=\s*"(?!#)[^"]*"/gi, '')
+    .replace(/\s(?:xlink:)?href\s*=\s*'(?!#)[^']*'/gi, '');
+}
+
 export function inlineSvg(
   svgText: string | null | undefined,
   x: number,
@@ -96,7 +118,7 @@ export function inlineSvg(
   rotate: number,
 ): string {
   if (!svgText) return '';
-  const source = namespaceSvgIds(String(svgText), 'wgd');
+  const source = namespaceSvgIds(stripActiveSvg(svgText), 'wgd');
   const viewBox = /viewBox\s*=\s*["']\s*([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)/i.exec(source);
   let vx = 0;
   let vy = 0;

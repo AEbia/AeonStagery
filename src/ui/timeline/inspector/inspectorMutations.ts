@@ -185,7 +185,13 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
       ...currentTemplates,
       enabledTemplateIds,
     });
-    if (!result.success) {
+    // `updateTemplateConfiguration` can report failure *after* the project was
+    // already saved (it resolves the default scene last), so the session is
+    // asked rather than the flag believed: reporting "not enabled" for a
+    // package that is enabled would send the user looking for a problem.
+    const applied = (projectWorkspace.getCurrentProject()?.metadata.templates?.enabledTemplateIds ?? [])
+      .includes(packageId);
+    if (!applied && !result.success) {
       showToast(`已导入，但未能在当前项目启用：${result.error ?? '未知错误'}`, 'error');
     }
   };
