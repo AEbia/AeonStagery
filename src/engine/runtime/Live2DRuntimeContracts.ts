@@ -232,6 +232,52 @@ export interface Live2DFrameSubmissionInput {
   transaction?: Live2DClockTransaction;
 }
 
+/** One bound model's complete Bake frame request; SDK update/render ordering stays adapter-owned. */
+export interface Live2DBakeFrameInput {
+  deltaMs: number;
+  renderer?: PIXI.Renderer;
+  label?: string;
+  flushCore?: boolean;
+  isCurrent: () => boolean;
+  /** Internal runtime batch lease; callers should use the batch behavior. */
+  transaction?: Live2DClockTransaction;
+}
+
+/** Optional one-time native transition performed before a coordinated Bake frame. */
+export type Live2DBakeMotionStartInput = Omit<Live2DPerformanceTransitionInput, 'isCurrent'>;
+
+export interface Live2DBakeFrameOperation {
+  readonly handle: Live2DModelHandle;
+  readonly isCurrent: () => boolean;
+  readonly renderer?: PIXI.Renderer;
+  readonly flushCore?: boolean;
+  /** Bound state preparation performed under the batch's shared clock transaction. */
+  readonly resetRuntimeState?: Live2DRuntimeResetInput;
+  /** Apply a previously captured pose under the batch's shared clock transaction. */
+  readonly restoreSnapshot?: ModelSnapshot;
+  /** Omit the frame step for state-only restore/reset batches. Defaults to true. */
+  readonly submitFrame?: boolean;
+  readonly stopMotion?: boolean;
+  readonly expression?: string | null;
+  readonly motionStart?: Live2DBakeMotionStartInput;
+  readonly resetForPlayback?: {
+    readonly idleSnapshot: ModelSnapshot;
+    readonly restartIdleMotion: boolean;
+  };
+}
+
+export interface Live2DBakeFrameBatchInput {
+  readonly operations: readonly Live2DBakeFrameOperation[];
+  readonly deltaMs: number;
+  readonly advanceClock?: boolean;
+  readonly isCurrent: () => boolean;
+}
+
+export interface Live2DBakeFrameBatchResult {
+  readonly status: 'submitted' | 'cancelled';
+  readonly transitions: ReadonlyMap<string, Live2DPerformanceTransitionResult>;
+}
+
 export interface Live2DFrameSubmissionResult {
   status: 'submitted' | 'deferred' | 'cancelled';
   retainedHandoffBoundary?: boolean;

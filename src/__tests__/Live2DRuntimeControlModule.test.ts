@@ -1,15 +1,44 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createLive2DModelHandle, getLive2DRuntimeCapabilities, resolveLive2DRuntimeCapabilities } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as PIXI from 'pixi.js';
+import {
+  createLive2DModelHandle,
+  getLive2DRuntimeCapabilities,
+  resolveLive2DRuntimeCapabilities,
+  submitLive2DBakeFrameBatch,
+} from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import {
   isSharedRuntimeClockLocked,
+  registerSharedRuntimeClockProvider,
   withSharedRuntimeClock,
   type Live2DClockTransaction,
 } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
+import { cubism2Live2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import type {
   Live2DRuntimeModelControls,
   Live2DSeekRestoreResult,
 } from '../engine/Live2DRuntimeAdapter';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import { Live2DCompositeModel } from '../engine/Live2DCompositeModel';
+
+const cubism2Runtime = {
+  runtimeFamily: 'cubism2' as const,
+  adapterId: 'pixi-live2d-display-cubism2' as const,
+  supported: true,
+};
+
+function createClock(initialTime: number) {
+  let time = initialTime;
+  const setUserTimeMSec = vi.fn((next: number) => { time = next; });
+  return {
+    clock: { getUserTimeMSec: () => time, setUserTimeMSec },
+    setUserTimeMSec,
+    getTime: () => time,
+  };
+}
+
+afterEach(() => {
+  registerSharedRuntimeClockProvider(() => cubism2Live2DAdapter.getClock());
+});
 
 function createControls(): Live2DRuntimeModelControls {
   return mockControls({
@@ -464,5 +493,245 @@ describe('createLive2DModelHandle', () => {
     expect(nestedOperation).toHaveBeenCalledTimes(1);
     expect(controls.advanceFrame).toHaveBeenCalledTimes(1);
     expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+});
+
+describe('submitLive2DBakeFrameBatch', () => {
+  it('starts transitions, restores idle, and advances one shared clock for multiple bound models', async () => {
+    const { clock, setUserTimeMSec, getTime } = createClock(100);
+    registerSharedRuntimeClockProvider(() => clock);
+    const order: string[] = [];
+    const controlsFor = (id: string) => mockControls({
+      stopAllMotions: vi.fn(() => { order.push(`${id}:stop`); }),
+      clearMotionState: vi.fn(() => { order.push(`${id}:clear`); }),
+      applySnapshot: vi.fn(() => { order.push(`${id}:snapshot`); }),
+      restartIdleMotion: vi.fn(async () => {
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+        order.push(`${id}:idle`);
+      }),
+      hasMotionGroup: vi.fn(() => true),
+      startMotion: vi.fn(async (_model, _key, _priority, _offset, options) => {
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+        expect(options?.clock).toBe(clock);
+        order.push(`${id}:motion`);
+        return { ok: true, offsetReplayMs: 25 };
+      }),
+      stepBakeFrame: vi.fn(() => {
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+        order.push(`${id}:frame`);
+      }),
+    });
+    const firstControls = controlsFor('first');
+    const secondControls = controlsFor('second');
+    const first = createLive2DModelHandle({ id: 'first', model: {}, runtime: cubism2Runtime, controls: firstControls });
+    const second = createLive2DModelHandle({ id: 'second', model: {}, runtime: cubism2Runtime, controls: secondControls });
+    const idleSnapshot = { params: new Float32Array([0]), opacities: new Float32Array([1]) };
+
+    const result = await submitLive2DBakeFrameBatch({
+      operations: [
+        {
+          handle: first,
+          isCurrent: () => true,
+          resetForPlayback: { idleSnapshot, restartIdleMotion: true },
+        },
+        {
+          handle: second,
+          isCurrent: () => true,
+          motionStart: { motionKey: 'wave', priority: 3, offsetSeconds: 0.25, sceneTimeSeconds: 1 },
+        },
+      ],
+      deltaMs: 16,
+      isCurrent: () => true,
+    });
+
+    expect(result.status).toBe('submitted');
+    expect(result.transitions.get('second')?.status).toBe('started');
+    expect(order).toEqual([
+      'first:stop', 'first:clear', 'first:snapshot', 'first:idle',
+      'second:motion', 'first:frame', 'second:frame',
+    ]);
+    expect(getTime()).toBe(116);
+    expect(setUserTimeMSec).toHaveBeenCalledTimes(1);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('cancels after an awaited preload when a model borrow becomes stale', async () => {
+    const { clock, setUserTimeMSec } = createClock(250);
+    registerSharedRuntimeClockProvider(() => clock);
+    let current = true;
+    let finishPreload!: () => void;
+    const preloadGate = new Promise<void>((resolve) => { finishPreload = resolve; });
+    const controls = mockControls({
+      preloadMotion: vi.fn(async () => preloadGate),
+      startMotion: vi.fn(async () => ({ ok: true, offsetReplayMs: 0 })),
+      stepBakeFrame: vi.fn(),
+    });
+    const handle = createLive2DModelHandle({ id: 'stale', model: {}, runtime: cubism2Runtime, controls });
+
+    const batchPromise = submitLive2DBakeFrameBatch({
+      operations: [{
+        handle,
+        isCurrent: () => current,
+        motionStart: { motionKey: 'wave', priority: 3, offsetSeconds: 0.5, sceneTimeSeconds: 1 },
+      }],
+      deltaMs: 16,
+      isCurrent: () => true,
+    });
+    while (vi.mocked(controls.preloadMotion).mock.calls.length === 0) await Promise.resolve();
+    current = false;
+    finishPreload();
+
+    const result = await batchPromise;
+    expect(result.status).toBe('cancelled');
+    expect(controls.startMotion).not.toHaveBeenCalled();
+    expect(controls.stepBakeFrame).not.toHaveBeenCalled();
+    expect(setUserTimeMSec).not.toHaveBeenCalled();
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('keeps the shared clock monotonic and releases the lock when a native transition throws', async () => {
+    const { clock, setUserTimeMSec, getTime } = createClock(500);
+    registerSharedRuntimeClockProvider(() => clock);
+    const controls = mockControls({
+      hasMotionGroup: vi.fn(() => true),
+      startMotion: vi.fn(async (_model, _key, _priority, _offset, options) => {
+        options?.clock?.setUserTimeMSec(-20);
+        throw new Error('native transition failed');
+      }),
+      stepBakeFrame: vi.fn(),
+    });
+    const handle = createLive2DModelHandle({ id: 'throwing', model: {}, runtime: cubism2Runtime, controls });
+
+    await expect(submitLive2DBakeFrameBatch({
+      operations: [{
+        handle,
+        isCurrent: () => true,
+        motionStart: { motionKey: 'wave', priority: 3, offsetSeconds: 0.5, sceneTimeSeconds: 1 },
+      }],
+      deltaMs: 16,
+      isCurrent: () => true,
+    })).rejects.toThrow('native transition failed');
+
+    expect(getTime()).toBe(500);
+    expect(setUserTimeMSec).toHaveBeenCalledWith(500);
+    expect(controls.stepBakeFrame).not.toHaveBeenCalled();
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('keeps the shared clock monotonic and skips later models when a borrow is cancelled during a frame', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(800);
+    registerSharedRuntimeClockProvider(() => clock);
+    let current = true;
+    const firstControls = mockControls({
+      stepBakeFrame: vi.fn(() => { current = false; }),
+    });
+    const secondControls = mockControls({ stepBakeFrame: vi.fn() });
+    const first = createLive2DModelHandle({ id: 'first-cancelled-frame', model: {}, runtime: cubism2Runtime, controls: firstControls });
+    const second = createLive2DModelHandle({ id: 'second-cancelled-frame', model: {}, runtime: cubism2Runtime, controls: secondControls });
+
+    const result = await submitLive2DBakeFrameBatch({
+      operations: [
+        { handle: first, isCurrent: () => current },
+        { handle: second, isCurrent: () => true },
+      ],
+      deltaMs: 16,
+      isCurrent: () => true,
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(getTime()).toBe(816);
+    expect(setUserTimeMSec).toHaveBeenCalledOnce();
+    expect(setUserTimeMSec).toHaveBeenCalledWith(816);
+    expect(firstControls.stepBakeFrame).toHaveBeenCalledOnce();
+    expect(secondControls.stepBakeFrame).not.toHaveBeenCalled();
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('keeps the shared clock monotonic when a bound model frame throws', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(850);
+    registerSharedRuntimeClockProvider(() => clock);
+    const controls = mockControls({
+      stepBakeFrame: vi.fn(() => { throw new Error('frame failed'); }),
+    });
+    const handle = createLive2DModelHandle({ id: 'failed-frame', model: {}, runtime: cubism2Runtime, controls });
+
+    await expect(submitLive2DBakeFrameBatch({
+      operations: [{ handle, isCurrent: () => true }],
+      deltaMs: 16,
+      isCurrent: () => true,
+    })).rejects.toThrow('frame failed');
+
+    expect(getTime()).toBe(866);
+    expect(setUserTimeMSec).toHaveBeenCalledOnce();
+    expect(setUserTimeMSec).toHaveBeenCalledWith(866);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('normalizes an invalid starting clock to a finite value on failure', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(Number.NaN);
+    registerSharedRuntimeClockProvider(() => clock);
+    const controls = mockControls({
+      hasMotionGroup: vi.fn(() => true),
+      startMotion: vi.fn(async (_model, _key, _priority, _offset, options) => {
+        options?.clock?.setUserTimeMSec(Number.NaN);
+        throw new Error('native transition failed');
+      }),
+    });
+    const handle = createLive2DModelHandle({ id: 'invalid-clock', model: {}, runtime: cubism2Runtime, controls });
+
+    await expect(submitLive2DBakeFrameBatch({
+      operations: [{
+        handle,
+        isCurrent: () => true,
+        motionStart: { motionKey: 'wave', priority: 3, offsetSeconds: 0.5, sceneTimeSeconds: 1 },
+      }],
+      deltaMs: 16,
+      isCurrent: () => true,
+    })).rejects.toThrow('native transition failed');
+
+    expect(getTime()).toBe(0);
+    expect(setUserTimeMSec).toHaveBeenLastCalledWith(0);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('runs a composite bake frame once with main-before-submodel updates', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(900);
+    registerSharedRuntimeClockProvider(() => clock);
+    const order: string[] = [];
+    const coreModel = () => ({
+      getParamIndex: () => -1,
+      getParameterValues: () => new Float32Array(0),
+      update: vi.fn(),
+    });
+    const mainModel = new PIXI.Container() as PIXI.Container & {
+      internalModel: { coreModel: ReturnType<typeof coreModel> };
+      update: ReturnType<typeof vi.fn>;
+    };
+    mainModel.name = 'main';
+    mainModel.internalModel = { coreModel: coreModel() };
+    mainModel.update = vi.fn(() => { order.push('main'); });
+    const subModel = new PIXI.Container() as PIXI.Container & {
+      internalModel: { coreModel: ReturnType<typeof coreModel> };
+      update: ReturnType<typeof vi.fn>;
+    };
+    subModel.name = 'sub';
+    subModel.internalModel = { coreModel: coreModel() };
+    subModel.update = vi.fn(() => { order.push('sub'); });
+    const composite = new Live2DCompositeModel(mainModel, [subModel]);
+    const controls = cubism2Live2DAdapter.getControls();
+    const frame = vi.spyOn(controls, 'stepBakeFrame');
+    const handle = createLive2DModelHandle({ id: 'composite-bake', model: composite, runtime: cubism2Runtime, controls });
+
+    const result = await submitLive2DBakeFrameBatch({
+      operations: [{ handle, isCurrent: () => true }],
+      deltaMs: 16,
+      isCurrent: () => true,
+    });
+
+    expect(result.status).toBe('submitted');
+    expect(frame).toHaveBeenCalledOnce();
+    expect(order).toEqual(['main', 'sub']);
+    expect(getTime()).toBe(916);
+    expect(setUserTimeMSec).toHaveBeenCalledOnce();
   });
 });

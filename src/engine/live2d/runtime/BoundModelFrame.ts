@@ -4,6 +4,7 @@ import {
 } from './Live2DRuntimeClockCoordinator';
 import type {
   Live2DClockTransaction,
+  Live2DBakeFrameInput,
   Live2DFrameSubmissionInput,
   Live2DFrameSubmissionResult,
   Live2DRuntimeModelControls,
@@ -62,5 +63,26 @@ export function createBoundModelFrame(
     return { status: 'submitted', retainedHandoffBoundary };
   }
 
-  return { frame: { shouldDeferPreview, submit } };
+  function submitBake(input: Live2DBakeFrameInput): Live2DFrameSubmissionResult {
+    if (!input.isCurrent()) return { status: 'cancelled' };
+    if (capabilities.usesSharedSdkClock
+      && !isSharedRuntimeClockTransactionActive(input.transaction)) {
+      return { status: 'deferred' };
+    }
+
+    const display = model as { visible?: boolean; renderable?: boolean };
+    const renderer = display.visible === false || display.renderable === false
+      ? undefined
+      : input.renderer;
+    controls.stepBakeFrame(
+      model,
+      input.deltaMs,
+      renderer,
+      input.label ?? id,
+      input.flushCore,
+    );
+    return input.isCurrent() ? { status: 'submitted' } : { status: 'cancelled' };
+  }
+
+  return { frame: { shouldDeferPreview, submit, submitBake } };
 }

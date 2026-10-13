@@ -32,8 +32,17 @@ import type {
   Live2DFrameSubmissionResult,
   Live2DModelResetOptions,
   Live2DClockTransaction,
+  Live2DBakeFrameBatchInput,
+  Live2DBakeFrameBatchResult,
+  Live2DBakeFrameInput,
+  Live2DBakeFrameOperation,
 } from '../../runtime/Live2DRuntimeContracts';
-import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
+import {
+  getSharedRuntimeClock,
+  getSharedRuntimeClockForTransaction,
+  isSharedRuntimeClockTransactionActive,
+  withSharedRuntimeClock,
+} from './Live2DRuntimeClockCoordinator';
 
 export interface Live2DRuntimeCapabilities {
   readonly runtimeFamily: Live2DRuntimeDescriptor['runtimeFamily'];
@@ -135,10 +144,18 @@ export interface Live2DLifecycleInterface {
     isCurrent?: () => boolean,
     transaction?: Live2DClockTransaction,
   ): Promise<boolean>;
+  /** Restore Bake's idle baseline and optional idle start before an appearance. */
+  prepareForBakePlayback(
+    idleSnapshot: ModelSnapshot,
+    restartIdleMotion: boolean,
+    isCurrent: () => boolean,
+    transaction?: Live2DClockTransaction,
+  ): Promise<boolean>;
 }
 
 export interface Live2DMotionInterface {
   getAvailableMotions(): string[];
+  hasMotionGroup(motionKey: string): boolean;
   getMotionDuration(motionKey: string): number;
   getMotionDebugState(): Record<string, unknown> | null;
   preloadMotion(motionKey: string, isCurrent?: () => boolean): Promise<boolean>;
@@ -187,6 +204,7 @@ export interface Live2DPerformanceInterface {
 export interface Live2DFrameInterface {
   shouldDeferPreview(transaction?: Live2DClockTransaction): boolean;
   submit(input: Live2DFrameSubmissionInput): Live2DFrameSubmissionResult;
+  submitBake(input: Live2DBakeFrameInput): Live2DFrameSubmissionResult;
 }
 
 export interface Live2DFocusInterface {
@@ -257,6 +275,23 @@ export function createLive2DModelHandle({
     lifecycle: {
       clearMotionState: () => controls.clearMotionState(model),
       stopAllMotions: () => controls.stopAllMotions(model),
+      prepareForBakePlayback: async (idleSnapshot, restartIdleMotion, isCurrent, transaction) => {
+        const prepare = async () => {
+          if (!isCurrent()) return false;
+          controls.stopAllMotions(model);
+          controls.clearMotionState(model);
+          if (!isCurrent()) return false;
+          controls.applySnapshot(model, idleSnapshot);
+          if (restartIdleMotion) {
+            await controls.restartIdleMotion(model);
+            if (!isCurrent()) return false;
+          }
+          return isCurrent();
+        };
+        if (!capabilities.usesSharedSdkClock) return prepare();
+        const result = await withSharedRuntimeClock(getSharedRuntimeClock(), isCurrent, prepare, transaction);
+        return result ?? false;
+      },
       resetToIdle: async (options = {}, isCurrent = () => true, transaction) => {
         if (!isCurrent()) return false;
         if (!capabilities.usesCubism2PrivateControls) {
@@ -279,6 +314,7 @@ export function createLive2DModelHandle({
     },
     motion: {
       getAvailableMotions: () => controls.getAvailableMotions(model),
+      hasMotionGroup: (motionKey) => controls.hasMotionGroup(model, motionKey),
       getMotionDuration: (motionKey) => controls.getMotionDuration(model, motionKey),
       getMotionDebugState: () => controls.getMotionDebugState(model),
       preloadMotion: async (motionKey, isCurrent = () => true) => {
@@ -323,4 +359,109 @@ export function createLive2DModelHandle({
       describeInvalidState: () => controls.describeInvalidState(model),
     },
   };
+}
+
+/** Run complete Bake work for a frame as one runtime-owned clock transaction. */
+export async function submitLive2DBakeFrameBatch(
+  input: Live2DBakeFrameBatchInput,
+): Promise<Live2DBakeFrameBatchResult> {
+  const seen = new Set<string>();
+  for (const operation of input.operations) {
+    if (seen.has(operation.handle.id)) {
+      throw new Error(`Bake frame batch contains duplicate model handle: ${operation.handle.id}`);
+    }
+    seen.add(operation.handle.id);
+  }
+
+  const transitions = new Map<string, Live2DPerformanceTransitionResult>();
+  const usesSharedClock = input.operations.some(operation => operation.handle.capabilities.usesSharedSdkClock);
+  const run = async (transaction: Live2DClockTransaction | null): Promise<Live2DBakeFrameBatchResult> => {
+    const clock = getSharedRuntimeClockForTransaction(transaction);
+    const clockTimeAtStart = clock?.getUserTimeMSec();
+    const clockFloor = Number.isFinite(clockTimeAtStart) ? Number(clockTimeAtStart) : 0;
+    const isCurrent = () => input.isCurrent() && input.operations.every(operation => operation.isCurrent());
+    let completed = false;
+    try {
+      for (const operation of input.operations) {
+        const current = () => input.isCurrent() && operation.isCurrent();
+        if (!current()) return { status: 'cancelled', transitions };
+        if (operation.resetRuntimeState) {
+          operation.handle.resetRuntimeState(operation.resetRuntimeState);
+          if (!current()) return { status: 'cancelled', transitions };
+        }
+        if (operation.resetForPlayback) {
+          const reset = await operation.handle.lifecycle.prepareForBakePlayback(
+            operation.resetForPlayback.idleSnapshot,
+            operation.resetForPlayback.restartIdleMotion,
+            current,
+            transaction ?? undefined,
+          );
+          if (!reset || !current()) return { status: 'cancelled', transitions };
+        } else if (operation.stopMotion) {
+          operation.handle.lifecycle.stopAllMotions();
+          operation.handle.lifecycle.clearMotionState();
+          if (!current()) return { status: 'cancelled', transitions };
+        }
+        if (operation.expression !== undefined) {
+          operation.handle.expression.setExpression(operation.expression);
+          if (!current()) return { status: 'cancelled', transitions };
+        }
+        if (operation.restoreSnapshot) {
+          operation.handle.snapshot.applySnapshot(operation.restoreSnapshot);
+          if (!current()) return { status: 'cancelled', transitions };
+        }
+      }
+
+      for (const operation of input.operations) {
+        const motionStart = operation.motionStart;
+        if (!motionStart) continue;
+        const current = () => input.isCurrent() && operation.isCurrent();
+        if (!current()) return { status: 'cancelled', transitions };
+        const result = await operation.handle.performance.transition(
+          { ...motionStart, isCurrent: current },
+          transaction ?? undefined,
+        );
+        transitions.set(operation.handle.id, result);
+        if (result.status === 'cancelled' || !current()) return { status: 'cancelled', transitions };
+      }
+
+      if (!isCurrent()) return { status: 'cancelled', transitions };
+      const shouldSubmitFrame = input.operations.some(operation => operation.submitFrame !== false);
+      if (clock && shouldSubmitFrame && input.advanceClock !== false
+        && Number.isFinite(input.deltaMs) && input.deltaMs > 0) {
+        const currentTime = clock.getUserTimeMSec();
+        const safeTime = Number.isFinite(currentTime) ? currentTime : clockFloor;
+        clock.setUserTimeMSec(safeTime + input.deltaMs);
+      }
+
+      for (const operation of input.operations) {
+        if (operation.submitFrame === false) continue;
+        const current = () => input.isCurrent() && operation.isCurrent();
+        if (!current()) return { status: 'cancelled', transitions };
+        const result = operation.handle.frame.submitBake({
+          deltaMs: input.deltaMs,
+          renderer: operation.renderer,
+          label: operation.handle.id,
+          flushCore: operation.flushCore,
+          isCurrent: current,
+          transaction: transaction ?? undefined,
+        });
+        if (result.status !== 'submitted') return { status: 'cancelled', transitions };
+      }
+      completed = true;
+      return { status: 'submitted', transitions };
+    } finally {
+      if (!completed && clock) {
+        const currentTime = clock.getUserTimeMSec();
+        const monotonicTime = Number.isFinite(currentTime)
+          ? Math.max(currentTime, clockFloor)
+          : clockFloor;
+        if (currentTime !== monotonicTime) clock.setUserTimeMSec(monotonicTime);
+      }
+    }
+  };
+
+  if (!usesSharedClock) return run(null);
+  const result = await withSharedRuntimeClock(getSharedRuntimeClock(), input.isCurrent, run);
+  return result ?? { status: 'cancelled', transitions };
 }

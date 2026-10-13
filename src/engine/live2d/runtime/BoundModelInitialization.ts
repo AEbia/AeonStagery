@@ -1,10 +1,11 @@
 import { resetCoreParams } from '../../Live2DConfig';
 import type {
   Live2DIdleBaseline, Live2DInitializationInput, Live2DInitializationResult,
-  Live2DRuntimeModelControls, Live2DRuntimeResetInput,
+  Live2DClockTransaction, Live2DRuntimeModelControls, Live2DRuntimeResetInput,
 } from '../../runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
 import { readPartOpacities, writePartOpacities } from './Cubism2PartOpacity';
+import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
 
 interface NeutralCore {
   getParameterValues?: () => Float32Array;
@@ -94,9 +95,9 @@ export function createBoundModelInitialization(
   return {
     async initialize(input: Live2DInitializationInput): Promise<Live2DInitializationResult> {
       if (!input.isCurrent()) return { status: 'cancelled' };
-      captureModelNeutralPoseOnce(model);
-      resetRuntimeState({ pose: 'neutral' });
       if (input.mode === 'live') {
+        captureModelNeutralPoseOnce(model);
+        resetRuntimeState({ pose: 'neutral' });
         controls.advanceFrame(model, 100);
         if (capabilities.usesCubism2PrivateControls) await controls.flushIdleState(model, input.isCurrent);
         else {
@@ -107,23 +108,36 @@ export function createBoundModelInitialization(
         catch (error) { console.warn(`[Live2D] Failed to neutralise idle baseline for ${id}`, error); }
         (model as NeutralModel).visible = false;
       } else {
-        const display = model as NeutralModel;
-        display.visible = true;
-        display.alpha = 1;
-        controls.installBakeRenderGuards(model);
-        try { controls.stepBakeFrame(model, 16, input.renderer, id, false); }
-        catch (error) { console.warn(`[BakeEngine] Initial render failed for ${id}`, error); }
-        if (capabilities.requiresIdleMotionFlush) {
-          try {
-            await controls.flushIdleState(model, input.isCurrent);
-            if (!input.isCurrent()) return { status: 'cancelled' };
-            controls.stepBakeFrame(model, 0, input.renderer, id, false);
-          } catch { /* preserve legacy idle-flush fallback */ }
-        }
-        if (!input.isCurrent()) return { status: 'cancelled' };
-        const snapshot = controls.captureSnapshot(id, model);
-        return { status: 'ready', idleSnapshot: snapshot ? { params: snapshot.params, opacities: snapshot.opacities } : null };
+        const initializeBake = async (transaction?: Live2DClockTransaction): Promise<Live2DInitializationResult> => {
+          if (!input.isCurrent()) return { status: 'cancelled' };
+          captureModelNeutralPoseOnce(model);
+          resetRuntimeState({ pose: 'neutral' });
+          const display = model as NeutralModel;
+          display.visible = true;
+          display.alpha = 1;
+          controls.installBakeRenderGuards(model);
+          try { controls.stepBakeFrame(model, 16, input.renderer, id, false); }
+          catch (error) { console.warn(`[BakeEngine] Initial render failed for ${id}`, error); }
+          if (capabilities.requiresIdleMotionFlush) {
+            try {
+              await controls.flushIdleState(model, input.isCurrent, transaction);
+              if (!input.isCurrent()) return { status: 'cancelled' };
+              controls.stepBakeFrame(model, 0, input.renderer, id, false);
+            } catch { /* preserve legacy idle-flush fallback */ }
+          }
+          if (!input.isCurrent()) return { status: 'cancelled' };
+          const snapshot = controls.captureSnapshot(id, model);
+          return { status: 'ready', idleSnapshot: snapshot ? { params: snapshot.params, opacities: snapshot.opacities } : null };
+        };
+        if (!capabilities.usesSharedSdkClock) return initializeBake();
+        const initialized = await withSharedRuntimeClock(
+          getSharedRuntimeClock(),
+          input.isCurrent,
+          transaction => initializeBake(transaction ?? undefined),
+        );
+        return initialized ?? { status: 'cancelled' };
       }
+      if (!input.isCurrent()) return { status: 'cancelled' };
       return { status: 'ready', idleSnapshot: controls.captureIdleSnapshot(model) };
     },
     bindRuntimeSource(input) {
