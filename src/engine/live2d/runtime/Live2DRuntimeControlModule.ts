@@ -35,12 +35,10 @@ import type {
   Live2DBakeFrameBatchInput,
   Live2DBakeFrameBatchResult,
   Live2DBakeFrameInput,
-  Live2DBakeFrameOperation,
 } from '../../runtime/Live2DRuntimeContracts';
 import {
   getSharedRuntimeClock,
   getSharedRuntimeClockForTransaction,
-  isSharedRuntimeClockTransactionActive,
   withSharedRuntimeClock,
 } from './Live2DRuntimeClockCoordinator';
 
