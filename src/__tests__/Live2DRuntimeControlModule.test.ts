@@ -647,6 +647,60 @@ describe('submitLive2DBakeFrameBatch', () => {
     expect(isSharedRuntimeClockLocked()).toBe(false);
   });
 
+  it('keeps the shared clock monotonic when a later model is cancelled after an earlier frame submits', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(900);
+    registerSharedRuntimeClockProvider(() => clock);
+    let current = true;
+    const firstControls = mockControls({ stepBakeFrame: vi.fn() });
+    const secondControls = mockControls({ stepBakeFrame: vi.fn(() => { current = false; }) });
+    const first = createLive2DModelHandle({ id: 'first-submitted-frame', model: {}, runtime: cubism2Runtime, controls: firstControls });
+    const second = createLive2DModelHandle({ id: 'second-cancelled-frame', model: {}, runtime: cubism2Runtime, controls: secondControls });
+
+    const result = await submitLive2DBakeFrameBatch({
+      operations: [
+        { handle: first, isCurrent: () => current },
+        { handle: second, isCurrent: () => current },
+      ],
+      deltaMs: 16,
+      isCurrent: () => true,
+    });
+
+    expect(result.status).toBe('cancelled');
+    expect(firstControls.stepBakeFrame).toHaveBeenCalledOnce();
+    expect(secondControls.stepBakeFrame).toHaveBeenCalledOnce();
+    expect(getTime()).toBe(916);
+    expect(setUserTimeMSec).toHaveBeenCalledOnce();
+    expect(setUserTimeMSec).toHaveBeenCalledWith(916);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
+  it('keeps the shared clock monotonic when a later model frame throws after an earlier frame submits', async () => {
+    const { clock, getTime, setUserTimeMSec } = createClock(920);
+    registerSharedRuntimeClockProvider(() => clock);
+    const firstControls = mockControls({ stepBakeFrame: vi.fn() });
+    const secondControls = mockControls({
+      stepBakeFrame: vi.fn(() => { throw new Error('later frame failed'); }),
+    });
+    const first = createLive2DModelHandle({ id: 'first-submitted-before-throw', model: {}, runtime: cubism2Runtime, controls: firstControls });
+    const second = createLive2DModelHandle({ id: 'second-throwing-frame', model: {}, runtime: cubism2Runtime, controls: secondControls });
+
+    await expect(submitLive2DBakeFrameBatch({
+      operations: [
+        { handle: first, isCurrent: () => true },
+        { handle: second, isCurrent: () => true },
+      ],
+      deltaMs: 16,
+      isCurrent: () => true,
+    })).rejects.toThrow('later frame failed');
+
+    expect(firstControls.stepBakeFrame).toHaveBeenCalledOnce();
+    expect(secondControls.stepBakeFrame).toHaveBeenCalledOnce();
+    expect(getTime()).toBe(936);
+    expect(setUserTimeMSec).toHaveBeenCalledOnce();
+    expect(setUserTimeMSec).toHaveBeenCalledWith(936);
+    expect(isSharedRuntimeClockLocked()).toBe(false);
+  });
+
   it('keeps the shared clock monotonic when a bound model frame throws', async () => {
     const { clock, getTime, setUserTimeMSec } = createClock(850);
     registerSharedRuntimeClockProvider(() => clock);

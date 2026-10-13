@@ -227,6 +227,131 @@ describe('BakeEngine runtime routing', () => {
     expect(result.snapshotHistory.length).toBeGreaterThanOrEqual(1);
   });
 
+  it.each(['cancel', 'throw'] as const)(
+    'discards all batch borrows after a later model frame %s and reloads them for the next bake',
+    async (failureMode) => {
+      const modelPath = 'figure/rana/rana.model3.json';
+      const createModel = vi.fn(async () => {
+        const params = new Float32Array([0.1]);
+        const opacities = new Float32Array([1]);
+        const model = new PIXI.Container() as PIXI.Container & {
+          internalModel: {
+            coreModel: {
+              getParameterValues: () => Float32Array;
+              getPartOpacities: () => Float32Array;
+            };
+            parameterValues: Float32Array;
+            partOpacities: Float32Array;
+            settings: { motions: Record<string, never>; expressions: Record<string, never> };
+            motionManager: {
+              stopAllMotions: ReturnType<typeof vi.fn>;
+              state: { currentGroup?: string; reservedGroup?: string; queue: unknown[] };
+            };
+          };
+          update: ReturnType<typeof vi.fn>;
+          render: ReturnType<typeof vi.fn>;
+          startMotion: ReturnType<typeof vi.fn>;
+        };
+        model.internalModel = {
+          coreModel: {
+            getParameterValues: () => params,
+            getPartOpacities: () => opacities,
+          },
+          parameterValues: params,
+          partOpacities: opacities,
+          settings: { motions: {}, expressions: {} },
+          motionManager: {
+            stopAllMotions: vi.fn(),
+            state: { currentGroup: undefined, reservedGroup: undefined, queue: [] },
+          },
+        };
+        model.update = vi.fn();
+        model.render = vi.fn();
+        model.startMotion = vi.fn(async () => true);
+        return model;
+      });
+      let engine!: BakeEngine;
+      let firstSimulationFrameSubmitted = false;
+      let failureInjected = false;
+      const framesByLabel = new Map<string, number>();
+      const controls = mockControls({
+        getCoreModel: model => model.internalModel.coreModel,
+        captureSnapshot: (id, model) => captureModelSnapshot(id, model),
+        stepBakeFrame: vi.fn((_model, _deltaMs, _renderer, label) => {
+          if (!label) return;
+          const frameNumber = (framesByLabel.get(label) ?? 0) + 1;
+          framesByLabel.set(label, frameNumber);
+          // Initialization and warmup account for the first six calls for
+          // each model. Fail the second model's simulation frame, after the
+          // first model's seventh call has already submitted successfully.
+          if (label === 'rana' && frameNumber === 7) firstSimulationFrameSubmitted = true;
+          if (label !== 'mira' || frameNumber !== 7) return;
+          expect(firstSimulationFrameSubmitted).toBe(true);
+          failureInjected = true;
+          if (failureMode === 'cancel') engine.cancel();
+          else throw new Error('later model frame failed');
+        }),
+      });
+
+      vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
+        runtimeFamily: 'cubism3-plus',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
+        supported: true,
+      });
+      vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+        id: 'untitled-pixi-live2d-engine-cubism',
+        supported: true,
+        init: vi.fn(async () => {}),
+        isReady: vi.fn(() => true),
+        getModelClass: vi.fn(() => null),
+        getConfig: vi.fn(() => null),
+        getUnsupportedMessage: vi.fn(() => null),
+        createModel,
+        getClock: () => null,
+        createFallbackModel: () => null,
+        disposeBakeRenderTexture: () => {},
+        getControls: () => controls,
+      }));
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ FileReferences: { Moc: 'rana.moc3' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )));
+
+      const baseScene = createBasePreparedScene(modelPath);
+      const firstAction = baseScene.actions[0];
+      const scene: PreparedCompiledScene = {
+        ...baseScene,
+        meta: {
+          ...baseScene.meta,
+          characters: [
+            { id: 'rana', name: 'Rana', model: modelPath },
+            { id: 'mira', name: 'Mira', model: modelPath },
+          ],
+        },
+        actions: [
+          firstAction,
+          { ...firstAction, id: 'compiled:add-character:mira', params: { ...firstAction.params, id: 'mira' } },
+        ],
+      };
+      const resolvedPaths = new Map([[modelPath, `D:/mock/demo/${modelPath}`]]);
+      engine = new BakeEngine(createApp());
+
+      const firstBake = engine.bakePreparedRange(scene, resolvedPaths, 1, 0, 0, 0.1, undefined, true);
+      if (failureMode === 'cancel') {
+        await expect(firstBake).resolves.toMatchObject({ snapshotHistory: [] });
+      } else {
+        await expect(firstBake).rejects.toThrow('later model frame failed');
+      }
+      expect(failureInjected).toBe(true);
+      expect(createModel).toHaveBeenCalledTimes(2);
+
+      const recovery = await engine.bakePreparedRange(scene, resolvedPaths, 2, 0, 0, 0.1, undefined, true);
+
+      expect(recovery.snapshotHistory.length).toBeGreaterThan(0);
+      expect(createModel).toHaveBeenCalledTimes(4);
+    },
+  );
+
   it('resolves prepared model runtime URIs from source-keyed bake path maps', async () => {
     const officialCreateModel = vi.fn(async () => {
       const model = new PIXI.Container() as any;

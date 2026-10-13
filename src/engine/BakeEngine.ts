@@ -25,7 +25,11 @@ import {
 } from './Live2DRuntimeAdapter';
 import { isPreparedAssetRef, preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
 import { BakeMotionRuntime, type BakeMotionPlanRequest, type BakeMotionRuntimeHost } from './BakeMotionRuntime';
-import type { Live2DBakeFrameOperation } from './runtime/Live2DRuntimeContracts';
+import type {
+  Live2DBakeFrameBatchInput,
+  Live2DBakeFrameBatchResult,
+  Live2DBakeFrameOperation,
+} from './runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeControlModule';
 
@@ -219,7 +223,7 @@ export class BakeEngine {
     let loadWait = 0;
     const warmupRenderer = this.app.renderer;
     while (this.activeMotionLoads.size > 0 && loadWait < 30) {
-      const result = await submitLive2DBakeFrameBatch({
+      const result = await this.submitBakeFrameBatch({
         operations: [...this.models.values()].map((entry) => ({
           handle: entry.runtimeHandle,
           isCurrent: () => this.isEntryCurrent(entry, isCurrent),
@@ -236,7 +240,7 @@ export class BakeEngine {
       if (!isCurrent()) return { snapshotHistory: [] };
     }
     for (let i = 0; i < 5; i++) {
-      const result = await submitLive2DBakeFrameBatch({
+      const result = await this.submitBakeFrameBatch({
         operations: [...this.models.values()].map((entry) => ({
           handle: entry.runtimeHandle,
           isCurrent: () => this.isEntryCurrent(entry, isCurrent),
@@ -279,7 +283,7 @@ export class BakeEngine {
           submitFrame: false,
         });
       }
-      const restored = await submitLive2DBakeFrameBatch({
+      const restored = await this.submitBakeFrameBatch({
         operations: restoreOperations,
         deltaMs: 0,
         advanceClock: false,
@@ -398,7 +402,7 @@ export class BakeEngine {
           };
           return operation;
         });
-        const batch = await submitLive2DBakeFrameBatch({
+        const batch = await this.submitBakeFrameBatch({
           operations,
           deltaMs: step * 1000,
           isCurrent,
@@ -642,6 +646,26 @@ export class BakeEngine {
     this.models.delete(id);
   }
 
+  private async submitBakeFrameBatch(
+    input: Live2DBakeFrameBatchInput,
+  ): Promise<Live2DBakeFrameBatchResult> {
+    try {
+      const result = await submitLive2DBakeFrameBatch(input);
+      if (result.status === 'cancelled') this.discardBakeBatchBorrows(input.operations);
+      return result;
+    } catch (error) {
+      this.discardBakeBatchBorrows(input.operations);
+      throw error;
+    }
+  }
+
+  private discardBakeBatchBorrows(operations: readonly Live2DBakeFrameOperation[]): void {
+    for (const operation of operations) {
+      const entry = this.models.get(operation.handle.id);
+      if (entry?.runtimeHandle === operation.handle) this.removeModel(entry.id);
+    }
+  }
+
   private isEntryCurrent(entry: BakeModel, isTaskCurrent: () => boolean): boolean {
     return isTaskCurrent()
       && this.models.get(entry.id) === entry
@@ -818,7 +842,7 @@ export class BakeEngine {
         delete entry.injectedParams[parameterId];
       }
     }
-    const result = await submitLive2DBakeFrameBatch({
+    const result = await this.submitBakeFrameBatch({
       operations: entries.map(entry => ({
         handle: entry.runtimeHandle,
         isCurrent: () => this.isEntryCurrent(entry, isTaskCurrent),
