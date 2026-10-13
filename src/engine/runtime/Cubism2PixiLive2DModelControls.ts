@@ -9,6 +9,7 @@ import {
   resolveNumericArrayLike,
 } from '../Live2DConfig';
 import {
+  getSharedRuntimeClockForTransaction,
   withSharedRuntimeClock,
   type Live2DClockTransaction,
 } from '../live2d/runtime/Live2DRuntimeClockCoordinator';
@@ -601,7 +602,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
       ));
       if (currentTargets.length === 0) return;
 
-      const utSystem = lease?.clock ?? null;
+      const utSystem = getSharedRuntimeClockForTransaction(lease);
       const nowMs = utSystem?.getUserTimeMSec() ?? performance.now();
       const elapsedMs = Number.isFinite(elapsedSeconds)
         ? Math.max(0, elapsedSeconds) * 1000
@@ -664,7 +665,10 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           }
         }
       } finally {
-        if (utSystem) utSystem.setUserTimeMSec(nowMs);
+        if (utSystem) {
+          const currentTimeMs = utSystem.getUserTimeMSec();
+          utSystem.setUserTimeMSec(Number.isFinite(currentTimeMs) ? Math.max(currentTimeMs, nowMs) : nowMs);
+        }
       }
 
       // Live2DModel.update() only accumulates delta. The SDK performs the
@@ -937,7 +941,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
           if (sdkClock) {
             await withSharedRuntimeClock(sdkClock, isCurrent, (lease) => {
               if (!isCurrent()) return;
-              const clock = lease?.clock;
+              const clock = getSharedRuntimeClockForTransaction(lease);
               if (!clock) return;
               const t = clock.getUserTimeMSec();
               clock.setUserTimeMSec(t + 16);
@@ -986,7 +990,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeModelControl
     const sdkClock = this.clockProvider();
 
     await withSharedRuntimeClock(sdkClock, isCurrent, async (activeTransaction) => {
-      const clock = activeTransaction?.clock ?? sdkClock;
+      const clock = getSharedRuntimeClockForTransaction(activeTransaction) ?? sdkClock;
       for (const targetModel of this.getConcreteModels(model)) {
         if (!isCurrent()) return;
         const internalModel = targetModel?.internalModel;

@@ -1,4 +1,8 @@
-import { withSharedRuntimeClock, type Live2DClockTransaction } from './runtime/Live2DRuntimeClockCoordinator';
+import {
+  getSharedRuntimeClockForTransaction,
+  withSharedRuntimeClock,
+  type Live2DClockTransaction,
+} from './runtime/Live2DRuntimeClockCoordinator';
 import type { CustomMotionSamplePoint } from './customMotionConversion';
 
 /**
@@ -421,7 +425,7 @@ async function sampleIsolatedMotion(
   if (typeof UtSystem.getUserTimeMSec !== 'function' || typeof UtSystem.setUserTimeMSec !== 'function') return null;
 
   const result = await withSharedRuntimeClock(UtSystem, () => true, async (lease) => {
-    const clock = lease?.clock ?? UtSystem;
+    const clock = getSharedRuntimeClockForTransaction(lease) ?? UtSystem;
     if (!clock) return null;
     const utBase = clock.getUserTimeMSec();
     const queue = new MotionQueueManager();

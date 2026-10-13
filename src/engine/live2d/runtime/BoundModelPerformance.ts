@@ -11,7 +11,11 @@ import type {
   Live2DSeekRestoreResult,
 } from '../../runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle, Live2DRuntimeCapabilities } from './Live2DRuntimeControlModule';
-import { getSharedRuntimeClock, withSharedRuntimeClock } from './Live2DRuntimeClockCoordinator';
+import {
+  getSharedRuntimeClock,
+  getSharedRuntimeClockForTransaction,
+  withSharedRuntimeClock,
+} from './Live2DRuntimeClockCoordinator';
 
 function isDefaultPose(snapshot: ModelSnapshot | null): boolean {
   if (!snapshot?.params?.length) return true;
@@ -92,7 +96,10 @@ export function createBoundModelPerformance(
       const result = await withSharedRuntimeClock(
         getSharedRuntimeClock(),
         input.isCurrent,
-        (activeTransaction) => runStart(activeTransaction?.clock ?? null, activeTransaction),
+        (activeTransaction) => runStart(
+          getSharedRuntimeClockForTransaction(activeTransaction),
+          activeTransaction,
+        ),
         transaction,
       );
       return result ?? { status: 'cancelled', offsetReplayMs: 0 };
@@ -104,7 +111,7 @@ export function createBoundModelPerformance(
     if (!capabilities.usesSharedSdkClock) return { status: 'unsupported' };
     if (!input.isCurrent()) return { status: 'cancelled' };
     const result = await withSharedRuntimeClock(getSharedRuntimeClock(), input.isCurrent, async (transaction) => {
-      const clock = transaction?.clock ?? null;
+      const clock = getSharedRuntimeClockForTransaction(transaction);
       if (!clock) return { status: 'unsupported' } as const;
       if (!input.isCurrent()) return { status: 'cancelled' } as const;
       const offsetMs = Math.max(0, input.offsetSeconds) * 1000;

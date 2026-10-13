@@ -453,6 +453,7 @@ describe('createLive2DModelHandle', () => {
 
     const result = await withSharedRuntimeClock(clock, () => true, async (outer) => {
       if (!outer) throw new Error('Expected an acquired clock transaction.');
+      expect(outer).not.toHaveProperty('clock');
       expect(isSharedRuntimeClockLocked()).toBe(true);
       expect(handle.frame.submit({ deltaMs: 16, shouldAdvance: true }).status).toBe('deferred');
       const token = await withSharedRuntimeClock(clock, () => true, nestedOperation, outer);

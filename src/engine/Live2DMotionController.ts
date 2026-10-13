@@ -248,6 +248,7 @@ export class Live2DMotionController {
       this.activeMotionLoads.add(id);
       try {
         const isReconstructing = this.getScriptEngine()?.isReconstructing;
+        const skipReset = getLive2DSnapshotRestorePolicy({ skipHardReset, isReconstructing }) === 'preserve-current';
         const playback = runtime.motion.getPlaybackState();
         const restartDecision = decideLive2DMotionRestart({
           currentMotionGroup: playback.currentGroup ?? undefined,
@@ -261,7 +262,6 @@ export class Live2DMotionController {
           sceneTime,
         });
         if (restartDecision.needsRestart) {
-          const skipReset = getLive2DSnapshotRestorePolicy({ skipHardReset, isReconstructing }) === 'preserve-current';
           const isCubism2 = runtime.capabilities.usesCubism2PrivateControls;
           const firstMotionAfterPurge = skipReset
             && entry.motionStartTime === undefined
@@ -319,7 +319,7 @@ export class Live2DMotionController {
           } else {
             clearPendingSeekBoundary(entry);
           }
-        } else if (skipHardReset && runtime.capabilities.usesSharedSdkClock) {
+        } else if (skipReset && runtime.capabilities.usesSharedSdkClock) {
           const seekResult = await runtime.performance.seekMotionOffset({
             motionStartUtTimeMs: entry.motionStartUtTime,
             offsetSeconds: offset,

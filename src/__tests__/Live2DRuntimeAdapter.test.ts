@@ -511,6 +511,49 @@ describe('Live2DRuntimeAdapter', () => {
     expect(utTime).toBe(10_000);
   });
 
+  it('keeps the Cubism 2 shared clock monotonic after successful, cancelled, and failed expression seeks', async () => {
+    const evaluate = async (outcome: 'success' | 'cancel' | 'failure') => {
+      let utTime = 10_000;
+      let current = true;
+      const clock = {
+        getUserTimeMSec: () => utTime,
+        setUserTimeMSec: (value: number) => { utTime = value; },
+      };
+      (globalThis as any).window = { UtSystem: clock };
+      const expressionManager = {
+        expressions: [],
+        currentExpression: null,
+        defaultExpression: {},
+        reserveExpressionIndex: -1,
+        queueManager: { stopAllMotions: vi.fn() },
+        getExpressionIndex: () => 0,
+        loadExpression: vi.fn(async () => ({})),
+        _setExpression: vi.fn(),
+        update: vi.fn(() => {
+          utTime += 1000;
+          if (outcome === 'cancel') current = false;
+          if (outcome === 'failure') throw new Error('expression update failed');
+        }),
+      };
+      const model = {
+        update: vi.fn(),
+        internalModel: { coreModel: {}, motionManager: { expressionManager } },
+      };
+      const controls = new Cubism2PixiLive2DModelControls({ clock: () => clock });
+      const seek = controls.setExpressionForSeek(model, 'smile', 0, undefined, () => current);
+
+      if (outcome === 'failure') await expect(seek).rejects.toThrow('expression update failed');
+      else await seek;
+
+      expect(utTime).toBe(11_000);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
+    };
+
+    await evaluate('success');
+    await evaluate('cancel');
+    await evaluate('failure');
+  });
+
   it('prevents an older Cubism 2 expression request from landing after seek restoration', async () => {
     let resolveOldExpression!: (expression: any) => void;
     const oldExpression = { name: 'old' };

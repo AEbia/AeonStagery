@@ -6,7 +6,6 @@ export interface Live2DRuntimeClock {
 }
 
 export interface Live2DClockTransaction {
-  readonly clock: Live2DRuntimeClock | null;
   readonly token: symbol;
 }
 
@@ -17,6 +16,7 @@ interface MutexRequest {
 const lockQueue: MutexRequest[] = [];
 let isLocked = false;
 let activeTransaction: Live2DClockTransaction | null = null;
+let activeClock: Live2DRuntimeClock | null = null;
 let sharedClockProvider: (() => Live2DRuntimeClock | null) | null = null;
 
 export function registerSharedRuntimeClockProvider(provider: () => Live2DRuntimeClock | null): void {
@@ -35,6 +35,13 @@ export function isSharedRuntimeClockTransactionActive(transaction?: Live2DClockT
   return !!transaction && isLocked && activeTransaction?.token === transaction.token;
 }
 
+/** Internal runtime access to the clock owned by an active opaque transaction. */
+export function getSharedRuntimeClockForTransaction(
+  transaction?: Live2DClockTransaction | null,
+): Live2DRuntimeClock | null {
+  return isSharedRuntimeClockTransactionActive(transaction ?? undefined) ? activeClock : null;
+}
+
 export async function acquireSharedRuntimeClockLock(): Promise<void> {
   if (!isLocked) {
     isLocked = true;
@@ -45,6 +52,7 @@ export async function acquireSharedRuntimeClockLock(): Promise<void> {
 
 export function releaseSharedRuntimeClockLock(): void {
   activeTransaction = null;
+  activeClock = null;
   const next = lockQueue.shift();
   if (next) next.resolve();
   else isLocked = false;
@@ -70,8 +78,9 @@ export async function withSharedRuntimeClock<T>(
     releaseSharedRuntimeClockLock();
     return undefined;
   }
-  const acquired: Live2DClockTransaction = { clock, token: Symbol('live2d-clock-transaction') };
+  const acquired: Live2DClockTransaction = Object.freeze({ token: Symbol('live2d-clock-transaction') });
   activeTransaction = acquired;
+  activeClock = clock;
   try {
     return await operation(acquired);
   } finally {

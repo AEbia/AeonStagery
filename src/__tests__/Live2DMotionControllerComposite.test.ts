@@ -409,7 +409,7 @@ describe('Live2DMotionController composite motion fallback', () => {
     expect(entry.pendingSeekBoundaryDuration).toBe(0.5);
   });
 
-  it('re-evaluates the current Cubism2 motion when dragging farther into the same motion', async () => {
+  it('re-evaluates the current Cubism2 motion during reconstruction when skipHardReset is false', async () => {
     let ut = 1000;
     (globalThis as any).window = {
       UtSystem: {
@@ -454,7 +454,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       () => ({ isReconstructing: true }),
     );
 
-    await controller._executePlayMotion('soyo', 'angry03', 3, 0.1, 10.1, true, 1);
+    await controller._executePlayMotion('soyo', 'angry03', 3, 0.1, 10.1, false, 1);
 
     expect(main.mm.startMotion).not.toHaveBeenCalled();
     expect(main.model.internalModel.update).toBeUndefined();
