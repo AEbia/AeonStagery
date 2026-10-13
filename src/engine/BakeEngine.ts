@@ -9,7 +9,7 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { ModelSnapshot, acquireUtSystemLock, releaseUtSystemLock } from './Live2DConfig';
+import { ModelSnapshot } from './Live2DConfig';
 import { computeSceneStateAtTime } from './RuntimeSceneState';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { PreparedAssetRef, PreparedCompiledScene, PreparedRuntimeValue } from '../api/types/semantic-scene';
@@ -18,16 +18,16 @@ import { eventBus } from '../api/events';
 import { settingsManager } from '../ui/SettingsStore';
 import type { Snapshot } from './SnapshotStore';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
-import { Live2DModelResources, Live2DModelLoadError, type Live2DResourceModel, type LoadedLive2DModel } from './Live2DModelResources';
-import type { Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
+import { Live2DModelResources, Live2DModelLoadError, type LoadedLive2DModel } from './Live2DModelResources';
 import {
   cubism2Live2DAdapter,
   getLive2DRuntimeAdapter,
-  type Live2DRuntimeClock,
 } from './Live2DRuntimeAdapter';
 import { isPreparedAssetRef, preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
 import { BakeMotionRuntime, type BakeMotionPlanRequest, type BakeMotionRuntimeHost } from './BakeMotionRuntime';
+import type { Live2DBakeFrameOperation } from './runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
+import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeControlModule';
 
 /**
  * Mouth parameters written by the deterministic dialogue text-mouth channel.
@@ -42,11 +42,11 @@ const BAKE_DIALOGUE_MOUTH_PARAMS = new Set(['PARAM_MOUTH_OPEN_Y', 'ParamMouthOpe
 
 interface BakeModel {
   id: string;
-  model: Live2DResourceModel;
+  displayObject: PIXI.Container;
   release: LoadedLive2DModel['release'];
+  isBorrowCurrent: () => boolean;
   modelPath: string;
   modelKey: string;
-  runtime: Live2DRuntimeDescriptor;
   runtimeHandle: Live2DModelHandle;
   adapterId: string;
   motionStartTime?: number;
@@ -168,7 +168,8 @@ export class BakeEngine {
     this.snapshotHistory = [];
     
     // Reset all loaded models to their idle state to prevent parameter carryover
-    this.resetAllModelsToIdle();
+    const reset = await this.resetAllModelsToIdle(isCurrent);
+    if (!reset || !isCurrent()) return { snapshotHistory: [] };
 
     const startTime = performance.now();
 
@@ -218,17 +219,35 @@ export class BakeEngine {
     let loadWait = 0;
     const warmupRenderer = this.app.renderer;
     while (this.activeMotionLoads.size > 0 && loadWait < 30) {
-      for (const entry of this.models.values()) {
-        this.stepBakeModel(entry, 16, warmupRenderer, false);
-      }
+      const result = await submitLive2DBakeFrameBatch({
+        operations: [...this.models.values()].map((entry) => ({
+          handle: entry.runtimeHandle,
+          isCurrent: () => this.isEntryCurrent(entry, isCurrent),
+          renderer: warmupRenderer,
+          flushCore: false,
+        })),
+        deltaMs: 16,
+        advanceClock: false,
+        isCurrent,
+      });
+      if (result.status === 'cancelled') return { snapshotHistory: [] };
       loadWait++;
       await new Promise((r) => setTimeout(r, 10));
       if (!isCurrent()) return { snapshotHistory: [] };
     }
     for (let i = 0; i < 5; i++) {
-      for (const entry of this.models.values()) {
-        this.stepBakeModel(entry, 16, warmupRenderer, false);
-      }
+      const result = await submitLive2DBakeFrameBatch({
+        operations: [...this.models.values()].map((entry) => ({
+          handle: entry.runtimeHandle,
+          isCurrent: () => this.isEntryCurrent(entry, isCurrent),
+          renderer: warmupRenderer,
+          flushCore: false,
+        })),
+        deltaMs: 16,
+        advanceClock: false,
+        isCurrent,
+      });
+      if (result.status === 'cancelled') return { snapshotHistory: [] };
     }
     const motionRuntime = await this.createBakeMotionRuntime(
       requiredMotions,
@@ -249,11 +268,27 @@ export class BakeEngine {
     // instead of simulating from 0s. This is the key performance optimization.
     const seededCharacters = new Set<string>();
     if (seedSnapshot && rangeStart > 0) {
+      const restoreOperations: Live2DBakeFrameOperation[] = [];
       for (const [id, modelSnap] of seedSnapshot.models) {
         const entry = this.models.get(id);
-        if (!entry) continue;
-        const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-        runtimeControls.applySnapshot(entry.model, modelSnap);
+        if (!entry || !this.isEntryCurrent(entry, isCurrent)) continue;
+        restoreOperations.push({
+          handle: entry.runtimeHandle,
+          isCurrent: () => this.isEntryCurrent(entry, isCurrent),
+          restoreSnapshot: modelSnap,
+          submitFrame: false,
+        });
+      }
+      const restored = await submitLive2DBakeFrameBatch({
+        operations: restoreOperations,
+        deltaMs: 0,
+        advanceClock: false,
+        isCurrent,
+      });
+      if (restored.status !== 'submitted' || !isCurrent()) return { snapshotHistory: [] };
+      for (const [id, modelSnap] of seedSnapshot.models) {
+        const entry = this.models.get(id);
+        if (!entry || !this.isEntryCurrent(entry, isCurrent)) continue;
         // Restore motion state
         if (modelSnap.motion) {
           entry.motionStartTime = modelSnap.motion.startTime;
@@ -282,8 +317,10 @@ export class BakeEngine {
     while (simTime <= effectiveEnd) {
       if (!isCurrent()) break;
 
-        // 1. Sync state (safe, no SDK clock required)
+        // 1. Prepare domain state before submitting one complete runtime frame.
         const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
+        const resetForPlaybackIds = new Set<string>();
+        const expressionUpdates = new Map<string, string | null>();
         for (const [id, state] of characters) {
           let entry = this.models.get(id);
           const targetResolvedPath = state.model ? resolvedModelPaths.get(state.model) : undefined;
@@ -301,35 +338,25 @@ export class BakeEngine {
             // 核心修复：如果这个角色是刚被 addCharacter 的（无论是第一次出现，还是 remove 后重新出现）
             // 必须强制清空它可能残留的任何动作状态，恢复为 Idle。
             if (!lastCharacters.has(id)) {
-              const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-              runtimeControls.stopAllMotions(entry.model);
-              runtimeControls.clearMotionState(entry.model);
-              runtimeControls.applySnapshot(entry.model, entry.idleSnapshot as ModelSnapshot);
-              if (entry.runtimeHandle.capabilities.requiresIdleMotionFlush) {
-                await runtimeControls.restartIdleMotion(entry.model);
-                if (!isCurrent()) break;
-              }
+              resetForPlaybackIds.add(id);
             }
-
-            const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
 
             this.applyBakeMotionState(entry, state, dialogue, simTime, motionRuntime);
 
             const expressionKey = state.expression?.key ?? null;
             if (entry.expressionKey !== expressionKey) {
-              runtimeControls.setExpression(entry.model, expressionKey);
-              entry.expressionKey = expressionKey;
+              expressionUpdates.set(id, expressionKey);
             }
 
             this.applyDialogueInjectedParams(entry, dialogue, characters, simTime);
 
             if (state.position) {
               const pos = resolveVec2(state.position);
-              entry.model.position.set(pos.x * 1920, pos.y * 1080);
+              entry.displayObject.position.set(pos.x * 1920, pos.y * 1080);
             }
-            if (state.scale !== undefined) entry.model.scale.set(state.scale, state.scale);
-            if (state.rotation !== undefined) entry.model.rotation = state.rotation;
-            if (state.opacity !== undefined) entry.model.alpha = state.opacity;
+            if (state.scale !== undefined) entry.displayObject.scale.set(state.scale, state.scale);
+            if (state.rotation !== undefined) entry.displayObject.rotation = state.rotation;
+            if (state.opacity !== undefined) entry.displayObject.alpha = state.opacity;
           }
         }
 
@@ -338,48 +365,63 @@ export class BakeEngine {
 
         if (!isCurrent()) break;
 
-        // 2. 执行 MotionRuntime 的一次性 native start/restart，然后统一推进。
-        //    这只在同一个全局 SDK 时钟锁内执行；不再每帧向 SDK 队列写入
-        //    _pendingPlayMotion，也不再复制 Live2DManager._executePlayMotion。
-        // === 核心修复：必须获取全局锁才能修改 SDK 时钟并执行模型物理更新 ===
-        await acquireUtSystemLock();
-        try {
-          if (!isCurrent()) break;
-          // NativeDriver 的 start/restart 必须在“普通帧推进”之前发生：它
-          // 复用 Cubism2NativeMotionSession 在锁内完成 offset 初始化/50ms
-          // 快进，随后下面的统一 update 才把 SDK 时钟推进到下一帧。
-          const clocks = new Set<Live2DRuntimeClock>();
-          for (const entry of this.models.values()) {
-            const clock = getLive2DRuntimeAdapter(entry.runtime).getClock();
-            if (clock) clocks.add(clock);
-            await motionRuntime.advanceNative({ charId: entry.id, utSystem: clock });
-            if (!isCurrent()) break;
-          }
-          if (!isCurrent()) break;
-          for (const clock of clocks) {
-            // 绝不能设置为 simTime * 1000（会引起时间倒流和负数 dt 导致物理坍缩）
-            // 必须在当前全局时钟基础上严格单调递增
-            const currentUt = clock.getUserTimeMSec();
-            clock.setUserTimeMSec(currentUt + step * 1000);
-          }
-
-          // 3. 驱动更新并渲染
-          const renderer = this.app.renderer;
-          for (const entry of this.models.values()) {
-            this.stepBakeModel(entry, step * 1000, renderer);
-          }
-        } finally {
-          // 不再恢复 originalUt，让全局时钟严格单调递增，供主引擎和后台共同使用
-          releaseUtSystemLock();
+        // 2. The runtime starts native motions, coordinates the shared clock,
+        //    advances it once, then submits every bound model's complete frame.
+        const frameEntries = [...this.models.values()];
+        const operations = frameEntries.map((entry) => {
+          const pending = motionRuntime.pendingNativeStart(entry.id);
+          const operation = {
+            handle: entry.runtimeHandle,
+            isCurrent: () => this.isEntryCurrent(entry, isCurrent),
+            renderer: this.app.renderer,
+            stopMotion: motionRuntime.hasPendingNativeStop(entry.id),
+            ...(expressionUpdates.has(entry.id) ? { expression: expressionUpdates.get(entry.id)! } : {}),
+            ...(resetForPlaybackIds.has(entry.id)
+              ? {
+                  resetForPlayback: {
+                    idleSnapshot: entry.idleSnapshot as ModelSnapshot,
+                    restartIdleMotion: entry.runtimeHandle.capabilities.requiresIdleMotionFlush,
+                  },
+                }
+              : {}),
+            ...(pending
+              ? {
+                  motionStart: {
+                    motionKey: pending.motionKey,
+                    priority: pending.priority,
+                    offsetSeconds: pending.offsetSeconds,
+                    sceneTimeSeconds: pending.sceneTimeSeconds,
+                    fadeInSeconds: pending.fadeInSeconds,
+                  },
+                }
+              : {}),
+          };
+          return operation;
+        });
+        const batch = await submitLive2DBakeFrameBatch({
+          operations,
+          deltaMs: step * 1000,
+          isCurrent,
+        });
+        if (batch.status !== 'submitted') {
+          eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
+          return { snapshotHistory: [], motionReport: motionRuntime.report() };
+        }
+        for (const entry of frameEntries) {
+          const transition = batch.transitions.get(entry.id);
+          if (transition) motionRuntime.completeNativeStart(entry.id, transition);
+          if (motionRuntime.hasPendingNativeStop(entry.id)) motionRuntime.completeNativeStop(entry.id);
+          if (expressionUpdates.has(entry.id)) entry.expressionKey = expressionUpdates.get(entry.id)!;
         }
 
         if (!isCurrent()) break;
 
         // Capture snapshots
         const models = new Map<string, ModelSnapshot>();
-        for (const id of this.models.keys()) {
-          const snap = this.captureSnapshot(id);
-          if (snap) models.set(id, snap);
+        for (const entry of this.models.values()) {
+          if (!this.isEntryCurrent(entry, isCurrent)) continue;
+          const snap = this.captureSnapshot(entry);
+          if (snap) models.set(entry.id, snap);
         }
         // Only store snapshots within the requested range
         if (models.size > 0 && simTime >= rangeStart) {
@@ -518,33 +560,16 @@ export class BakeEngine {
       fps,
       sampleMotion: (charId, motionKey, options) => {
         const entry = this.models.get(charId);
-        if (!isCurrent() || !entry) {
+        if (!entry || !this.isEntryCurrent(entry, isCurrent)) {
           return Promise.resolve({ status: 'unsupported' as const, diagnostics: ['Bake model is no longer current.'] });
         }
         return entry.runtimeHandle.motion.sampleMotion(motionKey, options);
       },
-      preloadMotion: (charId, motionKey) => isCurrent() ? this.preloadMotion(charId, motionKey) : Promise.resolve(),
+      preloadMotion: (charId, motionKey) => this.preloadMotion(charId, motionKey, isCurrent),
       getBaseValues: (charId, parameterIds, excludeParameterIds) => {
         const entry = this.models.get(charId);
-        if (!isCurrent() || !entry) return {};
+        if (!entry || !this.isEntryCurrent(entry, isCurrent)) return {};
         return this.getBakeParameterBaseValues(entry, parameterIds, excludeParameterIds);
-      },
-      stopNativeMotion: (charId) => {
-        if (!isCurrent()) return;
-        const entry = this.models.get(charId);
-        if (!entry) return;
-        const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-        controls.stopAllMotions(entry.model);
-        controls.clearMotionState(entry.model);
-      },
-      getModel: (charId) => {
-        const entry = this.models.get(charId);
-        if (!isCurrent() || !entry) return undefined;
-        return {
-          model: entry.model,
-          runtimeFamily: entry.runtime.runtimeFamily,
-          adapterId: entry.adapterId,
-        };
       },
       getSeedSceneTime: () => seedSceneTime,
     };
@@ -571,24 +596,37 @@ export class BakeEngine {
         if (!isCurrent() || !isTaskCurrent()) return;
         const adapter = getLive2DRuntimeAdapter(runtime);
         const runtimeHandle = adapter.createModelHandle(id, model, runtime);
-        this.container.addChild(model);
-        const isBorrowCurrent = () => isCurrent() && isTaskCurrent();
+        const isLoadCurrent = () => isCurrent() && isTaskCurrent();
+        this.container.addChild(runtimeHandle.displayObject);
         const initialized = await runtimeHandle.initialize({
-          mode: 'bake', renderer: this.app.renderer, isCurrent: isBorrowCurrent,
+          mode: 'bake', renderer: this.app.renderer, isCurrent: isLoadCurrent,
         });
-        if (initialized.status !== 'ready' || !isBorrowCurrent()) return;
+        if (initialized.status !== 'ready' || !isLoadCurrent()) return;
+        const borrow = { active: true, published: false, entry: null as BakeModel | null };
+        const isBorrowCurrent = () => borrow.active && (
+          borrow.published ? this.models.get(id) === borrow.entry : isLoadCurrent()
+        );
+        const releaseBorrow: LoadedLive2DModel['release'] = (disposition = 'reuse') => {
+          if (!borrow.active) return;
+          borrow.active = false;
+          release(disposition);
+        };
         const entry: BakeModel = {
-          id, model, release, modelPath: absolutePath, modelKey,
-          runtime, runtimeHandle, adapterId: runtime.adapterId, expressionKey: null,
+          id, displayObject: runtimeHandle.displayObject, release: releaseBorrow,
+          isBorrowCurrent,
+          modelPath: absolutePath, modelKey,
+          runtimeHandle, adapterId: runtime.adapterId, expressionKey: null,
           injectedParams: {},
           idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
         };
+        borrow.entry = entry;
         if (!runtimeHandle.bindRuntimeSource({
           mode: 'bake', isExportMode: false, injectedParamsSource: entry, isCurrent: isBorrowCurrent,
         })) return;
         entry.idleSnapshot = initialized.idleSnapshot ?? entry.idleSnapshot;
-        if (!isCurrent() || !isTaskCurrent()) return;
+        if (!isLoadCurrent()) return;
         this.models.set(id, entry);
+        borrow.published = true;
       }, undefined, modelKey);
     } catch (error) {
       if (!(error instanceof Live2DModelLoadError)) throw error;
@@ -604,32 +642,10 @@ export class BakeEngine {
     this.models.delete(id);
   }
 
-  /**
-   * One bake frame for one entry: everything below is delegated to the runtime
-   * adapter — model advancement, internal/core flush, bake RenderTexture
-   * rendering (or the Cubism 2 advance-without-render fast path) and the
-   * corrupt-batch salvage around it.
-   */
-  private stepBakeModel(entry: BakeModel, deltaMs: number, renderer: any, flushCore: boolean = true): void {
-    if (!renderer || !entry.model || entry.model.visible === false || entry.model.renderable === false) {
-      // Keep the frame advance even when the model is not renderable — only
-      // the render is skipped (mirrors the legacy renderBakeModel gate).
-      getLive2DRuntimeAdapter(entry.runtime).getControls().stepBakeFrame(
-        entry.model,
-        deltaMs,
-        undefined,
-        entry.id,
-        flushCore,
-      );
-      return;
-    }
-    getLive2DRuntimeAdapter(entry.runtime).getControls().stepBakeFrame(
-      entry.model,
-      deltaMs,
-      renderer,
-      entry.id,
-      flushCore,
-    );
+  private isEntryCurrent(entry: BakeModel, isTaskCurrent: () => boolean): boolean {
+    return isTaskCurrent()
+      && this.models.get(entry.id) === entry
+      && entry.isBorrowCurrent();
   }
 
   private applyDialogueInjectedParams(
@@ -653,8 +669,8 @@ export class BakeEngine {
    * - Authored custom motions and cached resource motions are evaluated by the
    *   shared CurveDriver (evaluateCustomMotionRuntime, ADR-0033).
    * - Permanent cache misses go to the NativeDriver, which uses the timeline
-   *   intent as its state source and is advanced inside the BakeEngine-owned
-   *   global SDK clock lock.
+   *   intent as its state source and returns a start request for the complete
+   *   runtime frame batch.
    *
    * The cache is only consulted by `BakeMotionRuntime.prepare()` before the
    * loop; this method never reads the cache or writes `_pendingPlayMotion`.
@@ -714,8 +730,7 @@ export class BakeEngine {
     parameterIds: readonly string[],
     excludeParameterIds?: ReadonlySet<string>,
   ): Record<string, number> {
-    const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-    const parameters = runtimeControls.getParameterValues(entry.model) ?? [];
+    const parameters = entry.runtimeHandle.parameters.getParameterValues() ?? [];
     const wanted = new Set(parameterIds);
     const values: Record<string, number> = {};
     for (const parameter of parameters) {
@@ -730,10 +745,6 @@ export class BakeEngine {
   private setBakeInjectedParam(entry: BakeModel, paramName: string, value: number): void {
     const nextValue = Number.isFinite(value) ? value : 0;
     if (entry.injectedParams[paramName] === nextValue) return;
-
-    const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-    runtimeControls.setInjectedParameter(entry.model, paramName, nextValue);
-    runtimeControls.syncInputParameters(entry.model);
     entry.injectedParams[paramName] = nextValue;
   }
 
@@ -750,29 +761,22 @@ export class BakeEngine {
 
   // ── Private: snapshot capture ──────────────────────────────────────────
 
-  private captureSnapshot(id: string): ModelSnapshot | null {
-    const entry = this.models.get(id);
-    if (!entry) return null;
-    return getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(
-      id,
-      entry.model,
-      entry.motionStartTime,
-    );
+  private captureSnapshot(entry: BakeModel): ModelSnapshot | null {
+    return entry.runtimeHandle.snapshot.captureSnapshot(entry.motionStartTime);
   }
 
-  private async preloadMotion(id: string, motionKey: string): Promise<void> {
+  private async preloadMotion(id: string, motionKey: string, isTaskCurrent: () => boolean = () => true): Promise<void> {
     const entry = this.models.get(id);
-    if (!entry) return;
-    const runtimeControls = getLive2DRuntimeAdapter(entry.runtime).getControls();
+    if (!entry || !this.isEntryCurrent(entry, isTaskCurrent)) return;
 
     // Pre-check if the motion group exists and is not empty to prevent "Undefined motion" warnings
-    if (!runtimeControls.hasMotionGroup(entry.model, motionKey)) {
+    if (!entry.runtimeHandle.motion.hasMotionGroup(motionKey)) {
       return;
     }
 
     this.activeMotionLoads.add(id);
     try {
-      await runtimeControls.preloadMotion(entry.model, motionKey);
+      await entry.runtimeHandle.motion.preloadMotion(motionKey, () => this.isEntryCurrent(entry, isTaskCurrent));
     } finally {
       this.activeMotionLoads.delete(id);
     }
@@ -803,8 +807,9 @@ export class BakeEngine {
 
 
 
-  resetAllModelsToIdle(): void {
-    for (const entry of this.models.values()) {
+  async resetAllModelsToIdle(isTaskCurrent: () => boolean = () => true): Promise<boolean> {
+    const entries = [...this.models.values()].filter(entry => this.isEntryCurrent(entry, isTaskCurrent));
+    for (const entry of entries) {
       // A new range gets a new BakeMotionRuntime, but reuses these models.
       // The new curve driver cannot release parameters owned by the previous
       // run. Drop those writers before warmup or the core update hook writes
@@ -812,11 +817,26 @@ export class BakeEngine {
       for (const parameterId of Object.keys(entry.injectedParams)) {
         delete entry.injectedParams[parameterId];
       }
-      entry.runtimeHandle.resetRuntimeState({ pose: 'idle', idleSnapshot: entry.idleSnapshot });
+    }
+    const result = await submitLive2DBakeFrameBatch({
+      operations: entries.map(entry => ({
+        handle: entry.runtimeHandle,
+        isCurrent: () => this.isEntryCurrent(entry, isTaskCurrent),
+        resetRuntimeState: { pose: 'idle', idleSnapshot: entry.idleSnapshot },
+        submitFrame: false,
+      })),
+      deltaMs: 0,
+      advanceClock: false,
+      isCurrent: isTaskCurrent,
+    });
+    if (result.status !== 'submitted' || !isTaskCurrent()) return false;
+    for (const entry of entries) {
+      if (!this.isEntryCurrent(entry, isTaskCurrent)) continue;
       entry.expressionKey = null;
       entry.motionStartTime = undefined;
       entry.lastOffset = undefined;
     }
+    return true;
   }
 }
 

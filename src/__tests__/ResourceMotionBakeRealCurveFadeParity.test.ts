@@ -16,6 +16,7 @@ import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/s
 import { BakeEngine } from '../engine/BakeEngine';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
+import type { Live2DClockTransaction } from '../engine/runtime/Live2DRuntimeContracts';
 import { motionCurveCache } from '../engine/live2d/motionCurveCache';
 import { mockControls, mockAdapter } from './helpers/mockLive2DRuntimeAdapter';
 
@@ -219,7 +220,8 @@ function cubism2Controls(model: ReturnType<typeof createCubism2BakeModel>) {
     captureSnapshot: (id: string, m: any, motionStartTime?: number) =>
       realControls.captureSnapshot(id, m, motionStartTime),
     prepareModel: (m: any, options: any) => realControls.prepareModel(m, options),
-    flushIdleState: (m: any) => realControls.flushIdleState(m),
+    flushIdleState: (m: any, isCurrent?: () => boolean, transaction?: Live2DClockTransaction) =>
+      realControls.flushIdleState(m, isCurrent, transaction),
     restartIdleMotion: (m: any) => realControls.restartIdleMotion(m),
     isolateMask: (m: any) => realControls.isolateMask(m),
     installBakeRenderGuards: (m: any) => realControls.installBakeRenderGuards(m),

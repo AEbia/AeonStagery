@@ -124,7 +124,7 @@ describe('BakeEngine runtime routing', () => {
     };
   }
 
-  it('routes single .model3.json bake loads through the official adapter', async () => {
+  it('routes prepared bake loads through the adapter and preserves a seeded pose on the first resumed frame', async () => {
     const officialCreateModel = vi.fn(async () => {
       const model = new PIXI.Container() as any;
       model.visible = true;
@@ -159,6 +159,10 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
+    const controls = mockControls({
+      getCoreModel: (model: any) => model.internalModel.coreModel,
+      captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
+    });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
@@ -171,10 +175,7 @@ describe('BakeEngine runtime routing', () => {
       getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
-        getCoreModel: (model: any) => model.internalModel.coreModel,
-        captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
-      }),
+      getControls: () => controls,
     }));
 
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -187,14 +188,29 @@ describe('BakeEngine runtime routing', () => {
     })) as any);
 
     const engine = new BakeEngine(createApp());
+    const sourceScene = createBasePreparedScene('figure/rana/rana.model3.json');
+    const resolvedPaths = new Map([['figure/rana/rana.model3.json', 'D:/mock/demo/figure/rana/rana.model3.json']]);
+    const seedPose = { params: new Float32Array([0.75]), opacities: new Float32Array([0.5]) };
+    const addCharacter = sourceScene.actions[0];
+    const resumedScene: PreparedCompiledScene = {
+      ...sourceScene,
+      durationSeconds: 1.1,
+      actions: [
+        {
+          ...addCharacter,
+          params: { ...addCharacter.params, duration: 1.1 },
+        },
+      ],
+    };
+    vi.mocked(controls.applySnapshot).mockClear();
     const result = await engine.bakePreparedRange(
-      createBasePreparedScene('figure/rana/rana.model3.json'),
-      new Map([['figure/rana/rana.model3.json', 'D:/mock/demo/figure/rana/rana.model3.json']]),
+      resumedScene,
+      resolvedPaths,
       1,
-      0,
-      0,
+      1,
+      1,
       0.1,
-      undefined,
+      { time: 1, models: new Map([['rana', seedPose]]) },
       true,
     );
 
@@ -206,6 +222,8 @@ describe('BakeEngine runtime routing', () => {
         autoUpdate: false,
       }),
     );
+    expect(controls.applySnapshot).toHaveBeenCalledTimes(1);
+    expect(controls.applySnapshot).toHaveBeenCalledWith(expect.anything(), seedPose);
     expect(result.snapshotHistory.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -599,25 +617,10 @@ describe('BakeEngine runtime routing', () => {
     expect(model.renderLive2D).not.toHaveBeenCalled();
   });
 
-  it('applies dialogue mouth parameters through runtime controls during bake', () => {
-    const setInjectedParameter = vi.fn();
-    const syncInputParameters = vi.fn();
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      getControls: () => ({
-        setInjectedParameter,
-        syncInputParameters,
-      }),
-    } as any);
-
+  it('records dialogue mouth parameters in the live injected-parameter source', () => {
     const engine = new BakeEngine(createApp());
     const entry = {
       id: 'rana',
-      runtime: {
-        runtimeFamily: 'cubism3-plus',
-        adapterId: 'untitled-pixi-live2d-engine-cubism',
-        supported: true,
-      },
-      model: {},
       injectedParams: {},
     };
 
@@ -628,9 +631,7 @@ describe('BakeEngine runtime routing', () => {
       1.25,
     );
 
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_MOUTH_OPEN_Y', 1);
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'ParamMouthOpenY', 1);
-    expect(syncInputParameters).toHaveBeenCalledTimes(2);
+    expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 1, ParamMouthOpenY: 1 });
 
     (engine as any).applyDialogueInjectedParams(
       entry,
@@ -639,7 +640,6 @@ describe('BakeEngine runtime routing', () => {
       3,
     );
 
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_MOUTH_OPEN_Y', 0);
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'ParamMouthOpenY', 0);
+    expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 0, ParamMouthOpenY: 0 });
   });
 });
