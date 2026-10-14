@@ -306,6 +306,53 @@ describe('translateWebGalTextboxScss', () => {
     void style;
   });
 
+  it('never emits a number the renderer cannot use', () => {
+    // `border-radius` and `font-size` reject negative lengths in CSS, and a
+    // zero font size measures as empty text — but a template can say it anyway.
+    // PIXI takes the nine-slice insets unclamped, so a negative one would reach
+    // the plane as-is.
+    const hostile = (declarations: Record<string, string>) => {
+      const css = [
+        '.TextBox_main {',
+        ...Object.entries(declarations).map(([key, value]) => `  ${key}: ${value};`),
+        '}',
+        '.text { } .outer { } .inner { } .outerName { } .innerName { }',
+      ].join('\n');
+      return translateWebGalTextboxScss(css, { sourceName: 'textbox.scss' }).style.params as any;
+    };
+
+    const numbers = (params: unknown): number[] => {
+      const out: number[] = [];
+      const walk = (value: unknown) => {
+        if (Array.isArray(value)) value.forEach(walk);
+        else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+        else if (typeof value === 'number') out.push(value);
+      };
+      walk(params);
+      return out;
+    };
+
+    for (const [label, declarations] of Object.entries({
+      '负圆角': { height: '300px', 'font-size': '40px', 'border-radius': '-50px' },
+      '零字号': { height: '300px', 'font-size': '0px' },
+      '负字号': { height: '300px', 'font-size': '-40px' },
+      '零缩放': { height: '300px', 'font-size': '40px', transform: 'scale(0)' },
+      '负高度': { height: '-100px', 'font-size': '40px' },
+    } as Record<string, Record<string, string>>)) {
+      const params = hostile(declarations);
+      const all = numbers(params);
+      expect(all.every(Number.isFinite), `${label}: 出现 NaN/Infinity`).toBe(true);
+      expect(params.textbox.nineSlice.every((v: number) => v >= 0), `${label}: nine-slice 为负`).toBe(true);
+      expect(params.namebox.nineSlice.every((v: number) => v >= 0), `${label}: 名牌 nine-slice 为负`).toBe(true);
+      expect(params.text.fontSize, `${label}: 正文字号非正`).toBeGreaterThan(0);
+      expect(params.speaker.fontSize, `${label}: 名牌字号非正`).toBeGreaterThan(0);
+      expect(params.textbox.width, `${label}: 文本框宽度为负`).toBeGreaterThan(0);
+      expect(params.textbox.height, `${label}: 文本框高度为负`).toBeGreaterThan(0);
+      expect(params.textbox.nineSlice, `${label}: nine-slice 超出面板`)
+        .toEqual(params.textbox.nineSlice.map((v: number) => Math.max(0, v)));
+    }
+  });
+
   it('resolves layout percentages against the containing block', () => {
     const percent = `.TextBox_main {
   left: 10%;

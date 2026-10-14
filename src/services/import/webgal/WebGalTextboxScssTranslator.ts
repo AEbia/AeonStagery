@@ -351,6 +351,14 @@ export function translateWebGalTextboxScss(
     fontSize = rnd(48 * STAGE_SCALE);
     notes.push(`模板未声明 \`font-size\`（靠继承），已回退到 ${fontSize}px。`);
   }
+  // A font size has to be a positive finite number: `0` measures as an empty
+  // text and a negative one is invalid CSS outright, and either would leave the
+  // engine with a layer it cannot lay out. Anything unusable falls back to the
+  // inherited root size rather than being carried through.
+  if (!Number.isFinite(fontSize) || fontSize <= 0) {
+    fontSize = ROOT_FONT_PX * STAGE_SCALE;
+    notes.push(`模板的 \`font-size\` 不是正数，已回退到 ${fontSize}px。`);
+  }
 
   // ── Line height (ratio or absolute) ──
   let lineHeight: number;
@@ -528,6 +536,10 @@ export function translateWebGalTextboxScss(
     nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
   }
   if (nameSize == null) nameSize = rnd(fontSize * 0.98);
+  // Same reason as the body size: the nameplate inherits the parent's number,
+  // so a negative `font-size` would otherwise reach the geometry and the
+  // nine-slice with it.
+  if (!Number.isFinite(nameSize) || nameSize <= 0) nameSize = rnd(fontSize * 0.98) || 1;
 
   let nameLineHeight = resolveLength(name.lineheight, nameSize, true);
   if (nameLineHeight == null) nameLineHeight = rnd(nameSize * 1.6);
@@ -648,9 +660,18 @@ export function translateWebGalTextboxScss(
   // ── Nine-slice slices ──
   // The artwork is drawn 1:1 with what the engine renders, so the fixed slices
   // must not overlap the derived radii.
-  const textboxRadius = Math.min(theme.textbox.radius || 0, Math.floor(Math.min(boxW, boxH) / 2));
-  const textboxBorder = theme.textbox.border.width || 0;
-  let textboxPad = Math.min(textboxRadius + textboxBorder + 4, Math.floor(Math.min(boxW, boxH) / 3));
+  //
+  // Everything below is clamped at the source rather than at the exit: a
+  // negative radius (`border-radius: -50px`, which CSS discards as invalid) must
+  // not reach the artwork, the notes or the parameters — `PIXI.NineSlicePlane`
+  // takes these four numbers unclamped, and a negative inset makes it collapse.
+  const clampRadius = (value: number): number => Math.max(0, Number.isFinite(value) ? value : 0);
+  const textboxRadius = Math.min(
+    clampRadius(theme.textbox.radius),
+    clampRadius(Math.floor(Math.min(boxW, boxH) / 2)),
+  );
+  const textboxBorder = Math.max(0, theme.textbox.border.width || 0);
+  let textboxPad = clampRadius(Math.min(textboxRadius + textboxBorder + 4, Math.floor(Math.min(boxW, boxH) / 3)));
   const textboxDeco = theme.textbox.deco;
   let textboxRightSlice = textboxPad;
   let textboxBottomSlice = textboxPad;
@@ -662,13 +683,15 @@ export function translateWebGalTextboxScss(
   textboxRightSlice = Math.min(textboxRightSlice, Math.floor(boxW / 3));
   textboxBottomSlice = Math.min(textboxBottomSlice, Math.floor(boxH / 3));
 
-  const nameboxRadiusCss = theme.namebox.radius || 0;
+  const nameboxRadiusCss = clampRadius(theme.namebox.radius);
   // `border-radius: 9999px` means a pill, i.e. half the height.
   const nameboxRadius = nameboxRadiusCss >= 1000
     ? Math.floor(nameH / 2)
-    : Math.min(nameboxRadiusCss, Math.floor(nameH / 2));
-  const nameboxBorder = theme.namebox.border.width || 0;
-  const nameboxPadSlice = Math.min(nameboxRadius + nameboxBorder + 4, Math.floor(nameH / 2));
+    : Math.min(nameboxRadiusCss, clampRadius(Math.floor(nameH / 2)));
+  const nameboxBorder = Math.max(0, theme.namebox.border.width || 0);
+  const nameboxPadSlice = clampRadius(
+    Math.min(nameboxRadius + nameboxBorder + 4, Math.floor(nameH / 2)),
+  );
   const nameboxDeco = theme.namebox.deco;
   let nameboxRightSlice = nameboxPadSlice;
   if (nameboxDeco) {
