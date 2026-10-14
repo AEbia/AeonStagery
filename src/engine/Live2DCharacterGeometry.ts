@@ -29,7 +29,7 @@ type FilterContainer = PIXI.Container & {
   _filtersDirty?: boolean;
 };
 
-type SceneContext = {
+export type Live2DGeometrySceneContext = {
   isReconstructing?: boolean;
   transformationProxies?: ReadonlyMap<string, TransformationProxy>;
 };
@@ -39,7 +39,7 @@ export class Live2DCharacterGeometry {
     private readonly characters: ReadonlyMap<string, CharacterEntry>,
     private readonly pendingConfigs: Map<string, Partial<CharacterTransformConfig>[]>,
     private readonly getContainer: (id: string) => PIXI.Container,
-    private readonly getSceneContext: () => SceneContext | null,
+    private readonly getSceneContext: () => Live2DGeometrySceneContext | null,
     private readonly getCamera: () => CharacterCamera | null,
   ) {}
 

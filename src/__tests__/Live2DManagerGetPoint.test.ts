@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
@@ -62,7 +63,7 @@ describe('Live2DManager.getPoint', () => {
       },
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const point = manager.getPoint('soyo', 'head');
 
@@ -86,7 +87,7 @@ describe('Live2DManager.getPoint', () => {
       },
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const point = manager.getPoint('soyo', 'head');
 
@@ -105,7 +106,7 @@ describe('Live2DManager.getPoint', () => {
         internalModel: {},
       },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const out = { x: 0, y: 0 };
     expect(manager.getPoint('soyo', 'head', out)).toBe(out);
@@ -130,7 +131,7 @@ describe('Live2DManager.getPoint', () => {
     const composite = Object.create(Live2DCompositeModel.prototype);
     composite.mainModel = mainModel;
     composite.subModels = [headModel];
-    (manager as any).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
+    live2DStageState(manager).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
 
     expect(manager.getPoint('soyo', 'head')).toEqual({
       x: (300 + 200 * 0.5) / 1920,
@@ -145,7 +146,7 @@ describe('Live2DManager.getPoint', () => {
   it('falls back to transformation proxies when model bounds are invalid and returns null for an unknown character', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();
-    (manager as any).characters = new Map([[
+    live2DStageState(manager).characters = new Map([[
       'soyo',
       {
         id: 'soyo',
@@ -195,7 +196,7 @@ describe('Live2DManager.getPoint', () => {
       { internalModel: { focusController: subFocusB } },
     ];
 
-    (manager as any).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
+    live2DStageState(manager).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 0);
 
@@ -238,10 +239,10 @@ describe('Live2DManager.getPoint', () => {
       filterWarmupFrames: 6,
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (container as any)._alphaFilter = alphaFilter;
     container.filters = [alphaFilter];
-    vi.spyOn(manager, 'getContainer').mockReturnValue(container);
+    live2DStageState(manager).containers.set('soyo', container);
 
     manager.applyProxyTransform('soyo', {
       x: 960,
@@ -294,11 +295,11 @@ describe('Live2DManager.getPoint', () => {
       baseHeight: 1600,
       baseWidth: 700,
     } as any;
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['main', { ...firstEntry, id: 'main' }],
       ['variant', { ...secondEntry, id: 'variant' }],
     ]);
-    (manager as any).containers = new Map([
+    live2DStageState(manager).containers = new Map([
       ['main', firstContainer],
       ['variant', secondContainer],
     ]);
@@ -387,7 +388,7 @@ describe('Live2DManager.getPoint', () => {
       params[0] = 0;
     });
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: hardReset,
@@ -423,7 +424,7 @@ describe('Live2DManager.getPoint', () => {
     } as any;
     const hardReset = vi.fn(async () => {});
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: hardReset,
@@ -464,7 +465,7 @@ describe('Live2DManager.getPoint', () => {
       motionEpoch: 0,
     } as any;
 
-    (manager as any).characters = new Map([['rana', entry]]);
+    live2DStageState(manager).characters = new Map([['rana', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: vi.fn(async () => {}),
@@ -508,7 +509,7 @@ describe('Live2DManager.getPoint', () => {
     });
     const cubism2Model = createEntry('soyo', 'pixi-live2d-display-cubism2', 'cubism2');
     const cubism5Model = createEntry('rana', 'untitled-pixi-live2d-engine-cubism', 'cubism3-plus');
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['soyo', cubism2Model],
       ['rana', cubism5Model],
     ]);
@@ -533,7 +534,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => controls,
     }));
     const model = { internalModel: { coreModel: {} } };
-    (manager as any).characters = new Map([['haru', {
+    live2DStageState(manager).characters = new Map([['haru', {
       id: 'haru', model,
       runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism', runtimeFamily: 'cubism3-plus', supported: true },
       injectedParams: { ParamMouthOpenY: 0.8 }, config: {}, motionEpoch: 0,
@@ -571,7 +572,7 @@ describe('Live2DManager.getPoint', () => {
       config: {},
       motionEpoch: 0,
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: vi.fn(async () => {}),
@@ -622,7 +623,7 @@ describe('Live2DManager.getPoint', () => {
       skipHardReset: false,
       reqEpoch: 1,
     };
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['soyo', cubism2Model],
       ['rana', cubism5Model],
     ]);
@@ -668,7 +669,7 @@ describe('Live2DManager.getPoint', () => {
       _pendingPlayMotion: { key: 'cry02', priority: 3, offset: 0, sceneTime: 10, skipHardReset: false, reqEpoch: 1 },
     } as any;
     const dispatchMotion = vi.fn(async () => {});
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion,
       _hardReset: vi.fn(async () => {}),
@@ -702,7 +703,7 @@ describe('Live2DManager.getPoint', () => {
     }) as any);
 
     try {
-      (manager as any).characters = new Map([['rana', {
+      live2DStageState(manager).characters = new Map([['rana', {
         id: 'rana',
         model,
         runtime: {
@@ -753,7 +754,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'soyo',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 1, { fromX: 0, fromY: 0, elapsed: 0.5 });
 
@@ -791,7 +792,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'soyo',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 0);
 
@@ -820,7 +821,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'self',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['self', entry]]);
+    live2DStageState(manager).characters = new Map([['self', entry]]);
 
     (manager as any).syncLookAtFollows(
       new Map([['self', { lookAt: { target: 'target', focus: [1, 0] } }]]),

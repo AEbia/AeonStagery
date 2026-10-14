@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 /**
  * @vitest-environment jsdom
  */
@@ -94,8 +95,8 @@ function makeManager(char: ReturnType<typeof createCubism2Character>) {
     lipSyncParameterIds: new Set<string>(),
     motionEpoch: 0,
   };
-  (manager as any).characters = new Map([['hero', entry]]);
-  (manager as any).containers = new Map();
+  live2DStageState(manager).characters = new Map([['hero', entry]]);
+  live2DStageState(manager).containers = new Map();
   return manager;
 }
 
@@ -137,7 +138,7 @@ describe('seek to a time before a motion', () => {
     const char = createCubism2Character();
     const manager = makeManager(char);
     manager.setScriptEngine({ isReconstructing: false, getCurrentTime: () => 3 } as any);
-    const entry = (manager as any).characters.get('hero');
+    const entry = live2DStageState(manager).characters.get('hero')!;
 
     // A seek that landed inside the handoff window latched a boundary pose;
     // updateAll re-applies it every paused frame inside that window.
@@ -163,7 +164,7 @@ describe('seek to a time before a motion', () => {
     const char = createCubism2Character();
     const manager = makeManager(char);
     manager.setScriptEngine({ isReconstructing: false, getCurrentTime: () => 3 } as any);
-    const entry = (manager as any).characters.get('hero');
+    const entry = live2DStageState(manager).characters.get('hero')!;
     const epoch = entry.motionEpoch;
 
     manager.playMotion('hero', 'wave', 3, 1, 3);
@@ -195,7 +196,7 @@ describe('seek to a time before the character entrance', () => {
     });
     const resources = new Live2DModelResources(() => '/project', () => adapter);
     await resources.loadCharacter('hero', 'hero.model.json', async loaded => {
-      const entry = Reflect.get(manager, 'characters').get('hero');
+      const entry = live2DStageState(manager).characters.get('hero')!;
       if (!entry) throw new Error('Expected staged character');
       entry.releaseModel = loaded.release;
     });

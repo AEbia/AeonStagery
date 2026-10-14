@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import Live2DManager from '../engine/Live2DManager';
@@ -35,7 +36,7 @@ function addCharacter(manager: Live2DManager, id: string, adapterId: string, mod
     config: {},
     injectedParams: {},
   };
-  (manager as any).characters.set(id, entry);
+  live2DStageState(manager).characters.set(id, entry);
   return entry;
 }
 

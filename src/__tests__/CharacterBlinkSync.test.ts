@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
@@ -122,7 +123,7 @@ describe('CharacterBlink Synchronization & Playback (Seam 3)', () => {
       });
 
       try {
-        (manager as any).characters.set('tomori', {
+        live2DStageState(manager).characters.set('tomori', {
           model: mockModel,
           runtime,
           runtimeHandle,
@@ -143,13 +144,6 @@ describe('CharacterBlink Synchronization & Playback (Seam 3)', () => {
       }
     });
 
-    it('stores intervalRangeMs in pendingBlinks if character is not yet registered', () => {
-      const manager = new Live2DManager();
-      manager.setBlink('anon', true, 5000, 2.0, 1.0, 500);
 
-      const pending = (manager as any).pendingBlinks.get('anon');
-      expect(pending).toBeDefined();
-      expect(pending.intervalRangeMs).toBe(500);
-    });
   });
 });

@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 // @vitest-environment jsdom
 import fs from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
@@ -96,7 +97,7 @@ describe.skipIf(!cubism2CorePath)('neutral pose through the packaged Cubism 2.1 
     const controls = new Cubism2PixiLive2DModelControls();
     const manager = new Live2DManager();
     const entry: any = { id: 'hero', model, runtime, modelPath: 'hero.model.json', config: {}, injectedParams: {}, lipSyncParameterIds: new Set(), idleSnapshot: controls.captureIdleSnapshot(model) };
-    (manager as any).characters.set('hero', entry);
+    live2DStageState(manager).characters.set('hero', entry);
     manager.setScriptEngine({ isReconstructing: true, getCurrentTime: () => 1 } as any);
 
     core.setParamFloat('PARAM_ANGLE_X', 30);

@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../engine/Live2DMotionController', () => ({
@@ -23,7 +24,7 @@ describe('Task 2 Live2D blink compatibility', () => {
       enabled: true,
     };
     const model = { internalModel: { eyeBlink } };
-    (manager as any).characters = new Map([['tomori', { id: 'tomori', model }]]);
+    live2DStageState(manager).characters = new Map([['tomori', { id: 'tomori', model }]]);
 
     manager.setBlink('tomori', false, 2500);
     expect(eyeBlink.update).not.toBe(originalUpdate);
@@ -41,7 +42,7 @@ describe('Task 2 Live2D blink compatibility', () => {
   it('does not throw for a Cubism 3+ or unloaded model without a Cubism 2 eyeBlink object', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['cubism3', { id: 'cubism3', model: { internalModel: { coreModel: {} } } }],
       ['loading', { id: 'loading', model: undefined }],
     ]);
@@ -63,7 +64,7 @@ describe('Task 2 Live2D blink compatibility', () => {
       mainModel: { internalModel: { eyeBlink: mainEyeBlink } },
       subModels: [{ internalModel: { eyeBlink: subEyeBlink } }],
     };
-    (manager as any).characters = new Map([['composed', { id: 'composed', model: composedModel }]]);
+    live2DStageState(manager).characters = new Map([['composed', { id: 'composed', model: composedModel }]]);
 
     manager.setBlink('composed', true, 3000);
 

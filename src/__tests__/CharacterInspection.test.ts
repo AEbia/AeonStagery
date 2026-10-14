@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { describe, expect, it } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
 import { CharacterAdapter } from '../api/adapters/CharacterAdapter';
@@ -16,7 +17,7 @@ function setup() {
     config: { position: [0.3, 0.8], scale: 1.2 }, injectedParams: {}, lipSyncParameterIds: new Set(),
     baseHeight: 1000, motionEpoch: 0,
   };
-  Reflect.set(manager, 'characters', new Map([['hero', entry]]));
+  live2DStageState(manager).characters = new Map([['hero', entry]]);
   return { adapter: new CharacterAdapter(manager), drawn, entry };
 }
 

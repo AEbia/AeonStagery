@@ -26,136 +26,57 @@ ADR-0013 与 ADR-0018 的 bundle 决策继续有效：协作 scene 仍保存 pro
 - `getModelDataFromPath()` 的公开返回继续是 `{ motions, expressions }`，以保持 UI 与 script validation 兼容；runtime family 信息只作为内部选择 Adapter 的事实。
 - 如果未来要改 scene schema、manifest schema 或 assetId 化，必须另开 ADR；本次只扩展 Live2D runtime 与 bundle 规则。
 
-## Implementation Notes
+## Implementation Boundaries
 
-当前实现已经建立三层边界：
+截至 2026-10-14，已接受的 runtime behavior Interface 迁移完成，旧的公共 `Live2DRuntimeModelControls` 契约已删除；production audit 未发现外围代码读取 raw model/Core、sampler target、SDK strategy flags 或 SDK clock/replay sequencing。以下按职责记录当前实现和仍适用的约束，避免把迁移过程中的阶段状态误读为现状。
 
-- `Live2DModelEntry` 负责共享 entrypoint 与 runtime family 识别。
-- `Live2DRuntimeResolver` 负责把 runtime family 映射到 adapter id 与支持状态。
-- `Live2DRuntimeAdapter` 负责 runtime 初始化与模型实例创建。
+### Runtime selection and bound behavior
 
-Cubism 2 当前由 `Cubism2PixiLive2DAdapter` 包住 `untitled-pixi-live2d-engine/cubism-legacy` 路径，保留现有兼容修复。Cubism 3/4/5 由 `CubismPixiLive2DAdapter` 使用 `untitled-pixi-live2d-engine/cubism`，只需要用户提供 `live2dcubismcore.min.js`。`Live2DEngineBridge` 集中加载两个入口，并注册能够识别两个入口模型实例的共享原生 Pixi 绘制管线。
+`Live2DModelEntry` 统一识别 bundle entry 与 runtime family；`Live2DRuntimeResolver` 选择 Adapter 并报告支持状态；`Live2DRuntimeAdapter` 初始化 runtime 并创建模型。Cubism 2 使用 `Cubism2PixiLive2DAdapter`，Cubism 3/4/5 使用 `CubismPixiLive2DAdapter`。
 
-### 2026-10-05: Cubism 3/4/5 implementation replacement
+绑定模型的 `Live2DModelHandle` 暴露完整行为、runtime-neutral 的参数与动作采样数据，以及类型明确的 Pixi display object。SDK 操作端口只存在于 runtime 内部实现；调用方不传递 transaction token、SDK start time 或采样目标。选择完整行为接口，是为了保留现有时间轴编排对角色意图的裁定，同时将 SDK 操作协议收回 runtime；改为每帧提交全部角色目标状态会改变编排状态模型，不属于本次重构。
 
-- 原 `official-cubism-web` adapter、`@cubism/*` generated SDK alias、独立画布和外部 Shader 链路移除。运行时描述与临时快照使用 `untitled-pixi-live2d-engine-cubism` adapter ID。
-- `CubismPixiModel` 在现有 controls interface 后适配新引擎：提前执行模拟使 Seek、参数读取、快照和 Bake 不依赖下一次绘制；渲染不重复推进模拟。
-- 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情清理与异步取消、确定性 blink/breath、Core 更新前的参数注入以及多模型扩容后的内存视图刷新。
-- 使用引擎内置的原生 Pixi 渲染，预览质量随舞台 renderer resolution 生效；Bake 通过 Pixi v8 RenderTexture contract 绘制。
-- Cubism 2.1 的 core、动作与私有 controls 不变。3/4/5 的 Core 缺失时仍只在对应模型加载处报告明确错误。
-- 当前锁定的 npm 引擎尚不支持离屏部件合成及扩展颜色/透明度混合模式；含这些效果的模型继续允许加载，但渲染结果可能缺失相应效果。普通 drawable 遮罩及兼容的正常、加算、乘算混合继续使用原渲染器。高版本运行时只使用一个用户提供的 Core，不新增官方 Framework 包。
+- Stage 与 Bake 通过绑定 handle 请求初始化、资源绑定、runtime state reset、静止和销毁；mask isolation、预热、idle flush、模型 baseline 和组合模型 pristine neutral pose 留在 runtime。
+- `inspectParameters` 返回独立的 parameter ID、索引、名称、值和范围；`editParameters` 在 runtime 内把旧工作区索引解析成 ID。批量编辑每个具体模型只提交一次几何。角色信息通过 `CharacterInfo` 返回 model path、配置、Adapter identity 和确定性能力。
+- 参数面板仍显示前 20 个参数，播放时禁用编辑；模型不可用、reload 后恢复播放位置等既有 UI 行为保持不变。显示、动画和 transform target 只取得类型明确的 Pixi object，不暴露 Core getter。
+- Runtime capability 只描述可执行行为与确定性保证。Adapter ID 用于 Adapter 选择、诊断和缓存 identity；编排层按 capability 选择行为，不按 runtime 身份新增分支。已加载 handle 的能力优先；无 handle 时使用 descriptor，缺少 descriptor 的旧 entry 保留 Cubism 2 默认兼容行为，`supported: false` 不声明执行能力。
+- Cubism 2 的共享 SDK 时钟锁、idle flush、动作重放、mask isolation、默认参数表与 snapshot hard reset 留在 Cubism 2 runtime。Native motion offset 不可用时，以共享时钟按 50ms 固定步重放；重放期间关闭 Physics，且不声明完整 state replay。
+- Cubism 3+ 使用原生动作 offset 和零步长姿态提交；Seek 避免暂停时重复执行 writer。这些能力不表示 Physics、Pose 或 LookAt 的完整状态重建。Bake frame batch 的共享时钟协调也封装在绑定 handle 内。
+- 动作转换、缓存预热、Seek 与 Bake 使用 neutral motion sampling。Cubism 2 在 runtime 内隔离采样并合并组合模型曲线；Cubism 3+ 保留原曲线段。不支持的曲线或 runtime 返回 typed unsupported 结果，调用方继续原生动作路径。
 
-Implementation: `src/engine/CubismPixiSdk.ts`, `src/engine/CubismPixiModel.ts`, `src/engine/Live2DEngineBridge.ts`, `src/engine/Live2DRuntimeAdapter.ts`.
-Upstream: <https://github.com/Untitled-Story/untitled-pixi-live2d-engine>.
+Cubism 3+ 的 `CubismPixiModel` 在绘制前推进模拟，使 Seek、参数读取、快照和 Bake 不依赖下一次绘制，绘制本身不会重复推进模拟。Adapter 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情异步取消、确定性 blink/breath、Core 更新前的参数注入，以及组合模型扩容后的内存视图刷新。
 
-### 2026-10-10: Model resource ownership
+### Model resource ownership
 
-`Live2DModelResources` 收拢原 `Live2DModelLoader` 的读取/缓存能力，以及原 `Live2DManager` 的加载取消、模型池取还、组合模型组装和纹理引用计数。模型池、加载任务和所有权记录全部私有；`Live2DManager` 通过 `loadCharacter` 借用实例，通过借用结果的 `release()` 归还，保留舞台编排、角色运行时清脏及积压指令处理。
+`Live2DModelResources` 管理模型创建、runtime 识别、registry 查询、组合组装、借用与归还、池和纹理引用。Stage 与 Bake 各持有独立实例，但共享同一所有权实现；BakeEngine 负责隐藏容器、发布前准备、场景时间推进和快照采集，不负责模型创建或回收。获取接口同时接收 prepared source identity 与 resolved runtime URI。
 
-- 同角色加载串行化。取消后的迟到实例和组合模型的部分加载结果由资源 Module 回收；舞台异步预热后必须检查 `isCurrent()` 才能展示。回收还校验实例当前所有者，避免旧回调误收已经归还并被另一角色借用的实例。
-- 纹理引用按具体模型的解析 URL 记录，覆盖创建中、预加载、舞台借用及池内实例；取还不改变引用数，实际销毁才递减。组合容器自身不持有纹理引用，具体模型分别使用自己的 Adapter 销毁，避免重复销毁。
-- `clear()` 推进资源代次，取消旧加载及旧排队请求，销毁池内实例；旧异步结果不能重新填池，也不能删除新代次的任务。未完成任务仍纳入 `waitForLoads()`。
-- 模型池每 URL 最多保留 10 个根实例。容量溢出时，只允许最后一个具体模型引用释放对应纹理；整场清空继续保留与独立 Bake 模型共享的 SDK/浏览器纹理。
+- 同角色加载串行化。借用结果提供 `isCurrent()` 与 `release()`；归还关联实际所有权及创建 Adapter。舞台在异步预热后复核资源借用、舞台代次和角色代次，旧回调及重复归还不能回收已被其他角色借用的实例。
+- `cancelLoads()` 使当前和排队获取失效，但保留已加载模型；不同 source/runtime 路径会替代同角色旧请求。`clear()` 推进资源代次、取消旧任务并清空池；`close()` 永久禁止获取并回收现有所有权。SDK 无法同步取消的迟到创建只能回收；未完成任务仍由 `waitForLoads()` 覆盖。
+- 模型池每 URL 最多保留 10 个根实例。纹理引用按具体模型解析后的 URL 记录，覆盖创建、预加载、舞台借用和池内实例；取还不改变引用数，实际销毁才递减。组合容器不重复回收子模型，独立 Bake 共享的 SDK/浏览器纹理在 Stage 清空时继续保留。
+- Bake 具体模型按实际 Adapter 回收：Cubism 2 遵守 soft-detach，其他 Adapter 销毁实例并保留共享纹理。主模型创建失败会终止组合模型；子模型创建失败可继续。部分组装、设置、取消或 Bake 发布准备失败时，已获取实例会被回收，不完整的 sync hook 不进入池。
 
-Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/Live2DManager.ts`.
-Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DModelResources.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
+### Stage publication and orchestration
 
-### 2026-10-12: Stage orchestration modules
+`Live2DManager` 保持调用接口。私有 `Live2DStageRuntime` 持有角色、容器、代次和命令状态，并负责登场、发布校验、积压意图消费、失败回滚和撤场；`Live2DModelResources` 仍独立负责模型所有权。自定义动作、Geometry 与 Rim Light 通过 Stage Runtime 共享舞台状态，不增加 runtime family 分支或新的 Adapter seam。
 
-`Live2DManager` 保留调用接口和角色登场/移除顺序，把下列实现集中到内部 Module：
+发布前先对齐代理视觉状态，再恢复表情、视线、blink、轮廓光、资源动作、自定义动作和 transform。积压意图按顺序消费，以保留资源动作之后的自定义动作及 handoff。重放期间撤场会停止剩余意图消费并取消登场通知；准备或重放失败先撤销舞台状态，再归还模型。撤场恢复中立姿态并清除未登场角色的积压状态；销毁容器前先移出借用模型，整场清空也销毁只为变换创建的容器。
 
-- `Live2DCustomMotionRuntime`：自定义动作接管、handoff 身份缓存、未覆盖参数的中立姿态恢复、Motion-stage writer 安装及场景时间选择。退出仍使用共享 `releaseCustomMotionOwnership`。
-- `Live2DCharacterGeometry`：传统 transform、相机投影、AlphaFilter 透明度保护、组合模型语义锚点及稳定采样范围。
-- `Live2DRimLightController`：轮廓光配置/补间、登场后的积压命令恢复、绝对时间 Seek 重建和移除时的 tween 清理。
+职责模块：`Live2DCustomMotionRuntime` 管理自定义动作接管、handoff、neutral pose 恢复和场景时间选择；`Live2DCharacterGeometry` 管理 transform、相机投影、透明度保护和组合模型锚点；`Live2DRimLightController` 管理轮廓光、补间、积压命令及 Seek 重建。
 
-积压命令容器仍由 `Live2DStageRuntime` 持有并统一清空；模型借用/归还仍由 `Live2DModelResources` 持有。新 Module 通过已有 runtime Adapter 操作模型，不增加 runtime family 分支或新的 Adapter seam。
+### Cubism 2 expression lifecycle
 
-Implementation: `src/engine/live2d/Live2DCustomMotionRuntime.ts`, `src/engine/Live2DCharacterGeometry.ts`, `src/engine/Live2DRimLightController.ts`.
-Verification: `src/__tests__/CharacterEntranceCustomMotion.test.ts`, `src/__tests__/CustomMotionLipSyncMouthProtection.test.ts`, `src/__tests__/Live2DManagerGetPoint.test.ts`, `src/__tests__/Live2DFadeAlphaFilter.test.ts`, `src/__tests__/Live2DRimLight.test.ts`, `src/__tests__/SeekStaleStatePurge.test.ts`.
+`Cubism2ExpressionLifecycle` 在 runtime 内管理普通表情播放、请求代次、队列清理和 Seek 前代表情淡入重建。异步加载后及提交前都会校验模型和代次；清空、idle 重置、quiesce 与 dispose 会使旧请求失效。清理停止真实表情队列并释放 reservation，不调用会重新入队默认表情的 SDK `resetExpression()`。Seek 通过前代表情与目标表情两阶段重建时钟，并延迟几何提交；组合角色逐个具体模型处理。
 
+### Cubism 3+ renderer limitation
 
-### 2026-10-11: Bake resource ownership
+Cubism 3/4/5 使用 `untitled-pixi-live2d-engine` 的 `cubism` 入口，Cubism 2 使用其 `cubism-legacy` 入口；`Live2DEngineBridge` 加载入口并注册共享原生 Pixi 绘制管线。预览质量跟随舞台 renderer resolution，Bake 通过 Pixi v8 RenderTexture 绘制。高版本 runtime 只要求用户提供 `live2dcubismcore.min.js`，不引入官方 Framework 包。
 
-Stage 与 Bake 各持有独立的 `Live2DModelResources`，共享同一所有权实现。用途在构造时固定；模型创建、runtime 识别、registry 查询、组合组装、池与回收策略都留在资源 Module。BakeEngine 只负责隐藏容器、发布前模型准备、场景时间推进与快照采集；prepared source identity 与 resolved runtime URI 一起进入获取接口。
+当前锁定的上游引擎不支持离屏部件合成及扩展颜色/透明度混合；含这些效果的模型仍可加载，但相应效果可能缺失。普通 drawable 遮罩及兼容的正常、加算、乘算混合继续由原渲染器支持。
 
-- `loadCharacter` 交付带 `isCurrent()` 与 `release()` 的借用结果。归还绑定实际所有权记录，旧回调和重复归还不会回收已经被其他角色借用的实例；实际创建 adapter 同样记录在所有权上。
-- `cancelLoads()` 使当前任务及其排队获取失效，但保留已加载模型，迟到创建归入该 Module 的池。获取同角色的不同 source/runtime 路径会替代旧获取；替代结果与被明确 `discard` 的借用不再进入池。
-- `close()` 永久禁止获取，同步使旧交付失效并回收全部现有所有权。SDK 请求无法同步终止时，迟到结果只能回收；`waitForLoads()` 继续覆盖请求和交付准备，BakeEngine 在同步关闭时移除隐藏容器并暴露相同等待接口。
-- Bake 具体模型按实际 adapter 回收：Cubism 2 保留 soft-detach 约束；其他 adapter 销毁实例并保留共享纹理。组合容器不重复回收子模型。Stage 的池上限、具体 URL 纹理引用与 clear 语义沿用现有实现。
-- 组合主模型失败终止，子模型创建失败继续；设置失败和取消回收已获取实例，部分组装失败后丢弃已安装 sync hook 的子模型。Bake 发布准备失败时丢弃未交付实例，避免残缺 hook 进入池。归池及关闭先静止 SDK 通道并清除旧借用者引用，Cubism 2 参数 hook 只读取当前绑定。
+## Implementation References
 
-Implementation: `src/engine/Live2DModelResources.ts`, `src/engine/BakeEngine.ts`, `src/engine/Live2DManager.ts`.
-Verification: `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/BakeResourceIntegration.test.ts`, `src/__tests__/BakeEngine.test.ts`.
-
-
-### 2026-10-12: Runtime capability consumption
-
-Stage、Motion、Seek 和 Bake 编排优先读取 `runtimeHandle.capabilities`；资源加载前的能力分类与 descriptor-only entry 的兼容路径统一使用 `Live2DRuntimeControlModule`。Adapter ID 仍用于 Adapter 选择、诊断和曲线缓存 identity，行为选择使用能力声明，覆盖共享 SDK 时钟、零步长姿态求值、动作 handoff、快照、组合模型和加载失败占位模型。
-
-- Cubism 2 的 `supportsNativeMotionOffset` 为 false，`supportsMotionOffsetReplay` 为 true，tier 为 `offset-replay-deterministic`。目标 offset 依赖共享 SDK 时钟的 50ms 固定步重放；没有时钟不能完成重放，Physics 在重放期间被禁用，`supportsStateReplay` 仍为 false。
-- Cubism 3+ 的 `supportsNativeMotionOffset` 为 true，`supportsMotionOffsetReplay` 为 false。Seek 使用直接队列 offset，强制零步长帧提交姿态，暂停时避免重复执行 writer；这不声明完整 Physics/Pose/LookAt 状态重建。
-- 已加载 handle 的能力优先于 descriptor；没有 handle 的旧 entry 才使用 descriptor 分类，没有 descriptor 的旧 entry 保留 Cubism 2 默认行为。`supported: false` 的 descriptor 不声明执行能力。
-
-Implementation: `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/Live2DStageRuntime.ts`, `src/engine/Live2DModelResources.ts`, `src/engine/Live2DMotionController.ts`, `src/engine/Live2DManager.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`, `src/engine/BakeEngine.ts`.
-Verification: `src/__tests__/Live2DRuntimeControlModule.test.ts`, `src/__tests__/Live2DStageRuntime.test.ts`, `src/__tests__/CharacterSynchronizer.test.ts`.
-
-后续 runtime 能力扩展优先填充对应 Adapter 的 init/create/model control 与能力声明，而不是继续在编排层新增 runtime 身份或私有字段分支。
-
-### 2026-10-12: Accepted runtime behavior Interface migration
-
-`Live2DRuntimeModelControls` 当前把两个 SDK 的内部结构及操作协议铺成了公共 Interface；`Live2DModelHandle` 的分组转发尚未收回调用方对 Core、子模型、focus controller 和共享时钟的知识。这是本 ADR 要求 SDK 私有操作留在 Adapter 内的 implementation gap。
-
-仓库内所有调用方迁移到绑定模型、表达完整行为的 Interface，最终删除公共 `getControls()`、raw model/Core/子模型/focus controller/采样目标 getter。初始化、动作交接、帧提交与 Seek 恢复各自封装运行时操作顺序；动作采样向调用方交付 runtime-neutral 数据。显示对象只提供类型明确的 Pixi 显示能力。时间轴选择仍由编排 Module 负责，模型池、借用取消及纹理所有权仍由资源 Module 负责。
-
-这是行为保持的重构：保留 Cubism 2 组合模型同步、动作交接、隔离采样、soft-detach，以及 Cubism 3+ 原生 offset 和零步长姿态提交的既有承诺。共享 SDK 时钟锁由运行时实现统一管理，覆盖预览、Seek、采样和 Bake，避免外围批次与模型内部操作重复取锁。参数 UI 与工作区工具改用中立参数描述和值；动作转换、缓存预热、Seek 与 Bake 均通过采样行为取得数据。
-
-选择完整行为方法，是为了让现有时间轴编排继续决定角色意图，同时由运行时 Module 收回 SDK 协议。每帧提交全部角色目标状态的声明式重写会同时改变编排状态模型，本次没有采用。迁移过程中允许旧形式暂时存在以保持验证可运行；最终删除旧公共契约是交付条件。
-
-这段记录了 2026-10-12 的已接受目标；当日实现尚未完成。最终集成结果见下方 2026-10-14 记录。实施规格、完成条件与迁移切片仍由本地 issue tracker 的 19 号条目维护。
-
-### 2026-10-12: Bound initialization and neutral character inspection (implemented slices)
-
-初始化与重置切片已经完成：Stage 和 Bake 通过绑定 handle 的 `initialize`、`bindRuntimeSource`、`resetRuntimeState`、`quiesce` 与 `dispose` 请求完整操作。遮罩隔离、预热、idle flush、主模型 baseline 与组合模型 pristine neutral pose 留在 runtime implementation；资源 Module 继续持有借用、池与纹理所有权。
-
-参数与角色检查切片通过 `inspectParameters` 返回独立的参数 ID、索引、显示名称、当前值及可用范围，通过 `editParameters` 在 runtime 内将旧工作区索引解析为 ID。每个具体模型在批量写入后只提交一次几何，组合模型的参数传播留在实现内。参数面板与工作区保留前 20 个参数、播放中禁用编辑、模型不可用的处理及 reload 后恢复播放位置的行为。
-
-`CharacterInfo` 返回独立的 model path、配置、adapter identity 与确定性能力描述，供 reload、资源缓存 identity 与 Seek 行为选择使用。Stage/CharacterAdapter 的 `getModel`、`getCoreModel`、`getAllCharacters` 及绑定 handle 的 Core getter 已删除；动画与 transform target 只取得类型明确的 Pixi `Container`。
-
-剩余 implementation gaps：完整 performance/Seek/frame 行为、统一 SDK 时钟与 Bake transaction 协调尚未迁移。旧 controls contract、raw model fields、sampler target getters 及相关公共 re-exports 暂时保留，最终删除仍是完整迁移的交付条件。
-
-Implementation: `src/engine/live2d/runtime/BoundModelInitialization.ts`, `src/engine/live2d/runtime/BoundModelParameters.ts`, `src/engine/Live2DManager.ts`, `src/api/adapters/CharacterAdapter.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`.
-Verification: `src/__tests__/Live2DBoundInitialization.test.ts`, `src/__tests__/Live2DBoundParameters.test.ts`, `src/__tests__/CharacterInspection.test.ts`, `src/__tests__/CharacterDirectoryParameters.test.tsx`, `src/__tests__/useWorkspaceToolsBridge.test.tsx`, existing animation/Seek/resource integrations and `npm run check`.
-
-Combined verification for these slices: `npm run check` passed 514 files, 5625 tests and TypeScript on 2026-10-12.
-
-### 2026-10-12: Bound neutral motion sampling (implemented slice)
-
-运行时 handle 现在提供 `motion.sampleMotion`，由 Adapter 在私有 SDK seam 内完成动作元数据解析、Cubism 2 隔离队列采样与组合模型曲线合并，Cubism 3+ 返回保留原曲线段的中立 custom motion。转换、曲线缓存预热、Seek-side cache ensure 与 Bake plan 通过该行为取得数据；不支持的曲线/运行时返回 typed unsupported 结果，缓存继续记录永久 miss 并回退原生动作路径。旧 sampler target 仍只作为分阶段迁移的私有 fallback，计划在后续删除公共 controls contract 时移除。
-
-Implementation: `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`, `src/engine/runtime/CubismPixiLive2DAdapter.ts`, `src/engine/live2d/motionCurveCache.ts`, `src/services/timeline-authoring/CustomMotionConversionCommand.ts`, `src/engine/coordinators/CharacterSynchronizer.ts`, `src/engine/BakeMotionRuntime.ts`.
-
-### 2026-10-14: Legacy public interface removed and integration verified
-
-19 号规格的最终集成已完成。旧的 `Live2DRuntimeModelControls` 公共契约已从 `Live2DRuntimeContracts` 和 `Live2DRuntimeAdapter` 移除；SDK 操作端口只留在 runtime 内部实现目录。Adapter 不再提供 controls、model class、SDK config 或 clock getter，绑定 handle 只暴露类型明确的 Pixi display object、参数/角色信息、neutral sampling 数据及完整行为。
-
-外部 capability 只报告支持的行为和确定性保证。Cubism 2 controls、共享 SDK clock、idle flush 与内部 replay timestamp 留在 runtime implementation；Stage、Motion、Seek、参数工具和 Bake 不传递 transaction token 或 SDK start time。Bake frame batch 在绑定 handle 内协调同一时钟，公开帧行为不接受 transaction 参数。
-
-转换命令、曲线缓存、Seek 与 Bake 通过 neutral motion sampling 取数据，authoring 不再读取 sampler targets。Blink、focus 生命周期、idle baseline、外部 performance 注册、参数批量提交和 head anchor 查询也通过绑定 handle 行为完成。针对公共行为的 pass-through assertions 已改为结果、状态和提交顺序检查；少数 Cubism 2 测试仍直接测试内部端口，以保护 SDK 专属保证。
-
-最终 production audit 未发现 `getControls()`、公开 raw model/Core/sampler target 字段、SDK strategy capability flags 或 SDK clock/replay sequencing 的外围调用。组合模型和 setup hook 中的 Core 遍历/更新仍属于 runtime model 实现本身；资源池、借用校验与纹理所有权仍由资源 Module 管理。迁移 tickets 20–25 的验收项均已勾选。
-
-Implementation: `src/engine/runtime/Live2DRuntimeControlPort.ts`, `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/live2d/runtime/BoundModelPerformance.ts`, `src/engine/live2d/runtime/Live2DRuntimeControlModule.ts`, `src/engine/Live2DManager.ts`, `src/engine/Live2DMotionController.ts`, `src/engine/BakeEngine.ts`, `src/engine/export/FrameCaptureEngine.ts`, `src/services/timeline-authoring/CustomMotionConversionCommand.ts`.
-Verification: `npm run check` passed 514 files, 5,653 tests and TypeScript on 2026-10-14. Focused integration checks passed for the runtime handle, Stage, Bake and motion controller.
-
-Implementation status: complete; no remaining runtime behavior Interface migration gaps.
-
-### 2026-10-14: Cubism 2 Expression lifecycle ownership
-
-`Cubism2ExpressionLifecycle` 是 Cubism 2 runtime 内部的私有 Module，集中普通表情播放、请求代次、队列清理与 Seek 前代表情淡入重建。`Cubism2PixiLive2DModelControls` 保留既有内部操作入口；绑定 handle 的公开 Interface、场景对前代表情的裁定和共享时钟协调继续遵循上述决策。
-
-- 普通表情加载由该 Module 在 SDK `loadExpression` 完成后复核请求代次，再提交队列，避免同名请求复用 SDK reservation 时旧结果抢占新请求。
-- 清空、idle 重置、quiesce 和直接 dispose 都使旧请求失效。清理停止真实表情队列并释放 reservation；不调用会重新入队默认表情的 SDK `resetExpression()`。idle 重置使用真实的 `internalModel.motionManager.expressionManager`。
-- Seek 保留前代表情/目标表情两阶段时钟重建、单调时钟恢复与延迟几何提交；异步加载之后和提交之前均复核请求所属模型与代次。组合角色逐具体模型处理。
-
-Implementation: `src/engine/live2d/runtime/Cubism2ExpressionLifecycle.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`.
-Verification: `src/__tests__/Cubism2ExpressionLifecycle.test.ts` 覆盖回收后的迟到加载、过期 Seek、idle 重置、同名请求竞争、借用复用、直接 soft-detach、加载拒绝和组合角色清理；既有 runtime、前代表情淡入与暂停预览测试继续覆盖公开行为。
+- Runtime boundary: `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/Live2DRuntimeAdapter.ts`, `src/engine/live2d/runtime/`.
+- Resource ownership: `src/engine/Live2DModelResources.ts`, `src/engine/BakeEngine.ts`.
+- Stage orchestration: `src/engine/Live2DStageRuntime.ts`, `src/engine/Live2DManager.ts`, `src/engine/live2d/Live2DCustomMotionRuntime.ts`, `src/engine/Live2DCharacterGeometry.ts`, `src/engine/Live2DRimLightController.ts`.
+- Cubism 2 expression lifecycle: `src/engine/live2d/runtime/Cubism2ExpressionLifecycle.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`.
+- Verification: `npm run check`; focused coverage in `src/__tests__/Live2DRuntimeAdapter.test.ts`, `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DStageRuntime.test.ts`, `src/__tests__/Cubism2ExpressionLifecycle.test.ts` and related runtime integration tests.

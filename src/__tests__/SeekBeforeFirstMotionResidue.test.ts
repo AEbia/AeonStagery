@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 /**
  * @vitest-environment jsdom
  */
@@ -159,8 +160,8 @@ function makeManager(char: ReturnType<typeof createRealLayoutSdkModel>) {
     lipSyncParameterIds: new Set<string>(),
     motionEpoch: 0,
   };
-  (manager as any).characters = new Map([['hero', entry]]);
-  (manager as any).containers = new Map();
+  live2DStageState(manager).characters = new Map([['hero', entry]]);
+  live2DStageState(manager).containers = new Map();
   return { manager, entry };
 }
 

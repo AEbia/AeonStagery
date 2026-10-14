@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
 
@@ -103,7 +104,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.playMotion('hero', 'wave', 3, 0, 1);
     manager.setExpression('hero', 'smile');
@@ -133,7 +134,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.setExpression('hero', 'smile');
     manager.playMotion('hero', 'wave', 3, 0, 1);
@@ -159,7 +160,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.setExpression('hero', 'smile');
     manager.resetToIdle('hero');

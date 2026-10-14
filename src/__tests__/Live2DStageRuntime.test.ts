@@ -1,5 +1,7 @@
+import { live2DStageState } from './helpers/live2DStageState';
+import { Live2DModelResources } from '../engine/Live2DModelResources';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Live2DStageRuntime } from '../engine/Live2DStageRuntime';
+import { Live2DStageRuntime, type Live2DStageRuntimeCallbacks } from '../engine/Live2DStageRuntime';
 import type { CharacterEntry } from '../engine/Live2DConfig';
 import type { Live2DRuntimeAdapter } from '../engine/runtime/Live2DRuntimeContracts';
 import type { Live2DRuntimeControlPort } from '../engine/runtime/Live2DRuntimeControlPort';
@@ -11,6 +13,15 @@ import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { acquireSharedRuntimeClockLock, releaseSharedRuntimeClockLock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+
+function createStage(callbacks: Omit<Live2DStageRuntimeCallbacks, 'getCamera' | 'isExportMode' | 'applyIntent'>) {
+  return new Live2DStageRuntime({
+    ...callbacks,
+    getCamera: () => null,
+    isExportMode: () => false,
+    applyIntent: vi.fn(),
+  }, new Live2DModelResources(() => ''));
+}
 
 const runtime = {
   runtimeFamily: 'cubism2' as const,
@@ -66,7 +77,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('drains pending motion intent before committing the frame', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -84,7 +95,7 @@ describe('Live2DStageRuntime', () => {
       skipHardReset: false,
       reqEpoch: 1,
     };
-    stage.characters.set(entry.id, entry);
+    live2DStageState(stage).characters.set(entry.id, entry);
 
     await stage.step(16, true);
 
@@ -94,7 +105,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('keeps parameter injection after runtime advancement', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -104,7 +115,7 @@ describe('Live2DStageRuntime', () => {
     });
     const entry = makeEntry('hero', { autoUpdate: false });
     entry.injectedParams = { PARAM_ANGLE_X: 0.4 };
-    stage.characters.set(entry.id, entry);
+    live2DStageState(stage).characters.set(entry.id, entry);
 
     await stage.step(16);
 
@@ -114,7 +125,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('uses handle clock capabilities to defer motions and updates during shared clock replay', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -138,7 +149,7 @@ describe('Live2DStageRuntime', () => {
       entry._pendingPlayMotion = {
         key: 'wave', priority: 3, offset: 0, sceneTime: 0, skipHardReset: false, reqEpoch: 1,
       };
-      stage.characters.set(entry.id, entry);
+      live2DStageState(stage).characters.set(entry.id, entry);
     }
     // Both entries say Cubism 2; only the loaded handle declares an independent clock.
     await acquireSharedRuntimeClockLock();
@@ -155,7 +166,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('defers forced and manual stage frames while the shared clock is locked', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -170,7 +181,7 @@ describe('Live2DStageRuntime', () => {
       runtime,
       controls,
     });
-    stage.characters.set(entry.id, entry);
+    live2DStageState(stage).characters.set(entry.id, entry);
 
     await acquireSharedRuntimeClockLock();
     try {
@@ -184,7 +195,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('commits and freezes zero-delta evaluation according to the handle', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -198,7 +209,7 @@ describe('Live2DStageRuntime', () => {
       ...handle,
       capabilities: { ...handle.capabilities, evaluatesPoseOnZeroDelta: true },
     };
-    stage.characters.set(entry.id, entry);
+    live2DStageState(stage).characters.set(entry.id, entry);
     stage.setAutoUpdate(false);
     await stage.step(0, true, 1000);
     expect(advanceFrame).toHaveBeenCalledExactlyOnceWith(entry.model, 0);
@@ -210,7 +221,7 @@ describe('Live2DStageRuntime', () => {
     const { model, internal, drawn } = createCubismModelFixture();
     const adapter = new CubismPixiLive2DAdapter();
     vi.mocked(runtimeAdapter.getLive2DRuntimeAdapter).mockReturnValue(adapter);
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -238,7 +249,7 @@ describe('Live2DStageRuntime', () => {
         : null,
     });
     expect(entry.customMotionStage).not.toBeNull();
-    stage.characters.set(entry.id, entry);
+    live2DStageState(stage).characters.set(entry.id, entry);
     stage.setAutoUpdate(false);
     const elapsedTime = model.elapsedTime;
     try {
@@ -259,7 +270,7 @@ describe('Live2DStageRuntime', () => {
   });
 
   it('isolates a failed model update from the rest of the frame', async () => {
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -272,8 +283,8 @@ describe('Live2DStageRuntime', () => {
     advanceFrame.mockImplementation((model: object) => {
       if ((model as { id: string }).id === 'failing') throw new Error('sdk failure');
     });
-    stage.characters.set('failing', makeEntry('failing', failingModel));
-    stage.characters.set('healthy', makeEntry('healthy', healthyModel));
+    live2DStageState(stage).characters.set('failing', makeEntry('failing', failingModel));
+    live2DStageState(stage).characters.set('healthy', makeEntry('healthy', healthyModel));
 
     await expect(stage.step(16)).resolves.toBeUndefined();
     expect(advanceFrame).toHaveBeenCalledTimes(2);
@@ -282,7 +293,7 @@ describe('Live2DStageRuntime', () => {
   it('waits for in-flight operations and clears coordinator state', async () => {
     let releaseMutex!: () => void;
     const mutex = new Promise<void>(resolve => { releaseMutex = resolve; });
-    const stage = new Live2DStageRuntime({
+    const stage = createStage({
       dispatchMotion,
       describeInvalidModelState: () => null,
       repairCorruptedModel: vi.fn().mockResolvedValue(undefined),
@@ -290,19 +301,19 @@ describe('Live2DStageRuntime', () => {
       resolveCustomMotionSceneTime: () => 0,
       getScriptEngine: () => null,
     });
-    stage.characters.set('hero', makeEntry('hero', { autoUpdate: false }));
-    stage.pendingMotions.set('hero', []);
-    stage.motionMutex.set('hero', mutex);
+    live2DStageState(stage).characters.set('hero', makeEntry('hero', { autoUpdate: false }));
+    live2DStageState(stage).pendingMotions.set('hero', []);
+    live2DStageState(stage).motionMutex.set('hero', mutex);
     const wait = stage.waitForQuiescence(vi.fn().mockResolvedValue(undefined));
 
     await Promise.resolve();
     releaseMutex();
-    stage.motionMutex.delete('hero');
+    live2DStageState(stage).motionMutex.delete('hero');
     await wait;
     stage.clear();
 
-    expect(stage.characters.size).toBe(0);
-    expect(stage.pendingMotions.size).toBe(0);
-    expect(stage.motionMutex.size).toBe(0);
+    expect(live2DStageState(stage).characters.size).toBe(0);
+    expect(live2DStageState(stage).pendingMotions.size).toBe(0);
+    expect(live2DStageState(stage).motionMutex.size).toBe(0);
   });
 });

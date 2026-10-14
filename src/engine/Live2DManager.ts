@@ -3,16 +3,14 @@
  *
  * Model resources and frame commits live in their own modules. Custom-motion
  * takeover, geometry/opacity and rim lights each hide their implementation
- * behind an internal interface; this manager owns entrance/removal ordering
- * and keeps the existing caller interface.
+ * behind an internal interface. Stage Runtime owns publication, withdrawal and
+ * pending-intent consumption; this manager keeps the existing caller interface.
  * Runtime imports stay lazy inside the adapters.
  */
 
 import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import * as PIXI from 'pixi.js';
-import gsap from 'gsap';
-import { stageManager } from './StageManager';
 import { hookSystem } from '../api/hooks';
 import { eventBus } from '../api/events';
 import { getLogger } from './Logger';
@@ -24,11 +22,10 @@ import type {
   Live2DParameterEditResult,
   Live2DParameterInspection,
 } from '../api/types/live2d-parameter-animation';
-import { resolveVec2 } from './utils/math';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
 import type { RimLightStyleState } from '../api/types/visual';
 import { setScriptEngineForSetup } from './Live2DSetupState';
-import { Live2DMotionController, MotionRequest } from './Live2DMotionController';
+import type { Live2DMotionController } from './Live2DMotionController';
 import { Live2DModelResources, Live2DModelLoadError } from './Live2DModelResources';
 import { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
@@ -39,10 +36,10 @@ import type { CustomMotionHandoffPose } from './live2d/customMotionRuntime';
 import { motionCurveCache } from './live2d/motionCurveCache';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
 import { purgeCharacterRuntimeState } from './live2d/characterStatePurge';
-import { Live2DStageRuntime, type PendingLookAt, type PendingBlink, type PendingCustomMotion } from './Live2DStageRuntime';
+import { Live2DStageRuntime, type Live2DStageIntent } from './Live2DStageRuntime';
 import { Live2DCustomMotionRuntime } from './live2d/Live2DCustomMotionRuntime';
-import { Live2DCharacterGeometry } from './Live2DCharacterGeometry';
-import { Live2DRimLightController } from './Live2DRimLightController';
+import type { Live2DCharacterGeometry } from './Live2DCharacterGeometry';
+import type { Live2DRimLightController } from './Live2DRimLightController';
 
 export interface LookAtOptions {
   fromX?: number;
@@ -88,6 +85,7 @@ class Live2DManager {
   private readonly logger = getLogger('Live2DManager');
 
   constructor() {
+    this.modelResources = new Live2DModelResources(() => this.basePath);
     this.stageRuntime = new Live2DStageRuntime({
       dispatchMotion: (id, request) => {
         this.ensureMotionController();
@@ -98,46 +96,40 @@ class Live2DManager {
       maybeInstallCustomMotionStage: (entry) => this.customMotionRuntime.ensureStage(entry),
       resolveCustomMotionSceneTime: (entry, manualTimeMs) => this.customMotionRuntime.resolveSceneTime(entry, manualTimeMs),
       getScriptEngine: () => this._scriptEngine,
-    });
-    this.characterGeometry = new Live2DCharacterGeometry(
-      this.characters,
-      this.stageRuntime.pendingConfigs,
-      (id) => this.getContainer(id),
-      () => this._scriptEngine,
-      () => this.currentCamera,
-    );
-    this.rimLights = new Live2DRimLightController(
-      this.characters,
-      (id) => this.getContainer(id),
-      () => this._scriptEngine?.getCurrentTime?.(),
-      this.stageRuntime.pendingRimLightCommands,
-      this.stageRuntime.pendingRimLightStates,
-    );
-    this.modelResources = new Live2DModelResources(
-      () => this.basePath,
-    );
+      getCamera: () => this.syncCurrentCameraFromScriptEngine(),
+      isExportMode: () => this._isExportMode,
+      applyIntent: (id, intent) => this.applyStageIntent(id, intent),
+    }, this.modelResources);
+    this.characterGeometry = this.stageRuntime.geometry;
+    this.rimLights = this.stageRuntime.rimLights;
   }
 
-  private get characters(): Map<string, CharacterEntry> { return this.stageRuntime.characters; }
-  private set characters(value: Map<string, CharacterEntry>) { this.stageRuntime.replaceCharacters(value); }
-  private get containers(): Map<string, PIXI.Container> { return this.stageRuntime.containers; }
-  private set containers(value: Map<string, PIXI.Container>) { this.stageRuntime.replaceContainers(value); }
-  private get pendingMotions(): Map<string, MotionRequest[]> { return this.stageRuntime.pendingMotions; }
-  private get pendingConfigs(): Map<string, Partial<CharacterTransformConfig>[]> { return this.stageRuntime.pendingConfigs; }
-  private get pendingExpressions(): Map<string, string | null> { return this.stageRuntime.pendingExpressions; }
-  private get pendingCustomMotions(): Map<string, PendingCustomMotion> { return this.stageRuntime.pendingCustomMotions; }
-  private get pendingLookAts(): Map<string, PendingLookAt> { return this.stageRuntime.pendingLookAts; }
-  private get pendingBlinks(): Map<string, PendingBlink> { return this.stageRuntime.pendingBlinks; }
-  private get _jumpingCharacters(): Set<string> { return this.stageRuntime.jumpingCharacters; }
-  private get _motionMutex(): Map<string, Promise<void>> { return this.stageRuntime.motionMutex; }
-  private get _hardResetMutex(): Map<string, Promise<void>> { return this.stageRuntime.hardResetMutex; }
-  private get _activeMotionLoads(): Set<string> { return this.stageRuntime.activeMotionLoads; }
   private get _shouldUpdate(): boolean { return this.stageRuntime.isUpdating; }
-  private get _tickerAdded(): boolean { return this.stageRuntime.hasTicker; }
-  private set _tickerAdded(value: boolean) { if (value) this.stageRuntime.markTickerAdded(); }
 
-  private nextCharacterGeneration(id: string): number {
-    return this.stageRuntime.nextCharacterGeneration(id);
+  private applyStageIntent(id: string, intent: Live2DStageIntent): void {
+    switch (intent.kind) {
+      case 'motion': {
+        const m = intent.request;
+        this.playMotion(id, m.key, m.priority, m.offset, m.sceneTime, m.skipHardReset, m.handoffSnapshot);
+        break;
+      }
+      case 'customMotion': {
+        const m = intent.request;
+        this.playCustomMotion(id, m.motion, m.sceneTime, m.handoffSnapshot);
+        break;
+      }
+      case 'expression': this.setExpression(id, intent.expression); break;
+      case 'lookAt': {
+        const l = intent.request;
+        this.lookAt(id, l.focusX, l.focusY, l.duration, l.options);
+        break;
+      }
+      case 'blink': {
+        const b = intent.request;
+        this.setBlink(id, b.enabled, b.intervalMs, b.sceneTimeSeconds, b.startTimeSeconds, b.intervalRangeMs);
+        break;
+      }
+    }
   }
 
   /**
@@ -197,9 +189,7 @@ class Live2DManager {
 
   private syncCurrentCameraFromScriptEngine(): { position: Vec2; zoom: number } | null {
     const camera = this._scriptEngine?.getCurrentCamera?.();
-    if (camera?.position && Number.isFinite(camera.zoom)) {
-      this.currentCamera = camera;
-    }
+    if (camera?.position && Number.isFinite(camera.zoom)) this.currentCamera = camera;
     return this.currentCamera;
   }
 
@@ -212,196 +202,9 @@ class Live2DManager {
    * @param config Optional positioning/animation config
    */
   async addCharacter(id: string, modelJsonPath: string, config: CharacterConfig = {}): Promise<void> {
-    const targetMap = this.characters;
-    if (targetMap.has(id)) this.removeCharacter(id);
-    const staging: { container?: PIXI.Container; entry?: CharacterEntry } = {};
     try {
-      await this.modelResources.loadCharacter(id, modelJsonPath, async ({ model, modelUrl, runtime, isCurrent, release }) => {
-        const lifecycleGeneration = this.nextCharacterGeneration(id);
-        const adapter = getLive2DRuntimeAdapter(runtime);
-        const runtimeHandle = adapter.createModelHandle(id, model, runtime);
-        const initialized = await runtimeHandle.initialize({ mode: 'live', isCurrent });
-        if (initialized.status !== 'ready' || !isCurrent()) return;
-        const idleSnapshot = initialized.idleSnapshot;
-
-        // Start our manual ticker if this is the first character
-        if (!this._tickerAdded) {
-          const app = stageManager.getApp();
-          app.ticker.add((ticker) => this.updateAll(ticker.deltaMS));
-          this._tickerAdded = true;
-        }
-
-        // Apply positioning
-        const camera = this.syncCurrentCameraFromScriptEngine();
-        const pos = config.position ? resolveVec2(config.position) : { x: 0.5, y: 1.15 };
-        const container = this.getContainer(id);
-        staging.container = container;
-        container.x = pos.x * 1920;
-        container.y = pos.y * 1080;
-        container.angle = config.rotation ?? 0;
-
-        model.x = 0;
-        model.y = 0;
-
-        // Scale — reset to 1 first to get clean height reading
-        model.scale.set(1);
-        const baseHeight = model.height || 1000;
-        (model as any)._baseHeight = baseHeight;
-
-        const targetHeight = 1080 * (config.scale ?? 1.3);
-        const modelScale = targetHeight / baseHeight;
-        model.scale.set(modelScale);
-        const baseWidth = (model.width && modelScale !== 0)
-          ? model.width / modelScale
-          : baseHeight * 0.58;
-
-        // Flip
-        if (config.flipX) {
-          model.scale.x *= -1;
-          (model as any)._flipX = true;
-        }
-
-        // Anchor from feet
-        model.anchor.set(0.5, 0.9);
-
-        // Opacity
-        if (config.opacity !== undefined) {
-          model.alpha = config.opacity;
-        }
-
-        // Z-index
-        if (config.zIndex !== undefined) {
-          model.zIndex = config.zIndex;
-        }
-
-        // Add model to its persistent container
-        container.addChild(model);
-
-        // 核心修复：在变可见前，强行同步一次代理状态到模型实例
-        // 注意：此时 entry 还没加入 characters Map，所以必须通过 modelOverride 传入模型
-        if (this._scriptEngine) {
-          const proxy = this._scriptEngine.transformationProxies.get(id);
-          if (proxy) this.applyProxyTransform(id, proxy, model, camera ?? undefined);
-        }
-
-        model.visible = true; // 现在可以安全显示了
-
-        // --- 核心修复：生命周期校验 ---
-        // 如果在 await 加载期间角色已经被删除了（例如连续 Seek），则直接丢弃这个模型
-        if (!isCurrent()) {
-          console.warn(`[Live2D] Model for "${id}" loaded but character was already removed. Skip display.`);
-          if (model.parent) model.parent.removeChild(model);
-          return;
-        }
-
-        const entry: CharacterEntry = {
-          id,
-          model,
-          modelPath: modelJsonPath,
-          modelUrl,
-          releaseModel: release,
-          runtime,
-          adapterId: runtime.adapterId,
-          runtimeHandle,
-          config,
-          injectedParams: {},
-          lipSyncParameterIds: new Set<string>(),
-          baseHeight,
-          baseWidth,
-          motionEpoch: 0,
-          filterWarmupFrames: 6,
-          lifecycleGeneration,
-        };
-        staging.entry = entry;
-
-        if (idleSnapshot) entry.idleSnapshot = idleSnapshot;
-        // Warmup precedes entry creation; binding retains the live source and
-        // installs runtime protections before the first stage render.
-        if (!runtimeHandle.bindRuntimeSource({
-          mode: 'live', isExportMode: this._isExportMode, injectedParamsSource: entry,
-          applyProxyTransform: (proxyId, proxy) => this.applyProxyTransform(proxyId, proxy), isCurrent,
-        })) return;
-
-        targetMap.set(id, entry);
-
-        // Abort if character was removed during async loading / setup
-        if (!isCurrent()) {
-          targetMap.delete(id);
-          if (model && model.parent) model.parent.removeChild(model);
-          return;
-        }
-
-        // 核心修复：加载完成后，立即对齐 ScriptEngine 的代理状态（透明度、位置等）
-        // 这样即便在 fadeIn 补间过程中加载完成，模型也会立刻跳到当前的正确不透明度
-        if (this._scriptEngine) {
-          const proxy = this._scriptEngine.transformationProxies.get(id);
-          if (proxy) {
-            const latestCamera = this.syncCurrentCameraFromScriptEngine();
-            this.applyProxyTransform(id, proxy, undefined, latestCamera ?? undefined);
-          }
-        }
-
-        this.applyPendingCharacterVisualState(id);
-
-        // 核心修复：全量恢复积压的指令，保留 offset 等关键参数
-        const pendingM = this.pendingMotions.get(id);
-        if (pendingM) {
-          pendingM.forEach(m => this.playMotion(id, m.key, m.priority, m.offset, m.sceneTime, m.skipHardReset));
-          this.pendingMotions.delete(id);
-        }
-
-        // A custom motion buffered before the entrance loaded replays after the
-        // queued resource motions: it was requested later, and the newest motion
-        // intent owns the character's output (ADR-0029).
-        const pendingCustomMotion = this.pendingCustomMotions.get(id);
-        if (pendingCustomMotion) {
-          this.pendingCustomMotions.delete(id);
-          this.playCustomMotion(
-            id,
-            pendingCustomMotion.motion,
-            pendingCustomMotion.sceneTime,
-            pendingCustomMotion.handoffSnapshot,
-          );
-        }
-
-        const pendingE = (entry as any)._pendingExpression;
-        if (pendingE !== undefined) {
-          this.setExpression(id, pendingE);
-          (entry as any)._pendingExpression = undefined;
-        }
-
-        const pendingL = (entry as any)._pendingLookAt;
-        if (pendingL) {
-          const l = pendingL as any;
-          this.lookAt(id, l.focusX, l.focusY, l.duration, l.options);
-          (entry as any)._pendingLookAt = undefined;
-        }
-
-        const pendingB = (entry as any)._pendingBlink;
-        if (pendingB) {
-          this.setBlink(id, pendingB.enabled, pendingB.intervalMs, pendingB.sceneTimeSeconds, pendingB.startTimeSeconds, pendingB.intervalRangeMs);
-          (entry as any)._pendingBlink = undefined;
-        }
-
-        const pendingTrans = this.pendingConfigs.get(id);
-        if (pendingTrans) {
-          pendingTrans.forEach(conf => this.transform(id, conf));
-          this.pendingConfigs.delete(id);
-        }
-
-        // Fire hook
-        hookSystem.execute('character:add', { id, modelPath: modelJsonPath });
-
-        console.log(`[Live2D] Character "${id}" added to stage.`);
-      }, () => stageManager.getApp().renderer);
+      await this.stageRuntime.addCharacter(id, modelJsonPath, config);
     } catch (err) {
-      if (staging.entry && targetMap.get(id) === staging.entry) this.removeCharacter(id);
-      else if (staging.container && this.containers.get(id) === staging.container) {
-        gsap.killTweensOf(staging.container);
-        staging.container.parent?.removeChild(staging.container);
-        staging.container.destroy({ children: true });
-        this.containers.delete(id);
-      }
       console.error(`[Live2D] Failed to load model "${modelJsonPath}":`, err);
       if (err instanceof Live2DModelLoadError) {
         showRuntimeErrorToast(`Live2D 模型加载失败：角色 "${id}"。\n${err.message}\n${err.fullPath}`);
@@ -411,107 +214,12 @@ class Live2DManager {
     }
   }
 
-  /**
-   * Remove a character from the stage.
-   */
   removeCharacter(id: string): void {
-    this.modelResources.cancelLoad(id);
-    this.nextCharacterGeneration(id);
-    this.pendingExpressions.delete(id);
-    // A motion intent buffered for a character that never entered must die with
-    // the character; otherwise it would fire on a later, unrelated entrance.
-    this.pendingCustomMotions.delete(id);
-    this.pendingLookAts.delete(id);
-    this.pendingBlinks.delete(id);
-    this.rimLights.removeCharacter(id);
-
-    const targetMap = this.characters;
-    const entry = targetMap.get(id);
-    if (entry) {
-      entry.lifecycleGeneration = (entry.lifecycleGeneration ?? 0) + 1;
-      // Shared ownership exit: dispose the stage writer (restores eye blink,
-      // detaches listeners), release controlled injected parameters, stop the
-      // SDK motion/expression channels and restore the neutral pose. The model
-      // instance is recycled into the preload pool below, so anything left
-      // behind here would be inherited by the next character that enters with
-      // the same model — visible as the previous action during its fade-in.
-      purgeCharacterRuntimeState(entry, { restoreNeutralPose: true });
-      // 1. 停止所有 GSAP 动画
-      gsap.killTweensOf(entry.model);
-      gsap.killTweensOf(entry.model.scale);
-      if (entry.breathTween) entry.breathTween.kill();
-
-      // CRITICAL: Detach model from container before destroying the container to prevent
-      // container.destroy({ children: true }) from automatically destroying the model,
-      // which ruins the globally shared Cubism WebGL shader program!
-      if (entry.model && entry.model.parent) {
-        entry.model.parent.removeChild(entry.model);
-      }
-
-      const container = this.containers.get(id);
-      if (container) {
-        gsap.killTweensOf(container);
-        container.parent?.removeChild(container);
-        container.destroy({ children: true });
-        this.containers.delete(id);
-      }
-
-      entry.releaseModel?.();
-
-      // 3. 清理状态
-      targetMap.delete(id);
-      this.pendingMotions.delete(id);
-      this.pendingConfigs.delete(id);
-
-      hookSystem.execute('character:remove', { id });
-      console.log(`[Live2D] Character "${id}" removed from stage.`);
-    }
+    this.stageRuntime.removeCharacter(id);
   }
 
-  /**
-   * Get a persistent container for a character.
-   */
   getContainer(id: string): PIXI.Container {
-    let container = this.containers.get(id);
-    if (!container) {
-      container = new PIXI.Container();
-      container.name = `character-container-${id}`;
-      container.alpha = 0; // 核心修复：初始状态强制设为全透明，防止动画接管前的瞬时闪现
-      this.containers.set(id, container);
-
-      const charLayer = stageManager.getLayer('characters');
-      charLayer.addChild(container);
-    }
-    return container;
-  }
-
-  private applyPendingCharacterVisualState(id: string): void {
-    if (this.pendingExpressions.has(id)) {
-      const expression = this.pendingExpressions.get(id) ?? null;
-      this.pendingExpressions.delete(id);
-      this.setExpression(id, expression);
-    }
-
-    const pendingLookAt = this.pendingLookAts.get(id);
-    if (pendingLookAt) {
-      this.pendingLookAts.delete(id);
-      this.lookAt(id, pendingLookAt.focusX, pendingLookAt.focusY, pendingLookAt.duration, pendingLookAt.options);
-    }
-
-    const pendingBlink = this.pendingBlinks.get(id);
-    if (pendingBlink) {
-      this.pendingBlinks.delete(id);
-      this.setBlink(
-        id,
-        pendingBlink.enabled,
-        pendingBlink.intervalMs,
-        pendingBlink.sceneTimeSeconds,
-        pendingBlink.startTimeSeconds,
-        pendingBlink.intervalRangeMs,
-      );
-    }
-
-    this.rimLights.applyPending(id);
+    return this.stageRuntime.getContainer(id);
   }
 
   /**
@@ -541,9 +249,9 @@ class Live2DManager {
     // intent; otherwise it would replay on load afterwards and wrongly take
     // over. A cache-backed resource motion *is* a custom motion, so the cache
     // branch below re-buffers it as the newer intent.
-    this.pendingCustomMotions.delete(id);
+    this.stageRuntime.discardIntent(id, 'customMotion');
 
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (this.resourceMotionCacheEnabled && entry) {
       const cached = motionCurveCache.get({
         adapterId: entry.runtime.adapterId,
@@ -567,7 +275,7 @@ class Live2DManager {
 
   /** Preview replacements reuse the block's start pose, never saved fade frames. */
   getCustomMotionPreviewHandoff(id: string, sceneTime: number): CustomMotionHandoffPose | undefined {
-    return this.customMotionRuntime.getPreviewHandoff(this.characters.get(id), sceneTime);
+    return this.customMotionRuntime.getPreviewHandoff(this.stageRuntime.getCharacter(id), sceneTime);
   }
 
   /**
@@ -595,7 +303,7 @@ class Live2DManager {
     handoffSnapshot?: ModelSnapshot | null,
     previewHandoff?: CustomMotionHandoffPose,
   ): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) {
       // No character on stage yet: a statement can pair the custom motion with
       // the entrance that creates the character (角色登场 + 角色动作 at the same
@@ -603,7 +311,7 @@ class Live2DManager {
       // model load. Buffer the intent — the same way resource motions wait in
       // `pendingMotions` — and replay it on load, keeping the authored start
       // time so the curve resumes at the frame the playhead is actually on.
-      this.pendingCustomMotions.set(id, { motion, sceneTime, handoffSnapshot });
+      this.stageRuntime.bufferIntent(id, { kind: 'customMotion', request: { motion, sceneTime, handoffSnapshot } });
       return;
     }
 
@@ -623,7 +331,7 @@ class Live2DManager {
 
   /** 清除所有角色的待执行动作并推进 epoch，Seek 前必须调用以防止旧指令污染快照恢复 */
   clearAllPendingMotions(): void {
-    this.pendingCustomMotions.clear();
+    this.stageRuntime.clearPendingCustomMotions();
     this.ensureMotionController();
     this.motionController!.clearAllPendingMotions();
   }
@@ -642,7 +350,7 @@ class Live2DManager {
    *   tail pose.
    */
   purgeAllCharacterRuntimeState(options: { restoreNeutralPose?: boolean } = {}): void {
-    for (const entry of this.characters.values()) {
+    for (const entry of this.stageRuntime.getCharacterEntries()) {
       purgeCharacterRuntimeState(entry, {
         restoreNeutralPose: options.restoreNeutralPose ?? true,
       });
@@ -662,19 +370,16 @@ class Live2DManager {
    * @param expressionName Expression name from model.json, e.g., "tomori/angry01", or empty string to reset
    */
   setExpression(id: string, expressionName: string | null): void {
-    const entry = this.characters.get(id);
-    if (!entry) {
-      this.pendingExpressions.set(id, expressionName);
+    const entry = this.stageRuntime.getCharacter(id);
+    if (!entry?.model) {
+      this.stageRuntime.bufferIntent(id, { kind: 'expression', expression: expressionName });
       return;
     }
 
     entry.expressionKey = expressionName;
-    this.pendingExpressions.delete(id);
+    this.stageRuntime.discardIntent(id, 'expression');
 
-    if (!entry.model) {
-      (entry as any)._pendingExpression = expressionName;
-      return;
-    }
+
 
     try {
       const runtime = getBoundRuntimeHandle(entry);
@@ -690,7 +395,7 @@ class Live2DManager {
           expressionName,
           Number.POSITIVE_INFINITY,
           undefined,
-          () => this.characters.get(id) === entry
+          () => this.stageRuntime.getCharacter(id) === entry
             && (entry.lifecycleGeneration ?? 0) === generation
             && entry.expressionKey === expressionName,
         )
@@ -723,11 +428,11 @@ class Live2DManager {
     previousExpressionKey?: string | null,
     isCurrentOperation: () => boolean = () => true,
   ): Promise<void> {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry?.model) return;
 
     entry.expressionKey = expressionName;
-    this.pendingExpressions.delete(id);
+    this.stageRuntime.discardIntent(id, 'expression');
 
     try {
       const runtime = getBoundRuntimeHandle(entry);
@@ -737,11 +442,11 @@ class Live2DManager {
         expressionName,
         elapsedSeconds,
         previousExpressionKey,
-        () => this.characters.get(id) === entry
+        () => this.stageRuntime.getCharacter(id) === entry
           && (entry.lifecycleGeneration ?? 0) === generation
           && isCurrentOperation(),
       );
-      if (this.characters.get(id) !== entry || (entry.lifecycleGeneration ?? 0) !== generation || !isCurrentOperation()) return;
+      if (this.stageRuntime.getCharacter(id) !== entry || (entry.lifecycleGeneration ?? 0) !== generation || !isCurrentOperation()) return;
       hookSystem.execute('character:expression', { id, expressionName: expressionName || '' });
     } catch (err) {
       console.error(`[Live2D] Failed to restore expression "${expressionName}" on "${id}" during seek:`, err);
@@ -749,7 +454,7 @@ class Live2DManager {
   }
 
   prepareExpressionForSeek(id: string, expressionName: string | null): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (entry) entry.expressionKey = expressionName;
   }
 
@@ -760,7 +465,7 @@ class Live2DManager {
    * never re-populates models that soft cleanup already retained.
    */
   matchesLoadedModel(id: string, modelUrl: string): boolean {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return false;
     const requestedUrl = this.modelResources.pathToUrl(modelUrl);
     return entry.modelPath === modelUrl || entry.modelUrl === modelUrl || entry.modelUrl === requestedUrl;
@@ -787,7 +492,7 @@ class Live2DManager {
    * Display capabilities for animation; SDK operations stay on the handle.
    */
   getDisplayObject(id: string): PIXI.Container | null {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     return entry?.runtimeHandle?.displayObject ?? entry?.model ?? null;
   }
 
@@ -796,7 +501,7 @@ class Live2DManager {
     motionKey: string,
     options: import('./runtime/Live2DRuntimeContracts').Live2DMotionSamplingOptions,
   ): Promise<import('./runtime/Live2DRuntimeContracts').Live2DMotionSamplingResult> {
-    const entry = this.characters.get(characterId);
+    const entry = this.stageRuntime.getCharacter(characterId);
     if (!entry?.model) {
       return { status: 'unsupported', diagnostics: [`Character "${characterId}" is not loaded.`] };
     }
@@ -814,7 +519,7 @@ class Live2DManager {
       console.warn(`[Live2DManager] Ignored invalid parameter ${paramName}=${value} for ${id}`);
       return;
     }
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return;
     entry.injectedParams[paramName] = value;
   }
@@ -831,7 +536,7 @@ class Live2DManager {
       console.warn(`[Live2DManager] Ignored invalid parameter ${paramName}=${value} for ${id}`);
       return;
     }
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return;
     entry.injectedParams[paramName] = value;
     (entry.lipSyncParameterIds ??= new Set()).add(paramName);
@@ -852,7 +557,7 @@ class Live2DManager {
    * motion) can actually drive them again (ADR-0029 stage handoff).
    */
   clearLipSyncParameters(id: string): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return;
     const owned = entry.lipSyncParameterIds;
     if (owned && owned.size > 0) {
@@ -863,7 +568,7 @@ class Live2DManager {
   }
 
   getParameterMetadata(id: string): readonly Live2DParameterMetadata[] {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return [];
     const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
     const metadata = handle.parameters.getParameterMetadata();
@@ -877,14 +582,14 @@ class Live2DManager {
   }
 
   inspectParameters(id: string): readonly Live2DParameterInspection[] | null {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return null;
     const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
     return handle.inspectParameters();
   }
 
   editParameters(id: string, edits: readonly Live2DParameterEdit[]): Live2DParameterEditResult {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return { appliedParameterIds: [] };
     const handle = entry.runtimeHandle ?? getLive2DRuntimeAdapter(entry.runtime).createModelHandle(id, entry.model, entry.runtime);
     return handle.editParameters(edits);
@@ -927,18 +632,15 @@ class Live2DManager {
     duration: number = 0.5,
     options?: LookAtOptions,
   ): void {
-    const entry = this.characters.get(id);
-    if (!entry) {
-      this.pendingLookAts.set(id, { focusX, focusY, duration, options });
+    const entry = this.stageRuntime.getCharacter(id);
+    if (!entry?.model) {
+      this.stageRuntime.bufferIntent(id, { kind: 'lookAt', request: { focusX, focusY, duration, options } });
       return;
     }
 
-    this.pendingLookAts.delete(id);
+    this.stageRuntime.discardIntent(id, 'lookAt');
 
-    if (!entry.model) {
-      (entry as any)._pendingLookAt = { focusX, focusY, duration, options };
-      return;
-    }
+
 
     // The focus-controller interpolation (GSAP ownership, frame writes, SDK
     // focus fallback) is entirely owned by the runtime adapter.
@@ -987,18 +689,15 @@ class Live2DManager {
     startTimeSeconds?: number,
     intervalRangeMs?: number,
   ): void {
-    const entry = this.characters.get(id);
-    if (!entry) {
-      this.pendingBlinks.set(id, { enabled, intervalMs, sceneTimeSeconds, startTimeSeconds, intervalRangeMs });
+    const entry = this.stageRuntime.getCharacter(id);
+    if (!entry?.model) {
+      this.stageRuntime.bufferIntent(id, { kind: 'blink', request: { enabled, intervalMs, sceneTimeSeconds, startTimeSeconds, intervalRangeMs } });
       return;
     }
 
-    this.pendingBlinks.delete(id);
+    this.stageRuntime.discardIntent(id, 'blink');
 
-    if (!entry.model) {
-      (entry as any)._pendingBlink = { enabled, intervalMs, sceneTimeSeconds, startTimeSeconds, intervalRangeMs };
-      return;
-    }
+
 
     // Eye-blink channel manipulation (updater wrap, multiplier, interval) is
     // owned by the runtime adapter.
@@ -1067,7 +766,7 @@ class Live2DManager {
    * during Hitchcock zoom where scale must change every animation frame.
    */
   setCharacterScale(id: string, scale: number): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry || !entry.model) return;
     const sign = entry.model.scale.x < 0 ? -1 : 1;
     entry.model.scale.set(scale * sign, scale);
@@ -1088,12 +787,12 @@ class Live2DManager {
   }
 
   canApplyContainerFilters(id: string): boolean {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     return !entry?.filterWarmupFrames || entry.filterWarmupFrames <= 0;
   }
 
   hasActiveFilterWarmup(): boolean {
-    for (const entry of this.characters.values()) {
+    for (const entry of this.stageRuntime.getCharacterEntries()) {
       if (entry.filterWarmupFrames && entry.filterWarmupFrames > 0) {
         return true;
       }
@@ -1105,7 +804,7 @@ class Live2DManager {
    * Get available motion keys for a loaded character.
    */
   getAvailableMotions(id: string): string[] {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return [];
 
     try {
@@ -1132,7 +831,7 @@ class Live2DManager {
    * Get available expression keys for a loaded character.
    */
   getAvailableExpressions(id: string): string[] {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return [];
 
     try {
@@ -1151,7 +850,7 @@ class Live2DManager {
    * Detached character information for listing and reload.
    */
   getCharacterInfo(id: string): CharacterInfo | null {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return null;
     return {
       id: entry.id,
@@ -1163,7 +862,7 @@ class Live2DManager {
   }
 
   listCharacterInfo(): readonly CharacterInfo[] {
-    return [...this.characters.keys()].flatMap(id => {
+    return [...this.stageRuntime.getCharacterIds()].flatMap(id => {
       const info = this.getCharacterInfo(id);
       return info ? [info] : [];
     });
@@ -1173,7 +872,7 @@ class Live2DManager {
    * Capture snapshot via pure function (shared with BakeEngine).
    */
   captureSnapshot(id: string): ModelSnapshot | null {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry || !entry.model) return null;
     if (!getLive2DRuntimeCapabilities(entry).supportsSnapshot) return null;
     return getBoundRuntimeHandle(entry)?.snapshot.captureSnapshot(entry.motionStartTime) ?? null;
@@ -1201,12 +900,12 @@ class Live2DManager {
       isCurrent?: () => boolean;
     },
   ): Promise<void> {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry?.model) return;
     const lifecycleGeneration = entry.lifecycleGeneration ?? 0;
     const runtime = getBoundRuntimeHandle(entry);
     if (!runtime) return;
-    const isCurrent = () => this.characters.get(id) === entry
+    const isCurrent = () => this.stageRuntime.getCharacter(id) === entry
       && (entry.lifecycleGeneration ?? 0) === lifecycleGeneration
       && (input.isCurrent?.() ?? true);
     let result;
@@ -1257,7 +956,7 @@ class Live2DManager {
    * Used by ScriptEngine to ensure snapshots are not taken during transition.
    */
   isMotionLoading(): boolean {
-    return this.motionController ? this.motionController.isMotionLoading() : this._activeMotionLoads.size > 0;
+    return this.stageRuntime.motionController.isMotionLoading();
   }
 
   /**
@@ -1267,7 +966,7 @@ class Live2DManager {
    * Log internal SDK motion state for debugging.
    */
   debugMotionState(id: string): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return;
     console.log(
       `[Live2D Debug] Motion State for "${id}":`,
@@ -1276,7 +975,7 @@ class Live2DManager {
   }
 
   logModelParameters(id: string): void {
-    const entry = this.characters.get(id);
+    const entry = this.stageRuntime.getCharacter(id);
     if (!entry) return;
     const values = getBoundRuntimeHandle(entry)?.parameters.getParameterValues();
     if (!values) return;
@@ -1311,7 +1010,7 @@ class Live2DManager {
   }
 
   listCharacters(): string[] {
-    return Array.from(this.characters.keys());
+    return Array.from(this.stageRuntime.getCharacterIds());
   }
 
   /**
@@ -1324,7 +1023,7 @@ class Live2DManager {
   }
 
   hasCharacter(id: string): boolean {
-    return this.characters.has(id);
+    return !!this.stageRuntime.getCharacter(id);
   }
 
   private describeInvalidModelState(entry: CharacterEntry): string | null {
@@ -1343,7 +1042,7 @@ class Live2DManager {
       this.ensureMotionController();
       entry.corruptionRepairPromise = this.motionController!._hardReset(entry.id, entry.model)
         .then(() => {
-          if (this.characters.get(entry.id) !== entry) return;
+          if (this.stageRuntime.getCharacter(entry.id) !== entry) return;
 
           const remainingIssue = this.describeInvalidModelState(entry);
           if (remainingIssue) {
@@ -1359,7 +1058,7 @@ class Live2DManager {
           console.warn(`[Live2D] NaN repair failed for "${entry.id}":`, err);
         })
         .finally(() => {
-          if (this.characters.get(entry.id) === entry) {
+          if (this.stageRuntime.getCharacter(entry.id) === entry) {
             entry.corruptionRepairPromise = undefined;
           }
         });
@@ -1425,29 +1124,13 @@ class Live2DManager {
    * Internal helper for a complete model reset.
    */
   private ensureMotionController(): void {
-    if (!this.motionController) {
-      this.motionController = new Live2DMotionController(
-        this.characters,
-        this.containers,
-        this.pendingMotions,
-        this.pendingConfigs,
-        this._motionMutex,
-        this._hardResetMutex,
-        this._activeMotionLoads,
-        this._jumpingCharacters,
-        () => this._scriptEngine,
-      );
-    }
+    this.motionController ??= this.stageRuntime.motionController;
   }
 
   /**
-   * Remove all characters but keep containers for tween stability.
+   * Withdraw all characters and clear stage intents and resources.
    */
   clear(): void {
-    for (const id of Array.from(this.characters.keys())) {
-      this.removeCharacter(id);
-    }
-    this.modelResources.clear();
     this.stageRuntime.clear();
   }
 }

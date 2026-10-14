@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { describe, expect, it, vi } from 'vitest';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
@@ -119,7 +120,7 @@ function makeManager(entry: any, controls: any) {
         createTestControls: () => controls,
       }) as any,
     );
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: vi.fn(async () => {}),

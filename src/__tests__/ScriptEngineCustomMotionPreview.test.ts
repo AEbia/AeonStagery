@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import ScriptEngine from '../engine/ScriptEngine';
@@ -27,7 +28,7 @@ describe('temporary custom Motion stage projection', () => {
         coreModel: { getParameterValues: () => params },
       } },
     };
-    const characters: Map<string, import('../engine/Live2DConfig').CharacterEntry> = Reflect.get(live2DManager, 'characters');
+    const characters = live2DStageState(live2DManager).characters;
     characters.set(entry.id, entry);
     const canonical = { ...motion, fadeInSeconds: 0.5 };
     const candidate = { ...canonical, tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 30 }] }] };

@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { CharacterEntry } from '../engine/Live2DConfig';
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
@@ -42,7 +43,7 @@ it('does not rebuild the same Cubism 3+ fade history on every scrub request', as
     adapterId: 'untitled-pixi-live2d-engine-cubism', config: {}, injectedParams: {},
     lipSyncParameterIds: new Set(), baseHeight: 100, motionEpoch: 0, idleSnapshot: snapshot,
   };
-  Reflect.set(manager, 'characters', new Map([[entry.id, entry]]));
+  live2DStageState(manager).characters = new Map([[entry.id, entry]]);
   const sync = new CharacterSynchronizer(manager);
   const snapshots = new SnapshotStore();
   snapshots.insert(0, new Map([['hero', snapshot]]));
@@ -90,7 +91,7 @@ it('does not rebuild the same Cubism 3+ fade history on every scrub request', as
   } finally {
     entry.customMotionStage?.dispose();
     model.destroy();
-    Reflect.set(manager, 'characters', new Map());
+    live2DStageState(manager).characters = new Map();
   }
 });
 
