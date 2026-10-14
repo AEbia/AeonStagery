@@ -32,6 +32,10 @@
     "extraResources": [
       "projects/**/*"
     ],
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "asar": true,
     "publish": [
       {
