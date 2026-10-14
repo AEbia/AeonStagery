@@ -19,7 +19,7 @@ interface Props {
   onClose: () => void;
 }
 
-type UIState = 'idle' | 'recording' | 'converting' | 'done' | 'error';
+type UIState = 'idle' | 'recording' | 'converting' | 'done' | 'cancelled' | 'error';
 
 export default function ExportDialog({ onClose }: Props) {
   const dialogRef = useModalDialog(onClose);
@@ -28,6 +28,15 @@ export default function ExportDialog({ onClose }: Props) {
   const [statusText, setStatusText] = useState('准备导出');
   const [outputPath, setOutputPath] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const exportControllerRef = useRef<AbortController | null>(null);
+  const handleCancelExport = () => {
+    const controller = exportControllerRef.current;
+    if (!controller || controller.signal.aborted) return;
+    setCancelling(true);
+    setStatusText('正在取消导出...');
+    controller.abort();
+  };
 
   const playbackAdapter = usePlaybackAdapter();
   const exportAdapter = useExportAdapter();
@@ -57,7 +66,7 @@ export default function ExportDialog({ onClose }: Props) {
 
   const ffmpegLogCallback = useCallback((msg: string) => {
     console.log(`[FFmpeg Main] ${msg}`);
-    if (uiStateRef.current === 'converting' && totalFramesRef.current > 0) {
+    if (!exportControllerRef.current?.signal.aborted && uiStateRef.current === 'converting' && totalFramesRef.current > 0) {
       const match = msg.match(/frame=\s*(\d+)/);
       if (match) {
         const currentFrame = parseInt(match[1]);
@@ -82,6 +91,9 @@ export default function ExportDialog({ onClose }: Props) {
 
       if (saveResult.canceled || !saveResult.filePath) return;
 
+      const controller = new AbortController();
+      exportControllerRef.current = controller;
+      setCancelling(false);
       setOutputPath(saveResult.filePath);
       setProgress(0);
       setUiState('recording');
@@ -110,6 +122,7 @@ export default function ExportDialog({ onClose }: Props) {
           ffmpegLogCallback,
         },
         (p: ExportProgress) => {
+          if (controller.signal.aborted) return;
           if (p.phase === 'capture') {
             setUiState('recording');
             setProgress(p.percent);
@@ -127,8 +140,14 @@ export default function ExportDialog({ onClose }: Props) {
             setProgress(100);
           }
         },
+        controller.signal,
       );
 
+      if (result.cancelled) {
+        setUiState('cancelled');
+        setStatusText('导出已取消');
+        return;
+      }
       if (!result.success) {
         setUiState('error');
         setErrorMsg(result.error || '导出失败');
@@ -143,6 +162,9 @@ export default function ExportDialog({ onClose }: Props) {
       setUiState('error');
       setErrorMsg(err.message);
       setStatusText('导出失败');
+    } finally {
+      exportControllerRef.current = null;
+      setCancelling(false);
     }
   }, [
     format, codec, bitrate, exportStart, exportEnd, includeAudio,
@@ -436,14 +458,25 @@ export default function ExportDialog({ onClose }: Props) {
           </div>
         )}
 
+        {uiState === 'cancelled' && (
+          <div className="empty-state" role="status" aria-live="polite" style={{ padding: '24px 0' }}>
+            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '16px' }}>导出已取消</div>
+          </div>
+        )}
+
         <div className="modal__footer">
+          {(uiState === 'recording' || uiState === 'converting') && (
+            <button className="btn" onClick={handleCancelExport} disabled={cancelling}>
+              {cancelling ? '正在取消...' : '取消导出'}
+            </button>
+          )}
           {uiState === 'idle' && (
             <>
               <button className="btn" onClick={onClose}>取消</button>
               <button className="btn btn--primary" onClick={handleExport}>开始导出</button>
             </>
           )}
-          {(uiState === 'done' || uiState === 'error') && (
+          {(uiState === 'done' || uiState === 'error' || uiState === 'cancelled') && (
             <button className="btn btn--primary" onClick={onClose}>关闭</button>
           )}
         </div>

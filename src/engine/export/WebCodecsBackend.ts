@@ -49,6 +49,7 @@ export class WebCodecsBackend implements ICaptureBackend {
               assertExportSuccess(pushResult, 'FFmpeg encoded chunk push');
             });
             this.encoderQueue.push(p);
+            void p.catch(() => {});
           } catch (error) {
             this.encoderFailure = toError(error);
           }
@@ -135,7 +136,7 @@ export class WebCodecsBackend implements ICaptureBackend {
     }
   }
 
-  async abort(): Promise<void> {
+  async abort(cancelled = false): Promise<void> {
     if (!this.streamStarted || this.streamFinished) return;
     this.streamFinished = true;
     const pendingChunks = this.encoderQueue;
@@ -146,7 +147,8 @@ export class WebCodecsBackend implements ICaptureBackend {
       // The encoder may already be closed after a fatal error.
     }
     try {
-      await this.electronAPI.endStreamExport();
+      // User cancellation is terminated by ExportAdapter's cancelExport IPC.
+      if (!cancelled) await this.electronAPI.endStreamExport();
     } catch {
       // Preserve the original capture failure while still attempting cleanup.
     }
