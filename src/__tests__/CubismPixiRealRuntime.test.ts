@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import * as PIXI from 'pixi.js';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
 import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
+import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 
 const corePath = resolveCubismWebCorePath();
 const entry = process.env.AEON_CUBISM_TEST_MODEL;
@@ -86,6 +87,30 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     expect(Array.from(model.internalModel.parameterValues).every(Number.isFinite)).toBe(true);
     expect(model.deltaTime).toBe(0);
   });
+  it('commits a batch of injected parameters with one Core geometry update', async () => {
+    const model = await createModel();
+    const runtime = new CubismPixiLive2DAdapter();
+    const handle = runtime.createModelHandle('cubism-web', model);
+    const core = model.internalModel.coreModel;
+    model.update(0);
+    const positions = core.getModel().drawables.vertexPositions as readonly Float32Array[];
+    const before = positions.map(vertices => vertices.slice());
+    const update = vi.spyOn(core, 'update');
+    const values = { ParamAngleX: 15, ParamAngleY: 10, ParamMouthOpenY: 0.75 };
+    try {
+      for (const [id, value] of Object.entries(values)) handle.parameters.setInjectedParameter(id, value);
+      expect(update).not.toHaveBeenCalled();
+      handle.parameters.syncInputParameters();
+      expect(update).toHaveBeenCalledOnce();
+      expect(positions.some((vertices, index) => vertices.some((value, vertex) => value !== before[index][vertex]))).toBe(true);
+      const ids = core.getParameterIds();
+      for (const [id, value] of Object.entries(values)) {
+        expect(model.internalModel.parameterValues[ids.indexOf(id)]).toBeCloseTo(value);
+      }
+    } finally {
+      update.mockRestore();
+    }
+  });
   it('sorts native drawables with the Cubism 5 Core render-order API', async () => {
     const model = await createModel();
     model.update(16);
@@ -157,6 +182,25 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     expect(model.internalModel.parameterValues[index]).toBeCloseTo(25);
     model.update(16);
     expect(model.internalModel.parameterValues[index]).toBeCloseTo(25);
+  });
+  it.each([2, 120])('restores a native motion at %ss with one update and retains its pose while paused', async (offset) => {
+    const model = await createModel();
+    addProbeMotion(model);
+    model.internalModel.physics = undefined;
+    const baseline = model.captureRuntimeSnapshot('haru');
+    const update = vi.spyOn(model.internalModel, 'update');
+    const result = await model.restoreAtSceneTime({
+      id: 'haru', targetSceneTime: offset, idleSnapshot: baseline,
+      motion: { key: 'probe', offset, sceneTime: offset, fadeInSeconds: 0 },
+    });
+    expect(result).toEqual({ status: 'restored', tierUsed: 'native', diagnostics: [] });
+    expect(update).toHaveBeenCalledTimes(1);
+    const index = model.internalModel.coreModel.getParameterIds().indexOf('ParamAngleY');
+    const expected = Math.min(offset, 10);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(expected, 5);
+    for (let i = 0; i < 120; i++) model.update(0);
+    expect(model.internalModel.parameterValues[index]).toBeCloseTo(expected, 5);
+    update.mockRestore();
   });
   it.each([0, 0.25, 0.75])('holds a seeked motion fade pose at %ss while paused and continues on playback', async (offset) => {
     const model = await createModel();

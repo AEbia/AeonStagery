@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 /**
  * @vitest-environment jsdom
  */
@@ -19,7 +20,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { captureModelNeutralPoseOnce, resetModelToNeutralPose } from '../engine/live2d/characterStatePurge';
 import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
 
@@ -36,7 +37,7 @@ const RUNTIME = {
 } as any;
 
 function controls() {
-  return getLive2DRuntimeAdapter(RUNTIME).getControls();
+  return new Cubism2PixiLive2DModelControls();
 }
 
 function createRealLayoutSdkModel() {
@@ -159,8 +160,8 @@ function makeManager(char: ReturnType<typeof createRealLayoutSdkModel>) {
     lipSyncParameterIds: new Set<string>(),
     motionEpoch: 0,
   };
-  (manager as any).characters = new Map([['hero', entry]]);
-  (manager as any).containers = new Map();
+  live2DStageState(manager).characters = new Map([['hero', entry]]);
+  live2DStageState(manager).containers = new Map();
   return { manager, entry };
 }
 
@@ -198,7 +199,7 @@ describe('seek before the first motion returns to the entrance pose (real layout
 
   it('ScriptEngine reconstruct-seek sequence drops the in-flight motion pose', async () => {
     const char = createRealLayoutSdkModel();
-    // Loader-time capture (Live2DModelLoader.preloadModel does this after
+    // Loader-time capture (Live2DModelResources.preloadModel does this after
     // createModel; addCharacter then neutralizes + captures idleSnapshot).
     captureModelNeutralPoseOnce(char.model);
     const { manager, entry } = makeManager(char);

@@ -1,3 +1,5 @@
+import { live2DStageState } from './helpers/live2DStageState';
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
 import { SnapshotStore } from '../engine/SnapshotStore';
@@ -16,7 +18,7 @@ function createMockLive2DManager() {
   return {
     listCharacters: vi.fn().mockReturnValue([]),
     hasCharacter: vi.fn().mockReturnValue(false),
-    getAllCharacters: vi.fn().mockReturnValue(new Map()),
+    getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map().get(id), id)),
     applySnapshot: vi.fn(),
     captureSnapshot: vi.fn().mockReturnValue(null),
     playMotion: vi.fn(),
@@ -95,7 +97,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
     const params = new Float32Array([10]); // 模型当前姿态（动作起点姿态）
     const model = createCubism2Model(params, ['Angle X']);
     const entry: any = { id: 'char1', model, injectedParams: {}, lipSyncParameterIds: new Set() };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
 
     // 快照库：动作起点快照（time=5, 起点姿态 10）与动作内烘焙快照（time=5.03, 曲线值 30）
     const startSnapshot = createSnapshot(10);
@@ -108,7 +110,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       ...createMockLive2DManager(),
       listCharacters: vi.fn().mockReturnValue(['char1']),
       hasCharacter: vi.fn().mockReturnValue(true),
-      getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', entry]])),
+      getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', entry]]).get(id), id)),
       applySnapshot: vi.fn((_id: string, snap: any) => {
         params.set(snap.params);
       }),
@@ -166,7 +168,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
     const params = new Float32Array([10]);
     const model = createCubism2Model(params, ['Angle X']);
     const entry: any = { id: 'char1', model, injectedParams: {}, lipSyncParameterIds: new Set() };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
 
     const startSnapshot = createSnapshot(10);
     const inMotionSnapshot = createSnapshot(30);
@@ -178,7 +180,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       ...createMockLive2DManager(),
       listCharacters: vi.fn().mockReturnValue(['char1']),
       hasCharacter: vi.fn().mockReturnValue(true),
-      getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', entry]])),
+      getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', entry]]).get(id), id)),
       applySnapshot: vi.fn((_id: string, snap: any) => {
         params.set(snap.params);
       }),
@@ -213,7 +215,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
     const params = new Float32Array([10]);
     const model = createCubism2Model(params, ['Angle X']);
     const entry: any = { id: 'char1', model, injectedParams: {}, lipSyncParameterIds: new Set() };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
 
     // 模型处于曲线值姿态（如一次失败 seek 留下的状态）时发生了捕获
     params.fill(30);
@@ -250,7 +252,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       pendingSeekBoundaryMotionStartTime: 4.8,
       pendingSeekBoundaryDuration: 0.5,
     };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
 
     manager.playCustomMotion('char1', createCustomMotion(), 5);
 
@@ -293,7 +295,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       motionEpoch: 0,
       idleSnapshot: { params: new Float32Array([0, 0]), opacities: new Float32Array([1]) },
     };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
 
     manager.playCustomMotion('char1', createCustomMotion(), 5);
 
@@ -313,7 +315,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
     const params = new Float32Array([10]);
     const model = createCubism2Model(params, ['Angle X']);
     const entry: any = { id: 'char1', model, injectedParams: {}, lipSyncParameterIds: new Set() };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
     (manager as any).motionController = new Live2DMotionController(
       new Map([['char1', entry]]),
       new Map(),
@@ -371,7 +373,7 @@ describe('Live2D custom motion fade-in handoff (root cause fix)', () => {
       lipSyncParameterIds: new Set(),
       idleSnapshot: { params: new Float32Array([10]), opacities: new Float32Array([1]) },
     };
-    (manager as any).characters = new Map([['char1', entry]]);
+    live2DStageState(manager).characters = new Map([['char1', entry]]);
     (manager as any)._scriptEngine = { getCurrentTime: () => sceneTime };
 
     const motion = createCustomMotion(1);

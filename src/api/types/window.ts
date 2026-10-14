@@ -397,8 +397,8 @@ export interface CharacterAPI {
   setZIndex(id: string, zIndex: number): void;
   /** Get available motion keys for a character */
   getMotions(id: string): string[];
-  /** Get the raw PixiJS Live2D model for advanced manipulation */
-  getModel(id: string): any;
+  /** Typed Pixi display capabilities for character animation. */
+  getDisplayObject(id: string): import('pixi.js').Container | null;
   /** Get the normalized bounds/points of a character for cinematic framing */
   getPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center'): Vec2 | null;
   /** List all active characters */

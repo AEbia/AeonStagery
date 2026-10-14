@@ -8,8 +8,9 @@ import {
   resolveCubism2MotionMeta,
   sampleCubism2MotionCurves,
   type Cubism2MotionCurve,
-  type Cubism2MotionSamplerTarget,
 } from '../engine/live2d/cubism2MotionSampler';
+
+type Cubism2MotionSamplerTarget = Parameters<typeof resolveCubism2MotionMeta>[0];
 
 interface FakeParamCurve {
   readonly id: string;

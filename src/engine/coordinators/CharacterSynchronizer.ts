@@ -1,3 +1,4 @@
+import type { CharacterInfo } from '../../api/types/character';
 import type { SnapshotStore } from '../SnapshotStore';
 import type { ProxyRegistry } from './ProxyRegistry';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
@@ -6,7 +7,7 @@ import type { Live2DSeekExpressionState } from '../Live2DRuntimeAdapter';
 import { resolveLookAtFocus } from '../lookAtFocus';
 import { seekProfiler } from '../SeekProfiler';
 import { motionCurveCache, type CachedResourceMotion, type MotionCurveCacheSource } from '../live2d/motionCurveCache';
-import type { Cubism2MotionSamplerTarget } from '../live2d/cubism2MotionSampler';
+import type { Live2DMotionSamplingResult } from '../runtime/Live2DRuntimeContracts';
 
 interface DesiredCharState {
   id: string;
@@ -99,7 +100,7 @@ function snapshotBelongsToLifecycle(
 interface Live2DMuscle {
   listCharacters(): string[];
   hasCharacter(id: string): boolean;
-  getAllCharacters?(): Map<string, any>;
+  getCharacterInfo?(id: string): CharacterInfo | null;
   applySnapshot(id: string, snap: any): void;
   captureSnapshot(id: string): any;
   restoreSeekState?(id: string, input: {
@@ -110,6 +111,7 @@ interface Live2DMuscle {
     expression?: Live2DSeekExpressionState | null;
     isScrubbing?: boolean;
     preserveMotionForPlayback?: boolean;
+    isCurrent?: () => boolean;
   }): Promise<any>;
   playMotion(
     id: string,
@@ -129,13 +131,14 @@ interface Live2DMuscle {
   resetToIdle(id: string): void;
   setExpression(id: string, key: string): void;
   prepareExpressionForSeek?(id: string, key: string | null): void;
-  setExpressionForSeek?(id: string, key: string | null, elapsedSeconds: number, previousKey?: string | null): Promise<void>;
-  /**
-   * Concrete Cubism 2 sampling targets of a loaded character. Used by the
-   * seek-side `motionCurveCache.ensure` to convert a not-yet-cached resource
-   * motion on demand (ADR-0033). Absent on runtimes without the sampler.
-   */
-  getMotionSamplerTargets?(id: string): readonly Cubism2MotionSamplerTarget[];
+  setExpressionForSeek?(
+    id: string,
+    key: string | null,
+    elapsedSeconds: number,
+    previousKey?: string | null,
+    isCurrent?: () => boolean,
+  ): Promise<void>;
+  sampleMotion?(id: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   lookAt(id: string, x: number, y: number, duration: number, options?: {
     fromX?: number;
     fromY?: number;
@@ -158,11 +161,6 @@ interface Live2DMuscle {
   stopAllMotions(id: string): void;
   getMotionDuration?(id: string, key: string): number;
 }
-
-declare const UtSystem: {
-  getUserTimeMSec(): number;
-  setUserTimeMSec(ms: number): void;
-} | undefined;
 
 export class CharacterSynchronizer {
   private live2D: Live2DMuscle;
@@ -194,10 +192,10 @@ export class CharacterSynchronizer {
     for (const [id, state] of desiredChars) {
       const motion = state.motion;
       if (!motion || motion.output.kind !== 'resource') continue;
-      const entry = this.live2D.getAllCharacters?.().get(id);
+      const entry = this.live2D.getCharacterInfo?.(id);
       if (!entry) continue;
       const cacheKey = {
-        adapterId: entry.runtime?.adapterId ?? entry.adapterId ?? '',
+        adapterId: entry.adapterId,
         modelRuntimePath: entry.modelPath,
         motionKey: motion.output.key,
       };
@@ -208,9 +206,15 @@ export class CharacterSynchronizer {
       }
       // Permanently-rejected keys stay on the SDK path without re-sampling.
       if (motionCurveCache.missReason(cacheKey)) continue;
-      const targets = this.live2D.getMotionSamplerTargets?.(id) ?? [];
-      if (targets.length === 0) continue;
-      ensureTargets.push({ id, source: { ...cacheKey, targets, fps: input.fps ?? 60 } });
+      const fps = input.fps ?? 60;
+      const resourceMotionKey = motion.output.key;
+      if (this.live2D.sampleMotion) {
+        ensureTargets.push({ id, source: {
+          ...cacheKey,
+          fps,
+          sample: (options) => this.live2D.sampleMotion!(id, resourceMotionKey, options),
+        } });
+      }
     }
 
     // Seek-side ensure: a not-yet-sampled but convertible resource motion is
@@ -236,10 +240,10 @@ export class CharacterSynchronizer {
       const motion = state.motion;
       if (!motion || motion.output.kind !== 'resource') continue;
       if (cachedResourceMotions.has(id)) continue;
-      const entry = this.live2D.getAllCharacters?.().get(id);
+      const entry = this.live2D.getCharacterInfo?.(id);
       if (!entry) continue;
       const reason = motionCurveCache.missReason({
-        adapterId: entry.runtime?.adapterId ?? entry.adapterId ?? '',
+        adapterId: entry.adapterId,
         modelRuntimePath: entry.modelPath,
         motionKey: motion.output.key,
       }) ?? 'not-cached';
@@ -296,13 +300,15 @@ export class CharacterSynchronizer {
       if (modelSnap) nativeMotionHandoffSnapshots.set(id, modelSnap);
     }
     const nativeSeekInputs = new Map<string, {
-      snapshot?: any;
-      handoffSnapshot?: any;
+      snapshot?: ModelSnapshot | null;
+      handoffSnapshot?: ModelSnapshot | null;
       targetSceneTime: number;
+      focus?: readonly [number, number];
       motion?: { key: string; priority?: number; offset: number; sceneTime: number } | null;
       expression?: Live2DSeekExpressionState | null;
       isScrubbing?: boolean;
       preserveMotionForPlayback?: boolean;
+      isCurrent: () => boolean;
     }>();
     const nativeSeekIds = new Set<string>();
     const pendingSeekExpressions: Array<{
@@ -313,8 +319,16 @@ export class CharacterSynchronizer {
     }> = [];
 
     for (const [id, state] of desiredChars) {
-      const entry = this.live2D.getAllCharacters?.().get(id);
-      if (entry?.runtime?.adapterId !== 'untitled-pixi-live2d-engine-cubism' || !this.live2D.restoreSeekState || !this.live2D.hasCharacter(id)) {
+      const entry = this.live2D.getCharacterInfo?.(id);
+      // A cached Cubism 3+ parameter-only motion is already represented by the
+      // runtime-neutral evaluator. Restore it through that same evaluator so
+      // seek and playback keep one owner for its parameters. Native offset
+      // restoration remains the fallback for unsupported/unconverted motions
+      // and other runtime-owned state.
+      if (!entry || !entry.determinism.supportsNativeMotionOffset
+        || (cachedResourceMotions.has(id) && !!this.live2D.playCustomMotion)
+        || !this.live2D.restoreSeekState
+        || !this.live2D.hasCharacter(id)) {
         continue;
       }
       const motion = state.motion && state.motion.output.kind === 'resource'
@@ -328,14 +342,22 @@ export class CharacterSynchronizer {
             : {}),
         }
         : null;
+      const focus = state.lookAt
+        ? typeof state.lookAt.target === 'string' && state.lookAt.target.trim()
+          && Array.isArray(state.lookAt.focus)
+          ? state.lookAt.focus as readonly [number, number]
+          : resolveLookAtFocus(state.lookAt, this.live2D.getPoint?.bind(this.live2D), id)
+        : [0, 0] as const;
       nativeSeekInputs.set(id, {
         snapshot: snap?.models.get(id) ?? null,
         handoffSnapshot: nativeMotionHandoffSnapshots.get(id) ?? null,
         targetSceneTime: time,
+        focus,
         motion,
         expression: resolveSeekExpression(state.expression, time),
         isScrubbing,
         preserveMotionForPlayback: !isScrubbing,
+        isCurrent: () => !shouldCancel() && this.live2D.hasCharacter(id),
       });
     }
 
@@ -412,6 +434,7 @@ export class CharacterSynchronizer {
             },
             expression: resolveSeekExpression(previous.expression, motionStartTime),
             isScrubbing: true,
+            isCurrent: () => !shouldCancel() && this.live2D.hasCharacter(id),
           });
           if (shouldCancel()) return;
           restoreInput.handoffSnapshot = this.live2D.captureSnapshot(id) ?? restoreInput.handoffSnapshot;
@@ -460,6 +483,10 @@ export class CharacterSynchronizer {
         if (state.motion) {
           const offset = this.getMotionOffset(id, state.motion, time);
           if (!nativeSeekIds.has(id)) {
+            const characterEntry = this.live2D.getCharacterInfo?.(id);
+            const cachedDirectOffsetMotion = characterEntry && characterEntry.determinism.supportsNativeMotionOffset
+              ? cachedResourceMotions.get(id)
+              : undefined;
             this.playDesiredMotion(
               id,
               state.motion,
@@ -467,6 +494,7 @@ export class CharacterSynchronizer {
               time,
               skipHardReset || isScrubbing,
               customMotionHandoffSnapshots.get(id),
+              cachedDirectOffsetMotion,
             );
           }
         } else if (!isScrubbing) {
@@ -609,6 +637,7 @@ export class CharacterSynchronizer {
         // playback continues the fade from that very progress.
         expression.elapsedSeconds,
         expression.previousKey,
+        () => !shouldCancel() && this.live2D.hasCharacter(expression.id),
       );
       if (shouldCancel()) return;
     }
@@ -634,12 +663,22 @@ export class CharacterSynchronizer {
     time: number,
     skipHardReset: boolean,
     handoffSnapshot?: ModelSnapshot,
+    cachedResourceMotion?: CachedResourceMotion,
   ): void {
     if (motion.output.kind === 'custom') {
       if (this.live2D.playCustomMotion) {
         this.live2D.playCustomMotion(id, motion.output, time - offset, handoffSnapshot);
         return;
       }
+      return;
+    }
+    if (cachedResourceMotion && this.live2D.playCustomMotion) {
+      this.live2D.playCustomMotion(
+        id,
+        cachedResourceMotion.motion,
+        time - offset,
+        handoffSnapshot,
+      );
       return;
     }
     if (handoffSnapshot) {

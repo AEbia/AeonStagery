@@ -1,8 +1,29 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Live2DManager from '../engine/Live2DManager';
 
 function createCharacter() {
   const expressionState = { current: null as string | null };
+  let currentExpression: { name: string } | null = null;
+  const expressionManager: any = {
+    destroyed: false,
+    defaultExpression: null,
+    definitions: [{ name: 'smile' }, { name: 'angry' }],
+    expressions: [],
+    reserveExpressionIndex: -1,
+    getExpressionIndex: vi.fn((name: string) => (name === 'smile' ? 0 : name === 'angry' ? 1 : -1)),
+    loadExpression: vi.fn(async (index: number) => ({ name: index === 0 ? 'smile' : 'angry' })),
+    queueManager: { stopAllMotions: vi.fn() },
+    _motionQueueManager: { stopAllMotions: vi.fn() },
+    stopAllExpressions: vi.fn(() => { expressionState.current = null; }),
+  };
+  Object.defineProperty(expressionManager, 'currentExpression', {
+    get: () => currentExpression,
+    set: (value: { name: string } | null) => {
+      currentExpression = value;
+      expressionState.current = value?.name ?? null;
+    },
+  });
   const motionManager: any = {
     playing: false,
     state: {
@@ -13,6 +34,7 @@ function createCharacter() {
     _motionQueueManager: {
       stopAllMotions: vi.fn(),
     },
+    expressionManager,
     loadMotion: vi.fn().mockResolvedValue(undefined),
     startMotion: vi.fn().mockImplementation(async (group: string) => {
       motionManager.state.currentGroup = group;
@@ -82,7 +104,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.playMotion('hero', 'wave', 3, 0, 1);
     manager.setExpression('hero', 'smile');
@@ -112,7 +134,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.setExpression('hero', 'smile');
     manager.playMotion('hero', 'wave', 3, 0, 1);
@@ -138,7 +160,7 @@ describe('Live2D expression priority', () => {
       injectedParams: {},
       motionEpoch: 0,
     };
-    (manager as any).characters = new Map([['hero', entry]]);
+    live2DStageState(manager).characters = new Map([['hero', entry]]);
 
     manager.setExpression('hero', 'smile');
     manager.resetToIdle('hero');

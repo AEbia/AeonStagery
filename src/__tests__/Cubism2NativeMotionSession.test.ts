@@ -119,4 +119,25 @@ describe('Cubism2NativeMotionSession', () => {
     expect(target.internalModel.physics).toBe(physics);
     expect(target.motionManager.startMotion).toHaveBeenCalledTimes(1);
   });
+
+  it('restores the shared clock monotonically when cancellation interrupts offset replay', async () => {
+    const target = makeTarget();
+    const clock = makeClock(100000);
+    let current = true;
+    vi.mocked(target.motionManager.update).mockImplementation(() => { current = false; });
+    const session = new Cubism2NativeMotionSession();
+
+    const result = await session.startMotion({
+      targets: [target],
+      motionKey: 'wave',
+      priority: 3,
+      offsetSeconds: 0.25,
+      clock,
+      isCurrent: () => current,
+    });
+
+    expect(result).toMatchObject({ cancelled: true, offsetReplayMs: 50 });
+    expect(clock.getUserTimeMSec()).toBeGreaterThanOrEqual(100000);
+    expect(target.internalModel.physics).toEqual({ enabled: true });
+  });
 });

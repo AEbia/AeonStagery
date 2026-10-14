@@ -1,12 +1,45 @@
 import * as PIXI from 'pixi.js';
 import { loadCubismEngineModule } from './Live2DEngineBridge';
 import { captureModelSnapshot, type ModelSnapshot } from './Live2DConfig';
-import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestoreResult } from './Live2DRuntimeAdapter';
+import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestoreResult } from './runtime/Live2DRuntimeContracts';
+import type { Live2DPerformanceMetadata, PerformanceCompatibility, PreparedAssetRef } from './runtime/Live2DRuntimeContracts';
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
 
 function parameterId(id: any): string {
   const value = typeof id === 'string' ? id : id?.getString?.();
   return typeof value === 'string' ? value : value?.s ?? '';
+}
+
+/**
+ * Clear stateful Cubism 3+ subsystems before restoring from a scene snapshot.
+ * Parameters/opacities are restored immediately after this reset, so Pose's
+ * authored default selection cannot overwrite the seek handoff pose.
+ */
+function resetCubismStateForRestore(internal: any, core: any): void {
+  const physics = internal?.physics;
+  physics?.initialize?.();
+  if (physics && typeof physics === 'object') {
+    // CubismPhysics.initialize() resets particle positions but intentionally
+    // keeps interpolation history for ordinary runtime use. Seek replay needs
+    // a fresh integrator so the result cannot depend on a previous seek.
+    if ('_currentRemainTime' in physics) physics._currentRemainTime = 0;
+    for (const field of ['_currentRigOutputs', '_previousRigOutputs']) {
+      const outputs = physics[field];
+      const size = outputs?.getSize?.() ?? 0;
+      for (let index = 0; index < size; index++) {
+        const values = outputs.at(index)?.outputs;
+        const valueSize = values?.getSize?.() ?? 0;
+        for (let valueIndex = 0; valueIndex < valueSize; valueIndex++) values.set(valueIndex, 0);
+      }
+    }
+  }
+  internal?.pose?.reset?.(core);
+  const focus = internal?.focusController;
+  focus?.focus?.(0, 0, true);
+  if (focus && typeof focus === 'object') {
+    if ('vx' in focus) focus.vx = 0;
+    if ('vy' in focus) focus.vy = 0;
+  }
 }
 
 /** The SDK caches native memory views. A second model may grow the shared heap. */
@@ -37,10 +70,66 @@ function queueEntries(queue: any): any[] {
   return Array.from({ length: entries?.getSize?.() ?? 0 }, (_, index) => entries.at(index));
 }
 
+type CubismExternalEngine = {
+  Live2DCubismFramework?: {
+    CubismMotion?: { create: (buffer: ArrayBuffer, size: number) => any };
+    CubismExpressionMotion?: { create: (buffer: ArrayBuffer, size: number) => any };
+  };
+  [key: string]: unknown;
+};
+
+function modelParameterIds(core: any): Set<string> {
+  const ids = new Set<string>();
+  const count = core?.getParameterCount?.() ?? 0;
+  for (let index = 0; index < count; index++) ids.add(parameterId(core.getParameterId(index)));
+  return ids;
+}
+
+function externalParameterIds(kind: 'motion' | 'expression', value: any): string[] {
+  if (kind === 'motion') {
+    const curves = value?._motionData?.curves;
+    const list = Array.isArray(curves)
+      ? curves
+      : Array.from({ length: curves?.getSize?.() ?? 0 }, (_, index) => curves.at(index));
+    return list.map((curve: any) => parameterId(curve?.id)).filter(Boolean);
+  }
+  const parameters = value?.getExpressionParameters?.();
+  const list = Array.isArray(parameters)
+    ? parameters
+    : Array.from({ length: parameters?.getSize?.() ?? 0 }, (_, index) => parameters.at(index));
+  return list.map((entry: any) => parameterId(entry?.parameterId)).filter(Boolean);
+}
+
+function compatibilityForExternal(
+  kind: 'motion' | 'expression',
+  value: any,
+  core: any,
+  metadata?: Live2DPerformanceMetadata,
+): PerformanceCompatibility {
+  const available = modelParameterIds(core);
+  const referenced = [...new Set(externalParameterIds(kind, value))];
+  const required = metadata?.requiredParameterIds ?? [];
+  const missingParameterIds = required.filter((id) => !available.has(id));
+  const ignoredParameterIds = referenced.filter((id) => !available.has(id));
+  const diagnostics = ignoredParameterIds.length
+    ? [`${kind} references unknown parameter ids: ${ignoredParameterIds.join(', ')}.`]
+    : [];
+  if (missingParameterIds.length && !metadata?.allowPartial) {
+    diagnostics.unshift(`Missing required parameter ids: ${missingParameterIds.join(', ')}.`);
+    return { status: 'incompatible', missingParameterIds, ignoredParameterIds, diagnostics };
+  }
+  return {
+    status: missingParameterIds.length || ignoredParameterIds.length ? 'partial' : 'compatible',
+    missingParameterIds,
+    ignoredParameterIds,
+    diagnostics,
+  };
+}
+
 /** Adapt the native model to the engine's existing controls, without a second
  * canvas, texture upload, SDK checkout, or external shader directory.
  */
-export function installCubismPixiModelRuntime(model: any): any {
+export function installCubismPixiModelRuntime(model: any, suppliedEngine?: CubismExternalEngine): any {
   const internal = model.internalModel;
   const core = internal.coreModel;
   const manager = internal.motionManager;
@@ -52,6 +141,9 @@ export function installCubismPixiModelRuntime(model: any): any {
   let blink = createBlinkControlState(false);
   const sourceFadeIns = new WeakMap<object, number>();
   const sourceCurveFadeIns = new WeakMap<object, number[]>();
+  const externalMotions = new Map<string, any>();
+  const externalExpressions = new Map<string, any>();
+  let enginePromise: Promise<CubismExternalEngine> | null = suppliedEngine ? Promise.resolve(suppliedEngine) : null;
   let renderedParameters: Float32Array | null = null;
   let bakeTexture: PIXI.RenderTexture | null = null;
   let motionUpdateTime: number | null = null;
@@ -172,8 +264,90 @@ export function installCubismPixiModelRuntime(model: any): any {
     const matches = Object.keys(manager.definitions).filter((group) => group.split('/').at(-1) === leaf);
     return matches.length === 1 ? matches[0] : key;
   };
-  model.preloadMotion = (group: string, index = 0) => manager.loadMotion(resolveGroup(group), index);
+  const loadExternalEngine = async (): Promise<CubismExternalEngine> => {
+    enginePromise ??= loadCubismEngineModule().then((loaded) => loaded as CubismExternalEngine);
+    return enginePromise;
+  };
+  const registerExternalPerformance = async (
+    kind: 'motion' | 'expression',
+    runtimeKey: string,
+    source: PreparedAssetRef,
+    metadata?: Live2DPerformanceMetadata,
+  ): Promise<PerformanceCompatibility> => {
+    const incompatible = (diagnostic: string): PerformanceCompatibility => ({
+      status: 'incompatible', missingParameterIds: [], ignoredParameterIds: [], diagnostics: [diagnostic],
+    });
+    if (!source.runtimeUri || source.unavailable) return incompatible(`Failed to fetch external ${kind} "${runtimeKey}": runtime URI is unavailable.`);
+    if (kind === 'expression' && !expressionManager) {
+      return incompatible(`Cannot register external expression "${runtimeKey}": this model has no expression manager.`);
+    }
+    let bytes: ArrayBuffer;
+    try {
+      const response = await fetch(source.runtimeUri);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      bytes = await response.arrayBuffer();
+    } catch (error) {
+      return incompatible(`Failed to fetch external ${kind} "${runtimeKey}": ${String(error)}`);
+    }
+    try {
+      const definition = {
+        File: source.source,
+        FadeInTime: metadata?.fadeIn ?? 0,
+        FadeOutTime: metadata?.fadeOut ?? 0,
+        Sound: metadata?.sound,
+      };
+      const managerValue = kind === 'motion'
+        ? manager.createMotion?.(bytes, runtimeKey, definition)
+        : expressionManager?.createExpression?.(bytes, undefined);
+      let value = managerValue;
+      if (!value) {
+        const engine = await loadExternalEngine();
+        const framework = engine.Live2DCubismFramework;
+        const factory = kind === 'motion' ? framework?.CubismMotion : framework?.CubismExpressionMotion;
+        value = factory?.create?.(bytes, bytes.byteLength);
+      }
+      if (!value) return incompatible(`Failed to parse external ${kind} "${runtimeKey}": Cubism ${kind} factory is unavailable.`);
+      if (metadata?.fadeIn !== undefined) value.setFadeInTime?.(metadata.fadeIn);
+      if (metadata?.fadeOut !== undefined) value.setFadeOutTime?.(metadata.fadeOut);
+      if (kind === 'motion' && metadata?.loop !== undefined) value.setIsLoop?.(metadata.loop);
+      const compatibility = compatibilityForExternal(kind, value, core, metadata);
+      if (compatibility.status === 'incompatible') return compatibility;
+      model.unregisterExternalPerformance?.(runtimeKey);
+      (kind === 'motion' ? externalMotions : externalExpressions).set(runtimeKey, value);
+      return compatibility;
+    } catch (error) {
+      return incompatible(`Failed to parse external ${kind} "${runtimeKey}": ${String(error)}`);
+    }
+  };
+  model.registerExternalMotion = (runtimeKey: string, source: PreparedAssetRef, metadata?: Live2DPerformanceMetadata) =>
+    registerExternalPerformance('motion', runtimeKey, source, metadata);
+  model.registerExternalExpression = (runtimeKey: string, source: PreparedAssetRef, metadata?: Live2DPerformanceMetadata) =>
+    registerExternalPerformance('expression', runtimeKey, source, metadata);
+  model.unregisterExternalPerformance = (runtimeKey: string) => {
+    const motion = externalMotions.get(runtimeKey);
+    const expression = externalExpressions.get(runtimeKey);
+    if (motion && queueEntries(manager.queueManager).some((entry) => entry?._motion === motion)) manager.stopAllMotions();
+    if (expression && expressionManager) {
+      if (queueEntries(expressionManager.queueManager).some((entry) => entry?._motion === expression)) {
+        expressionManager.stopAllExpressions();
+      }
+      if (expressionManager.currentExpression === expression) expressionManager.resetExpression();
+    }
+    externalMotions.delete(runtimeKey);
+    externalExpressions.delete(runtimeKey);
+  };
+  model.getExternalPerformanceKeys = (kind?: 'motion' | 'expression'): string[] => {
+    if (kind === 'motion') return [...externalMotions.keys()];
+    if (kind === 'expression') return [...externalExpressions.keys()];
+    return [...new Set([...externalMotions.keys(), ...externalExpressions.keys()])];
+  };
+  model.preloadMotion = (group: string, index = 0) => {
+    const external = externalMotions.get(group);
+    return external ? Promise.resolve(external) : manager.loadMotion(resolveGroup(group), index);
+  };
   model.getMotionDuration = (group: string, index = 0) => {
+    const external = externalMotions.get(group);
+    if (external) return external._motionData?.duration ?? external.getDuration?.() ?? 0;
     const motion = manager.motionGroups[resolveGroup(group)]?.[index];
     return motion?._motionData?.duration ?? motion?.getDuration?.() ?? 0;
   };
@@ -183,10 +357,42 @@ export function installCubismPixiModelRuntime(model: any): any {
     manager.playing = false;
     for (const parallel of internal.parallelMotionManager ?? []) parallel.stopAllMotions?.();
   };
-  model.startMotion = async (key: string, index = 0, priority = 3, offsetSeconds = 0, fadeInSeconds?: number) => {
+  model.startMotion = async (
+    key: string,
+    index = 0,
+    priority = 3,
+    offsetSeconds = 0,
+    fadeInSeconds?: number,
+    isCurrent: () => boolean = () => true,
+  ) => {
+    const external = externalMotions.get(key);
+    if (external) {
+      if (disposed || !isCurrent()) return false;
+      if (fadeInSeconds !== undefined) external.setFadeInTime?.(fadeInSeconds);
+      model.stopAllMotions();
+      const queue = manager.queueManager;
+      const handle = queue?.startMotion?.(external, false);
+      const entry = queueEntries(queue).find((candidate) => candidate?._motion === external)
+        ?? queue?.getCubismMotionQueueEntry?.(handle);
+      if (!entry) return false;
+      const now = model.elapsedTime / 1000;
+      external.setupMotionQueueEntry?.(entry, now);
+      const start = now - Math.max(0, Number.isFinite(offsetSeconds) ? offsetSeconds : 0);
+      entry.setStartTime?.(start);
+      entry.setFadeInStartTime?.(start);
+      if (!external.isLoop?.()) entry.setEndTime?.(start + model.getMotionDuration(key, index));
+      entry.setLastCheckEventSeconds?.(start);
+      manager.playing = true;
+      if (manager.state) {
+        manager.state.currentGroup = key;
+        manager.state.currentIndex = index;
+        manager.state.currentPriority = priority;
+      }
+      return true;
+    }
     const group = resolveGroup(key);
     const motion = await model.preloadMotion(group, index);
-    if (!motion || disposed) return false;
+    if (!motion || disposed || !isCurrent()) return false;
     if (!sourceFadeIns.has(motion)) sourceFadeIns.set(motion, motion.getFadeInTime());
     const override = typeof fadeInSeconds === 'number' && Number.isFinite(fadeInSeconds) && fadeInSeconds >= 0;
     motion.setFadeInTime(override ? fadeInSeconds : sourceFadeIns.get(motion));
@@ -202,7 +408,7 @@ export function installCubismPixiModelRuntime(model: any): any {
     motion.setOffsetTime(0);
     model.stopAllMotions();
     const started = await manager.startMotion(group, index, priority, { loop: false, resetExpression: false });
-    if (!started || disposed) return false;
+    if (!started || disposed || !isCurrent()) return false;
     const entry = queueEntries(manager.queueManager).find((candidate) => candidate?._motion === motion);
     if (!entry) {
       model.stopAllMotions();
@@ -217,11 +423,17 @@ export function installCubismPixiModelRuntime(model: any): any {
     entry.setLastCheckEventSeconds(start);
     return true;
   };
-  const setExpression = async (key: string | null, elapsedSeconds?: number) => {
+  const setExpression = async (
+    key: string | null,
+    elapsedSeconds?: number,
+    _previousExpressionKey?: string | null,
+    isCurrent: () => boolean = () => true,
+  ) => {
     // The character API and inspector use an empty string to clear expressions.
     key = key || null;
     const epoch = ++expressionEpoch;
     expressionKey = key;
+    if (!isCurrent()) return;
     if (!expressionManager) return;
     expressionManager.reserveExpressionIndex = -1;
     if (key === null || elapsedSeconds !== undefined) {
@@ -230,13 +442,30 @@ export function installCubismPixiModelRuntime(model: any): any {
       expressionManager.resetExpression();
     }
     if (key === null) return;
+    const external = externalExpressions.get(key);
+    if (external) {
+      const queue = expressionManager.queueManager;
+      queue?.stopAllMotions?.();
+      expressionManager.currentExpression = external;
+      const handle = queue?.startMotion?.(external, false);
+      const entry = queueEntries(queue).find((candidate) => candidate?._motion === external)
+        ?? queue?.getCubismMotionQueueEntry?.(handle);
+      if (entry) {
+        const now = model.elapsedTime / 1000;
+        external.setupMotionQueueEntry?.(entry, now);
+        const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds!) : Math.max(0, external.getFadeInTime?.() ?? 0);
+        entry.setStartTime?.(now - elapsed);
+        entry.setFadeInStartTime?.(now - elapsed);
+      }
+      return;
+    }
     const index = expressionManager.getExpressionIndex(key);
     if (index < 0) return;
     const expression = await expressionManager.loadExpression(index);
-    if (disposed || epoch !== expressionEpoch || !expression) return;
+    if (disposed || epoch !== expressionEpoch || !expression || !isCurrent()) return;
     if (expressionManager.currentExpression === expression) expressionManager.restoreExpression();
     else await expressionManager.setExpression(index);
-    if (disposed || epoch !== expressionEpoch) return;
+    if (disposed || epoch !== expressionEpoch || !isCurrent()) return;
     if (elapsedSeconds !== undefined) {
       const now = model.elapsedTime / 1000;
       // A legacy state without a start timestamp requests the final latch.
@@ -281,20 +510,57 @@ export function installCubismPixiModelRuntime(model: any): any {
     core.update();
   };
   model.restoreAtSceneTime = async (input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> => {
+    const isCurrent = input.isCurrent ?? (() => true);
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     model.stopAllMotions();
+    // Native Cubism queues already support an absolute offset by setting the
+    // queue entry's start timestamp. Keep the scene clock at the target while
+    // restoring so natural channels (breath/blink) and the first geometry pass
+    // are evaluated at the requested scene time. This is O(1) for any offset;
+    // replaying 60Hz updates here made late seeks linearly expensive.
     sceneTime = Math.max(0, input.targetSceneTime);
+    blink.sceneTimeSeconds = sceneTime;
+    resetCubismStateForRestore(internal, core);
     const baseline = input.handoffSnapshot ?? input.idleSnapshot ?? input.snapshot;
     if (baseline) model.applyRuntimeSnapshot(baseline);
-    const started = !input.motion || await model.startMotion(input.motion.key, 0, input.motion.priority ?? 3, input.motion.offset, input.motion.fadeInSeconds);
+    const focus = internal?.focusController;
+    focus?.focus?.(input.focus?.[0] ?? 0, input.focus?.[1] ?? 0, true);
+    const motionOffset = input.motion && Number.isFinite(input.motion.offset)
+      ? Math.max(0, input.motion.offset)
+      : 0;
+    const started = !input.motion || await (input.isCurrent
+      ? model.startMotion(
+          input.motion.key,
+          0,
+          input.motion.priority ?? 3,
+          motionOffset,
+          input.motion.fadeInSeconds,
+          isCurrent,
+        )
+      : model.startMotion(
+          input.motion.key,
+          0,
+          input.motion.priority ?? 3,
+          motionOffset,
+          input.motion.fadeInSeconds,
+        ));
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
     const key = input.expression !== undefined
       ? input.expression?.key ?? null
       : input.snapshot?.expression?.key ?? null;
-    await setExpression(key, input.expression?.elapsedSeconds ?? Number.POSITIVE_INFINITY);
+    const expressionElapsed = input.expression?.elapsedSeconds;
+    await setExpression(key, expressionElapsed ?? Number.POSITIVE_INFINITY, undefined, isCurrent);
+    if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
+    // `startMotion` and `setExpression` have already installed their absolute
+    // queue offsets. One zero-delta update commits both queues and runs the
+    // normal state hooks without simulating every elapsed frame.
     model.update(0);
     return {
       status: started ? 'restored' : 'fallback',
       tierUsed: started ? 'native' : 'snapshot-forward',
-      diagnostics: started ? [] : [`Motion "${input.motion?.key}" was not available.`],
+      diagnostics: started
+        ? []
+        : [`Motion "${input.motion?.key}" was not available.`],
     };
   };
   model.renderForBake = (renderer: any, target?: PIXI.RenderTexture) => {
@@ -310,6 +576,8 @@ export function installCubismPixiModelRuntime(model: any): any {
     if (disposed) return;
     disposed = true;
     expressionEpoch++;
+    externalMotions.clear();
+    externalExpressions.clear();
     internal.off('beforeModelUpdate', beforeCoreUpdate);
     bakeTexture?.destroy(true);
     bakeTexture = null;
@@ -321,5 +589,30 @@ export function installCubismPixiModelRuntime(model: any): any {
 export async function createCubismPixiModel(modelUrl: string, options: Live2DModelCreateOptions): Promise<any> {
   const engine = await loadCubismEngineModule();
   const model = await engine.Live2DModel.from(modelUrl, { ...options, autoUpdate: false, autoFocus: false, autoHitTest: false, idleMotionGroup: '__aeon_manual_idle__', eyeBlink: false });
-  return installCubismPixiModelRuntime(model);
+  // pixi-live2d-display normally installs this resolver while loading a
+  // resource, but adapter-created instances can expose raw settings without
+  // it. Motion3 cache conversion must resolve relative `File` entries against
+  // the model3.json URL or it will permanently miss and use the native queue.
+  const settings = model.internalModel?.settings as { resolveURL?: (file: string) => string } | undefined;
+  if (settings && typeof settings.resolveURL !== 'function') {
+    try {
+      settings.resolveURL = (file: string) => {
+        try {
+          const normalizedFile = file.replaceAll('\\', '/');
+          // Keep filesystem model paths usable in native/Electron loads where
+          // the SDK has not converted the Windows path to an asset URL yet.
+          if (/^[A-Za-z]:[\\/]/.test(modelUrl)) {
+            const normalized = modelUrl.replaceAll('\\', '/');
+            return `${normalized.slice(0, normalized.lastIndexOf('/') + 1)}${normalizedFile}`;
+          }
+          return new URL(normalizedFile, modelUrl).toString();
+        } catch {
+          return file;
+        }
+      };
+    } catch {
+      // Some SDK builds expose a sealed settings object; native fallback stays available.
+    }
+  }
+  return installCubismPixiModelRuntime(model, engine);
 }

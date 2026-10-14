@@ -59,7 +59,10 @@ vi.mock('../ui/context/AppContext', () => ({
 
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: semanticDocumentState.document, filePath: null }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({
+    state: 'closed', session: null, target: null, fps: 60,
+    canonicalMotion: null, motion: null, keyframes: [], committing: false,
+  }),
 }));
 
 const sceneData = {

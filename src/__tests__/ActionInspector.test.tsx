@@ -38,6 +38,7 @@ const testState = vi.hoisted(() => {
     },
     characterAdapter: {
       getModelDataFromPath,
+      hasCharacter: vi.fn(() => true),
       playMotion: vi.fn(),
       stopAllMotions: vi.fn(),
       setExpression: vi.fn(),
@@ -89,7 +90,7 @@ vi.mock('../ui/context/AppContext', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: testState.semanticDocument, filePath: null }),
   useValidationIssues: () => ({ issues: [], loading: false }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({ state: 'closed', target: null, session: null }),
 }));
 
 describe('ActionInspector', () => {

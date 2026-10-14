@@ -25,6 +25,7 @@ export interface CollaborationLeaseRecord {
 export interface CollaborationLeaseRegistryV2<SocketKey = unknown> {
   leasesBySocket: Map<SocketKey, Set<CollaborationLeaseTargetKey>>;
   leasesByTarget: Map<CollaborationLeaseTargetKey, CollaborationLeaseRecord>;
+  socketsByTarget: Map<CollaborationLeaseTargetKey, SocketKey>;
 }
 
 export function encodeCollaborationLeaseTargetV2(target: CollaborationLeaseTargetV2): CollaborationLeaseTargetKey {
@@ -50,6 +51,7 @@ export function createCollaborationLeaseRegistryV2<SocketKey = unknown>(): Colla
   return {
     leasesBySocket: new Map<SocketKey, Set<CollaborationLeaseTargetKey>>(),
     leasesByTarget: new Map<CollaborationLeaseTargetKey, CollaborationLeaseRecord>(),
+    socketsByTarget: new Map<CollaborationLeaseTargetKey, SocketKey>(),
   };
 }
 
@@ -58,8 +60,8 @@ export type CollaborationLeaseGrantResultV2 =
   | { granted: false; heldByClientId: CollaborationClientId };
 
 /**
- * Atomically request the lease for a target. The current holder (even if it
- * is the same client) keeps the lease; a different client is denied.
+ * Atomically request the lease for a target. A different client is denied;
+ * the same client may replace its ownership with a new acquisition request.
  */
 export function acquireCollaborationLeaseV2<SocketKey>(
   registry: CollaborationLeaseRegistryV2<SocketKey>,
@@ -71,10 +73,15 @@ export function acquireCollaborationLeaseV2<SocketKey>(
 ): CollaborationLeaseGrantResultV2 {
   const key = encodeCollaborationLeaseTargetV2(target);
   const existing = registry.leasesByTarget.get(key);
-  if (existing && existing.clientId !== clientId) {
+  if (existing && (existing.clientId !== clientId
+    || (existing.requestId === requestId && registry.socketsByTarget.get(key) !== socket))) {
     return { granted: false, heldByClientId: existing.clientId };
   }
 
+  if (existing) {
+    const previousSocket = registry.socketsByTarget.get(key);
+    if (previousSocket !== undefined) registry.leasesBySocket.get(previousSocket)?.delete(key);
+  }
   const record: CollaborationLeaseRecord = {
     clientId,
     requestId,
@@ -82,6 +89,7 @@ export function acquireCollaborationLeaseV2<SocketKey>(
     lastRenewedAt: now,
   };
   registry.leasesByTarget.set(key, record);
+  registry.socketsByTarget.set(key, socket);
   let bySocket = registry.leasesBySocket.get(socket);
   if (!bySocket) {
     bySocket = new Set();
@@ -101,7 +109,8 @@ export function renewCollaborationLeaseV2<SocketKey>(
 ): boolean {
   const key = encodeCollaborationLeaseTargetV2(target);
   const record = registry.leasesByTarget.get(key);
-  if (!record || record.clientId !== clientId || record.requestId !== requestId) return false;
+  if (!record || record.clientId !== clientId || record.requestId !== requestId
+    || registry.socketsByTarget.get(key) !== socket) return false;
   record.lastRenewedAt = now;
   let bySocket = registry.leasesBySocket.get(socket);
   if (!bySocket) {
@@ -117,11 +126,14 @@ export function releaseCollaborationLeaseV2<SocketKey>(
   socket: SocketKey,
   clientId: CollaborationClientId,
   target: CollaborationLeaseTargetV2,
+  requestId: string,
 ): boolean {
   const key = encodeCollaborationLeaseTargetV2(target);
   const record = registry.leasesByTarget.get(key);
-  if (!record || record.clientId !== clientId) return false;
+  if (!record || record.clientId !== clientId || record.requestId !== requestId
+    || registry.socketsByTarget.get(key) !== socket) return false;
   registry.leasesByTarget.delete(key);
+  registry.socketsByTarget.delete(key);
   registry.leasesBySocket.get(socket)?.delete(key);
   return true;
 }
@@ -139,8 +151,9 @@ export function releaseAllCollaborationLeasesV2<SocketKey>(
   const released: CollaborationLeaseRecord[] = [];
   for (const key of keys) {
     const record = registry.leasesByTarget.get(key);
-    if (record) {
+    if (record && registry.socketsByTarget.get(key) === socket) {
       registry.leasesByTarget.delete(key);
+      registry.socketsByTarget.delete(key);
       released.push(record);
     }
   }
@@ -162,6 +175,7 @@ export function expireCollaborationLeasesV2<SocketKey>(
   for (const [key, record] of registry.leasesByTarget) {
     if (now - record.lastRenewedAt >= timeoutMs) {
       registry.leasesByTarget.delete(key);
+      registry.socketsByTarget.delete(key);
       expiredKeys.add(key);
       expired.push(record);
     }

@@ -33,9 +33,9 @@ interface MotionFadeCache {
 }
 
 /**
- * Cheap content signature of the fade-relevant motion data: track set, fade
- * durations and every keyframe time/value. Recomputed per evaluation (a few
- * dozen numbers) so an in-place keyframe edit invalidates the accumulation.
+ * Content signature of fade-relevant motion data, including segment controls.
+ * Only computed during an active fade so dense curves do not get scanned on
+ * every frame after the transition has ended.
  */
 function motionFadeSignature(motion: Extract<CharacterMotionOutput, { kind: 'custom' }>): number {
   let hash = motion.tracks.length * 31 + Math.round((motion.fadeInSeconds ?? 0) * 1000);
@@ -45,6 +45,15 @@ function motionFadeSignature(motion: Extract<CharacterMotionOutput, { kind: 'cus
     for (const keyframe of track.keyframes) {
       hash = (hash * 31 + Math.round(keyframe.time * 1000)) | 0;
       hash = (hash * 31 + Math.round(keyframe.value * 1000)) | 0;
+      const segment = keyframe.segment;
+      hash = (hash * 31 + (segment?.type === 'bezier' ? 1
+        : segment?.type === 'stepped' ? 2 : segment?.type === 'inverseStepped' ? 3 : 0)) | 0;
+      if (segment?.type === 'bezier') {
+        for (const point of segment.controlPoints) {
+          hash = (hash * 31 + Math.round(point.time * 1000)) | 0;
+          hash = (hash * 31 + Math.round(point.value * 1000)) | 0;
+        }
+      }
     }
   }
   return hash;
@@ -114,7 +123,7 @@ export function evaluateCustomMotionRuntime(
 
   const values: Record<string, number> = {};
   let anyFading = false;
-  const fadeCache = resolveMotionFadeCache(handoff, motion, resumeFrames ?? handoff.resumeFrames);
+  let fadeCache: MotionFadeCache | undefined;
   for (const track of motion.tracks) {
     const curveValue = frame.values[track.parameterId];
     if (curveValue === undefined) continue;
@@ -122,6 +131,7 @@ export function evaluateCustomMotionRuntime(
     const fadeInSeconds = resolveTrackFadeInSeconds(track, motion.fadeInSeconds);
     const fading = fadeInSeconds > 0 && localTime < fadeInSeconds;
     if (fading) {
+      fadeCache ??= resolveMotionFadeCache(handoff, motion, resumeFrames ?? handoff.resumeFrames);
       const handoffValue = handoff.values[track.parameterId] ?? curveValue;
       values[track.parameterId] = evaluateCubismFadeIn(
         track,

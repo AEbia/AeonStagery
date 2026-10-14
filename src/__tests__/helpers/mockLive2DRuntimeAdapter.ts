@@ -1,9 +1,11 @@
+import { createLive2DModelHandle } from '../../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { vi } from 'vitest';
 import type {
   Live2DRuntimeAdapter,
-  Live2DRuntimeModelControls,
   Live2DSeekRestoreResult,
 } from '../../engine/Live2DRuntimeAdapter';
+import type { Live2DRuntimeControlPort } from '../../engine/runtime/Live2DRuntimeControlPort';
+import type { Live2DModelDisplayObject } from '../../engine/runtime/Live2DRuntimeContracts';
 
 /**
  * Shared runtime-controls mock for engine tests.
@@ -13,7 +15,7 @@ import type {
  * Tests override the behaviours they actually assert on; everything else
  * defaults to benign no-ops.
  */
-export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}): Live2DRuntimeModelControls {
+export function mockControls(overrides: Partial<Live2DRuntimeControlPort> = {}): Live2DRuntimeControlPort {
   return {
     getCoreModel: vi.fn(() => null),
     describeInvalidState: vi.fn(() => null),
@@ -23,10 +25,18 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     getMotionDebugState: vi.fn(() => null),
     getParameterValues: vi.fn(() => null),
     getParameterMetadata: vi.fn(() => null),
+    registerExternalMotion: vi.fn(async () => ({
+      status: 'compatible' as const, missingParameterIds: [], ignoredParameterIds: [], diagnostics: [],
+    })),
+    registerExternalExpression: vi.fn(async () => ({
+      status: 'compatible' as const, missingParameterIds: [], ignoredParameterIds: [], diagnostics: [],
+    })),
+    unregisterExternalPerformance: vi.fn(),
     clearMotionState: vi.fn(),
     stopAllMotions: vi.fn(),
     preloadMotion: vi.fn(async () => {}),
     setExpression: vi.fn(),
+    setExpressionForSeek: vi.fn(async () => {}),
     setInjectedParameter: vi.fn(),
     syncInputParameters: vi.fn(),
     captureSnapshot: vi.fn(() => null),
@@ -44,73 +54,44 @@ export function mockControls(overrides: Partial<Live2DRuntimeModelControls> = {}
     restartIdleMotion: vi.fn(async () => {}),
     hasMotionGroup: vi.fn(() => true),
     startMotion: vi.fn(async () => ({ ok: true, offsetReplayMs: 0 })),
-    getMotionSamplingTargets: vi.fn(() => []),
+    sampleMotion: vi.fn(async () => ({ status: 'unsupported' as const })),
     installCustomMotionStage: vi.fn(() => null),
     quiesceModel: vi.fn(),
     disposeModel: vi.fn(),
     prepareModel: vi.fn(),
+    prepareModelResources: vi.fn(),
     isolateMask: vi.fn(),
     installBakeRenderGuards: vi.fn(),
     setBlink: vi.fn(),
     applyFocus: vi.fn(),
     getFocusControllers: vi.fn(() => []),
+    manageFocusAnimations: vi.fn(),
     getHeadAnchor: vi.fn(() => null),
     ...overrides,
   };
 }
 
 /** Shared adapter mock with benign defaults (override per test). */
-export function mockAdapter(overrides: Partial<Live2DRuntimeAdapter> = {}): Live2DRuntimeAdapter {
+type MockAdapterOverrides = Partial<Live2DRuntimeAdapter> & {
+  /** Test-only control injection; the mock adapter never exposes this port. */
+  createTestControls?: () => Live2DRuntimeControlPort;
+};
+
+export function mockAdapter(overrides: MockAdapterOverrides = {}): Live2DRuntimeAdapter {
+  const { createTestControls, ...adapterOverrides } = overrides;
   return {
     id: 'pixi-live2d-display-cubism2',
     supported: true,
     init: vi.fn(async () => {}),
     isReady: vi.fn(() => true),
-    getModelClass: vi.fn(() => null),
-    getConfig: vi.fn(() => null),
-    getControls: vi.fn(() => mockControls()),
-    createModelHandle: vi.fn((id: string, model: any, runtime: any) => ({
-      id,
-      runtime,
-      displayObject: model,
-      rawModel: model,
-      capabilities: {
-        runtimeFamily: runtime?.runtimeFamily,
-        adapterId: runtime?.adapterId,
-        supportsMotion: true,
-        supportsExpression: true,
-        supportsParameterInjection: true,
-        supportsSnapshot: true,
-        supportsBakeRender: true,
-        usesCubism2PrivateControls: runtime?.adapterId === 'pixi-live2d-display-cubism2',
-      },
-      lifecycle: { getCoreModel: () => null, clearMotionState: () => {}, stopAllMotions: () => {} },
-      motion: {
-        getAvailableMotions: () => [],
-        getMotionDuration: () => 0,
-        getMotionDebugState: () => null,
-        preloadMotion: vi.fn(async () => {}),
-      },
-      expression: { getAvailableExpressions: () => [], setExpression: () => {} },
-      parameters: {
-        getParameterValues: () => null,
-        getParameterMetadata: () => null,
-        setInjectedParameter: () => {},
-        syncInputParameters: () => {},
-      },
-      snapshot: {
-        captureSnapshot: () => null,
-        applySnapshot: () => {},
-        restoreSeekState: vi.fn(async () => ({ status: 'restored', tierUsed: 'native' })),
-      },
-      render: { renderForBake: () => {} },
-      diagnostics: { describeInvalidState: () => null },
-    }) as any),
-    createModel: vi.fn(async () => ({})),
+    createModelHandle: vi.fn((id, model, runtime) => createLive2DModelHandle({
+      id, model, runtime: runtime ?? { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls: createTestControls?.() ?? mockControls(),
+    })),
+    createModel: vi.fn(async () => ({} as Live2DModelDisplayObject)),
     getUnsupportedMessage: vi.fn(() => null),
-    getClock: vi.fn(() => null),
     createFallbackModel: vi.fn(() => null),
     disposeBakeRenderTexture: vi.fn(),
-    ...overrides,
+    ...adapterOverrides,
   };
 }

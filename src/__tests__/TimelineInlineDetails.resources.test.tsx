@@ -121,7 +121,7 @@ describe('Inline details resources', () => {
     const { container } = list();
     const detail = expand(container);
     fireEvent.click(detail.getByRole('button', { name: '编辑关键帧' }));
-    expect(state.setCustomMotionEditorActionId).toHaveBeenCalledWith('statementId:4:line|outputKey:6:motion');
+    expect(state.openCustomMotionEditor).toHaveBeenCalledWith({ statementId: 'line' });
     expect((screen.getByRole('textbox', { name: '动作名称' }) as HTMLInputElement).readOnly).toBe(true);
   });
 });

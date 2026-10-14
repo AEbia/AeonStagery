@@ -9,5 +9,4 @@ export interface IEditorStore extends IReadonlyEditorStore {
   setPixelsPerSecond(pps: number): void;
   setGizmosVisible(visible: boolean): void;
   setSaveStatus(status: SaveStatus): void;
-  setCustomMotionEditorActionId(id: string | null): void;
 }

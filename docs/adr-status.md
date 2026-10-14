@@ -11,7 +11,7 @@
 | [KSM-0003 Semantic Scene Statements](ksm-adr/ksm-0003-semantic-scene-statements.md) | current freshness anchor | 当前 semantic statement authoring、prepared runtime、template payload 与 legacy deletion gates 的权威入口；SceneDocumentV5 现作为当前 schema epoch（由 ADR-0031 演进，支持自 v3 与 v4 自动迁移），协作协议升级为 v3 wire。 |
 | [0031 Evolution Compatibility Policy](adr/0031-evolution-compatibility-policy.md) | current freshness anchor | 持久化创作资产演进兼容政策；SceneDocumentV5 为当前激活的 schema epoch（支持自 v3 与 v4 自动迁移），project metadata v2（包含 Project Compatibility Envelope），collaboration wire v3（要求 sceneSchemaVersion = 5），以及兼容性协调器 (Compatibility Coordinator) 与未知字段保真契约的权威入口。 |
 | [0018 Timeline Authoring, Collaboration Transactions, and Resource Seams](adr/0018-timeline-authoring-collaboration-resource-seams.md) | current for collaboration/resource seams; timeline edit section superseded by KSM-0003 | Collaboration transaction planner、publish executor、asset readiness gate、Live2D bundle rules 与 asset scope policy 仍以本文为入口；legacy action-edit Interface 已由 semantic statement authoring 接管。 |
-| [0019 Live2D Cubism Multi-Version Runtime Compatibility](adr/0019-live2d-cubism-multiversion-runtime.md) | current freshness anchor | Cubism 2 与 Cubism 3/4/5 runtime Adapter seam、Live2D entry 识别与 bundle 兼容承诺以本文为准。 |
+| [0019 Live2D Cubism Multi-Version Runtime Compatibility](adr/0019-live2d-cubism-multiversion-runtime.md) | current freshness anchor | Cubism 2 与 Cubism 3/4/5 runtime Adapter seam、Live2D entry 识别、模型资源所有权与 bundle 兼容承诺以本文为准。 |
 | [0021 Stable External Library Mount References](adr/0021-stable-external-library-mount-references.md) | current freshness anchor | 本地 scene 使用稳定 `@mount/<id>/...` 引用，用户设置映射本机根目录，协作发布前 projectize 为项目相对引用。 |
 
 ## Current Supporting Decisions
@@ -37,7 +37,7 @@
 | [0024 Source-Identity Project Agent Authoring](adr/0024-source-identity-project-agent-authoring.md) | current | Project Agent 以稳定 statement/companion identity 读取与写入正式 scene；写工具、回执、诊断与 benchmark gate 以本文为准。 |
 | [0025 External Agent Bridge](adr/0025-external-agent-bridge.md) | proposed | 复用 Project Agent 业务装配的 headless CLI、stdio JSON-RPC 与 benchmark sample port。 |
 | [0026 WebGAL Script Import as a Scaffolding Source](adr/0026-webgal-script-import-scaffolding-source.md) | current | WebGAL 剧本导入脚手架：单文件单场景、`changeFigure` 状态语义、说话人/立绘双向身份绑定、`@mount` 引用、导入回执（含 report）与阅读速度导入时定参。 |
-| [0028 Scoped Custom Motion Edit Lease](adr/0028-scoped-custom-motion-edit-lease.md) | current | 自定义 Motion 转换和写入使用服务端裁定的角色表演实体级租约；普通场景编辑仍遵守 ADR-0012。 |
+| [0028 Scoped Custom Motion Edit Lease](adr/0028-scoped-custom-motion-edit-lease.md) | current, implemented | 应用级 CustomMotionEditing 会话统一持有编辑租约与候选；转换通过同一 authority 移交租约，普通场景编辑仍遵守 ADR-0012。 |
 | [0029 Live2D 自定义 Motion 关键帧编辑](adr/0029-live2d-custom-motion-keyframe-authoring.md) | current, implemented | 自定义 Motion 是 `characterPerformance` 的 `kind: 'custom'` Motion 来源；资源 Motion 转换、关键帧/曲线编辑、运行时与协作边界的权威入口。 |
 | [0030 Dialogue Duration Policy Ownership](adr/0030-dialogue-duration-policy.md) | current, implemented | `resolveDialogueDuration` 是对白默认、节奏档位、阅读速度和文本更新重算策略的唯一 policy 入口；调用方只声明语境。 |
 | [0032 崩溃界面与诊断报告恢复体系](adr/0032-crash-screen-and-diagnostic-report-recovery.md) | current, implemented | 全栈分级捕获、无堆栈沉稳崩溃界面、日志黑匣子环形缓冲、严格脱敏结构化诊断报告与静态兜底恢复体系的权威入口。 |

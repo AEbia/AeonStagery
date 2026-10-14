@@ -67,6 +67,9 @@ import {
 import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
 import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
+import { CustomMotionEditing } from '../services/timeline-authoring/CustomMotionEditing';
+import { CustomMotionConversion } from '../services/timeline-authoring/CustomMotionConversion';
+import { InMemoryCustomMotionEditAuthority } from '../services/timeline-authoring/CustomMotionEditAuthority';
 import { SemanticVisualCompositionAuthoringService } from '../services/visual-authoring/SemanticVisualCompositionAuthoringService';
 import { ElectronVoiceAuthoringAdapter, VoiceAuthoringService, type VoiceAuthoringElectronPort } from '../services/voice/VoiceAuthoringService';
 import {
@@ -282,12 +285,14 @@ export interface BootstrapContext {
     templatePerformanceProfiles: TemplatePerformanceProfileAuthoringService;
     semanticDocument: SemanticDocumentCoordinator;
     semanticAuthoring: SemanticAuthoringApplicationService;
+    customMotionEditing: CustomMotionEditing;
+    customMotionConversion: CustomMotionConversion;
     semanticRawScript: SemanticRawScriptService;
     semanticVisualComposition: SemanticVisualCompositionAuthoringService;
     aiProse: AiProseAuthoringComposition;
     projectAgent?: ProjectAgentService;
   };
-  dispose: () => void;
+  dispose: () => Promise<void>;
 }
 
 export function bootstrap(options?: {
@@ -475,6 +480,27 @@ export function bootstrap(options?: {
 
   // ─── Project Agent (ADR0023) — editor composition ───────
   const characterAdapter = new CharacterAdapter();
+  const customMotionEditing = new CustomMotionEditing({
+    store: documentStore, authoring: semanticAuthoring,
+    authority: new InMemoryCustomMotionEditAuthority(),
+    preview: {
+      apply: (input) => getScriptEngine()?.previewCustomMotion(input),
+      clear: async () => { await getScriptEngine()?.clearCustomMotionPreview(); },
+    },
+  });
+  const customMotionConversion = new CustomMotionConversion({
+    store: documentStore, authoring: semanticAuthoring, editing: customMotionEditing,
+    sampleMotion: (characterId, motionKey, options) => characterAdapter.sampleMotion(characterId, motionKey, options),
+  });
+  let editingProject = projectSession.getCurrentProject();
+  const disposeMotionProjectLifecycle = projectSession.subscribe(() => {
+    const next = projectSession.getCurrentProject();
+    if (!next || next.rootPath !== editingProject?.rootPath || next.metadata.projectId !== editingProject?.metadata.projectId) {
+      void customMotionConversion.cancel();
+      void customMotionEditing.closeActive('project-changed').catch(() => {});
+    }
+    editingProject = next;
+  });
   const resolveActiveSceneEntry = () => {
     const project = projectSession.getCurrentProject();
     if (!project) return null;
@@ -1104,6 +1130,8 @@ export function bootstrap(options?: {
       templatePerformanceProfiles,
       semanticDocument: semanticDocumentCoordinator,
       semanticAuthoring,
+      customMotionEditing,
+      customMotionConversion,
       semanticRawScript,
       semanticVisualComposition,
       aiProse,
@@ -1146,12 +1174,17 @@ export function bootstrap(options?: {
       templatePerformanceProfiles,
       semanticDocument: semanticDocumentCoordinator,
       semanticAuthoring,
+      customMotionEditing,
+      customMotionConversion,
       semanticRawScript,
       semanticVisualComposition,
       aiProse,
       ...(projectAgent ? { projectAgent } : {}),
     },
-    dispose: () => {
+    dispose: async () => {
+      disposeMotionProjectLifecycle();
+      const closeMotionEditing = customMotionEditing.closeActive('disposed');
+      const closeMotionConversion = customMotionConversion.dispose();
       disposeDialogueFontSize();
       disposeDialogueTextSpeed();
       playbackAdapter.dispose();
@@ -1168,9 +1201,15 @@ export function bootstrap(options?: {
       disposeDaemon();
       validationDaemon.dispose();
       disposeProjectDependencyReset();
-      resourceAuthoring.dispose();
-      templateResourceFiles.dispose();
       disposeSemanticHistory();
+      try {
+        await Promise.all([closeMotionEditing, closeMotionConversion]);
+        await customMotionEditing.dispose();
+      }
+      finally {
+        resourceAuthoring.dispose();
+        templateResourceFiles.dispose();
+      }
     },
   };
 }

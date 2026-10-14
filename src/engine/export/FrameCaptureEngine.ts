@@ -5,7 +5,7 @@ import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
 import { customAnimHost } from '../CustomAnimHost';
 import type { CustomAnimationCaptureFrame } from '../CustomAnimHost';
-import { cubism2Live2DAdapter } from '../Live2DRuntimeAdapter';
+import { advanceLive2DExportClock } from '../live2d/runtime/Live2DRuntimeControlModule';
 import { Rectangle } from 'pixi.js';
 
 // Minimal interfaces for injected dependencies — only what FrameCaptureEngine actually uses
@@ -147,19 +147,6 @@ function createCompositeCanvas(
     if (error instanceof Error && error.message.startsWith('Custom HTML capture')) throw error;
     throw new Error(`Custom HTML capture compositing failed: ${String(error)}`);
   }
-}
-
-declare const UtSystem: {
-  getUserTimeMSec(): number;
-  setUserTimeMSec(ms: number): void;
-} | undefined;
-
-/**
- * Best-effort SDK clock access through the Cubism 2 runtime adapter (export
- * keeps the same monotonic discipline as the engine runtime).
- */
-function getRuntimeClock(): import('../Live2DRuntimeAdapter').Live2DRuntimeClock | null {
-  return cubism2Live2DAdapter.getClock();
 }
 
 export class FrameCaptureEngine {
@@ -317,8 +304,7 @@ export class FrameCaptureEngine {
         document.body.classList.add('is-exporting');
       }
 
-      const runtimeClock = getRuntimeClock();
-      let exportUtBaseline = runtimeClock ? runtimeClock.getUserTimeMSec() : 0;
+      let exportUtBaseline = advanceLive2DExportClock(0) ?? 0;
 
       const startFrame = Math.floor(rangeStart * fps);
       const endFrame = Math.ceil(rangeEnd * fps);
@@ -332,10 +318,7 @@ export class FrameCaptureEngine {
         const dtMs = 1000 / fps;
 
         // Monotonically advance UtSystem — never rewind
-        if (runtimeClock) {
-          exportUtBaseline += dtMs;
-          runtimeClock.setUserTimeMSec(exportUtBaseline);
-        }
+        exportUtBaseline = advanceLive2DExportClock(dtMs, exportUtBaseline) ?? exportUtBaseline;
 
         // Reconcile all graphic layers through the awaited seek seam on every
         // export frame. Directly crossing a GSAP callback is not sufficient

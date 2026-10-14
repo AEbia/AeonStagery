@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import Live2DManager from '../engine/Live2DManager';
@@ -22,7 +23,7 @@ function createManager() {
   const advanceFrame = vi.fn();
   const controls = mockControls({ setExpressionForSeek, advanceFrame });
   vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(
-    mockAdapter({ getControls: () => controls }) as any,
+    mockAdapter({ createTestControls: () => controls }) as any,
   );
   return { manager: new Live2DManager(), controls, setExpressionForSeek, advanceFrame };
 }
@@ -35,7 +36,7 @@ function addCharacter(manager: Live2DManager, id: string, adapterId: string, mod
     config: {},
     injectedParams: {},
   };
-  (manager as any).characters.set(id, entry);
+  live2DStageState(manager).characters.set(id, entry);
   return entry;
 }
 
@@ -62,7 +63,14 @@ describe('Live2D paused expression preview', () => {
     await vi.waitFor(() => expect(setExpressionForSeek).toHaveBeenCalledTimes(1));
     // Infinity asks the model for the expression's final pose; the frame is then
     // re-evaluated at delta 0 so the preview cannot advance the scene.
-    expect(setExpressionForSeek).toHaveBeenCalledWith(model, 'smile', Number.POSITIVE_INFINITY);
+    expect(setExpressionForSeek).toHaveBeenCalledWith(
+      model,
+      'smile',
+      Number.POSITIVE_INFINITY,
+      undefined,
+      expect.any(Function),
+      undefined,
+    );
     await vi.waitFor(() => expect(advanceFrame).toHaveBeenCalledTimes(1));
     expect(advanceFrame).toHaveBeenCalledWith(model, 0);
   });
