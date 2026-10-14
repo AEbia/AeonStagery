@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconRefresh, IconX } from '../icons';
-import { findVisibleGuideTarget } from './guideTarget';
+import { findVisibleGuideTarget, getGuideTargetClipBounds } from './guideTarget';
 
 type SpotlightStatusTone = 'neutral' | 'checking' | 'success' | 'warning';
 
@@ -15,8 +15,14 @@ interface SpotlightAction {
   onClick: () => void;
 }
 
+interface SpotlightHelp {
+  label: string;
+  content: React.ReactNode;
+}
+
 export interface SpotlightOverlayProps {
   targetSelector: string;
+  fallbackTargetSelector?: string;
   title: string;
   description: string;
   stepLabel: string;
@@ -28,6 +34,7 @@ export interface SpotlightOverlayProps {
   showSpotlight?: boolean;
   status?: SpotlightStatus;
   action?: SpotlightAction;
+  help?: SpotlightHelp;
 }
 
 interface ViewportRect {
@@ -54,15 +61,16 @@ const clamp = (value: number, minimum: number, maximum: number) => (
   Math.min(Math.max(value, minimum), Math.max(minimum, maximum))
 );
 
-const measureTarget = (selector: string, padding: number): ViewportRect | null => {
-  const target = findVisibleGuideTarget(selector);
-  if (!target) return null;
+const measureTarget = (target: HTMLElement, padding: number): ViewportRect | null => {
   const raw = target.getBoundingClientRect();
+  const bounds = getGuideTargetClipBounds(target);
+  if (Math.min(raw.right, bounds.right) <= Math.max(raw.left, bounds.left)
+    || Math.min(raw.bottom, bounds.bottom) <= Math.max(raw.top, bounds.top)) return null;
 
-  const left = clamp(raw.left - padding, 0, window.innerWidth);
-  const top = clamp(raw.top - padding, 0, window.innerHeight);
-  const right = clamp(raw.right + padding, 0, window.innerWidth);
-  const bottom = clamp(raw.bottom + padding, 0, window.innerHeight);
+  const left = clamp(raw.left - padding, bounds.left, bounds.right);
+  const top = clamp(raw.top - padding, bounds.top, bounds.bottom);
+  const right = clamp(raw.right + padding, bounds.left, bounds.right);
+  const bottom = clamp(raw.bottom + padding, bounds.top, bounds.bottom);
   return {
     left,
     top,
@@ -116,6 +124,7 @@ const getCardPosition = (target: ViewportRect, cardHeight: number) => {
 
 export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
   targetSelector,
+  fallbackTargetSelector,
   title,
   description,
   stepLabel,
@@ -127,9 +136,11 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
   showSpotlight = true,
   status,
   action,
+  help,
 }) => {
   const [targetRect, setTargetRect] = useState<ViewportRect | null>(null);
   const [cardHeight, setCardHeight] = useState(CARD_ESTIMATED_HEIGHT);
+  const [helpExpanded, setHelpExpanded] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
@@ -137,16 +148,18 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
     let resizeObserver: ResizeObserver | null = null;
     let observedTarget: HTMLElement | null = null;
 
+    const getTarget = () => findVisibleGuideTarget(targetSelector)
+      ?? (fallbackTargetSelector ? findVisibleGuideTarget(fallbackTargetSelector) : null);
     const update = () => {
       frame = null;
-      const nextTarget = findVisibleGuideTarget(targetSelector);
+      const nextTarget = getTarget();
       if (nextTarget !== observedTarget) {
         if (resizeObserver && observedTarget) resizeObserver.unobserve(observedTarget);
         observedTarget = nextTarget;
         observedTarget?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
         if (resizeObserver && observedTarget) resizeObserver.observe(observedTarget);
       }
-      const nextRect = measureTarget(targetSelector, padding);
+      const nextRect = nextTarget ? measureTarget(nextTarget, padding) : null;
       setTargetRect((current) => isSameRect(current, nextRect) ? current : nextRect);
     };
     const scheduleUpdate = () => {
@@ -155,12 +168,18 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
     };
 
     resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleUpdate);
-    const mutationObserver = new MutationObserver(scheduleUpdate);
+    const mutationObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => (
+        mutation.type !== 'attributes'
+        || (mutation.attributeName !== 'class' && mutation.attributeName !== 'style')
+        || (observedTarget && mutation.target instanceof Element && mutation.target.contains(observedTarget))
+      ))) scheduleUpdate();
+    });
     mutationObserver.observe(document.body, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ['open', 'hidden', 'aria-label', 'aria-selected', 'data-active', 'data-timeline-layout'],
+      attributeFilter: ['open', 'hidden', 'aria-label', 'aria-selected', 'data-active', 'data-timeline-layout', 'class', 'style'],
     });
     window.addEventListener('resize', scheduleUpdate);
     document.addEventListener('scroll', scheduleUpdate, true);
@@ -173,7 +192,7 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
       window.removeEventListener('resize', scheduleUpdate);
       document.removeEventListener('scroll', scheduleUpdate, true);
     };
-  }, [padding, targetSelector]);
+  }, [fallbackTargetSelector, padding, targetSelector]);
 
   useLayoutEffect(() => {
     const card = cardRef.current;
@@ -183,7 +202,7 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
     observer?.observe(card);
     return () => observer?.disconnect();
-  }, [description, status?.label, title]);
+  }, [description, helpExpanded, status?.label, title]);
 
   const cardPosition = useMemo(
     () => targetRect ? getCardPosition(targetRect, cardHeight) : null,
@@ -294,6 +313,28 @@ export const SpotlightOverlay: React.FC<SpotlightOverlayProps> = ({
             <IconRefresh width={13} height={13} />
             {action.label}
           </button>
+        )}
+        {help && (
+          <>
+            <button
+              type="button"
+              className="btn fl-spotlight__help"
+              aria-expanded={helpExpanded}
+              aria-controls="first-lesson-spotlight-help"
+              onClick={() => setHelpExpanded((expanded) => !expanded)}
+            >
+              {helpExpanded ? '收起素材说明' : help.label}
+            </button>
+            <div
+              id="first-lesson-spotlight-help"
+              className="fl-spotlight__help-content"
+              role="region"
+              aria-label="素材目录示例"
+              hidden={!helpExpanded}
+            >
+              {help.content}
+            </div>
+          </>
         )}
       </aside>
     </div>,
