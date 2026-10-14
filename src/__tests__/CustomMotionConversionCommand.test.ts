@@ -14,7 +14,9 @@ import { SemanticAuthoringApplicationService } from '../services/timeline-author
 import { DocumentStore } from '../ui/store/DocumentStore';
 import type { SemanticDocumentProjectionRuntimePort } from '../services/document/DocumentProjectionPorts';
 import { sceneDocumentCodec } from '../services/semantic-scene';
-import type { Live2DMotionSampledCurve } from '../engine/runtime/Live2DRuntimeContracts';
+import type { Live2DMotionSampledCurve, Live2DMotionSamplingResult } from '../engine/runtime/Live2DRuntimeContracts';
+import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import { createCubismModelFixture } from './helpers/cubismModelFixture';
 
 function makeRuntime(): SemanticDocumentProjectionRuntimePort {
   return {
@@ -116,6 +118,101 @@ function deferred<T>() {
 }
 
 describe('CustomMotionConversionCommand', () => {
+  it('converts a short Motion3 with inherited source fades and a longer track fade', async () => {
+    const { coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const { model } = createCubismModelFixture();
+    model.internalModel.settings.motions = { wave: [{ File: 'wave.motion3.json' }] };
+    const source = {
+      Meta: { Duration: 0.25, FadeInTime: -1, FadeOutTime: -1 },
+      Curves: [{ Target: 'Parameter', Id: 'ParamAngleX', FadeInTime: 0.7, Segments: [0, 0, 0, 0.25, 10] }],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(source)).buffer })));
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('alice', model);
+    try {
+      const command = new CustomMotionConversionCommand({ authoring,
+        sampleMotion: (_id, key, options) => handle.motion.sampleMotion(key, options) });
+      const result = await command.convert({ locator: { kind: 'statement', statementId: 'perf-1' }, density: 'standard', origin: 'timeline-editor' });
+      expect(result.motion.derivedFrom).toEqual({ key: 'wave', fadeInSeconds: 1, fadeOutSeconds: 1 });
+      expect(result.motion.durationSeconds).toBe(0.7);
+      expect(result.motion.fadeInSeconds).toBe(0.3);
+      expect(result.motion.tracks[0].fadeInSeconds).toBe(0.7);
+      expect(result.motion.tracks[0].keyframes.at(-1)?.time).toBe(0.25);
+    } finally {
+      handle.dispose({ mode: 'destroy' });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([{ lipSyncIds: ['ParamMouthOpenY'] }, { lipSyncIds: [] }])('converts Motion3 model eye and lip effects with configured lips $lipSyncIds', async ({ lipSyncIds }) => {
+    const { store, coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const { model } = createCubismModelFixture(undefined, ['ParamEyeLOpen', 'ParamEyeROpen']);
+    model.internalModel.settings.motions = { wave: [{ File: 'wave.motion3.json' }] };
+    model.internalModel.settings.getLipSyncParameters = () => lipSyncIds;
+    const source = {
+      Meta: { Duration: 1, FadeInTime: 0 },
+      Curves: [
+        { Target: 'Model', Id: 'EyeBlink', Segments: [0, 1, 0, 1, 0] },
+        { Target: 'Model', Id: 'LipSync', Segments: [0, 0.2, 0, 1, 0.6] },
+        { Target: 'Parameter', Id: 'ParamEyeLOpen', Segments: [0, 1, 0, 1, 0.5] },
+        { Target: 'Parameter', Id: 'ParamMouthOpenY', Segments: [0, 0.1, 0, 1, 0.3] },
+        { Target: 'Parameter', Id: 'ParamAngleX', Segments: [0, 0, 1, 0.2, 4, 0.7, -2, 1, 8] },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(source)).buffer })));
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('alice', model);
+    try {
+      const command = new CustomMotionConversionCommand({
+        authoring, sampleMotion: (_id, key, options) => handle.motion.sampleMotion(key, options),
+      });
+      const result = await command.convert({
+        locator: { kind: 'statement', statementId: 'perf-1' }, density: 'sparse', origin: 'timeline-editor',
+      });
+      const atHalf = (id: string) => result.motion.tracks.find((track) => track.parameterId === id)?.keyframes.find((point) => point.time === 0.5)?.value;
+      expect(atHalf('ParamEyeLOpen')).toBeCloseTo(0.375);
+      expect(atHalf('ParamEyeROpen')).toBeCloseTo(0.5);
+      expect(atHalf('ParamMouthOpenY')).toBeCloseTo(0.6);
+      expect(result.motion.tracks.find((track) => track.parameterId === 'ParamAngleX')?.keyframes[0].segment)
+        .toEqual({ type: 'bezier', controlPoints: [{ time: 0.2, value: 4 }, { time: 0.7, value: -2 }] });
+      expect(result.motion.tracks.find((track) => track.parameterId === 'ParamEyeLOpen')?.keyframes).toHaveLength(31);
+      expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion).toEqual(result.motion);
+    } finally {
+      handle.dispose({ mode: 'destroy' });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('preserves native Motion3 segments and track fades without applying the density fit', async () => {
+    const { store, coordinator, authoring } = makeHarness();
+    await coordinator.applyDocument(makeDocument());
+    const native: Live2DMotionSamplingResult = {
+      status: 'sampled', metadata: { durationSeconds: 2, fadeInSeconds: 0.4, fadeOutSeconds: 0.2 },
+      motion: {
+        kind: 'custom', durationSeconds: 2, fadeInSeconds: 0.4, derivedFrom: { key: 'wave' },
+        tracks: [{ parameterId: 'ParamAngleX', fadeInSeconds: 2.5, keyframes: [
+          { time: 0, value: 0, segment: { type: 'bezier', controlPoints: [{ time: 0.1, value: 12 }, { time: 0.3, value: -8 }] } },
+          { time: 0.425, value: 5, segment: { type: 'stepped' } },
+          { time: 1, value: 10, segment: { type: 'inverseStepped' } },
+          { time: 2, value: 3 },
+        ] }],
+      },
+    };
+    const command = new CustomMotionConversionCommand({ authoring, sampleMotion: async () => native });
+    const result = await command.convert({
+      locator: { kind: 'statement', statementId: 'perf-1' }, density: 'sparse', origin: 'timeline-editor',
+    });
+    expect(result.motion.tracks).toEqual(native.motion?.tracks);
+    expect(result.motion.fadeInSeconds).toBe(0.3);
+    expect(result.motion.durationSeconds).toBe(2.5);
+    expect(result.simplifiedTrackIds).toEqual([]);
+    expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').expression).toBe('smile');
+    expect(sceneDocumentCodec.parseAndValidate(store.getCurrentSceneDocumentSnapshot()).statements[0].params)
+      .toMatchObject({ motion: result.motion });
+    await authoring.undo();
+    expect(paramsOf(store.getCurrentSceneDocumentSnapshot(), 'perf-1').motion).toMatchObject({ kind: 'resource' });
+  });
+
   it('converts a resource motion into a codec-valid custom motion preserving sibling outputs', async () => {
     const { store, coordinator, authoring } = makeHarness();
     await coordinator.applyDocument(makeDocument());

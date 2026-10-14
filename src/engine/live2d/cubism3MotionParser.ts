@@ -4,6 +4,7 @@ import type {
   CustomMotionSegment,
   CustomMotionTrack,
 } from '../../api/types/semantic-scene';
+import { evaluateCustomMotionTrack } from './customMotion';
 
 /** Motion3 segment tags from the Cubism 3/4/5 JSON format. */
 const LINEAR = 0;
@@ -13,9 +14,13 @@ const INVERSE_STEPPED = 3;
 
 export interface Cubism3MotionParserOptions {
   readonly derivedFromKey?: string;
+  readonly fps?: number;
+  readonly eyeBlinkParameterIds?: readonly string[];
+  readonly lipSyncParameterIds?: readonly string[];
 }
 
 export interface Cubism3MotionParseResult {
+  readonly sourceDurationSeconds: number;
   readonly motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
   readonly ignoredCurves: readonly { target: string; id: string }[];
 }
@@ -41,11 +46,11 @@ function finiteNumber(value: unknown, label: string): number {
   return value;
 }
 
-function finiteNonNegative(value: unknown, label: string, fallback: number): number {
+function resolveFadeSeconds(value: unknown, label: string, fallback: number): number {
   if (value === undefined) return fallback;
   const result = finiteNumber(value, label);
-  if (result < 0) throw new Error(`Motion3 ${label} must be non-negative`);
-  return result;
+  // CubismMotion resolves negative motion-level fades to its 1s SDK default.
+  return result < 0 ? 1 : result;
 }
 
 function segmentType(value: unknown, curveIndex: number): number {
@@ -146,12 +151,12 @@ export function parseCubism3MotionJson(
 
   const duration = finiteNumber(meta.Duration, 'Meta.Duration');
   if (duration <= 0) throw new Error('Motion3 Meta.Duration must be positive');
-  const motionFadeInSeconds = finiteNonNegative(meta.FadeInTime, 'Meta.FadeInTime', 0);
-  const fadeOutSeconds = finiteNonNegative(meta.FadeOutTime, 'Meta.FadeOutTime', 0);
+  const motionFadeInSeconds = resolveFadeSeconds(meta.FadeInTime, 'Meta.FadeInTime', 0);
+  const fadeOutSeconds = resolveFadeSeconds(meta.FadeOutTime, 'Meta.FadeOutTime', 0);
   const areBeziersRestricted = meta.AreBeziersRestricted === true;
-  if (motionFadeInSeconds > duration) throw new Error('Motion3 Meta.FadeInTime cannot exceed duration');
 
   const tracks: CustomMotionTrack[] = [];
+  const effects = new Map<'EyeBlink' | 'LipSync', CustomMotionTrack>();
   const ignoredCurves: Array<{ target: string; id: string }> = [];
   const seen = new Set<string>();
   source.Curves.forEach((rawCurve, curveIndex) => {
@@ -160,6 +165,14 @@ export function parseCubism3MotionJson(
     const target = typeof curve.Target === 'string' ? curve.Target : '';
     const id = typeof curve.Id === 'string' ? curve.Id : '';
     if (!target || !id) throw new Error(`Motion3 curve ${curveIndex} requires Target and Id`);
+    if (target === 'Model' && (id === 'EyeBlink' || id === 'LipSync')) {
+      const ids = id === 'EyeBlink' ? options.eyeBlinkParameterIds : options.lipSyncParameterIds;
+      if (ids?.length) {
+        if (effects.has(id)) throw new Error(`Motion3 contains duplicate Model curve ${id}`);
+        effects.set(id, { parameterId: id, keyframes: decodeCurve(curve, curveIndex, duration, areBeziersRestricted) });
+        return;
+      }
+    }
     if (target !== 'Parameter') {
       ignoredCurves.push({ target, id });
       return;
@@ -168,12 +181,9 @@ export function parseCubism3MotionJson(
     seen.add(id);
     // Cubism's exported Motion3 files use -1 on a curve to mean "use the
     // motion-level fade". It is a sentinel, not a negative duration.
-    const fadeInSeconds = curve.FadeInTime === undefined || curve.FadeInTime === -1
+    const fadeInSeconds = curve.FadeInTime === undefined || finiteNumber(curve.FadeInTime, `curve ${curveIndex}.FadeInTime`) < 0
       ? undefined
-      : finiteNonNegative(curve.FadeInTime, `curve ${curveIndex}.FadeInTime`, motionFadeInSeconds);
-    if (fadeInSeconds !== undefined && fadeInSeconds > duration) {
-      throw new Error(`Motion3 curve ${curveIndex}.FadeInTime cannot exceed duration`);
-    }
+      : resolveFadeSeconds(curve.FadeInTime, `curve ${curveIndex}.FadeInTime`, motionFadeInSeconds);
     tracks.push({
       parameterId: id,
       ...(fadeInSeconds !== undefined ? { fadeInSeconds } : {}),
@@ -181,11 +191,13 @@ export function parseCubism3MotionJson(
     });
   });
 
+  expandModelEffects(tracks, effects, options, duration);
   if (tracks.length === 0) throw new Error('Motion3 contains no Parameter curves');
   return {
+    sourceDurationSeconds: duration,
     motion: {
       kind: 'custom',
-      durationSeconds: duration,
+      durationSeconds: Math.max(duration, motionFadeInSeconds, ...tracks.map((track) => track.fadeInSeconds ?? 0)),
       fadeInSeconds: motionFadeInSeconds,
       derivedFrom: {
         key: options.derivedFromKey ?? 'motion3',
@@ -196,6 +208,36 @@ export function parseCubism3MotionJson(
     },
     ignoredCurves,
   };
+}
+
+/** Model effects compose with direct curves before their normal parameter fade. */
+function expandModelEffects(
+  tracks: CustomMotionTrack[],
+  effects: ReadonlyMap<'EyeBlink' | 'LipSync', CustomMotionTrack>,
+  options: Cubism3MotionParserOptions,
+  duration: number,
+): void {
+  if (effects.size === 0) return;
+  const fps = options.fps ?? 60;
+  if (!Number.isFinite(fps) || fps <= 0) throw new Error('Motion3 effect sampling fps must be finite and positive');
+  const eyes = new Set(effects.has('EyeBlink') ? options.eyeBlinkParameterIds : []);
+  const lips = new Set(effects.has('LipSync') ? options.lipSyncParameterIds : []);
+  const affected = new Set([...eyes, ...lips]);
+  const times = Array.from({ length: Math.floor(duration * fps) + 1 }, (_, frame) => frame / fps);
+  if (times.at(-1)! < duration) times.push(duration);
+  for (const id of affected) {
+    const index = tracks.findIndex((track) => track.parameterId === id);
+    const direct = tracks[index];
+    const keyframes: CustomMotionKeyframe[] = times.map((time, frame) => {
+      let value = direct ? evaluateCustomMotionTrack(direct, time)! : eyes.has(id) ? 1 : 0;
+      if (eyes.has(id)) value *= evaluateCustomMotionTrack(effects.get('EyeBlink')!, time)!;
+      if (lips.has(id)) value += evaluateCustomMotionTrack(effects.get('LipSync')!, time)!;
+      return { time, value, ...(frame < times.length - 1 ? { segment: { type: 'linear' as const } } : {}) };
+    });
+    const expanded: CustomMotionTrack = { ...(direct ?? { parameterId: id }), keyframes };
+    if (index < 0) tracks.push(expanded);
+    else tracks[index] = expanded;
+  }
 }
 
 export function parseCubism3MotionBuffer(

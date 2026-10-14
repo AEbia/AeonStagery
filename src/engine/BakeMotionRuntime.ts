@@ -37,6 +37,7 @@ import {
   type CustomMotionFadeResumeFrames,
   type CustomMotionHandoffPose,
 } from './live2d/customMotionRuntime';
+import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from './live2d/customMotionStage';
 
 export interface BakeMotionPlanRequest {
   readonly charId: string;
@@ -84,6 +85,8 @@ export interface BakeMotionRuntimeHost {
    * already mid-fade and must continue the 60Hz accumulation (ADR-0029).
    */
   getSeedSceneTime?(): number | undefined;
+  /** Use the model's normal motion/expression pipeline when a writer is available. */
+  installCustomMotionStage?(charId: string, input: Omit<InstallCustomMotionStageInput, 'targets'>): CustomMotionStageHandle | null;
 }
 
 export interface BakeMotionRuntimeReport {
@@ -102,6 +105,9 @@ interface CurveDriverState {
   readonly motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
   readonly startSceneTime: number;
   readonly handoff: CustomMotionHandoffPose;
+  readonly controlledParameterIds: readonly string[];
+  readonly protectedParameterIds: Set<string>;
+  stage?: CustomMotionStageHandle | null;
 }
 
 interface NativeDriverState {
@@ -262,6 +268,17 @@ export class BakeMotionRuntime {
     return this.reportValues;
   }
 
+  releaseCharacter(charId: string, injectedParams: Record<string, number>): void {
+    const state = this.states.get(charId);
+    if (state) this.clearCurveDriver(state, injectedParams);
+    this.states.delete(charId);
+  }
+
+  dispose(): void {
+    for (const state of this.states.values()) state.curve?.stage?.dispose();
+    this.states.clear();
+  }
+
   applyIntent(input: BakeMotionApplyInput): BakeMotionApplyResult {
     const charId = input.charId;
     const state = this.getOrCreateState(charId);
@@ -394,7 +411,9 @@ export class BakeMotionRuntime {
 
   private clearCurveDriver(state: CharacterRuntimeState, injectedParams: Record<string, number>): void {
     if (!state.curve) return;
-    for (const parameterId of customMotionControlledParameterIds(state.curve.motion)) {
+    state.curve.stage?.dispose();
+    for (const parameterId of state.curve.controlledParameterIds) {
+      if (state.curve.protectedParameterIds.has(parameterId)) continue;
       delete injectedParams[parameterId];
     }
     state.curve = undefined;
@@ -448,8 +467,23 @@ export class BakeMotionRuntime {
         ? { values: baseValues, resumeFrames }
         : { values: baseValues };
       this.clearCurveDriver(state, injectedParams);
-      active = { motion, startSceneTime, handoff };
+      active = { motion, startSceneTime, handoff, controlledParameterIds: controlled, protectedParameterIds: new Set(channelProtected) };
       state.curve = active;
+      active.stage = this.host.installCustomMotionStage?.(charId, {
+        getState: () => state.curve ?? null,
+        lipSyncParameterIds: active.protectedParameterIds,
+      });
+      if (active.stage) {
+        for (const parameterId of controlled) {
+          if (!channelProtected?.has(parameterId)) delete injectedParams[parameterId];
+        }
+      }
+    }
+    active.protectedParameterIds.clear();
+    channelProtected?.forEach((id) => active!.protectedParameterIds.add(id));
+    if (active.stage) {
+      active.stage.setSceneTime(simTime);
+      return;
     }
     const evaluation = evaluateCustomMotionRuntime(motion, startSceneTime, simTime, active.handoff);
     applyCustomMotionValues(injectedParams, customMotionControlledParameterIds(motion), evaluation.values, channelProtected);

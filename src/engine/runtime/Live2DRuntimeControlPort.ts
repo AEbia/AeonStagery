@@ -89,6 +89,8 @@ export interface Live2DRuntimeControlPort {
 
   /** Enumerate the concrete runtime model instances of a (possibly composite) model. */
   getConcreteModels(model: any): any[];
+  /** Pin the next simulation's effect channels to authored scene time. */
+  setSceneTime?(model: object, sceneTimeSeconds: number, deltaMs?: number): void;
   /** Standard per-frame simulation step (`model.update(deltaMs)`; composite-aware). */
   advanceFrame(model: any, deltaMs: number): void;
   /** Advance only the motion queues of every concrete model to an absolute SDK time. */

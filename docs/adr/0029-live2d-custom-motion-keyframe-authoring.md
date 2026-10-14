@@ -14,7 +14,7 @@ extends: ADR-0028
 计算结束后追加一个 Parameter 覆盖层。
 
 - 自定义 Motion 与普通 `playMotion` 属于同一级角色动作。
-- Cubism 2.1 是第一优先级；Cubism 3/4/5 在相同抽象下后续接入。
+- Cubism 2.1 与 Cubism 3/4/5 使用相同的自定义 Motion 创作契约。
 - 主要入口是选中已有 `playMotion` 并选择“自定义动作”。
 - 导入或注册 `.mtn` / `.motion3.json` 时仍只创建普通资源 Motion，不自动解析成
   自定义 Motion、不生成 Parameter 轨道，也不改变源文件或既有 `playMotion`。
@@ -350,7 +350,7 @@ extends: ADR-0028
 
 ### Cubism 3/4/5
 
-- 后续直接解析 `.motion3.json` 的 Parameter 目标曲线，精确保留原生 Linear、
+- 直接解析 `.motion3.json` 的 Parameter 目标曲线，精确保留原生 Linear、
   Bezier、Stepped 和 Inverse Stepped 分段、源关键点及其运行曲线。直接
   `PartOpacity` / Parts 可见性曲线不生成自定义 Motion 轨道。
 - 同时解析 `Target: "Model"` 的 `EyeBlink` 与 `LipSync` 曲线，并根据当前目标模型
@@ -378,7 +378,7 @@ extends: ADR-0028
 - 当前 AeonStagery 没有消费 Motion3 `UserData` Motion 事件；转换忽略这些事件，不把
   底层库的 `motion:<value>` 发射扩展为场景字段。未来若产品引入 Motion 事件语义，
   必须另行定义普通 Motion 与自定义 Motion 的共同契约。
-- 接入 Cubism 3/4/5 原生创作时，曲线编辑器应支持其原生分段类型和控制点编辑，
+- Cubism 3/4/5 曲线编辑器支持其原生分段类型和控制点编辑，
   不把 Bezier 或阶梯分段压成线性关键帧。
 
 ### Cubism 2.1 关键帧生成密度

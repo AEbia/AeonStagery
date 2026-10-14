@@ -46,6 +46,28 @@ ADR-0013 与 ADR-0018 的 bundle 决策继续有效：协作 scene 仍保存 pro
 
 Cubism 3+ 的 `CubismPixiModel` 在绘制前推进模拟，使 Seek、参数读取、快照和 Bake 不依赖下一次绘制，绘制本身不会重复推进模拟。Adapter 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情异步取消、确定性 blink/breath、Core 更新前的参数注入，以及组合模型扩容后的内存视图刷新。
 
+### Cubism 3+ authored performance parity
+
+Cubism 3/4/5 通过现有绑定 handle 支持眨眼、视线、表情、资源 Motion、自定义
+Motion 和资源动作转换。视线使用场景指定的过渡时长、Seek 经过时间和 GSAP
+缓动，支持暂停、恢复与停止；SDK 的惯性积分在过渡期间由 runtime 接管。
+
+自定义 Motion 在 `afterMotionUpdate` 阶段写入参数，表情继续叠加；它控制的眼睛
+Parameter 不再被自动眨眼重复改写，其余眼睛仍使用场景眨眼状态。所有权释放
+恢复自动眨眼，规则覆盖模型配置的非标准 EyeBlink Parameter ID。
+
+Stage 与 Bake 的帧请求可提交绝对场景时间。Runtime 内部对齐参数队列与自然
+效果通道；暂停 Seek 的零步长提交保持 SDK elapsed time。Bake 应用场景的
+眨眼、视线和表情经过时间，并在提交帧前等待表情加载。表情 Seek 根据
+`previousKey` 重建前代表情淡出和目标表情淡入；异步取消仍受请求代次保护。
+
+Bake 的曲线驱动使用绑定 handle 的自定义 Motion 阶段，保持与 Stage 相同的
+表情、眨眼及实时口型所有权顺序。阶段在动作替换、角色重载、任务结束及
+取消时释放；不具备可写阶段的 runtime 保留参数注入回退。
+
+这些保证针对已有创作功能和参数求值，不扩大 Physics/Pose 完整状态重建、
+高版本组合模型或下述特殊渲染效果的支持范围。
+
 ### Model resource ownership
 
 `Live2DModelResources` 管理模型创建、runtime 识别、registry 查询、组合组装、借用与归还、池和纹理引用。Stage 与 Bake 各持有独立实例，但共享同一所有权实现；BakeEngine 负责隐藏容器、发布前准备、场景时间推进和快照采集，不负责模型创建或回收。获取接口同时接收 prepared source identity 与 resolved runtime URI。

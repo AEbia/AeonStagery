@@ -281,6 +281,9 @@ interface Live2DModelHandleCreateOptions {
 }
 
 interface PrivateHandleOperations {
+  prepareFrameSceneTime(sceneTime: number, deltaMs: number): void;
+  restoreExpressionBeforeFrame(key: string | null, elapsed: number, previousKey: string | null | undefined,
+    isCurrent: () => boolean, transaction?: Live2DClockTransaction): Promise<boolean>;
   prepareForBakePlayback(
     idleSnapshot: ModelSnapshot,
     restartIdleMotion: boolean,
@@ -458,6 +461,8 @@ export function createLive2DModelHandle({
     },
   };
   privateHandleOperations.set(handle, {
+    prepareFrameSceneTime: (time, deltaMs) => controls.setSceneTime?.(model, time, deltaMs),
+    restoreExpressionBeforeFrame: performanceBinding.restoreExpressionBeforeFrame,
     prepareForBakePlayback,
     transitionInTransaction: performanceBinding.transitionInTransaction,
     submitBakeInTransaction: frameBinding.submitBakeInTransaction,
@@ -508,7 +513,17 @@ export async function submitLive2DBakeFrameBatch(
           operation.handle.lifecycle.clearMotionState();
           if (!current()) return { status: 'cancelled', transitions };
         }
-        if (operation.expression !== undefined) {
+        if (operation.sceneTimeSeconds !== undefined && Number.isFinite(operation.sceneTimeSeconds)) {
+          privateHandleOperations.get(operation.handle)!.prepareFrameSceneTime(operation.sceneTimeSeconds, input.deltaMs);
+        }
+        if (operation.expressionState !== undefined) {
+          const expression = operation.expressionState;
+          const restored = await privateHandleOperations.get(operation.handle)!.restoreExpressionBeforeFrame(
+            expression.key, expression.elapsedSeconds ?? Number.POSITIVE_INFINITY, expression.previousKey,
+            current, transaction ?? undefined,
+          );
+          if (!restored || !current()) return { status: 'cancelled', transitions };
+        } else if (operation.expression !== undefined) {
           operation.handle.expression.setExpression(operation.expression);
           if (!current()) return { status: 'cancelled', transitions };
         }
@@ -546,6 +561,7 @@ export async function submitLive2DBakeFrameBatch(
         if (!current()) return { status: 'cancelled', transitions };
         const result = privateHandleOperations.get(operation.handle)!.submitBakeInTransaction({
           deltaMs: input.deltaMs,
+          sceneTimeSeconds: operation.sceneTimeSeconds,
           renderer: operation.renderer,
           label: operation.handle.id,
           flushCore: operation.flushCore,
