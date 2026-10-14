@@ -18,6 +18,23 @@ import {
 } from '../services/import/webgal/WebGalScssSyntax';
 
 describe('WebGalScssSyntax', () => {
+  it.each([
+    ['.TextBox_main > .text', '.TextBox_main .text'],
+    ['.TextBox_main .text', '.TextBox_main > .text'],
+  ])('keeps source order for equally specific rules: %s then %s', (first, last) => {
+    const blocks = parseBlocks(`${first} { font-size:100%; } ${last} { font-size:200%; }`);
+    expect(lookup(blocks, '.text').fontsize).toBe('200%');
+  });
+
+  it('keeps repeated selectors in source order among equally specific rules', () => {
+    const blocks = parseBlocks(`
+      .TextBox_main .text { font-size:100%; color:red; }
+      .TextBox_main > .text { font-size:200%; color:blue; }
+      .TextBox_main .text { font-size:300%; }
+    `);
+    expect(lookup(blocks, '.text')).toMatchObject({ fontsize: '300%', color: 'blue' });
+  });
+
   it('scales WebGAL stage pixels onto the AeonStagery stage', () => {
     expect(STAGE_SCALE).toBeCloseTo(0.75, 5);
     expect(ROOT_FONT_PX).toBe(20);

@@ -88,6 +88,8 @@ interface InstalledPackageRecord {
   packageRoot: string;
   /** Style ids the package defines, so a replace can keep the ones in use. */
   styleIds: string[];
+  /** Files referenced by the installed style, including old content-hashed SVGs. */
+  assetFiles: string[];
   /**
    * Whether a wholesale replace is safe. An import reproduces a single dialogue
    * style, so replacing a package that publishes several would drop the rest —
@@ -124,6 +126,16 @@ function resolveInside(root: string, relativePath: string): string {
   return resolvedPath;
 }
 
+/** Check the actual file location as well as the declared path. */
+async function validateTemplateFile(templateRoot: string, sourcePath: string): Promise<void> {
+  resolveInside(templateRoot, path.relative(templateRoot, sourcePath));
+  const [realRoot, realSource] = await Promise.all([
+    fs.promises.realpath(templateRoot),
+    fs.promises.realpath(sourcePath),
+  ]);
+  resolveInside(realRoot, path.relative(realRoot, realSource));
+}
+
 /** Locate `Stage/TextBox/textbox.scss`, accepting the stylesheet path itself. */
 export function resolveWebGalTemplateRoot(input: string): string {
   const resolved = path.resolve(input);
@@ -158,7 +170,10 @@ async function readTemplateFont(templateRoot: string) {
     // WebGAL also ships a pre-compressed copy for its own transfer path.
     if (/\.gz$/i.test(url)) continue;
     const sourcePath = resolveInside(templateRoot, url);
-    if (await pathExists(sourcePath)) return { family, sourcePath };
+    if (await pathExists(sourcePath)) {
+      await validateTemplateFile(templateRoot, sourcePath);
+      return { family, sourcePath };
+    }
   }
   return null;
 }
@@ -220,8 +235,36 @@ async function convertTemplate(input: WebGalScssInspectInput & {
  */
 const IMPORTED_CAPABILITIES = new Set(['dialogueStyles', 'assets', 'template', 'manifestSchemaVersion', 'v']);
 
-function unimportedCapabilities(manifest: Record<string, any>): string[] {
+function unimportedCapabilities(manifest: Record<string, unknown>): string[] {
   return Object.keys(manifest).filter((key) => !IMPORTED_CAPABILITIES.has(key));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Use the installed manifest's resource records rather than the new build's hashes. */
+function installedAssetFiles(
+  packageRoot: string,
+  manifest: Record<string, unknown>,
+  styles: Record<string, unknown>[],
+): string[] {
+  const assetRoot = isRecord(manifest.assets) && typeof manifest.assets.root === 'string'
+    ? manifest.assets.root : WEBGAL_PACKAGE_ASSET_ROOT;
+  const files: string[] = [];
+  for (const style of styles) {
+    if (!isRecord(style.params)) continue;
+    for (const [slot, resource] of [
+      ['textbox', 'image'], ['namebox', 'image'], ['text', 'fontFile'], ['speaker', 'fontFile'],
+    ]) {
+      const params = style.params[slot];
+      const relative = isRecord(params) ? params[resource] : null;
+      if (typeof relative !== 'string' || !relative) continue;
+      const target = resolveInside(packageRoot, path.join(assetRoot, relative));
+      files.push(path.relative(packageRoot, target).split(path.sep).join('/'));
+    }
+  }
+  return files;
 }
 
 /** Read what is already installed, so conflicts and free names can be reported. */
@@ -237,44 +280,53 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const packageRoot = path.join(templatesRoot, entry.name);
-    const manifest = await readJsonIfPresent<Record<string, any>>(
-      path.join(packageRoot, 'manifest.v2.json'),
-    );
-    if (!manifest) continue;
+    try {
+      const manifest = await readJsonIfPresent<unknown>(
+        path.join(packageRoot, 'manifest.v2.json'),
+      );
+      if (!isRecord(manifest) || !isRecord(manifest.template)) continue;
+      if (manifest.dialogueStyles !== undefined && !Array.isArray(manifest.dialogueStyles)) continue;
+      const styles: unknown[] = manifest.dialogueStyles ?? [];
+      if (!styles.every(isRecord)) continue;
 
-    const sidecar = await readJsonIfPresent<WebGalImportRecord>(
-      path.join(packageRoot, WEBGAL_IMPORT_RECORD_FILE),
-    );
-    const styleParams = (manifest.dialogueStyles ?? [])
-      .map((style: Record<string, unknown>) => style?.params)
-      .filter(Boolean);
-    const styleIds = (Array.isArray(manifest.dialogueStyles) ? manifest.dialogueStyles : [])
-      .map((style: Record<string, unknown>) => String(style?.id ?? ''))
-      .filter(Boolean);
+      const sidecar = await readJsonIfPresent<WebGalImportRecord>(
+        path.join(packageRoot, WEBGAL_IMPORT_RECORD_FILE),
+      );
+      const styleParams = styles
+        .map((style) => style.params)
+        .filter(Boolean);
+      const styleIds = styles
+        .map((style) => String(style.id ?? ''))
+        .filter(Boolean);
 
-    records.push({
-      packageId: String(manifest.template?.id ?? entry.name),
-      packageName: String(manifest.template?.name ?? entry.name),
-      // Discovery does not require the directory to be named after the package
-      // id (`--out` can differ), so remember where the manifest actually lives.
-      packageRoot,
-      // A package id and its style id are not the same thing (`--style-id`), so
-      // a replace has to keep the ids the installed styles were published under.
-      styleIds,
-      // Only a package that publishes exactly one style can be rebuilt from a
-      // single WebGAL stylesheet — and only when it declares nothing else, since
-      // a replace replaces the whole directory. Anything richer is a valid
-      // package this import must not overwrite.
-      replaceable: styleIds.length <= 1 && unimportedCapabilities(manifest).length === 0,
-      // The sidecar records the original stylesheet hash; without it a package
-      // can still be matched on the parameters it translates to.
-      record: {
-        ...(sidecar ?? {}),
-        ...(styleParams.length
-          ? { paramsSignature: dialogueParamsSignature(styleParams[0]) }
-          : {}),
-      },
-    });
+      records.push({
+        packageId: String(manifest.template.id ?? entry.name),
+        packageName: String(manifest.template.name ?? entry.name),
+        // Discovery does not require the directory to be named after the package
+        // id (`--out` can differ), so remember where the manifest actually lives.
+        packageRoot,
+        // A package id and its style id are not the same thing (`--style-id`), so
+        // a replace has to keep the ids the installed styles were published under.
+        styleIds,
+        assetFiles: installedAssetFiles(packageRoot, manifest, styles),
+        // Only a package that publishes exactly one style can be rebuilt from a
+        // single WebGAL stylesheet — and only when it declares nothing else, since
+        // a replace replaces the whole directory. Anything richer is a valid
+        // package this import must not overwrite.
+        replaceable: styleIds.length <= 1 && unimportedCapabilities(manifest).length === 0,
+        // The sidecar records the original stylesheet hash; without it a package
+        // can still be matched on the parameters it translates to.
+        record: {
+          ...(sidecar ?? {}),
+          ...(styleParams.length
+            ? { paramsSignature: dialogueParamsSignature(styleParams[0]) }
+            : {}),
+        },
+      });
+    } catch {
+      // A damaged package must not prevent discovery or installation of others.
+      continue;
+    }
   }
   return records;
 }
@@ -412,8 +464,9 @@ export async function installWebGalTemplatePackage(
   // artwork, a hand-edited asset, anything — and replacing it would silently
   // take them with it, so refuse while the files are still there.
   if (replaceTarget) {
-    const expected = new Set(build.files.map((file) => file.relativePath));
-    expected.add(WEBGAL_IMPORT_RECORD_FILE);
+    const expected = new Set([
+      'manifest.v2.json', WEBGAL_IMPORT_RECORD_FILE, ...replaceTarget.assetFiles,
+    ]);
     const stray: string[] = [];
     const walk = async (relative: string): Promise<void> => {
       for (const item of await fs.promises.readdir(
@@ -457,7 +510,7 @@ export async function installWebGalTemplatePackage(
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
       if (file.sourcePath) {
         // The font is copied from the template; refuse anything pointing outside it.
-        resolveInside(templateRoot, path.relative(templateRoot, file.sourcePath));
+        await validateTemplateFile(templateRoot, file.sourcePath);
         await fs.promises.copyFile(file.sourcePath, target);
         continue;
       }

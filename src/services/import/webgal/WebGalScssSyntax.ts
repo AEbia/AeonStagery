@@ -64,6 +64,10 @@ const NAMED_COLORS: Record<string, string> = {
 /** A flattened stylesheet: selector → declaration body. */
 export type ScssBlocks = Record<string, string>;
 
+// The public map merges repeated selectors for direct lookups. Keep individual
+// rules too, so merging different selectors can still follow source order.
+const sourceRules = new WeakMap<ScssBlocks, Array<{ selector: string; body: string }>>();
+
 /** A single declaration block, normalised to `propertysansdashes` keys. */
 export type ScssDeclarations = Record<string, string>;
 
@@ -242,6 +246,7 @@ function mergeBodies(existing: string, incoming: string): string {
 export function parseBlocks(css: string): ScssBlocks {
   const source = stripComments(css);
   const blocks: ScssBlocks = {};
+  const rules: Array<{ selector: string; body: string }> = [];
   const stack: Array<[string[], string[]]> = [];
   let buf = '';
   let i = 0;
@@ -269,6 +274,7 @@ export function parseBlocks(css: string): ScssBlocks {
       for (const full of selector.split(',')) {
         const name = full.trim();
         if (!name) continue;
+        rules.push({ selector: name, body });
         const existing = blocks[name];
         // The cascade merges: a later rule only overrides the properties it
         // declares. Replacing the body wholesale loses everything an earlier
@@ -334,6 +340,7 @@ export function parseBlocks(css: string): ScssBlocks {
   for (const key of Object.keys(blocks)) {
     if (blocks[key] && blocks[key].trim()) out[key] = blocks[key];
   }
+  sourceRules.set(out, rules);
   return out;
 }
 
@@ -382,15 +389,16 @@ function selectorSpecificity(selector: string): number {
  */
 export function lookup(blocks: ScssBlocks, selector: string): ScssDeclarations {
   const suffix = ` ${selector}`;
-  const matching = Object.keys(blocks)
-    .filter((key) => key === selector || key.endsWith(suffix))
+  const rules = sourceRules.get(blocks)
+    ?? Object.entries(blocks).map(([selector, body]) => ({ selector, body }));
+  const matching = rules
+    .filter((rule) => rule.selector === selector || rule.selector.endsWith(suffix))
     .sort((left, right) => (
-      selectorSpecificity(left) - selectorSpecificity(right)
-      || (left < right ? -1 : left > right ? 1 : 0)
+      selectorSpecificity(left.selector) - selectorSpecificity(right.selector)
     ));
   if (matching.length === 0) return {};
-  let merged = blocks[matching[0]];
-  for (const key of matching.slice(1)) merged = mergeBodies(merged, blocks[key]);
+  let merged = matching[0].body;
+  for (const rule of matching.slice(1)) merged = mergeBodies(merged, rule.body);
   return parseDecls(merged);
 }
 

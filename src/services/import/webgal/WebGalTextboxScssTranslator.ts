@@ -248,7 +248,7 @@ function scaleTheme(theme: WebGalTextBoxTheme, sx: number, sy: number): void {
 
 /** Read the alignment a template expresses through `text-align` or flex `align-items`. */
 function resolveTextAlignment(main: ScssDeclarations, textBlock: ScssDeclarations): 'left' | 'center' | 'right' {
-  const ta = String(declOf(main, 'textalign') || declOf(textBlock, 'textalign') || '').trim();
+  const ta = String(declOf(textBlock, 'textalign') || declOf(main, 'textalign') || '').trim();
   const ai = String(main.alignitems || '').trim();
   if (/^(left|start)$/.test(ta)) return 'left';
   if (/^(right|end)$/.test(ta)) return 'right';
@@ -362,7 +362,7 @@ export function translateWebGalTextboxScss(
 
   // ── Line height (ratio or absolute) ──
   let lineHeight: number;
-  const lineHeightRaw = declOf(main, 'lineheight') || declOf(textBlock, 'lineheight');
+  const lineHeightRaw = declOf(textBlock, 'lineheight') || declOf(main, 'lineheight');
   if (lineHeightRaw != null) {
     const raw = String(lineHeightRaw).trim().replace(/!\s*\w+\s*$/, '').trim();
     const absolute = /^(-?[\d.]+)\s*(px|pt)$/.exec(raw);
@@ -581,7 +581,7 @@ export function translateWebGalTextboxScss(
   nameMinW = Math.max(nameMinW, namePadL + namePadR + nameSize, 40);
 
   const family = options.fontFamily
-    || (declOf(main, 'fontfamily') || declOf(textBlock, 'fontfamily') || 'sans-serif')
+    || (declOf(textBlock, 'fontfamily') || declOf(main, 'fontfamily') || 'sans-serif')
       .split(',')[0].trim().replace(/^["']|["']$/g, '');
   const fontFile = options.fontFile || null;
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -128,6 +128,117 @@ async function listPackageDirectories(templatesRoot: string): Promise<string[]> 
 }
 
 describe('WebGAL SCSS template import', () => {
+  it('replaces the old recorded artwork after only the decoration changes', async () => {
+    const root = await makeRoot('aeonstagery-webgal-artwork-replace-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const first = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    const artworkRoot = path.join(first.installPath, 'assets', 'ui', 'dialogue', 'webgal');
+    const oldFiles = await readdir(artworkRoot);
+
+    await writeFile(path.join(templateRoot, 'assets', 'textbox-meteor.svg'),
+      '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="#0ff"/></svg>');
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(inspection.conflicts[0]).toMatchObject({ packageId: first.id, replaceable: true });
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: first.id,
+    });
+    expect(replaced.replaced).toBe(true);
+    const newFiles = await readdir(artworkRoot);
+    expect(newFiles).toHaveLength(oldFiles.length);
+    expect(newFiles).not.toEqual(oldFiles);
+    expect(await readFile(path.join(artworkRoot, newFiles.find((file) => file.startsWith('textbox-'))!), 'utf8'))
+      .toContain('#0ff');
+    for (const obsolete of oldFiles.filter((file) => !newFiles.includes(file))) {
+      await expect(stat(path.join(artworkRoot, obsolete))).rejects.toThrow();
+    }
+  });
+
+  it.each(['inspection', 'installation'])('rejects font symlinks outside the template during %s', async (operation) => {
+    const root = await makeRoot('aeonstagery-webgal-font-symlink-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const fontPath = path.join(templateRoot, 'assets', 'FixtureSans.ttf');
+    const outside = path.join(root, 'private.ttf');
+    await writeFile(outside, 'outside-template-content');
+    await rm(fontPath);
+    await symlink(outside, fontPath);
+
+    const importTemplate = operation === 'inspection'
+      ? inspectWebGalTemplateDirectory : installWebGalTemplatePackage;
+    await expect(importTemplate({ templateRoot, templatesRoot }))
+      .rejects.toThrow(/目录/);
+    await expect(stat(templatesRoot)).rejects.toThrow();
+  });
+
+  it('replaces an old recorded font when the newly imported font has another file name', async () => {
+    const root = await makeRoot('aeonstagery-webgal-font-replace-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const first = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    await rename(path.join(templateRoot, 'assets', 'FixtureSans.ttf'), path.join(templateRoot, 'assets', 'NewSans.ttf'));
+    await writeFile(path.join(templateRoot, 'template.json'), JSON.stringify({
+      name: 'Fixture Theme',
+      fonts: [{ 'font-family': 'Fixture Sans', url: 'assets/NewSans.ttf' }],
+    }));
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: first.id,
+    });
+    expect(replaced.replaced).toBe(true);
+    expect(await readdir(path.join(replaced.installPath, 'assets', 'fonts'))).toEqual(['NewSans.ttf']);
+    expect(await readFile(path.join(replaced.installPath, 'assets', 'fonts', 'NewSans.ttf'), 'utf8'))
+      .toBe(FONT_BYTES);
+  });
+
+  it('allows font symlinks inside a template reached through a symlink', async () => {
+    const root = await makeRoot('aeonstagery-webgal-font-internal-symlink-');
+    const templateRoot = path.join(root, 'template');
+    await writeTemplate(templateRoot);
+    const fontPath = path.join(templateRoot, 'assets', 'FixtureSans.ttf');
+    await rename(fontPath, path.join(templateRoot, 'assets', 'actual.ttf'));
+    await symlink('actual.ttf', fontPath);
+    const alias = path.join(root, 'template-alias');
+    await symlink(templateRoot, alias, 'dir');
+    const installed = await installWebGalTemplatePackage({
+      templateRoot: alias, templatesRoot: path.join(root, 'library'),
+    });
+    expect(await readFile(path.join(installed.installPath, 'assets', 'fonts', 'FixtureSans.ttf'), 'utf8'))
+      .toBe(FONT_BYTES);
+  });
+
+  it('isolates malformed existing manifests while inspecting and installing a valid template', async () => {
+    const root = await makeRoot('aeonstagery-webgal-malformed-manifest-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const first = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    const invalidManifests: unknown[] = [
+      { template: { id: 'broken' }, dialogueStyles: {} },
+      { template: { id: 'broken' }, dialogueStyles: [null] },
+      null, [], 'invalid',
+    ];
+    for (const [index, manifest] of invalidManifests.entries()) {
+      const dir = path.join(templatesRoot, `broken-${index}`);
+      await mkdir(dir);
+      await writeFile(path.join(dir, 'manifest.v2.json'), JSON.stringify(manifest));
+    }
+
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(inspection.conflicts).toHaveLength(1);
+    expect(inspection.conflicts[0].packageId).toBe(first.id);
+    const installed = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    expect(installed.id).toBe(`${first.id}-2`);
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: first.id,
+    });
+    expect(replaced.replaced).toBe(true);
+    expect(JSON.parse(await readFile(path.join(templatesRoot, 'broken-0', 'manifest.v2.json'), 'utf8')))
+      .toEqual(invalidManifests[0]);
+  });
+
   it('reports what would be installed before touching the library', async () => {
     const root = await makeRoot('aeonstagery-webgal-inspect-');
     const templateRoot = path.join(root, 'template');

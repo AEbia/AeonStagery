@@ -49,6 +49,26 @@ const FIXTURE = `
 `;
 
 describe('translateWebGalTextboxScss', () => {
+  it('uses explicit body declarations before inherited parent values', () => {
+    const { style } = translateWebGalTextboxScss(`
+      .TextBox_main { font-size:40px; line-height:2 !important; text-align:right !important; font-family:Parent !important; }
+      .text { font-size:100%; line-height:1.5; text-align:left; font-family:Child; }
+    `);
+    expect(style.params.text).toMatchObject({
+      fontSize: 30, lineHeight: 45, align: 'left', fontFamily: 'Child',
+    });
+  });
+
+  it('falls back to inherited body declarations when the child declares none', () => {
+    const { style } = translateWebGalTextboxScss(`
+      .TextBox_main { font-size:40px; line-height:2; text-align:right; font-family:Parent; }
+      .text { font-size:100%; }
+    `);
+    expect(style.params.text).toMatchObject({
+      fontSize: 30, lineHeight: 60, align: 'right', fontFamily: 'Parent',
+    });
+  });
+
   it('matches the golden presentation for a scaled template', () => {
     const { style, assetGeom } = translateWebGalTextboxScss(FIXTURE, { sourceName: 'textbox.scss' });
 
