@@ -239,6 +239,12 @@
   animation: fl-lesson-card-in 200ms var(--ease-emphasized) both;
 }
 
+.fl-lesson-modal-layer--layout {
+  background: transparent;
+  backdrop-filter: none;
+  animation: none;
+}
+
 .fl-lesson-dialog--celebration {
   position: relative;
   overflow: hidden;
@@ -357,6 +363,10 @@
   flex: 0 0 auto;
   margin: 3px 0 0;
   accent-color: var(--accent-primary);
+}
+
+.fl-layout-choice input[type="radio"]:focus {
+  box-shadow: none;
 }
 
 .fl-layout-choice > span {

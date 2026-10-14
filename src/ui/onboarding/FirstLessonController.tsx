@@ -9,8 +9,10 @@ import React, {
 import { createPortal } from 'react-dom';
 import type { IProjectOpenWorkflow } from '../../api/interfaces/IProjectOpenWorkflow';
 import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
-import { getCubismPixiSdkStatus } from '../../engine/CubismPixiSdk';
+import { isLive2DRuntimeFamilyAvailable } from '../../engine/Live2DRuntimeResolver';
+import { waitForLive2DRuntimeBootstrap } from '../../engine/Live2DRuntimeAvailability';
 import {
+  FIRST_LESSON_BUSINESS_STEPS,
   evaluateFirstLessonCompletion,
   FirstLessonProgressStore,
   FirstLessonProjectService,
@@ -18,12 +20,13 @@ import {
   checkWebGalAssetSourceReadiness,
   type FirstLessonBusinessStep,
   type FirstLessonProgressState,
+  type WebGalAssetSourceReadinessFailureCode,
   type WebGalAssetSourceFileAccess,
 } from '../../services/onboarding';
 import type { IFileAccess } from '../../services/io/IFileAccess';
 import { IconCheck, IconInfo, IconTarget, IconX } from '../icons';
 import { useModalDialog } from '../hooks/useModalDialog';
-import { useSettings } from '../SettingsStore';
+import { settingsManager, useSettings } from '../SettingsStore';
 import { findVisibleGuideTarget } from './guideTarget';
 import { SpotlightOverlay } from './SpotlightOverlay';
 import './firstLesson.css';
@@ -41,6 +44,21 @@ type LessonPhase =
   | 'error';
 
 type ReadinessStatus = 'idle' | 'checking' | 'found' | 'needs_reselect';
+
+const WEBGAL_SAMPLE_ASSET_ROOT = String.raw`...\public\games\<项目名>\game`;
+const WEBGAL_SAMPLE_PROJECT_ROOT = String.raw`...\public\games\<项目名>`;
+const WEBGAL_SAMPLE_FIGURE_ROOT = String.raw`...\public\games\<项目名>\game\figure`;
+
+const ASSET_SOURCE_FAILURE_GUIDANCE: Record<WebGalAssetSourceReadinessFailureCode, string> = {
+  'missing-figure-directory': '所选目录没有直接包含 figure/ 文件夹。请选 figure/ 的上一层 game/ 目录，不要选 figure/ 本身，也不要选上一级项目目录。',
+  'no-loadable-model': 'figure/ 中没有找到可用的完整 Live2D 模型。请确认其中有受支持的模型入口文件及其依赖文件。',
+  'model-entry-unreadable': '模型入口文件无法读取。请检查文件访问权限，或重新解压、复制完整的角色模型目录后重试。',
+  'model-entry-invalid-json': '模型入口文件不是有效的 JSON。请从模型原始素材重新导出或复制该文件。',
+  'model-format-unrecognized': '没有识别到受支持的 Cubism 模型入口。请选择 model.json、*.model.json 或 *.model3.json。',
+  'model-runtime-unavailable': '当前没有可用的模型运行时。请改选当前支持的 Cubism 模型，或先启用对应运行时。',
+  'model-body-missing': '模型引用的主体文件缺失。请重新复制完整的角色模型目录，并保留文件夹结构。',
+  'model-texture-missing': '模型引用的纹理图片不完整。请重新复制完整的角色模型目录，并保留纹理路径。',
+};
 
 export type FirstLessonGuideStep =
   | 'open-character-panel'
@@ -383,7 +401,7 @@ export const getGuidePresentation = (
       return {
         selector: '[aria-label="选择模型文件"]',
         title: '正在检查模型',
-        description: '正在确认模型本体、纹理和显示能力。检查完成后会自动继续。',
+        description: '正在确认模型本体、纹理和 Cubism 运行时。检查完成后会自动继续。',
         step: 3,
         allowTargetInteraction: false,
         status: { label: '正在检查', tone: 'checking' },
@@ -393,8 +411,8 @@ export const getGuidePresentation = (
         selector: '[aria-label="选择模型文件"]',
         title: modelStatus === 'needs_reselect' ? '需要重新选择模型' : '为角色选择模型',
         description: modelStatus === 'needs_reselect'
-          ? '请选择文件完整的 model.json、*.model.json 或 *.model3.json；拼好模不进入本课。'
-          : '点击文件夹按钮，为刚创建的角色选择一个可用的 Live2D 模型。',
+          ? '请选择文件齐全且运行时可用的 Cubism 2.1 或 Cubism 3/4/5（C3+）模型入口'
+          : '点击文件夹按钮，为角色选择一个可用的模型。',
         step: 3,
         status: modelStatus === 'needs_reselect'
           ? { label: '需要重新选择', tone: 'warning' }
@@ -404,7 +422,7 @@ export const getGuidePresentation = (
       return {
         selector: '[role="dialog"][aria-labelledby="asset-browser-title"]',
         title: '选择模型入口文件',
-        description: '在 figure 中找到角色模型，选择 model.json、*.model.json 或 *.model3.json。',
+        description: '在 figure 中找到角色模型，选择 *.model.json 或 *.model3.json',
         step: 3,
         padding: 3,
       };
@@ -727,9 +745,10 @@ const hasTunedCameraFocusPart = (
   })
 );
 
-const isRuntimeFamilyAvailable = (runtimeFamily: 'cubism2' | 'cubism3-plus') => (
-  runtimeFamily === 'cubism2' || getCubismPixiSdkStatus().available
-);
+const isRuntimeFamilyAvailable = async (runtimeFamily: 'cubism2' | 'cubism3-plus') => {
+  await waitForLive2DRuntimeBootstrap();
+  return isLive2DRuntimeFamilyAvailable(runtimeFamily);
+};
 
 const LessonDialog: React.FC<{
   eyebrow: string;
@@ -739,14 +758,15 @@ const LessonDialog: React.FC<{
   closeLabel?: string;
   icon?: 'target' | 'success' | 'info';
   celebration?: boolean;
+  previewWorkspace?: boolean;
   status?: { label: string; tone: 'checking' | 'success' | 'warning' };
   children?: React.ReactNode;
-}> = ({ eyebrow, title, description, onClose, closeLabel = '关闭教程', icon = 'target', celebration = false, status, children }) => {
+}> = ({ eyebrow, title, description, onClose, closeLabel = '关闭教程', icon = 'target', celebration = false, previewWorkspace = false, status, children }) => {
   const dialogRef = useModalDialog(onClose);
   const Icon = icon === 'success' ? IconCheck : icon === 'info' ? IconInfo : IconTarget;
 
   return createPortal(
-    <div className="fl-lesson-modal-layer">
+    <div className={`fl-lesson-modal-layer${previewWorkspace ? ' fl-lesson-modal-layer--layout' : ''}`}>
       <div
         ref={dialogRef}
         className={`fl-lesson-dialog${celebration ? ' fl-lesson-dialog--celebration' : ''}`}
@@ -794,6 +814,45 @@ const LessonDialog: React.FC<{
   );
 };
 
+// Native radios update the choice while settings redraw the workspace preview.
+// Keep this dialog outside that subscription so its content and focus stay stable.
+const LayoutSelectionDialog = React.memo<{
+  onClose: () => void;
+  onContinue: () => void;
+}>(({ onClose, onContinue }) => {
+  const [initialLayout] = useState(() => settingsManager.get('workbenchTimelineLayoutMode'));
+  return (
+    <LessonDialog
+      eyebrow={`第 2 / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步 · 选择工作台布局`}
+      title="选择你喜欢的工作台布局"
+      description="两种布局都能完成本课。选择会立即保存，以后也可以在“全局设置 → 基础体验 → 工作区布局”中切换。"
+      onClose={onClose}
+      previewWorkspace
+    >
+      <fieldset className="fl-layout-choices" aria-label="工作台布局模式">
+        {([
+          { value: 'tracks', label: '轨道编辑优先', description: '底部轨道占满宽度，左侧管理角色与剧本大纲，右侧编辑选中语句的属性。' },
+          { value: 'list', label: '剧本动作优先', description: '右侧剧本动作列表占满高度，展开语句即可编辑属性，适合逐句编排故事。' },
+        ] as const).map((layout) => (
+          <label key={layout.value} className="fl-layout-choice">
+            <input
+              type="radio"
+              name="first-lesson-layout"
+              value={layout.value}
+              defaultChecked={initialLayout === layout.value}
+              onChange={() => settingsManager.set('workbenchTimelineLayoutMode', layout.value)}
+            />
+            <span><strong>{layout.label}</strong><span>{layout.description}</span></span>
+          </label>
+        ))}
+      </fieldset>
+      <button type="button" className="btn btn--primary" onClick={onContinue}>
+        使用此布局，继续教程
+      </button>
+    </LessonDialog>
+  );
+});
+
 export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   semanticDocument,
   externalLibraryPaths,
@@ -805,7 +864,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   playbackStore,
   children,
 }) => {
-  const { settings, setSetting } = useSettings();
+  const { settings } = useSettings();
   const progressStore = useMemo(
     () => new FirstLessonProgressStore(createSafeBrowserStorage()),
     [],
@@ -814,6 +873,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   const [phase, setPhase] = useState<LessonPhase>('idle');
   const [isWebGalAuthor, setIsWebGalAuthor] = useState<boolean | null>(null);
   const [assetStatus, setAssetStatus] = useState<ReadinessStatus>('idle');
+  const [assetFailureCode, setAssetFailureCode] = useState<WebGalAssetSourceReadinessFailureCode | null>(null);
   const [modelStatus, setModelStatus] = useState<ReadinessStatus>('idle');
   const [modelAvailability, setModelAvailability] = useState<Readonly<Record<string, boolean>>>(EMPTY_MODEL_AVAILABILITY);
   const [errorMessage, setErrorMessage] = useState('');
@@ -886,11 +946,14 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     };
   }, [phase]);
 
-  const modelReferences = useMemo(
-    () => collectModelReferences(semanticDocument),
+  const modelReferenceFingerprint = useMemo(
+    () => collectModelReferences(semanticDocument).join('\n'),
     [semanticDocument],
   );
-  const modelReferenceFingerprint = modelReferences.join('\n');
+  const modelReferences = useMemo(
+    () => modelReferenceFingerprint ? modelReferenceFingerprint.split('\n') : [],
+    [modelReferenceFingerprint],
+  );
 
   useEffect(() => {
     if (phase !== 'guiding') return;
@@ -1012,24 +1075,39 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     cameraFocusPartBaselines,
   ]);
 
+  // The persisted current step marks every earlier tutorial step as completed.
+  // Keep that progress when later runtime or document snapshots invalidate an earlier condition.
+  const progressEvaluation = useMemo(() => {
+    const currentStepIndex = FIRST_LESSON_BUSINESS_STEPS.indexOf(progress.currentStep);
+    const firstUnmetStep = FIRST_LESSON_BUSINESS_STEPS
+      .slice(currentStepIndex)
+      .find((step) => !evaluation.satisfiedSteps.includes(step)) ?? null;
+    return {
+      ...evaluation,
+      completed: firstUnmetStep === null,
+      firstUnmetStep,
+    };
+  }, [evaluation, progress.currentStep]);
+
   useEffect(() => {
-    if (phase !== 'guiding' || evaluation.firstUnmetStep !== 'insert-character-entrance') return;
+    if (phase !== 'guiding' || progressEvaluation.firstUnmetStep !== 'insert-character-entrance') return;
     const interval = window.setInterval(() => setRuntimeRevision((current) => current + 1), 300);
     return () => window.clearInterval(interval);
-  }, [evaluation.firstUnmetStep, phase]);
+  }, [progressEvaluation.firstUnmetStep, phase]);
 
   useEffect(() => {
     if (
       phase !== 'guiding'
-      || evaluation.firstUnmetStep !== 'insert-character-entrance'
+      || progressEvaluation.firstUnmetStep !== 'insert-character-entrance'
       || !isPlaying
       || hasPlayedCharacterEntrance
       || !hasEntranceStatement(semanticDocument, evaluation.selectedCharacterId)
     ) return;
-    const timer = window.setTimeout(() => setHasPlayedCharacterEntrance(true), 2000);
-    return () => window.clearTimeout(timer);
+    // Playback can stop before the model finishes loading. Remember that it ran;
+    // completion still waits for the character's confirmed presence on stage.
+    setHasPlayedCharacterEntrance(true);
   }, [
-    evaluation.firstUnmetStep,
+    progressEvaluation.firstUnmetStep,
     evaluation.selectedCharacterId,
     hasPlayedCharacterEntrance,
     isPlaying,
@@ -1044,21 +1122,21 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   }, [isPlaying, phase, progress.hasStartedPreview, progressStore]);
 
   useEffect(() => {
-    if (phase !== 'guiding' || evaluation.completed) return;
-    if (evaluation.firstUnmetStep && evaluation.firstUnmetStep !== progress.currentStep) {
-      setProgress(progressStore.setCurrentStep(evaluation.firstUnmetStep));
+    if (phase !== 'guiding' || progressEvaluation.completed) return;
+    if (progressEvaluation.firstUnmetStep && progressEvaluation.firstUnmetStep !== progress.currentStep) {
+      setProgress(progressStore.setCurrentStep(progressEvaluation.firstUnmetStep));
     }
-  }, [evaluation.completed, evaluation.firstUnmetStep, phase, progress.currentStep, progressStore]);
+  }, [phase, progress.currentStep, progressEvaluation.completed, progressEvaluation.firstUnmetStep, progressStore]);
 
   useEffect(() => {
-    if (phase !== 'guiding' || !evaluation.completed) return;
+    if (phase !== 'guiding' || !progressEvaluation.completed) return;
     setProgress(progressStore.markCompleted());
     setPhase('completed');
     completionTimerRef.current = window.setTimeout(() => {
       completionTimerRef.current = null;
       setPhase('idle');
     }, 8000);
-  }, [evaluation.completed, phase, progressStore]);
+  }, [phase, progressEvaluation.completed, progressStore]);
 
   const enterGuide = useCallback(() => {
     setModelAvailability(EMPTY_MODEL_AVAILABILITY);
@@ -1109,9 +1187,11 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     const fingerprint = externalLibraryPaths.map(normalizePathForComparison).join('|');
     assetFingerprintRef.current = fingerprint;
     setAssetStatus('checking');
+    setAssetFailureCode(null);
     setPhase('asset-checking');
 
     let found = false;
+    let failureCode: WebGalAssetSourceReadinessFailureCode | null = null;
     for (const path of externalLibraryPaths) {
       try {
         const result = await checkWebGalAssetSourceReadiness(
@@ -1123,18 +1203,21 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
           found = true;
           break;
         }
+        if (result.status === 'needs_reselect') failureCode = result.code;
       } catch {
-        // All readiness failures share the same author-facing state.
+        failureCode = 'no-loadable-model';
       }
     }
 
     if (operationTokenRef.current !== token) return;
     if (!found) {
+      setAssetFailureCode(externalLibraryPaths.length > 0 ? failureCode ?? 'no-loadable-model' : null);
       setAssetStatus('needs_reselect');
       setPhase('asset-setup');
       return;
     }
 
+    setAssetFailureCode(null);
     setAssetStatus('found');
     setPhase('asset-found');
     await new Promise<void>((resolve) => window.setTimeout(resolve, 480));
@@ -1155,6 +1238,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     setProgress(next);
     setIsWebGalAuthor(null);
     setAssetStatus('idle');
+    setAssetFailureCode(null);
     setModelStatus('idle');
     setModelAvailability(EMPTY_MODEL_AVAILABILITY);
     setModelCheckRevision(0);
@@ -1181,10 +1265,10 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     [domSnapshotRefreshKey],
   );
 
-  const guideStep = phase === 'guiding' && evaluation.firstUnmetStep
+  const guideStep = phase === 'guiding' && progressEvaluation.firstUnmetStep
     ? resolveFirstLessonGuideStep({
       ...domSnapshot,
-      firstUnmetStep: evaluation.firstUnmetStep,
+      firstUnmetStep: progressEvaluation.firstUnmetStep,
       modelStatus,
       hasEntranceStatement: hasEntranceStatement(semanticDocument, evaluation.selectedCharacterId),
       hasEnvironmentStatement: hasEnvironmentStatement(semanticDocument),
@@ -1245,11 +1329,32 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   const assetTargetSelector = externalLibraryPaths.length > 0
     ? `[data-tutorial-target="external-library-replace-${externalLibraryPaths.length - 1}"]`
     : '[data-tutorial-target="external-library-add"]';
-  const assetDescription = externalLibraryPaths.length > 0
-    ? '当前目录里没有找到可用模型。点击“修改”，重新选择直接包含 figure 文件夹的素材目录。'
-    : isWebGalAuthor
-      ? '点击“添加”，选择 WebGAL 中直接包含 figure 等素材子目录的目录，不要选择项目根目录。'
-      : '点击“添加”，选择一个直接包含 figure 文件夹的素材目录。教程不会修改其中的文件。';
+  const assetDescription = assetFailureCode
+    ? `${ASSET_SOURCE_FAILURE_GUIDANCE[assetFailureCode]} 点击“如何准备素材”查看目录示例。`
+    : `${isWebGalAuthor ? '选择 WebGAL 游戏素材目录' : '选择素材目录'}，要求这一层直接包含 figure/ 文件夹。点击“如何准备素材”查看路径示例。`;
+  const assetHelpContent = (
+    <>
+      <p>选择 figure/ 的上一层 game/ 目录。figure/ 是 WebGAL 游戏目录中存放角色立绘和 Live2D 模型的素材目录。</p>
+      <div className="fl-spotlight__help-examples">
+        <div>
+          <strong>正确层级</strong>
+          <code>{WEBGAL_SAMPLE_ASSET_ROOT}</code>
+          <span>所选目录直接包含 figure/ 和 background/ 等素材目录。</span>
+        </div>
+        <div>
+          <strong>选得太浅</strong>
+          <code>{WEBGAL_SAMPLE_PROJECT_ROOT}</code>
+          <span>这是项目目录，figure/ 在其下方的 game/ 里面。</span>
+        </div>
+        <div>
+          <strong>选得太深</strong>
+          <code>{WEBGAL_SAMPLE_FIGURE_ROOT}</code>
+          <span>这是 figure/ 本身，应选择它的上一层 game/。</span>
+        </div>
+      </div>
+      <p>把“项目名”换成你的项目目录名。本课会检查 figure/ 中的模型和依赖文件，不会修改素材。</p>
+    </>
+  );
 
   return (
     <>
@@ -1277,7 +1382,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
         <LessonDialog
           eyebrow={`第 1 / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步 · 准备素材来源`}
           title="正在检查素材目录"
-          description="只检查是否有完整、可显示的 Live2D 模型，不会生成模型清单或修改文件。"
+          description="检查 Cubism 2.1 与 Cubism 3/4/5（C3+）模型的本体、纹理和对应运行时"
           onClose={requestLessonClose}
           status={{ label: '正在检查', tone: 'checking' }}
         />
@@ -1307,6 +1412,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
           action={externalLibraryPaths.length > 0
             ? { label: '重新检查', onClick: () => void scanAssetSources() }
             : undefined}
+          help={{ label: '如何准备素材', content: assetHelpContent }}
           padding={7}
         />
       )}
@@ -1322,36 +1428,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
       )}
 
       {!exitConfirmationOpen && phase === 'choose-layout' && (
-        <LessonDialog
-          eyebrow={`第 2 / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步 · 选择工作台布局`}
-          title="选择你喜欢的工作台布局"
-          description="两种布局都能完成本课。选择会立即保存，以后也可以在“全局设置 → 基础体验 → 工作区布局”中切换。"
-          onClose={requestLessonClose}
-        >
-          <fieldset className="fl-layout-choices" aria-label="工作台布局模式">
-            {([
-              { value: 'tracks', label: '轨道编辑优先', description: '底部轨道占满宽度，左侧管理角色与剧本大纲，右侧编辑选中语句的属性。' },
-              { value: 'list', label: '剧本动作优先', description: '右侧剧本动作列表占满高度，展开语句即可编辑属性，适合逐句编排故事。' },
-            ] as const).map((layout) => (
-              <label key={layout.value} className="fl-layout-choice">
-                <input
-                  type="radio"
-                  name="first-lesson-layout"
-                  value={layout.value}
-                  checked={settings.workbenchTimelineLayoutMode === layout.value}
-                  onChange={() => setSetting('workbenchTimelineLayoutMode', layout.value)}
-                />
-                <span>
-                  <strong>{layout.label}</strong>
-                  <span>{layout.description}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
-          <button type="button" className="btn btn--primary" onClick={enterGuide}>
-            使用此布局，继续教程
-          </button>
-        </LessonDialog>
+        <LayoutSelectionDialog onClose={requestLessonClose} onContinue={enterGuide} />
       )}
 
       {!exitConfirmationOpen && phase === 'error' && (
@@ -1368,6 +1445,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
       {!exitConfirmationOpen && phase === 'guiding' && guidePresentation && guideTargetSelector && (
         <SpotlightOverlay
           targetSelector={guideTargetSelector}
+          fallbackTargetSelector={insertionMenuStep ? '[data-testid="timeline-blank-insert-menu"]' : undefined}
           title={guidePresentation.title}
           description={guidePresentation.description}
           stepLabel={`第 ${guidePresentation.step + 1} / ${FIRST_LESSON_GUIDE_TOTAL_STEPS} 步`}
