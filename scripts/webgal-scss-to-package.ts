@@ -18,7 +18,7 @@
  * The conversion itself lives in `src/services/import/webgal/` and is pure, so
  * the in-app importer can reuse it without shelling out.
  */
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseBlocks, urlBasename } from '../src/services/import/webgal/WebGalScssSyntax';
 import { extractWebGalTextBoxTheme } from '../src/services/import/webgal/WebGalTextboxScssTranslator';
@@ -195,10 +195,33 @@ async function resolveFont(root: string, enabled: boolean): Promise<WebGalTempla
     // WebGAL also ships a pre-compressed `.gz` copy for its own transfer path;
     // the editor loads the font directly, so skip it.
     if (/\.gz$/i.test(url)) continue;
+    // `template.json` is data, not a path: a `url` of `../../…`, an absolute
+    // path or a symlink pointing outside would copy an unrelated local file
+    // into the exported package. Resolve it, then confirm the *real* path is
+    // still inside the template directory.
     const sourcePath = path.resolve(root, url);
-    if (await exists(sourcePath)) return { family, sourcePath };
+    if (await exists(sourcePath)) {
+      const [insideTemplate, realTemplateRoot, realSourcePath] = await Promise.all([
+        isInside(root, sourcePath),
+        realpath(root),
+        realpath(sourcePath),
+      ]);
+      if (!insideTemplate || !isInside(realTemplateRoot, realSourcePath)) {
+        throw new Error(
+          `模板字体指向模板目录之外的文件：${url}\n`
+          + '为避免把本地文件打包进模板包，已拒绝导入。',
+        );
+      }
+      return { family, sourcePath };
+    }
   }
   return null;
+}
+
+/** Whether `candidate` resolves to something inside `root`, path-segment wise. */
+function isInside(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 /** Read the `::after` ornaments the theme references, so they can be inlined. */
@@ -231,10 +254,14 @@ async function assertWritableTarget(outDir: string, force: boolean): Promise<voi
   const current = await stat(outDir);
   if (!current.isDirectory()) throw new Error(`Output path exists and is not a directory: ${outDir}`);
   if (force) return;
-  const manifest = path.join(outDir, 'manifest.v2.json');
-  if (await exists(manifest)) {
+  // `--force` is documented as "write into a non-empty directory", so the
+  // default has to mean the opposite: refuse anything that is not empty.
+  // Checking only for `manifest.v2.json` let a directory holding unrelated files
+  // through, and the writer would then overwrite whatever it collided with.
+  const entries = await readdir(outDir);
+  if (entries.length > 0) {
     throw new Error(
-      `Output directory already holds a package: ${outDir}\n`
+      `输出目录不为空（${entries.slice(0, 3).join('、')}${entries.length > 3 ? ' 等' : ''}）：${outDir}\n`
       + 'Pass --force to overwrite its files, or choose another --out directory.',
     );
   }

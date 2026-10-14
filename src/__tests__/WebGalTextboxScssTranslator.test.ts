@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { translateWebGalTextboxScss } from '../services/import/webgal/WebGalTextboxScssTranslator';
+import { buildWebGalScssAssetTable } from '../services/import/webgal/WebGalTextboxScssAssets';
 
 /**
  * A synthetic template exercising every branch the converter cares about:
@@ -57,7 +58,10 @@ describe('translateWebGalTextboxScss', () => {
       // `left: 120 / width: 1740 / height: 300` becomes these values.
       textbox: {
         image: 'ui/dialogue/webgal/textbox.svg',
-        nineSlice: [5, 5, 48, 37],
+        // `.TextBox_Background { border-radius: 24px }` is the panel the artwork is
+        // drawn from: 24 → 18 stage px → 9 once the 0.5 scale is folded in.
+        // The nameplate rule alone declares no radius, which read as 0.
+        nineSlice: [14, 14, 48, 37],
         x: 525,
         y: 866,
         width: 870,
@@ -66,7 +70,10 @@ describe('translateWebGalTextboxScss', () => {
       },
       namebox: {
         image: 'ui/dialogue/webgal/namebox.svg',
-        nineSlice: [4, 19, 4, 19],
+        // `.TextBox_ShowName_Background { border-radius: 9999px }` is a pill, so
+        // the radius is half the 57px plate — not the 0 the nameplate rule
+        // alone would have produced.
+        nineSlice: [28, 19, 28, 19],
         x: 534,
         y: 839,
         width: 300,
@@ -116,8 +123,10 @@ describe('translateWebGalTextboxScss', () => {
     // The artwork canvas matches what the engine draws; the textbox reserves the
     // downward box-shadow so it is not clipped.
     expect(assetGeom).toEqual({
-      textbox: { width: 870, height: 116, nineSlice: [5, 5, 48, 37] },
-      namebox: { width: 300, height: 57, nineSlice: [4, 19, 4, 19] },
+      // Both radii come from the background layers: 24px on the textbox, a
+      // 9999px pill on the nameplate (clamped to half its 57px height).
+      textbox: { width: 870, height: 116, nineSlice: [14, 14, 48, 37] },
+      namebox: { width: 300, height: 57, nineSlice: [28, 19, 28, 19] },
     });
   });
 
@@ -256,6 +265,45 @@ describe('translateWebGalTextboxScss', () => {
     expect(style.params.textbox!.x).toBe(90);
     expect(style.params.textbox!.width).toBe(1920 - 90 * 2);
     expect(style.params.textbox!.height).toBe(225);
+  });
+
+  it('lets the nested rule win over the plain one', () => {
+    // `.text` inherits 40px from `.TextBox_main`, and 200% of that is 80 WebGAL
+    // px → 60 stage px. Reading only the plain `.text` gave 100% of 40px = 30.
+    const nested = `.TextBox_main { font-size:40px; .text { font-size:200%; } }
+.text { font-size:100%; }
+.outer { }
+.inner { }
+.outerName { }
+.innerName { }
+`;
+    const { style } = translateWebGalTextboxScss(nested, { sourceName: 'textbox.scss' });
+    expect(style.params.text!.fontSize).toBe(60);
+  });
+
+  it('reads the border radius the background layers declare', () => {
+    // The panels are drawn from the background layer, so its radius is the one
+    // the user sees; reading only `.TextBox_main` produced square corners.
+    const rounded = `.TextBox_main { left:120px; right:120px; bottom:60px; height:300px; font-size:40px; }
+.TextBox_Background { border-radius:24px; }
+.TextBox_ShowName_Background { border-radius:9999px; }
+.text { }
+.outer { }
+.inner { }
+.outerName { }
+.innerName { }
+`;
+    const { theme, style } = translateWebGalTextboxScss(rounded, { sourceName: 'textbox.scss' });
+    // 24px on the WebGAL stage is 18 stage px; 9999px is clamped to a pill.
+    expect(theme.textbox.radius).toBe(18);
+    expect(theme.namebox.radius).toBeGreaterThan(0);
+    const table = buildWebGalScssAssetTable(theme, {
+      textbox: { width: 1600, height: 400 }, namebox: { width: 600, height: 200 },
+    }, null);
+    expect(table['wg-textbox'].svg).toContain('rx="18"');
+    // A pill resolves to half the panel height rather than the authored 9999px.
+    expect(table['wg-namebox'].svg).toMatch(/rx="[1-9]/);
+    void style;
   });
 
   it('resolves layout percentages against the containing block', () => {

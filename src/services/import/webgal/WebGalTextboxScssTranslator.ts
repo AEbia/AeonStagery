@@ -166,7 +166,7 @@ export function extractWebGalTextBoxTheme(blocks: ScssBlocks): WebGalTextBoxThem
   const textbox: WebGalPanelTheme = {
     fill: parsePaint(textboxFillRaw) || { kind: 'solid', color: '#00000000' },
     border: parseBorder(pickDecl(bg, ['border']) || pickDecl(main, ['border']), base),
-    radius: firstLength(declOf(main, 'borderradius'), base) || 0,
+    radius: firstLength(pickDecl(bg, ['borderradius']) || declOf(main, 'borderradius'), base) || 0,
     shadow: parseBoxShadow(pickDecl(bg, ['boxshadow']) || pickDecl(main, ['boxshadow']), base),
     deco: null,
   };
@@ -200,7 +200,7 @@ export function extractWebGalTextBoxTheme(blocks: ScssBlocks): WebGalTextBoxThem
       : (parsePaint(nameFillRaw || pickDecl(name, ['background', 'backgroundcolor', 'backgroundimage']))
         || { kind: 'solid', color: '#FFFFFF' }),
     border: parseBorder(pickDecl(nameBg, ['border']) || pickDecl(name, ['border']), nameBase),
-    radius: firstLength(declOf(name, 'borderradius'), nameBase) || 0,
+    radius: firstLength(pickDecl(nameBg, ['borderradius']) || declOf(name, 'borderradius'), nameBase) || 0,
     shadow: parseBoxShadow(pickDecl(nameBg, ['boxshadow']) || pickDecl(name, ['boxshadow']), nameBase),
     deco: null,
   };

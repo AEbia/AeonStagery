@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   alphaOf,
+  lookup,
   parseBlocks,
   parseBoxShadow,
   parseBorder,
@@ -72,6 +73,25 @@ describe('WebGalScssSyntax', () => {
     // Only the bare `url(` token is protected, so a function that merely ends in
     // `url` still gets its trailing comment removed.
     expect(stripComments('.a{filter:myurl(//x)}')).not.toContain('//');
+  });
+
+  it('merges every rule that applies instead of returning the first hit', () => {
+    // A plain `.text` used to short-circuit the lookup, so the more specific
+    // nested rule was never consulted.
+    const blocks = parseBlocks([
+      '.TextBox_main { font-size:40px; .text { font-size:200%; } }',
+      '.text { font-size:100%; }',
+    ].join('\n'));
+    expect(lookup(blocks, '.text').fontsize).toBe('200%');
+    // A property only the outer rule declares still comes through.
+    const both = parseBlocks([
+      '.TextBox_main { font-size:40px; .text { color:red; } }',
+      '.text { font-size:100%; left:5px; }',
+    ].join('\n'));
+    const merged = lookup(both, '.text');
+    expect(merged.fontsize).toBe('100%');
+    expect(merged.color).toBe('red');
+    expect(merged.left).toBe('5px');
   });
 
   it('resolves layout percentages against the containing block, not the font size', () => {

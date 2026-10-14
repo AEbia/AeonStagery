@@ -209,6 +209,21 @@ async function convertTemplate(input: WebGalScssInspectInput & {
   return { build, sourceHash: scssContentHash(scss), sourceName: path.basename(stylesheetPath) };
 }
 
+/**
+ * Manifest keys that describe a capability this import does not reproduce.
+ *
+ * A replace rewrites the whole directory, so anything the new manifest will not
+ * declare disappears — camera presets, voice profiles and the rest are authored
+ * by hand or by other importers and have no equivalent here. `dialogueStyles` is
+ * what this import writes; `assets` only names the root the artwork lives in,
+ * and the generated files are compared on disk instead.
+ */
+const IMPORTED_CAPABILITIES = new Set(['dialogueStyles', 'assets', 'template', 'manifestSchemaVersion', 'v']);
+
+function unimportedCapabilities(manifest: Record<string, any>): string[] {
+  return Object.keys(manifest).filter((key) => !IMPORTED_CAPABILITIES.has(key));
+}
+
 /** Read what is already installed, so conflicts and free names can be reported. */
 async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPackageRecord[]> {
   const records: InstalledPackageRecord[] = [];
@@ -247,9 +262,10 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
       // a replace has to keep the ids the installed styles were published under.
       styleIds,
       // Only a package that publishes exactly one style can be rebuilt from a
-      // single WebGAL stylesheet. Anything else is a valid package this import
-      // must not overwrite.
-      replaceable: styleIds.length <= 1,
+      // single WebGAL stylesheet — and only when it declares nothing else, since
+      // a replace replaces the whole directory. Anything richer is a valid
+      // package this import must not overwrite.
+      replaceable: styleIds.length <= 1 && unimportedCapabilities(manifest).length === 0,
       // The sidecar records the original stylesheet hash; without it a package
       // can still be matched on the parameters it translates to.
       record: {
@@ -370,14 +386,17 @@ export async function installWebGalTemplatePackage(
   // The style list de-duplicates by style id across packages, keeping the first
   // one it sees. A second package publishing an id that is already taken would
   // install successfully and then be invisible in the dropdown, so a fresh
-  // import gets the same `-2` treatment the package id already gets.
+  // import gets the same `-2` treatment the package id already gets — including
+  // the default, which is the package id and can just as easily collide with a
+  // style id some other package chose explicitly.
+  const installedStyleIds = installed.flatMap((entry) => entry.styleIds);
   const styleId = requestedStyleId
     ? replaceTarget
       ? requestedStyleId
-      : uniquePackageName(requestedStyleId, installed.flatMap((entry) => entry.styleIds))
+      : uniquePackageName(requestedStyleId, installedStyleIds)
     : replaceTarget
       ? replaceTarget.styleIds[0] ?? packageId
-      : packageId;
+      : uniquePackageName(packageId, installedStyleIds);
 
   const { build, sourceHash, sourceName } = await convertTemplate({
     ...input,
@@ -387,6 +406,33 @@ export async function installWebGalTemplatePackage(
     styleId,
     styleName: String(input.styleName ?? '').trim() || packageName,
   });
+
+  // The manifest is only a declaration; the directory is what actually gets
+  // replaced. A package may carry files this import cannot regenerate — extra
+  // artwork, a hand-edited asset, anything — and replacing it would silently
+  // take them with it, so refuse while the files are still there.
+  if (replaceTarget) {
+    const expected = new Set(build.files.map((file) => file.relativePath));
+    expected.add(WEBGAL_IMPORT_RECORD_FILE);
+    const stray: string[] = [];
+    const walk = async (relative: string): Promise<void> => {
+      for (const item of await fs.promises.readdir(
+        path.join(replaceTarget.packageRoot, relative),
+        { withFileTypes: true },
+      )) {
+        const child = relative ? `${relative}/${item.name}` : item.name;
+        if (item.isDirectory()) await walk(child);
+        else if (!expected.has(child)) stray.push(child);
+      }
+    };
+    await walk('');
+    if (stray.length > 0) {
+      throw new Error(
+        `「${replaceTarget.packageName}」含有本次导入无法重建的文件（${stray.slice(0, 3).join('、')}`
+        + `${stray.length > 3 ? ' 等' : ''}），整包覆盖会删除它们。请改为新增一个模板包。`,
+      );
+    }
+  }
 
   // Replace into the directory the package was actually found in. Deriving it
   // from the package id instead would create a second directory — and a second

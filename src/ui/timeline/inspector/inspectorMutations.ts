@@ -2,6 +2,7 @@
 // the inspector passes down through InspectorParamContext and the panels.
 // Move-only extraction from ActionInspector's component body.
 import type { useApp } from '../../context/AppContext';
+import { DEFAULT_PROJECT_TEMPLATE_CONFIGURATION } from '../../../api/types/project';
 import { buildAvailableDialogueStyles } from '../../templates/TemplateCapabilityConfig';
 import { showToast } from '../../Toast';
 import type { ActionInspectorProps } from '../ActionInspector';
@@ -168,19 +169,31 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
   const templatePackageCatalog = appContext.services?.templatePackages;
 
   /**
-   * A freshly installed package is not in the project's enabled list yet, and
-   * the dialogue style list is filtered by it — so without this step the import
-   * reports success while its style stays missing from the dropdown until the
-   * user enables the package in the project template settings by hand.
+   * Make an imported package usable from the current project.
+   *
+   * The dialogue style list is filtered by `enabledTemplateIds`, so a package
+   * that is merely installed is invisible: the import reports success while its
+   * style stays missing from the dropdown until the user enables it by hand.
+   *
+   * `metadata.templates` is optional — the project type and its codec both allow
+   * it to be absent, and other surfaces supply this default — so a project
+   * without one is filled in rather than skipped. A replace of an already
+   * enabled package still goes through the save, because that is what
+   * re-materialises the project's default `dialoguePresentation` snapshot: the
+   * style was just rewritten on disk, and leaving the snapshot alone would keep
+   * new dialogues on the old artwork.
    */
   const enableImportedPackage = async (packageId: string): Promise<void> => {
-    const currentTemplates = projectWorkspace?.getCurrentProject()?.metadata.templates;
-    if (!projectWorkspace || !currentTemplates) return;
-    if ((currentTemplates.enabledTemplateIds ?? []).includes(packageId)) return;
+    const project = projectWorkspace?.getCurrentProject();
+    if (!projectWorkspace || !project) return;
+    const currentTemplates = project.metadata.templates ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION;
+    const enabled = (currentTemplates.enabledTemplateIds ?? []).includes(packageId);
     const availableOrder = (appContext.services?.templatePackages?.getSummaries() ?? [])
       .map((entry) => entry.id);
-    const enabledTemplateIds = [...(currentTemplates.enabledTemplateIds ?? []), packageId]
-      .sort((left, right) => availableOrder.indexOf(left) - availableOrder.indexOf(right));
+    const enabledTemplateIds = enabled
+      ? [...(currentTemplates.enabledTemplateIds ?? [])]
+      : [...(currentTemplates.enabledTemplateIds ?? []), packageId]
+        .sort((left, right) => availableOrder.indexOf(left) - availableOrder.indexOf(right));
     const result = await projectWorkspace.updateTemplateConfiguration({
       ...currentTemplates,
       enabledTemplateIds,

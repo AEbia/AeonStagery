@@ -353,23 +353,45 @@ export function parseDecls(body: string): ScssDeclarations {
 }
 
 /**
+ * How strongly a selector targets an element, on the usual CSS weighting.
+ *
+ * Only the parts that can appear in these stylesheets are counted, which keeps
+ * the comparison honest for the one thing it decides: when both `.text` and
+ * `.TextBox_main .text` apply, the nested rule is the more specific one and has
+ * to win.
+ */
+function selectorSpecificity(selector: string): number {
+  let score = 0;
+  for (const part of selector.trim().split(/\s+/)) {
+    score += (part.match(/#[\w-]+/g) ?? []).length * 100;
+    score += (part.match(/(\.[\w-]+|\[[^\]]+\]|:[\w-]+(\([^)]*\))?)/g) ?? []).length * 10;
+    if (/^[a-zA-Z][\w-]*$/.test(part)) score += 1;
+  }
+  return score;
+}
+
+/**
  * Look a selector up, tolerating the flattening that nesting introduces
- * (`.text` → `.TextBox_main .text`). The longest matching rule wins.
+ * (`.text` → `.TextBox_main .text`).
+ *
+ * Every rule that can apply is collected — the bare selector and any descendant
+ * rule that ends in it — and merged from the least to the most specific, so a
+ * nested rule overrides the properties it declares instead of being ignored
+ * because a plain rule happened to exist. An earlier `.text { font-size: 100% }`
+ * no longer hides `.TextBox_main .text { font-size: 200% }`.
  */
 export function lookup(blocks: ScssBlocks, selector: string): ScssDeclarations {
-  if (blocks[selector]) return parseDecls(blocks[selector]);
-  const suffix = ' ' + selector;
-  let best: string | null = null;
-  let bestLen = -1;
-  for (const key of Object.keys(blocks)) {
-    if (key.length > suffix.length - 1 && key.slice(-suffix.length) === suffix) {
-      if (blocks[key].length > bestLen) {
-        best = key;
-        bestLen = blocks[key].length;
-      }
-    }
-  }
-  return best ? parseDecls(blocks[best]) : {};
+  const suffix = ` ${selector}`;
+  const matching = Object.keys(blocks)
+    .filter((key) => key === selector || key.endsWith(suffix))
+    .sort((left, right) => (
+      selectorSpecificity(left) - selectorSpecificity(right)
+      || (left < right ? -1 : left > right ? 1 : 0)
+    ));
+  if (matching.length === 0) return {};
+  let merged = blocks[matching[0]];
+  for (const key of matching.slice(1)) merged = mergeBodies(merged, blocks[key]);
+  return parseDecls(merged);
 }
 
 /** First non-empty value among `names`, or `null`. */

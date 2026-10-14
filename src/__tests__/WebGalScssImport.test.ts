@@ -320,6 +320,85 @@ describe('WebGAL SCSS template import', () => {
     await expect(stat(path.join(multi.dir, 'assets', 'extra.svg'))).resolves.toBeTruthy();
   });
 
+  it('refuses to replace a package that declares other capabilities', async () => {
+    const root = await makeRoot('aeonstagery-webgal-capabilities-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const imported = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    const source = JSON.parse(
+      await readFile(path.join(templatesRoot, imported.id, 'manifest.v2.json'), 'utf8'),
+    ) as { dialogueStyles: { params: unknown }[] };
+    await rm(path.join(templatesRoot, imported.id), { recursive: true, force: true });
+
+    // One dialogue style — which the style-count check accepts — plus a camera
+    // preset the import cannot reproduce.
+    const dir = path.join(templatesRoot, 'user.capabilities');
+    await mkdir(path.join(dir, 'assets'), { recursive: true });
+    await writeFile(path.join(dir, 'manifest.v2.json'), JSON.stringify({
+      template: { id: 'user.capabilities', name: 'Capability Pack', version: '1.0.0' },
+      dialogueStyles: [{ id: 'cap-a', name: 'A', params: source.dialogueStyles[0].params }],
+      cameraPresets: [{ id: 'cam-1', name: 'Wide' }],
+    }), 'utf8');
+    await writeFile(path.join(dir, 'assets', 'extra.svg'), '<svg viewBox="0 0 1 1"/>', 'utf8');
+
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(inspection.conflicts.find((item) => item.packageId === 'user.capabilities')?.replaceable)
+      .toBe(false);
+
+    await expect(installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: 'user.capabilities',
+    })).rejects.toThrow(/样式|文件|预设/);
+
+    // The whole point: nothing was lost.
+    const after = JSON.parse(
+      await readFile(path.join(dir, 'manifest.v2.json'), 'utf8'),
+    ) as { dialogueStyles: { id: string }[]; cameraPresets: unknown[] };
+    expect(after.dialogueStyles.map((style) => style.id)).toEqual(['cap-a']);
+    expect(after.cameraPresets).toHaveLength(1);
+    await expect(stat(path.join(dir, 'assets', 'extra.svg'))).resolves.toBeTruthy();
+  });
+
+  it('refuses to replace a package that holds files the import cannot rebuild', async () => {
+    const root = await makeRoot('aeonstagery-webgal-stray-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    const imported = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+
+    // The manifest declares nothing extra, so the capability check passes; the
+    // file on disk is what makes the replace destructive.
+    await writeFile(path.join(templatesRoot, imported.id, 'assets', 'hand-made.svg'), '<svg/>', 'utf8');
+
+    await expect(installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: imported.id,
+    })).rejects.toThrow(/无法重建/);
+    await expect(stat(path.join(templatesRoot, imported.id, 'assets', 'hand-made.svg')))
+      .resolves.toBeTruthy();
+  });
+
+  it('de-duplicates the default style id against ids other packages chose', async () => {
+    const root = await makeRoot('aeonstagery-webgal-defaultstyleid-');
+    const templatesRoot = path.join(root, 'library');
+    const first = path.join(root, 'a');
+    await writeTemplate(first, { name: 'Second' });
+    const second = path.join(root, 'b');
+    await writeTemplate(second, { name: 'Second' });
+
+    // An explicit style id takes the id a later default import would use.
+    const a = await installWebGalTemplatePackage({
+      templateRoot: first, templatesRoot, styleId: 'webgal-scss.Second',
+    });
+    const b = await installWebGalTemplatePackage({ templateRoot: second, templatesRoot });
+
+    const ids = async (id: string) => (JSON.parse(
+      await readFile(path.join(templatesRoot, id, 'manifest.v2.json'), 'utf8'),
+    ) as { dialogueStyles: { id: string }[] }).dialogueStyles.map((style) => style.id);
+
+    expect(await ids(a.id)).toEqual(['webgal-scss.Second']);
+    expect(await ids(b.id)).toEqual(['webgal-scss.Second-2']);
+  });
+
   it('keeps a requested style id unique across packages', async () => {
     const root = await makeRoot('aeonstagery-webgal-styleid-dup-');
     const templateRoot = path.join(root, 'template');

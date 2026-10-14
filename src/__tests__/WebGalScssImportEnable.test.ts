@@ -19,11 +19,14 @@ interface HarnessOptions {
   updateResult?: { success: boolean; error?: string };
   summaries?: { id: string; dialogueStyles?: unknown[] }[];
   hasProject?: boolean;
+  /** Project exists but carries no  at all. */
+  hasTemplates?: boolean;
 }
 
 function harness(options: HarnessOptions = {}) {
   const {
     enabledTemplateIds = ['aeonstagery.default'],
+    hasTemplates = true,
     updateResult = { success: true },
     summaries = [{ id: 'aeonstagery.default' }, { id: IMPORTED.id }],
     hasProject = true,
@@ -39,7 +42,7 @@ function harness(options: HarnessOptions = {}) {
     services: {
       projectWorkspace: {
         getCurrentProject: () => (hasProject
-          ? { metadata: { templates: { enabledTemplateIds } } }
+          ? { metadata: hasTemplates ? { templates: { enabledTemplateIds } } : {} }
           : undefined),
         updateTemplateConfiguration,
         prepareDialogueStyle: vi.fn(async () => ({})),
@@ -91,17 +94,31 @@ describe('enableImportedPackage', () => {
     expect(written?.enabledTemplateIds).toEqual(['aeonstagery.default', IMPORTED.id]);
   });
 
-  it('leaves the configuration alone when the package is already enabled', async () => {
-    const ctx = harness({
-      enabledTemplateIds: [IMPORTED.id],
-      summaries: [{ id: IMPORTED.id }, { id: 'aeonstagery.default' }],
-    });
+  it('re-saves an already enabled package so the default style is re-materialised', async () => {
+    const ctx = harness({ enabledTemplateIds: [IMPORTED.id] });
     const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
     ctx.restore();
 
-    // Already enabled: no write at all.
+    // The package was just rewritten on disk. Leaving the enabled list alone is
+    // not enough: saving is what re-materialises the project's default
+    // `dialoguePresentation`, so new dialogues do not keep the old artwork.
     expect(result.ok).toBe(true);
-    expect(ctx.updateTemplateConfiguration).not.toHaveBeenCalled();
+    expect(ctx.updateTemplateConfiguration).toHaveBeenCalledTimes(1);
+    expect(ctx.updateTemplateConfiguration.mock.calls[0]?.[0].enabledTemplateIds)
+      .toEqual([IMPORTED.id]);
+  });
+
+  it('fills in a default template configuration when the project has none', async () => {
+    const ctx = harness({ hasTemplates: false });
+    const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });
+    ctx.restore();
+
+    // `metadata.templates` is optional, so the import must not silently skip the
+    // enable step — the style would be installed but never offered.
+    expect(result.ok).toBe(true);
+    expect(ctx.updateTemplateConfiguration).toHaveBeenCalledTimes(1);
+    const written = ctx.updateTemplateConfiguration.mock.calls[0]?.[0];
+    expect(written?.enabledTemplateIds).toEqual(['aeonstagery.default', IMPORTED.id]);
   });
 
   it('surfaces a failed project write without failing the import', async () => {
