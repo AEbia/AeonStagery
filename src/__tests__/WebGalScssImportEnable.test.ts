@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectTemplateConfiguration } from '../api/types/project';
 import type { useApp } from '../ui/context/AppContext';
 import { createInspectorMutations } from '../ui/timeline/inspector/inspectorMutations';
+import { buildAvailableDialogueStyles } from '../ui/templates/TemplateCapabilityConfig';
+import type { TemplatePackageSummary } from '../services/template-package/TemplatePackageCatalog';
 
 const showToast = vi.fn();
 vi.mock('../ui/Toast', () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
@@ -80,6 +82,26 @@ afterEach(() => {
 });
 
 describe('enableImportedPackage', () => {
+  it('keeps existing template precedence when enabling a new package', async () => {
+    const summaries: TemplatePackageSummary[] = ['A', 'B', IMPORTED.id].map((id) => ({
+      id, name: id, version: '1.0.0', scope: 'user',
+      dialogueStyles: id === IMPORTED.id ? [] : [{ id: 'shared', name: id, renderer: 'image-dialogue-v1' }],
+    }));
+    const enabledTemplateIds = ['B', 'A'];
+    const before = buildAvailableDialogueStyles(summaries, enabledTemplateIds);
+    const ctx = harness({ enabledTemplateIds, summaries });
+    try {
+      const result = await ctx.mutations.webGalStyleImport.install({ templateRoot: '/tmp/template' });
+      expect(result.ok).toBe(true);
+      const written = ctx.updateTemplateConfiguration.mock.calls[0]?.[0];
+      expect(written?.enabledTemplateIds).toEqual(['B', 'A', IMPORTED.id]);
+      expect(buildAvailableDialogueStyles(summaries, written?.enabledTemplateIds ?? []))
+        .toEqual(before);
+    } finally {
+      ctx.restore();
+    }
+  });
+
   it('enables the installed package so its style becomes selectable', async () => {
     const ctx = harness();
     const result = await ctx.mutations.webGalStyleImport!.install({ templateRoot: '/tmp/template' });

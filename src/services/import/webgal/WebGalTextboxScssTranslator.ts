@@ -31,6 +31,7 @@ import {
   declOf,
   firstLength,
   hasVisibilityHidden,
+  isImportantDeclaration,
   lookup,
   parseBlocks,
   parseBorder,
@@ -528,7 +529,7 @@ export function translateWebGalTextboxScss(
   if (mainFontSize == null) mainFontSize = ROOT_FONT_PX;
   const nameFontSizeRaw = declOf(name, 'fontsize');
   let nameSize: number | null;
-  if (nameFontSizeRaw != null && /!\s*important/i.test(String(nameFontSizeRaw))) {
+  if (nameFontSizeRaw != null && isImportantDeclaration(name, 'fontsize')) {
     nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
   } else if (mainFontSizeDeclared) {
     nameSize = rnd(mainFontSize * 2);

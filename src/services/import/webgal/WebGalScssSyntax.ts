@@ -71,6 +71,10 @@ const sourceRules = new WeakMap<ScssBlocks, Array<{ selector: string; body: stri
 /** A single declaration block, normalised to `propertysansdashes` keys. */
 export type ScssDeclarations = Record<string, string>;
 
+// Values are ready for conversion; priority stays separate for comparisons
+// against WebGAL's inline nameplate font size.
+const importantProperties = new WeakMap<ScssDeclarations, Set<string>>();
+
 /** Expanded `padding` / `margin` shorthand. */
 export interface BoxSides {
   t: number;
@@ -221,6 +225,12 @@ function isImportant(declaration: string): boolean {
   return /!\s*important\s*$/i.test(declaration);
 }
 
+/** Whether the winning declaration can override a normal inline style. */
+export function isImportantDeclaration(declarations: ScssDeclarations, property: string): boolean {
+  return importantProperties.get(declarations)?.has(property)
+    ?? isImportant(declarations[property] ?? '');
+}
+
 /**
  * Merge two declaration bodies the way the cascade does: a later rule only
  * overrides the properties it actually declares, and an earlier `!important`
@@ -348,14 +358,19 @@ export function parseBlocks(css: string): ScssBlocks {
 export function parseDecls(body: string): ScssDeclarations {
   const d: ScssDeclarations = {};
   if (!body) return d;
-  for (const rawLine of body.split(';')) {
+  const important = new Set<string>();
+  for (const rawLine of mergeBodies('', body).split(';')) {
     const line = rawLine.replace(/\/\*[\s\S]*?\*\//g, '').trim();
     const idx = line.indexOf(':');
     if (idx < 0) continue;
     const key = line.slice(0, idx).trim().replace(/^-+/, '').toLowerCase().replace(/-/g, '');
-    const val = line.slice(idx + 1).trim();
+    const rawValue = line.slice(idx + 1).trim();
+    const val = rawValue.replace(/!\s*important\s*$/i, '').trim();
+    if (isImportant(rawValue)) important.add(key);
+    else important.delete(key);
     if (val) d[key] = val;
   }
+  importantProperties.set(d, important);
   return d;
 }
 
@@ -459,8 +474,10 @@ export function resolveLength(
   if (unit === '%' && percentBasis != null && percentBasis > 0) {
     return rnd((percentBasis * val) / 100);
   }
-  const relative = unit === 'em' || unit === 'rem' || unit === '%';
-  if (unit === 'em' || unit === 'rem') val *= base;
+  // `rem` always uses the unscaled root size, regardless of the parent's size.
+  const relative = unit === 'em' || unit === '%';
+  if (unit === 'rem') val *= ROOT_FONT_PX;
+  else if (unit === 'em') val *= base;
   else if (unit === '%') val = (base * val) / 100;
   else if (unit === 'pt') val *= 96 / 72;
   return rnd(val * (relative && baseIsScaled ? 1 : STAGE_SCALE));
@@ -493,7 +510,8 @@ export function resolveWidthLike(raw: unknown, fontBase: number, containerPx: nu
   const v = parseFloat(m[1]);
   const u = m[2] || 'px';
   if (u === '%') return rnd((containerPx * v) / 100);
-  if (u === 'em' || u === 'rem') return rnd(v * fontBase);
+  if (u === 'rem') return rnd(v * ROOT_FONT_PX * STAGE_SCALE);
+  if (u === 'em') return rnd(v * fontBase);
   if (u === 'pt') return rnd((v * 96) / 72 * STAGE_SCALE);
   return rnd(v * STAGE_SCALE);
 }

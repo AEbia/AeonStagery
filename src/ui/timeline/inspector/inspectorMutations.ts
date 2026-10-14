@@ -188,12 +188,11 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     if (!projectWorkspace || !project) return;
     const currentTemplates = project.metadata.templates ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION;
     const enabled = (currentTemplates.enabledTemplateIds ?? []).includes(packageId);
-    const availableOrder = (appContext.services?.templatePackages?.getSummaries() ?? [])
-      .map((entry) => entry.id);
+    // Existing order determines which package wins when resource ids overlap.
+    // Enabling a new package must preserve the project's authored precedence.
     const enabledTemplateIds = enabled
       ? [...(currentTemplates.enabledTemplateIds ?? [])]
-      : [...(currentTemplates.enabledTemplateIds ?? []), packageId]
-        .sort((left, right) => availableOrder.indexOf(left) - availableOrder.indexOf(right));
+      : [...(currentTemplates.enabledTemplateIds ?? []), packageId];
     const result = await projectWorkspace.updateTemplateConfiguration({
       ...currentTemplates,
       enabledTemplateIds,

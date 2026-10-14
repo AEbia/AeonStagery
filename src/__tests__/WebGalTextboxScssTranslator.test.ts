@@ -49,6 +49,35 @@ const FIXTURE = `
 `;
 
 describe('translateWebGalTextboxScss', () => {
+  it('converts important colors, alignment and font weights without falling back', () => {
+    const { style, theme } = translateWebGalTextboxScss(`
+      .TextBox_main {
+        font-size: 40px; color: black !important; background: red !important;
+        text-align: right !important; font-weight: 700 !important;
+      }
+      .TextBox_main { color: white; background: blue; text-align: left; font-weight: 400; }
+      .TextBox_showName { color: red !important; text-align: right !important; font-weight: 700 !important; }
+      .TextBox_showName { color: blue; text-align: center; font-weight: 400; }
+    `);
+    expect(style.params.text).toMatchObject({ color: '#000000', align: 'right', fontWeight: '700' });
+    expect(style.params.speaker).toMatchObject({ color: '#FF0000', align: 'right', fontWeight: '700' });
+    expect(theme.textbox.fill).toEqual({ kind: 'solid', color: '#FF0000FF' });
+  });
+
+  it('uses the root font size for rem typography and nameplate geometry', () => {
+    const { style } = translateWebGalTextboxScss(`
+      .TextBox_main { font-size: 40px; }
+      .text { font-size: 2rem; }
+      .TextBox_showName {
+        font-size: 1rem !important; height: 4rem; min-width: 10rem;
+        padding-left: 2rem; padding-right: 2rem;
+      }
+    `);
+    expect(style.params.text.fontSize).toBe(30);
+    expect(style.params.speaker).toMatchObject({ fontSize: 15, padding: [30, 0, 30, 0] });
+    expect(style.params.namebox).toMatchObject({ width: 150, minHeight: 60 });
+  });
+
   it('uses explicit body declarations before inherited parent values', () => {
     const { style } = translateWebGalTextboxScss(`
       .TextBox_main { font-size:40px; line-height:2 !important; text-align:right !important; font-family:Parent !important; }

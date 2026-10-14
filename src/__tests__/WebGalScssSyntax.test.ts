@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   alphaOf,
+  isImportantDeclaration,
   lookup,
   parseBlocks,
   parseBoxShadow,
@@ -18,6 +19,28 @@ import {
 } from '../services/import/webgal/WebGalScssSyntax';
 
 describe('WebGalScssSyntax', () => {
+  it('removes priority markers from values after selecting the winning declarations', () => {
+    const blocks = parseBlocks(`
+      .text { color: red !important; color: blue; text-align: right ! IMPORTANT; }
+      .TextBox_main .text { color: green; text-align: left; }
+    `);
+    const declarations = lookup(blocks, '.text');
+    expect(declarations).toMatchObject({ color: 'red', textalign: 'right' });
+    expect(isImportantDeclaration(declarations, 'color')).toBe(true);
+    expect(isImportantDeclaration(declarations, 'textalign')).toBe(true);
+    expect(lookup(parseBlocks('.text { color: red !important; color: blue; }'), '.text').color)
+      .toBe('red');
+  });
+
+  it('resolves rem against the root size independently of the font and container bases', () => {
+    expect(resolveLength('2rem', 40)).toBe(30);
+    expect(resolveLength('2rem', 30, true)).toBe(30);
+    expect(resolveLength('2rem', 30, true, 1920)).toBe(30);
+    expect(resolveLength('2em', 30, true)).toBe(60);
+    expect(resolveWidthLike('10rem', 60, 1600)).toBe(150);
+    expect(resolveWidthLike('10em', 60, 1600)).toBe(600);
+  });
+
   it.each([
     ['.TextBox_main > .text', '.TextBox_main .text'],
     ['.TextBox_main .text', '.TextBox_main > .text'],
