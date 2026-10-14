@@ -165,6 +165,29 @@ describe('WebGalAssetSourceReadiness', () => {
       code: 'model-format-unrecognized',
     });
   });
+
+  it('checks a selected Cubism 3+ model after asynchronous runtime readiness settles', async () => {
+    const fileAccess = createMemoryFileAccess({
+      'assets/figure/anon/anon.model3.json': JSON.stringify({
+        FileReferences: {
+          Moc: 'anon.moc3',
+          Textures: ['textures/body.png'],
+        },
+      }),
+      'assets/figure/anon/anon.moc3': 'moc3',
+      'assets/figure/anon/textures/body.png': 'png',
+    });
+
+    await expect(checkFirstLessonLive2DModelReadiness(
+      'assets/figure/anon/anon.model3.json',
+      fileAccess,
+      { isRuntimeFamilyAvailable: async (runtimeFamily) => runtimeFamily === 'cubism3-plus' },
+    )).resolves.toEqual({
+      status: 'found',
+      modelEntryPath: 'assets/figure/anon/anon.model3.json',
+      runtimeFamily: 'cubism3-plus',
+    });
+  });
 });
 
 function normalize(path: string): string {
