@@ -279,6 +279,9 @@ extends: ADR-0028
   `EyeBlink` 与目标眼睛 Parameter 曲线相乘，`LipSync` 与目标嘴部 Parameter 曲线
   相加；目标 Parameter 已有直接源曲线时，先按 Cubism SDK 规则组合，再生成一条
   自包含的最终 Parameter 轨道。
+  平滑组合按场景帧率采样，同时保留源分段边界；`stepped` 和 `inverseStepped`
+  的突变必须保留原始时间，不能被线性采样提前、延后或抹平。必要时以相邻浮点
+  时间点记录突变两侧值，并以保持分段连接，仍遵守精确时间唯一性契约。
 - Motion3 的 `Model Opacity` 与 `PartOpacity` 都属于直接透明度变化，转换时忽略，
   不生成 Parameter 轨道。
 - Expression 是位于 Motion 之上的独立覆盖/混合层。转换 Motion 时不采样当前

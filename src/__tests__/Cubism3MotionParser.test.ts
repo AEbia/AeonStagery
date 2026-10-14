@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCubism3MotionBuffer, parseCubism3MotionJson } from '../engine/live2d/cubism3MotionParser';
+import { evaluateCustomMotionTrack } from '../engine/live2d/customMotion';
+import { assertCanonicalCustomMotion } from '../services/semantic-scene/CustomMotionContract';
 
 function motion(overrides: Record<string, unknown> = {}) {
   return {
@@ -16,6 +18,54 @@ function motion(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Cubism 3 Motion3 parser', () => {
+  it.each([
+    { target: 'Parameter', id: 'ParamEyeLOpen', effect: 'EyeBlink', segment: 2 },
+    { target: 'Parameter', id: 'ParamEyeLOpen', effect: 'EyeBlink', segment: 3 },
+    { target: 'Model', id: 'EyeBlink', effect: 'EyeBlink', segment: 2 },
+    { target: 'Model', id: 'LipSync', effect: 'LipSync', segment: 3 },
+  ])('preserves off-frame jumps in $target $id segment $segment during effect expansion', ({ target, id, effect, segment }) => {
+    const parameterId = effect === 'EyeBlink' ? 'ParamEyeLOpen' : 'ParamMouthOpenY';
+    const segments = [0, 0.2, 0, 0.51, 0.2, segment, 0.73, 0.8, 0, 1, 0.8];
+    const source = motion({ Meta: { Duration: 1, FadeInTime: 0 }, Curves: target === 'Parameter'
+      ? [
+          { Target: 'Model', Id: effect, Segments: [0, 1, 0, 1, 1] },
+          { Target: target, Id: id, Segments: segments },
+        ]
+      : [{ Target: target, Id: id, Segments: segments }],
+    });
+    const expanded = parseCubism3MotionJson(source, {
+      fps: 30, eyeBlinkParameterIds: [parameterId], lipSyncParameterIds: [parameterId],
+    }).motion;
+    const reference = parseCubism3MotionJson(motion({ Meta: { Duration: 1 }, Curves: [
+      { Target: 'Parameter', Id: parameterId, Segments: segments },
+    ] })).motion.tracks[0];
+    assertCanonicalCustomMotion(expanded);
+    for (const time of [0.5, 0.51, 0.52, 0.72, 0.73, 0.74]) {
+      expect(evaluateCustomMotionTrack(expanded.tracks[0], time)).toBeCloseTo(evaluateCustomMotionTrack(reference, time)!, 8);
+    }
+  });
+
+  it('keeps an initial inverse-stepped effect jump at F0', () => {
+    const expanded = parseCubism3MotionJson(motion({ Meta: { Duration: 1 }, Curves: [
+      { Target: 'Model', Id: 'EyeBlink', Segments: [0, 0.2, 3, 1, 0.8] },
+    ] }), { fps: 30, eyeBlinkParameterIds: ['ParamEyeLOpen'] }).motion;
+    assertCanonicalCustomMotion(expanded);
+    expect(evaluateCustomMotionTrack(expanded.tracks[0], 0)).toBe(0.2);
+    expect(evaluateCustomMotionTrack(expanded.tracks[0], 0.001)).toBeCloseTo(0.8);
+  });
+
+  it('keeps smooth effects moving up to an off-frame parameter jump', () => {
+    const expanded = parseCubism3MotionJson(motion({ Meta: { Duration: 1 }, Curves: [
+      { Target: 'Model', Id: 'EyeBlink', Segments: [0, 1, 0, 1, 0.5] },
+      { Target: 'Parameter', Id: 'ParamEyeLOpen', Segments: [0, 0.2, 2, 0.51, 0.8, 0, 1, 0.8] },
+    ] }), { fps: 30, eyeBlinkParameterIds: ['ParamEyeLOpen'] }).motion;
+    assertCanonicalCustomMotion(expanded);
+    for (const time of [0.5, 0.509, 0.51, 0.52]) {
+      const expected = (time < 0.51 ? 0.2 : 0.8) * (1 - time / 2);
+      expect(evaluateCustomMotionTrack(expanded.tracks[0], time)).toBeCloseTo(expected, 8);
+    }
+  });
+
   it('converts linear segments and preserves motion metadata', () => {
     const result = parseCubism3MotionJson(motion());
     expect(result.motion.durationSeconds).toBe(2);

@@ -223,21 +223,70 @@ function expandModelEffects(
   const eyes = new Set(effects.has('EyeBlink') ? options.eyeBlinkParameterIds : []);
   const lips = new Set(effects.has('LipSync') ? options.lipSyncParameterIds : []);
   const affected = new Set([...eyes, ...lips]);
-  const times = Array.from({ length: Math.floor(duration * fps) + 1 }, (_, frame) => frame / fps);
-  if (times.at(-1)! < duration) times.push(duration);
+  const frameTimes = Array.from({ length: Math.floor(duration * fps) + 1 }, (_, frame) => frame / fps);
+  if (frameTimes.at(-1)! < duration) frameTimes.push(duration);
   for (const id of affected) {
     const index = tracks.findIndex((track) => track.parameterId === id);
     const direct = tracks[index];
+    const sources = [direct, eyes.has(id) ? effects.get('EyeBlink') : undefined,
+      lips.has(id) ? effects.get('LipSync') : undefined].filter((track): track is CustomMotionTrack => track !== undefined);
+    const { times, stepStarts, initialInverseStep } = effectSampleTimes(frameTimes, sources);
     const keyframes: CustomMotionKeyframe[] = times.map((time, frame) => {
       let value = direct ? evaluateCustomMotionTrack(direct, time)! : eyes.has(id) ? 1 : 0;
       if (eyes.has(id)) value *= evaluateCustomMotionTrack(effects.get('EyeBlink')!, time)!;
       if (lips.has(id)) value += evaluateCustomMotionTrack(effects.get('LipSync')!, time)!;
-      return { time, value, ...(frame < times.length - 1 ? { segment: { type: 'linear' as const } } : {}) };
+      const type = frame === 0 && initialInverseStep ? 'inverseStepped' : stepStarts.has(time) ? 'stepped' : 'linear';
+      return { time, value, ...(frame < times.length - 1 ? { segment: { type } } : {}) };
     });
     const expanded: CustomMotionTrack = { ...(direct ?? { parameterId: id }), keyframes };
     if (index < 0) tracks.push(expanded);
     else tracks[index] = expanded;
   }
+}
+
+/** Keep discontinuities at their source times while sampling smooth composition. */
+function effectSampleTimes(frameTimes: readonly number[], sources: readonly CustomMotionTrack[]): {
+  times: number[];
+  stepStarts: Set<number>;
+  initialInverseStep: boolean;
+} {
+  const times = new Set(frameTimes);
+  const jumps = new Set<number>();
+  let initialInverseStep = false;
+  for (const track of sources) {
+    track.keyframes.forEach((point, index) => {
+      times.add(point.time);
+      const next = track.keyframes[index + 1];
+      if (!next || point.value === next.value) return;
+      if (point.segment?.type === 'stepped') jumps.add(next.time);
+      else if (point.segment?.type === 'inverseStepped') {
+        if (point.time === 0) initialInverseStep = true;
+        else jumps.add(point.time);
+      }
+    });
+  }
+  const boundaries = [...times].sort((a, b) => a - b);
+  const stepStarts = new Set<number>();
+  for (let index = 1; index < boundaries.length; index++) {
+    const time = boundaries[index];
+    if (!jumps.has(time)) continue;
+    const previous = boundaries[index - 1];
+    // A sample just before the jump carries its left limit. A stepped segment
+    // then reaches the exact jump time without interpolating across it. The
+    // gap is a few floating-point units, so other smooth channels keep moving
+    // throughout the preceding frame instead of being held for a full frame.
+    const gap = Math.min((time - previous) / 2, Number.EPSILON * Math.max(1, time) * 4);
+    const before = time - gap;
+    const start = before > previous && before < time ? before : previous;
+    times.add(start);
+    stepStarts.add(start);
+  }
+  if (initialInverseStep) {
+    // F0 itself retains the source value; every positive time sees the jump.
+    const after = Math.min(boundaries[1] / 2, Number.EPSILON * 4);
+    if (after > 0) times.add(after);
+  }
+  return { times: [...times].sort((a, b) => a - b), stepStarts, initialInverseStep };
 }
 
 export function parseCubism3MotionBuffer(
