@@ -53,6 +53,7 @@ export interface FrameCaptureVisualRuntime {
 
 interface FrameCaptureConfig {
   signal?: AbortSignal;
+  onBackendStarted?: () => void;
   fps: number;
   rangeStart: number;
   rangeEnd: number;
@@ -273,6 +274,7 @@ export class FrameCaptureEngine {
         transparent: subtitleOnly,
       });
       backendReady = true;
+      config.onBackendStarted?.();
       signal?.throwIfAborted();
 
       // ── Deterministic Lockdown ──

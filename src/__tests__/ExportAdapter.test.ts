@@ -185,6 +185,27 @@ describe('ExportAdapter', () => {
     expect(retry.success).toBe(true);
   });
 
+  it('removes a direct output when cancellation arrives as stream finalization completes', async () => {
+    documentStore.setPreparedScene(createPreparedScene());
+    const controller = new AbortController();
+    electronAPI.export.endStreamExport.mockImplementation(async () => {
+      // Model the race where FFmpeg has closed and the main process has
+      // dropped its active stream before the renderer receives the result.
+      controller.abort();
+      return { success: true };
+    });
+
+    const result = await adapter.export({
+      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: false, backend: 'rawpixels', outputPath: '/output/direct.mp4',
+    }, vi.fn(), controller.signal);
+
+    expect(result).toEqual({ success: false, cancelled: true });
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith('/output/direct.mp4');
+  });
+
   it('cancels a running conversion and does not report completion', async () => {
     documentStore.setPreparedScene(createPreparedScene({ actions: [{
       id: 'voice', action: 'dialogue', time: 0,

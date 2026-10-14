@@ -58,6 +58,7 @@ export class ExportAdapter implements IExportAdapter {
   async export(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal): Promise<ExportResult> {
     let temporaryVideoPath: string | undefined;
     let finalCopyStarted = false;
+    let directCaptureOutputStarted = false;
     let cancellation: Promise<unknown> | undefined;
     let removeLogListener: (() => void) | undefined;
     const cancel = () => {
@@ -169,6 +170,9 @@ export class ExportAdapter implements IExportAdapter {
         subtitleOnly: isSubtitleOnly,
         subtitleChroma: isSubtitleChroma,
         signal,
+        onBackendStarted: () => {
+          if (videoPath === outputPath) directCaptureOutputStarted = true;
+        },
       });
       signal?.throwIfAborted();
 
@@ -256,7 +260,9 @@ export class ExportAdapter implements IExportAdapter {
       removeLogListener?.();
       if (signal?.aborted) {
         if (temporaryVideoPath) await this.electronAPI.fs.removeFile(temporaryVideoPath);
-        if (finalCopyStarted) await this.electronAPI.fs.removeFile(config.outputPath);
+        if (finalCopyStarted || directCaptureOutputStarted) {
+          await this.electronAPI.fs.removeFile(config.outputPath);
+        }
       }
     }
   }
