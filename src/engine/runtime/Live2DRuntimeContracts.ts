@@ -296,6 +296,7 @@ export interface Live2DDisposeOptions {
 export interface Live2DFocusInput {
   focusX: number;
   focusY: number;
+  /** Full authored transition duration, including options.elapsed. */
   duration?: number;
   options?: Live2DFocusOptions;
 }

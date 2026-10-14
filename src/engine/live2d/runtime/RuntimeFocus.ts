@@ -64,16 +64,14 @@ export function applyRuntimeFocus(controller: RuntimeFocusController, input: Liv
     originalUpdates.set(controller, controller.update);
     controller.update = () => {};
   }
-  const progress = Math.min(1, elapsed / duration);
-  const weight = gsap.parseEase(ease)(progress);
-  writeFrame(controller, targetX, targetY, fromX + (targetX - fromX) * weight, fromY + (targetY - fromY) * weight);
+  writeFrame(controller, targetX, targetY, fromX, fromY);
   controller.focus?.(targetX, targetY);
-  gsap.to(controller, {
-    x: targetX, y: targetY, duration: duration - elapsed,
-    ease: progress > 0 ? 'none' : ease,
+  // Seek the original tween so resuming follows the same easing curve.
+  gsap.fromTo(controller, { x: fromX, y: fromY }, {
+    x: targetX, y: targetY, duration, ease,
     onUpdate: () => writeFrame(controller, targetX, targetY, controller.x, controller.y),
     onComplete: finish, onInterrupt: finish,
-  });
+  }).time(elapsed);
 }
 
 export function manageRuntimeFocusAnimations(controllers: readonly RuntimeFocusController[], action: Live2DFocusAnimationAction): void {
