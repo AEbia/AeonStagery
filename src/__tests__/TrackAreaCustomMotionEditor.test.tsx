@@ -106,6 +106,7 @@ function renderTrackAreaWithCustomMotion(options: {
         })),
       }),
       getCurrentSceneDocumentSnapshot: () => options.document ?? null,
+      getCurrentSceneDocumentView: () => options.document ?? null,
       subscribe: () => () => {},
     } as any,
     playback: {

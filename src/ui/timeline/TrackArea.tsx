@@ -930,7 +930,7 @@ export const TrackArea = React.memo(({
     return [];
   }, [actionById, semanticTimelineItemById, onSelect, customMotionEditing, characterAdapter]);
 
-  const sceneFps = documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
+  const sceneFps = semanticSnapshot.document?.meta?.fps ?? 60;
   const estimateKeyframesForDensity = React.useCallback((density: CustomMotionDensity): number => {
     if (!conversionDialog) return 0;
     return estimateCustomMotionKeyframes(conversionDialog.durationSeconds, density, sceneFps);

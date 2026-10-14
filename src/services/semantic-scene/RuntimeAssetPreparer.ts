@@ -52,8 +52,9 @@ async function prepareAction(
   resolveAsset: RuntimeAssetResolver,
 ): Promise<PreparedCompiledAction> {
   const assetPaths = new Set((action.assetSlots ?? []).map((slot) => slot.path));
+  const { params: _params, ...metadata } = action;
   return deepFreeze({
-    ...cloneJson(action),
+    ...cloneJson(metadata),
     params: await prepareParams(action.params, action, resolveAsset, 'params', assetPaths),
   });
 }
@@ -80,6 +81,12 @@ async function prepareValue(
   path: string,
   assetPaths: ReadonlySet<string>,
 ): Promise<PreparedRuntimeValue> {
+  // Inline custom motions contain tens of thousands of ordinary JSON values,
+  // with no asset slots. Avoid one Promise/await per key/control coordinate.
+  if (![...assetPaths].some(assetPath => assetPath === path
+    || assetPath.startsWith(`${path}.`) || assetPath.startsWith(`${path}[`))) {
+    return copyAssetFreeValue(value, path);
+  }
   if (assetPaths.has(path) && typeof value === 'string') {
     if (value.trim() === '') return value;
     try {
@@ -119,6 +126,32 @@ async function prepareValue(
   ) {
     return value;
   }
+  throw new Error(`Unsupported runtime param value at ${path}`);
+}
+
+function copyAssetFreeValue(value: unknown, path: string): PreparedRuntimeValue {
+  if (Array.isArray(value)) {
+    const next: PreparedRuntimeValue[] = [];
+    let unchanged = Object.isFrozen(value);
+    for (const [index, item] of value.entries()) {
+      const copied = copyAssetFreeValue(item, `${path}[${index}]`);
+      next.push(copied);
+      unchanged &&= copied === item;
+    }
+    return unchanged ? value : next;
+  }
+  if (value && typeof value === 'object') {
+    const next: Record<string, PreparedRuntimeValue> = {};
+    let unchanged = Object.isFrozen(value);
+    for (const [key, nested] of Object.entries(value)) {
+      const copied = copyAssetFreeValue(nested, `${path}.${key}`);
+      next[key] = copied;
+      unchanged &&= copied === nested;
+    }
+    // All descendants were checked above; reuse only a fully immutable tree.
+    return unchanged ? value as Record<string, PreparedRuntimeValue> : next;
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
   throw new Error(`Unsupported runtime param value at ${path}`);
 }
 

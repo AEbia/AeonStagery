@@ -25,7 +25,7 @@ export function useSemanticDocument() {
     getVersion,
   );
   const documentSnapshot = useMemo(
-    () => ({ document: store.getCurrentSceneDocumentSnapshot(), version }),
+    () => ({ document: store.getCurrentSceneDocumentView(), version }),
     [store, version],
   );
   const document = documentSnapshot.document;
@@ -398,7 +398,7 @@ export function useValidationSummary() {
 
 export function useDocumentTitle() {
   const store = useDocumentStore();
-  const getTitle = useCallback(() => store.getCurrentSceneDocumentSnapshot()?.meta?.title || '', [store]);
+  const getTitle = useCallback(() => store.getCurrentSceneDocumentView()?.meta?.title || '', [store]);
 
   return useSyncExternalStore(
     (listener) => store.subscribe(listener),

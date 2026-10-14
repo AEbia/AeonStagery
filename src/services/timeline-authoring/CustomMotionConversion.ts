@@ -22,10 +22,10 @@ export class CustomMotionConversion {
     if (this.disposed || this.pending.size) return Promise.reject(new Error('动作转换正在进行或已关闭'));
     const controller = new AbortController();
     const reservation = this.options.editing.reserveConversion(() => controller.abort());
-    const scene = this.options.store.getCurrentSceneDocumentSnapshot()?.sceneId;
+    const scene = this.options.store.getCurrentSceneDocumentView()?.sceneId;
     const path = this.options.store.filePath;
     const unsubscribe = this.options.store.subscribe(() => {
-      if (scene !== this.options.store.getCurrentSceneDocumentSnapshot()?.sceneId || path !== this.options.store.filePath) controller.abort();
+      if (scene !== this.options.store.getCurrentSceneDocumentView()?.sceneId || path !== this.options.store.filePath) controller.abort();
     });
     const task = this.run(target, density, openEditor, controller.signal, reservation);
     this.pending.set(controller, task);
@@ -50,11 +50,11 @@ export class CustomMotionConversion {
     const locator = source.companionId
       ? { kind: 'companion' as const, statementId: source.statementId, companionId: source.companionId }
       : { kind: 'statement' as const, statementId: source.statementId };
-    const document = this.options.store.getCurrentSceneDocumentSnapshot();
+    const document = this.options.store.getCurrentSceneDocumentView();
     const path = this.options.store.filePath;
     await reservation.ready;
     if (signal.aborted) throw new Error('动作转换已取消');
-    const current = this.options.store.getCurrentSceneDocumentSnapshot();
+    const current = this.options.store.getCurrentSceneDocumentView();
     if (!document || !current || current.sceneId !== document.sceneId || path !== this.options.store.filePath) {
       throw new Error('动作转换的场景已切换');
     }

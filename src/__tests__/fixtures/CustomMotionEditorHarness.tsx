@@ -25,6 +25,7 @@ export function createEditorFixture(motion: CustomMotion, fps = 60, blockTime = 
   const store = {
     filePath: null,
     getCurrentSceneDocumentSnapshot: () => source,
+    getCurrentSceneDocumentView: () => source,
     getCompiledSceneSnapshot: () => ({ actions: [{ id: 'motion', action: 'playMotion', time: blockTime, source: { statementId: 'performance' } }] }),
     subscribe: () => () => {},
   } as unknown as DocumentStore;

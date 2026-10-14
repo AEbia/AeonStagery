@@ -12,7 +12,7 @@ function makeStores() {
     document: {
       filePath: '',
       subscribe,
-      getCurrentSceneDocumentSnapshot: () => ({
+      getCurrentSceneDocumentView: () => ({
         schemaVersion: 4,
         sceneId: 'status-bar-test',
         meta: { title: '协作测试剧本' },
