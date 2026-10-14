@@ -497,10 +497,11 @@ function parseCharacterMotionOutput(input: unknown, path: string): CharacterMoti
   const record = expectRecord(input, path);
   const kind = expectOneOf(record.kind, `${path}.kind`, ['resource', 'custom']);
   if (kind === 'resource') {
-    expectKeys(record, path, ['kind', 'key', 'fadeInSeconds']);
+    expectKeys(record, path, ['kind', 'key', 'durationSeconds', 'fadeInSeconds']);
     return compact({
       kind,
       key: expectString(record.key, `${path}.key`),
+      durationSeconds: optionalNonNegativeNumber(record.durationSeconds, `${path}.durationSeconds`),
       fadeInSeconds: optionalNonNegativeNumber(record.fadeInSeconds, `${path}.fadeInSeconds`),
     });
   }

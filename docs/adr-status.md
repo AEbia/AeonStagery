@@ -38,7 +38,7 @@
 | [0025 External Agent Bridge](adr/0025-external-agent-bridge.md) | proposed | 复用 Project Agent 业务装配的 headless CLI、stdio JSON-RPC 与 benchmark sample port。 |
 | [0026 WebGAL Script Import as a Scaffolding Source](adr/0026-webgal-script-import-scaffolding-source.md) | current | WebGAL 剧本导入脚手架：单文件单场景、`changeFigure` 状态语义、说话人/立绘双向身份绑定、`@mount` 引用、导入回执（含 report）与阅读速度导入时定参。 |
 | [0028 Scoped Custom Motion Edit Lease](adr/0028-scoped-custom-motion-edit-lease.md) | current, implemented | 应用级 CustomMotionEditing 会话统一持有编辑租约与候选；转换通过同一 authority 移交租约，普通场景编辑仍遵守 ADR-0012。 |
-| [0029 Live2D 自定义 Motion 关键帧编辑](adr/0029-live2d-custom-motion-keyframe-authoring.md) | current, implemented | 自定义 Motion 是 `characterPerformance` 的 `kind: 'custom'` Motion 来源；资源 Motion 转换、关键帧/曲线编辑、运行时与协作边界的权威入口。 |
+| [0029 Live2D 自定义 Motion 关键帧编辑](adr/0029-live2d-custom-motion-keyframe-authoring.md) | current, implemented | 自定义 Motion 是 `characterPerformance` 的 `kind: 'custom'` Motion 来源；资源 Motion 时长物化与转换、关键帧/曲线编辑、运行时与协作边界的权威入口。 |
 | [0030 Dialogue Duration Policy Ownership](adr/0030-dialogue-duration-policy.md) | current, implemented | `resolveDialogueDuration` 是对白默认、节奏档位、阅读速度和文本更新重算策略的唯一 policy 入口；调用方只声明语境。 |
 | [0032 崩溃界面与诊断报告恢复体系](adr/0032-crash-screen-and-diagnostic-report-recovery.md) | current, implemented | 全栈分级捕获、无堆栈沉稳崩溃界面、日志黑匣子环形缓冲、严格脱敏结构化诊断报告与静态兜底恢复体系的权威入口。 |
 | [0033 Live2D 资源 Motion 曲线缓存与 Seek 求值统一](adr/0033-live2d-resource-motion-curve-cache-seek.md) | current, implemented | 普通资源 Motion 在加载期生成隐藏逐帧曲线缓存（纯派生数据，512MB 预算），Seek 缓存优先 + SDK 回退，Play/Bake/Export 复用同一求值器的权威入口。 |

@@ -45,10 +45,10 @@ const TIME_BUCKET_LEVELS = [0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600];
 /**
  * Resolve the author-facing duration used by timeline geometry.
  *
- * Custom character performance statements keep their duration on the motion
+ * Character performance statements keep their duration on the motion
  * output (`params.motion.durationSeconds`) rather than on the compiled
  * runtime action's `duration` field. Every other action keeps the historical
- * top-level duration lookup. Keeping this in one place prevents a custom
+ * top-level duration lookup. Keeping this in one place prevents a resource or custom
  * motion from being rendered as a one-second block while the semantic model
  * treats it as a longer statement.
  */
@@ -57,11 +57,9 @@ export function getTimelineActionDuration(action: TimelineAction): number {
   if (action.semanticType === 'characterPerformance') {
     const motion = authoringParams.motion ?? action.params.motion;
     if (motion && typeof motion === 'object' && !Array.isArray(motion)) {
-      const customDuration = (motion as { kind?: unknown; durationSeconds?: unknown }).kind === 'custom'
-        ? (motion as { durationSeconds?: unknown }).durationSeconds
-        : undefined;
-      if (typeof customDuration === 'number' && Number.isFinite(customDuration)) {
-        return customDuration;
+      const motionDuration = (motion as { durationSeconds?: unknown }).durationSeconds;
+      if (typeof motionDuration === 'number' && Number.isFinite(motionDuration)) {
+        return motionDuration;
       }
     }
   }
