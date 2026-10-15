@@ -13,17 +13,19 @@ export type TemplatePackageImportResult =
 /**
  * A WebGAL dialogue template that appears to duplicate something installed.
  *
- * Two independent signals are reported separately rather than collapsed into
+ * Independent signals are reported separately rather than collapsed into
  * one flag, so the dialog can say *why* it thinks the import is a duplicate:
  * `contentMatch` compares the normalised stylesheet, `paramsMatch` compares the
  * parameters it translates to (the only signal available for packages imported
- * before the source was recorded).
+ * before the source was recorded). `sourceMatch` identifies an update from
+ * the same directory even when the stylesheet and resulting parameters changed.
  */
 export interface WebGalScssImportConflict {
   packageId: string;
   packageName: string;
   contentMatch: boolean;
   paramsMatch: boolean;
+  sourceMatch?: boolean;
   /**
    * Whether replacing this package is safe.
    *

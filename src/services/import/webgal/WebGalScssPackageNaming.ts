@@ -151,6 +151,8 @@ export interface WebGalImportConflict {
   contentMatch: boolean;
   /** The translated parameters are identical (covers imports without a record). */
   paramsMatch: boolean;
+  /** Same source directory, including a stylesheet edited since the last import. */
+  sourceMatch?: boolean;
   /**
    * Whether a wholesale replace is safe. An import reproduces a single dialogue
    * style, so a package publishing several cannot be overwritten — the other
@@ -165,16 +167,17 @@ export interface WebGalImportConflict {
 /**
  * Compare a candidate import against records of installed packages.
  *
- * Two independent signals, because neither is sufficient on its own:
+ * Independent signals, because none is sufficient on its own:
  * `sourceHash` is exact but only exists for packages imported since this record
  * was introduced, while `paramsSignature` is coarser but also covers older
- * packages and templates that were edited cosmetically.
+ * packages and templates that were edited cosmetically. `sourcePath` also
+ * identifies a template edited in place, so it remains available for updates.
  *
  * A match says "this is the same template", not "this package may be replaced" —
  * callers decide the latter from {@link WebGalImportConflict.replaceable}.
  */
 export function findWebGalImportConflicts(
-  candidate: { sourceHash: string; paramsSignature: string },
+  candidate: { sourceHash: string; paramsSignature: string; sourcePath?: string },
   records: ReadonlyArray<{
     packageId: string;
     packageName: string;
@@ -187,12 +190,14 @@ export function findWebGalImportConflicts(
     const record = entry.record;
     const contentMatch = !!record?.sourceHash && record.sourceHash === candidate.sourceHash;
     const paramsMatch = !!record?.paramsSignature && record.paramsSignature === candidate.paramsSignature;
-    if (!contentMatch && !paramsMatch) continue;
+    const sourceMatch = !!record?.sourcePath && record.sourcePath === candidate.sourcePath;
+    if (!contentMatch && !paramsMatch && !sourceMatch) continue;
     conflicts.push({
       packageId: entry.packageId,
       packageName: entry.packageName,
       contentMatch,
       paramsMatch,
+      sourceMatch,
       // Absent means the caller does not model replaceability, so keep the
       // historical behaviour rather than silently disabling replace.
       replaceable: entry.replaceable ?? true,

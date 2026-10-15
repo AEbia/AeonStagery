@@ -7,6 +7,7 @@ import {
   inspectWebGalTemplateDirectory,
 } from '../../electron/webgal-scss-import';
 import { WEBGAL_IMPORT_RECORD_FILE } from '../services/import/webgal/WebGalScssPackageNaming';
+import { parseTemplatePackageManifest } from '../services/template-package/TemplatePackageManifest';
 
 /**
  * A template exercising the paths a real theme uses: a container scale, a `%`
@@ -588,16 +589,41 @@ describe('WebGAL SCSS template import', () => {
     expect((await listPackageDirectories(templatesRoot)).sort()).toEqual([first.id, second.id].sort());
   });
 
-  it('treats an edited stylesheet as a new template', async () => {
+  it('offers an edited source for replacement and keeps its package and style ids', async () => {
     const root = await makeRoot('aeonstagery-webgal-edited-');
     const templateRoot = path.join(root, 'template');
     const templatesRoot = path.join(root, 'library');
     await writeTemplate(templateRoot);
-    await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    const first = await installWebGalTemplatePackage({ templateRoot, templatesRoot, styleId: 'existing-style' });
 
     await writeTemplate(templateRoot, { scss: SCSS.replace('height: 300px', 'height: 320px') });
     const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
 
+    expect(inspection.conflicts).toEqual([expect.objectContaining({
+      packageId: first.id, sourceMatch: true, contentMatch: false, paramsMatch: false, replaceable: true,
+    })]);
+    const replaced = await installWebGalTemplatePackage({
+      templateRoot, templatesRoot, replacePackageId: inspection.conflicts[0].packageId,
+    });
+    expect(replaced).toMatchObject({ id: first.id, replaced: true });
+    expect(await listPackageDirectories(templatesRoot)).toEqual([first.id]);
+    const manifest = parseTemplatePackageManifest(
+      JSON.parse(await readFile(path.join(replaced.installPath, 'manifest.v2.json'), 'utf8')),
+    );
+    expect(manifest.dialogueStyles?.[0]).toMatchObject({
+      id: 'existing-style', params: { textbox: { height: 123 } },
+    });
+  });
+
+  it('keeps a different source with the same template name separate', async () => {
+    const root = await makeRoot('aeonstagery-webgal-unrelated-');
+    const templateRoot = path.join(root, 'template');
+    const otherRoot = path.join(root, 'other');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+    await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    await writeTemplate(otherRoot, { scss: SCSS.replace('height: 300px', 'height: 320px') });
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot: otherRoot, templatesRoot });
     expect(inspection.conflicts).toEqual([]);
   });
 

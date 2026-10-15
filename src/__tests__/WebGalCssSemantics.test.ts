@@ -5,6 +5,54 @@ import { parseScssRules } from '../services/import/webgal/WebGalScssSyntax';
 import { buildWebGalTextboxTemplatePackage } from '../services/import/webgal/WebGalTextboxScssPackage';
 
 describe('WebGAL CSS fidelity', () => {
+  it.each([0, 0.25, 1])('preserves background opacity %s in the generated presentation', (opacity) => {
+    const nameOpacity = 1 - opacity;
+    const result = buildWebGalTextboxTemplatePackage({
+      templateId: 'opacity', templateName: 'Opacity',
+      scss: `
+        .TextBox_Background { background:black; opacity:${opacity}; border:2px solid red; }
+        .TextBox_ShowName_Background { background:blue; opacity:${nameOpacity}; }
+      `,
+    });
+    expect(result.style.params.textbox.opacity).toBe(opacity);
+    expect(result.style.params.namebox?.opacity ?? 1).toBe(nameOpacity);
+    // Backdrop opacity must not fade the independent text layers.
+    expect(result.style.params.text.color).toBe('#FFFFFF');
+    expect(result.style.params.speaker?.color).toBe('#FFFFFF');
+  });
+
+  it('uses visible layer typography for body and name text, including relative units and scale', () => {
+    const { params } = buildWebGalTextboxTemplatePackage({
+      templateId: 'typography', templateName: 'Typography',
+      scss: `
+        .TextBox_main { font-size:40px; transform:scale(0.5); }
+        .text { font-size:40px; font-weight:400; }
+        .outer { font-size:2em; font-weight:700; line-height:1.5; }
+        .TextBox_showName { font-weight:400; }
+        .outerName { font-size:1.5em; font-weight:700; line-height:2; }
+      `,
+    }).style;
+    expect(params.text).toMatchObject({ fontSize: 30, fontWeight: '700', lineHeight: 45 });
+    expect(params.speaker).toMatchObject({ fontSize: 45, fontWeight: '700' });
+    expect(params.namebox?.minHeight).toBe(90);
+  });
+
+  it('excludes shadows from hidden layers and keeps a child that restores visibility', () => {
+    const hidden = translateWebGalTextboxScss(`
+      .inner { visibility:hidden; text-shadow:0 0 10px red; -webkit-text-stroke:2px red; }
+      .outerName { visibility:hidden; text-shadow:0 0 10px red; }
+    `).style.params;
+    expect(hidden.text.dropShadow ?? false).toBe(false);
+    expect(hidden.text.strokeWidth).toBe(0);
+    expect(hidden.speaker?.dropShadow ?? false).toBe(false);
+
+    const visible = translateWebGalTextboxScss(`
+      .text { visibility:hidden; text-shadow:0 0 10px red; }
+      .inner { visibility:visible; }
+    `).style.params;
+    expect(visible.text.dropShadow).toBe(true);
+  });
+
   it('lets an important background longhand override the shorthand', () => {
     const result = translateWebGalTextboxScss(`
       .TextBox_Background { background: red; background-color: blue !important; }

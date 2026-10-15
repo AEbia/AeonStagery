@@ -173,12 +173,12 @@ function describePaint(paint: Paint | null): string {
 
 /** Convert a `text-shadow` grouping into the engine's `dropShadow*` parameters. */
 function toDropShadow(
-  shadow: TextShadowInfo,
+  shadow: TextShadowInfo | null,
   fontSize: number,
   uniformScale: number | undefined,
   axisScale: number | undefined,
 ): Partial<DialogueImageTextStyle> {
-  if (!shadow.has) return {};
+  if (!shadow?.has) return {};
   return {
     dropShadow: true,
     dropShadowColor: shadow.color,
@@ -216,8 +216,9 @@ export function mapWebGalTextboxStyle(
   const strictCenter = options.strictCenter === true;
   const notes = [...computed.diagnostics];
   const { main, text: textBlock, outer, inner, name, outerName, innerName } = computed;
-  let fontSize = Math.max(1, textBlock.fontSize);
-  let lineHeight = Math.max(fontSize, textBlock.lineHeight);
+  // Visible layers inherit wrapper typography, then apply their own overrides.
+  let fontSize = Math.max(1, outer.fontSize);
+  let lineHeight = Math.max(fontSize, outer.lineHeight);
 
   // ── Layout ──
   // Engine geometry: `o = max(textbox.height, inset + textHeight + inset)` with
@@ -325,8 +326,8 @@ export function mapWebGalTextboxStyle(
     if (strokeWidth > 0) strokeColor = rgbOnly(inner.stroke.color);
   }
 
-  const shadow = inner.textShadow;
-  const nameShadow = outerName.textShadow;
+  const shadow = inner.hidden ? null : inner.textShadow;
+  const nameShadow = outerName.hidden ? null : outerName.textShadow;
 
   // ── Nameplate ──
   let nameColor = rgbOnly(outerName.color);
@@ -336,8 +337,8 @@ export function mapWebGalTextboxStyle(
     notes.push(`名牌文字色取自 \`.outerName\` 的 \`background-clip:text\` → \`${nameColor}\`。`);
   }
 
-  let nameSize = Math.max(1, name.fontSize);
-  let nameLineHeight = Math.max(nameSize, name.lineHeight);
+  let nameSize = Math.max(1, outerName.fontSize);
+  let nameLineHeight = Math.max(nameSize, outerName.lineHeight);
   const nameTop = name.lengths.top ?? -60;
   const nameLeft = name.lengths.left ?? 20;
   let nameboxX = boxX + nameLeft;
@@ -520,7 +521,7 @@ export function mapWebGalTextboxStyle(
   const text: DialogueImageTextStyle = {
     fontFamily: family,
     fontSize,
-    fontWeight: textBlock.fontWeight,
+    fontWeight: outer.fontWeight,
     color: textColor,
     x: textX,
     y: textY,
@@ -535,7 +536,7 @@ export function mapWebGalTextboxStyle(
   const speaker: DialogueImageSpeakerStyle = {
     fontFamily: nameFamily,
     fontSize: nameSize,
-    fontWeight: name.fontWeight,
+    fontWeight: outerName.fontWeight,
     color: nameColor,
     align: nameAlign,
     padding: speakerPadding,
@@ -546,7 +547,7 @@ export function mapWebGalTextboxStyle(
     speaker.fontFile = fontFile;
   }
   Object.assign(text, toDropShadow(shadow, fontSize, uniformScale, axisScaleY));
-  if (shadow.has) {
+  if (shadow?.has) {
     notes.push('多条 `text-shadow` 已合并为单层 `dropShadow`（按主要图层取：'
       + `blur=${text.dropShadowBlur}、distance=${text.dropShadowDistance}）；`
       + '对称辉光或多重阴影已按单层效果近似。');
@@ -562,7 +563,7 @@ export function mapWebGalTextboxStyle(
   }
 
   // ── Nameplate shadow (`.outerName`'s `text-shadow`) ──
-  if (nameShadow.has) {
+  if (nameShadow?.has) {
     const nameDrop = toDropShadow(nameShadow, nameSize, uniformScale, axisScaleY);
     Object.assign(speaker, nameDrop);
     notes.push('**名牌文字阴影**：`speaker.dropShadow` 提取自 `.outerName` 的 `text-shadow`'
@@ -606,7 +607,7 @@ export function mapWebGalTextboxStyle(
         y: boxY,
         width: boxW,
         height: textboxTextureH,
-        opacity: 1,
+        opacity: computed.background.opacity,
       },
       namebox: {
         image: `${PANEL_IMAGE_DIR}namebox.svg`,
@@ -615,6 +616,7 @@ export function mapWebGalTextboxStyle(
         y: nameboxY,
         width: nameMinW,
         minHeight: nameH,
+        ...(computed.nameBackground.opacity !== 1 ? { opacity: computed.nameBackground.opacity } : {}),
       },
       text,
       speaker,

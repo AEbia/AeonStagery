@@ -107,6 +107,23 @@ describe('WebGalScssImportDialog', () => {
     expect(screen.queryByRole('button', { name: '导入' })).toBeNull();
   });
 
+  it('offers an overwrite for a changed stylesheet from the same source', () => {
+    const onConfirm = vi.fn();
+    render(
+      <WebGalScssImportDialog
+        inspection={makeInspection({ conflicts: [{
+          ...DUPLICATE, contentMatch: false, paramsMatch: false, sourceMatch: true,
+        }] })}
+        onCancel={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    expect(screen.getByText(/来源目录与已导入的一致，样式已修改/)).toBeTruthy();
+    expect(screen.queryByText(/翻译出的样式参数与已导入的一致/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '覆盖已有' }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replacePackageId: DUPLICATE.packageId }));
+  });
+
   it('confirms an overwrite against the matched package', () => {
     const onConfirm = vi.fn();
     render(

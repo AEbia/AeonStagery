@@ -376,7 +376,7 @@ export async function inspectWebGalTemplateDirectory(
 
   const paramsSignature = dialogueParamsSignature(build.style.params);
   const conflicts = findWebGalImportConflicts(
-    { sourceHash, paramsSignature },
+    { sourceHash, paramsSignature, sourcePath: templateRoot },
     installed.map((entry) => ({
       packageId: entry.packageId,
       packageName: entry.packageName,

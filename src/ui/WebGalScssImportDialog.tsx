@@ -24,7 +24,8 @@ export interface WebGalScssImportDialogProps {
 /** Why a candidate import was flagged as a duplicate. */
 function describeConflict(conflict: WebGalScssImportInspection['conflicts'][number]): string {
   if (conflict.contentMatch) return '样式表内容与已导入的一致';
-  return '翻译出的样式参数与已导入的一致';
+  if (conflict.paramsMatch) return '翻译出的样式参数与已导入的一致';
+  return '来源目录与已导入的一致，样式已修改';
 }
 
 export function WebGalScssImportDialog({
