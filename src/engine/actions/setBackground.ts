@@ -71,7 +71,6 @@ export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: { tim
   const duration = params.duration ?? 1;
   const layerId = String(params.layerId || BACKGROUND_LAYER_ID);
   const proxy = getEnvironmentProxy(ctx, layerId);
-  const initialTransform = createResolvedEnvironmentTransform(proxy, {});
   const targetTransform = createResolvedEnvironmentTransform(proxy, params);
 
   const at = (fn: () => void | Promise<void>) => {
@@ -97,9 +96,6 @@ export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: { tim
       return;
     }
     const imagePath = resolvePathAsync ? await resolvePathAsync(image) : resolvePath(image);
-    if (duration <= 0) {
-      Object.assign(proxy, targetTransform);
-    }
     await stageManager.setEnvironmentLayer(layerId, imagePath, {
       transition: params.transition,
       duration,
@@ -108,18 +104,14 @@ export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: { tim
       tileScaleY: params.tileScaleY,
       tileOffsetX: params.tileOffsetX,
       tileOffsetY: params.tileOffsetY,
-      ...initialTransform,
+      ...targetTransform,
     });
   });
 
-  if (duration > 0) {
-    animateEnvironmentProxy(ctx, layerId, t, {
-      ...params,
-      ...targetTransform,
-    });
-  } else {
-    Object.assign(proxy, targetTransform);
-  }
+  // The replacement image starts at its own transform, while the outgoing
+  // image retains its transform throughout the dissolve.
+  tl.set(proxy, { ...targetTransform }, t);
+  if (duration > 0) tl.to({}, { duration }, t);
 }
 
 export function scheduleTransformEnvironmentLayer(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {

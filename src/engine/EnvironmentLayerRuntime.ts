@@ -239,9 +239,8 @@ export function reconstructEnvironmentAtTime(
           ...nextBase,
           images,
         };
-        if (time < startTime + duration && duration > 0) {
-          applyInterpolatedTransform(renderState, sourceState, p, progress);
-        }
+        // A set introduces artwork at its authored transform. Its duration
+        // controls the image transition; transform actions animate geometry.
         environmentLayers.set(layerId, renderState);
         break;
       }
