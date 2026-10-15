@@ -167,7 +167,7 @@ async function readTemplateName(root: string, fallback: string): Promise<string>
     const name = typeof parsed.name === 'string' ? parsed.name.trim() : '';
     return name || fallback;
   } catch {
-    console.warn('  ! template.json is not valid JSON; falling back to the directory name');
+    console.warn('  ! template.json 解析失败，已使用目录名作为模板名称');
     return fallback;
   }
 }
@@ -209,7 +209,7 @@ async function resolveFont(root: string, enabled: boolean): Promise<WebGalTempla
       if (!insideTemplate || !isInside(realTemplateRoot, realSourcePath)) {
         throw new Error(
           `模板字体指向模板目录之外的文件：${url}\n`
-          + '为避免把本地文件打包进模板包，已拒绝导入。',
+          + '出于安全性考虑，已拒绝导入模板目录外的文件。',
         );
       }
       return { family, sourcePath };
@@ -241,7 +241,7 @@ async function readDecorationSources(
     const candidate = path.join(root, 'assets', fileName);
     const contents = await readTextIfPresent(candidate);
     if (contents == null) {
-      console.warn(`  ! ornament "${fileName}" referenced by .${slot} was not found; it will be skipped`);
+      console.warn(`  ! 未找到 .${slot} 引用的装饰素材 "${fileName}"，已跳过`);
       continue;
     }
     out[slot] = contents;
@@ -252,7 +252,7 @@ async function readDecorationSources(
 async function assertWritableTarget(outDir: string, force: boolean): Promise<void> {
   if (!(await exists(outDir))) return;
   const current = await stat(outDir);
-  if (!current.isDirectory()) throw new Error(`Output path exists and is not a directory: ${outDir}`);
+  if (!current.isDirectory()) throw new Error(`输出路径已存在且不是目录：${outDir}`);
   if (force) return;
   // `--force` is documented as "write into a non-empty directory", so the
   // default has to mean the opposite: refuse anything that is not empty.
@@ -262,7 +262,7 @@ async function assertWritableTarget(outDir: string, force: boolean): Promise<voi
   if (entries.length > 0) {
     throw new Error(
       `输出目录不为空（${entries.slice(0, 3).join('、')}${entries.length > 3 ? ' 等' : ''}）：${outDir}\n`
-      + 'Pass --force to overwrite its files, or choose another --out directory.',
+      + '若需覆盖已有文件，请传入 --force 参数，或指定其他 --out 目录。',
     );
   }
 }

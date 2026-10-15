@@ -240,7 +240,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     const font = fontInherited ? (parent?.font ?? ROOT_FONT_PX)
       : length(values.fontsize, parent?.font ?? ROOT_FONT_PX, parent?.font ?? ROOT_FONT_PX) ?? parent?.font ?? ROOT_FONT_PX;
     const safeFont = font > 0 ? font : parent?.font ?? ROOT_FONT_PX;
-    if (font <= 0) report(`${SELECTORS[node]} 的字号为零；引擎需要正字号，已采用继承字号。`);
+    if (font <= 0) report(`${SELECTORS[node]} 的字号为零，已采用继承字号。`);
     const lineInherited = authored.lineheight == null || authored.lineheight === 'inherit' || authored.lineheight === 'unset';
     let line: SourceStyle['line'];
     if (lineInherited && parent) line = parent.line;
@@ -249,7 +249,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     else {
       const absolute = length(values.lineheight, safeFont, safeFont);
       line = absolute != null && absolute >= 0 ? { kind: 'length', value: absolute } : { kind: 'ratio', value: 1.6 };
-      if (absolute == null) report(`无法计算 CSS 行高：${SELECTORS[node]} 的 ${values.lineheight}；按 1.6 倍字号近似。`);
+      if (absolute == null) report(`无法计算 CSS 行高：${SELECTORS[node]} 的 ${values.lineheight}，按 1.6 倍字号近似。`);
     }
     // Main's containing block is the stage; absolute nameplate divs use main.
     const container = node === 'main' ? null : sources.get('main') ?? resolve('main');
@@ -334,7 +334,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
   const elements = Object.fromEntries((Object.keys(SELECTORS) as Node[]).map((node) => [node, resolve(node).result])) as Record<Node, WebGalComputedElement>;
   const transformValue = valuesByNode.get('main')?.transform;
   if (transformValue && !/^(none|(?:scale(?:X|Y)?\([^)]*\)\s*)+)$/i.test(transformValue)) {
-    report(`不支持的主容器 transform：${transformValue}；仅映射 scale/scaleX/scaleY。`);
+    report(`不支持的主容器 transform：${transformValue}（仅支持映射 scale/scaleX/scaleY）。`);
   }
   return { ...elements, nameBackgroundHasPaint, transform: parseScale(transformValue), diagnostics };
 }
@@ -342,8 +342,8 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
 export function computeWebGalTextboxStyle(css: string): WebGalComputedStyle {
   const source = stripComments(css);
   const diagnostics: string[] = [];
-  if (/@[\w-]+/.test(source)) diagnostics.push('SCSS at-rule（含条件规则、mixin 和动画）未计算；仅转换静态规则。');
-  if (/\$[\w-]+/.test(source)) diagnostics.push('SCSS 变量未求值；请先编译为静态 CSS。');
+  if (/@[\w-]+/.test(source)) diagnostics.push('SCSS at-rule（含条件规则、mixin 与动画）未参与求值，仅转换静态规则。');
+  if (/\$[\w-]+/.test(source)) diagnostics.push('SCSS 变量未求值，建议先编译为静态 CSS。');
   return compute(parseScssRules(css), diagnostics);
 }
 

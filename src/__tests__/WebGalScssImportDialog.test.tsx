@@ -48,10 +48,11 @@ describe('WebGalScssImportDialog', () => {
     // The suggested name is offered as the placeholder, so it is never typed twice.
     expect(screen.getByPlaceholderText('仿番剧字幕')).toBeTruthy();
     expect(screen.getByText(/Stage\/TextBox\/textbox\.scss/)).toBeTruthy();
-    expect(screen.getByText(/留空 = 自动命名为/)).toBeTruthy();
+    expect(screen.getByText(/留空时自动命名为/)).toBeTruthy();
     // A clean import only needs the one action.
     expect(screen.getByRole('button', { name: '导入' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '覆盖已有' })).toBeNull();
+    expect(screen.queryByText(/没有来源记录/)).toBeNull();
   });
 
   it('confirms a new package with the automatic name when the field is left empty', () => {
@@ -98,7 +99,7 @@ describe('WebGalScssImportDialog', () => {
       />,
     );
 
-    expect(screen.getByText(/这份字幕看起来已经导入过/)).toBeTruthy();
+    expect(screen.getByText(/检测到该样式可能已导入过/)).toBeTruthy();
     expect(screen.getByText(/样式表内容与已导入的一致/)).toBeTruthy();
     expect(screen.getByText(/导入于 2026-10-12/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '覆盖已有' })).toBeTruthy();

@@ -245,7 +245,7 @@ export function mapWebGalTextboxStyle(
     pads.b = pads.t;
     pads.l = rnd(fontSize * 0.7);
     pads.r = pads.l;
-    notes.push('主容器未声明内边距；按正文大小估算面板留白。');
+    notes.push('主容器未声明内边距，已根据正文字号估算默认留白。');
   }
 
   if (strictCenter) {
@@ -268,15 +268,15 @@ export function mapWebGalTextboxStyle(
 
   const centerOffset = (boxX + boxW / 2) - (STAGE_WIDTH / 2);
   if (strictCenter) {
-    notes.push('已启用**严格居中**（`strictCenter`）：文本区中心对齐画布中心 960px。');
+    notes.push('已启用**严格居中**（`strictCenter`）：文本区水平居中对齐画布中心（960px）。');
   } else if (Math.abs(centerOffset) > 0.5) {
-    notes.push(`**水平偏心 ${centerOffset}px**：这是模板自身的设计`
-      + `（\`left:${left}\` 与 \`right:${right}\` 不对称），忠实还原的结果。`
-      + '若想强制居中，可在导入时传 `strictCenter: true`。');
+    notes.push(`**水平偏心 ${centerOffset}px**：模板左右边距不对称`
+      + `（\`left:${left}\` 与 \`right:${right}\`），已按设计保留水平偏移；`
+      + '如需居中，可在导入时启用 `strictCenter`。');
   }
 
   if (autoHeight) {
-    notes.push('⚠️ 模板未声明固定高度，`height` 由行高+内边距估算，若观感不符请直接调 `textbox.height`。');
+    notes.push('模板未声明固定高度，文本框高度已根据行高与内边距自动估算；如需微调可调整 `textbox.height`。');
   }
 
   // ── Body text colour ──
@@ -298,12 +298,11 @@ export function mapWebGalTextboxStyle(
         }
       }
       textColor = rgbOnly(picked.color);
-      notes.push('**渐变裁切文字**：`.outer` 用 `background-clip:text` 上色，'
-        + `引擎 \`text.color\` 不支持渐变，已取占比最大的那一段色 \`${textColor}\`。`);
+      notes.push('**渐变裁切文字**：`.outer` 使用了 `background-clip: text`，'
+        + `当前文本颜色仅支持纯色，已提取主色段颜色 \`${textColor}\`。`);
     } else {
       textColor = rgbOnly(outerPaint.color);
-      notes.push(`**文字色取自 \`.outer\` 的 \`background-clip:text\`** → \`${textColor}\``
-        + '（WebGAL 模板的常规写法；`.outer` 的 `color` 通常是 `transparent`，不能直接用）。');
+      notes.push(`**文字色取自 \`.outer\` 的 \`background-clip:text\`** → \`${textColor}\`。`);
     }
   }
   if (!textColor) {
@@ -320,7 +319,7 @@ export function mapWebGalTextboxStyle(
   let strokeColor = 'transparent';
   let strokeWidth = 0;
   if (inner.hidden) {
-    if (inner.stroke.width > 0) notes.push('`.inner` 描边层被隐藏，已按无描边处理。');
+    if (inner.stroke.width > 0) notes.push('`.inner` 描边层设置为隐藏，已按无描边处理。');
   } else {
     strokeWidth = inner.stroke.width;
     if (strokeWidth > 0) strokeColor = rgbOnly(inner.stroke.color);
@@ -358,7 +357,7 @@ export function mapWebGalTextboxStyle(
   if (!name.hasPadding) {
     namePads.l = rnd(nameSize * 1.5);
     namePads.r = namePads.l;
-    notes.push('姓名框未声明内边距；左右留白按姓名字号的 1.5 倍估算。');
+    notes.push('姓名框未声明内边距，左右留白已按姓名字号的 1.5 倍估算。');
   }
   let namePadL = Math.max(0, namePads.l);
   let namePadR = Math.max(0, namePads.r);
@@ -377,8 +376,10 @@ export function mapWebGalTextboxStyle(
   if (nameMinW == null) nameMinW = rnd(namePadL + namePadR + nameSize * 2);
   nameMinW = Math.max(nameMinW, namePadL + namePadR + nameSize, 40);
 
-  const family = options.fontFamily || textBlock.fontFamily;
-  const nameFamily = options.fontFamily || name.fontFamily;
+  // WebGAL themes commonly declare fonts on the visible overlay layers rather
+  // than their `.text` / `.TextBox_showName` wrappers.
+  const family = options.fontFamily || outer.fontFamily || textBlock.fontFamily;
+  const nameFamily = options.fontFamily || outerName.fontFamily || name.fontFamily;
   const fontFile = options.fontFile || null;
   const align = textBlock.align ?? main.flexAlign ?? 'center';
   const nameAlign = name.align ?? 'left';
@@ -444,8 +445,7 @@ export function mapWebGalTextboxStyle(
     scaleTheme(theme, sx, sy);
 
     notes.push(`**已折算模板的 \`transform: scale(${sx}${sy !== sx ? `, ${sy}` : ''})\`**：`
-      + 'WebGAL 靠这层整体缩放定尺寸，引擎没有 transform 概念，'
-      + '逐项折算后对话框位置、大小、字号、圆角才与网页端一致。');
+      + '已将缩放折算到对话框位置、尺寸、字号与圆角等具体属性。');
   }
 
   if (strokeWidth > 0) strokeWidth = Math.max(1, rnd(strokeWidth));
@@ -515,8 +515,7 @@ export function mapWebGalTextboxStyle(
 
   notes.push(`**文本框高度**：框体 \`${boxH}px\``
     + (textboxShadowDy ? ` + 阴影预留 \`${textboxShadowDy}px\` = 贴图 \`${textboxTextureH}px\`` : '')
-    + `。引擎此时会**保持底边不动、向上生长**（等价 WebGAL 的 \`bottom:${bottom}px\`），`
-    + '所以长台词不会溢出屏幕下沿。');
+    + `；采用底边固定对齐（\`bottom: ${bottom}px\`），文本超出时向上扩展。`);
 
   const text: DialogueImageTextStyle = {
     fontFamily: family,
@@ -548,9 +547,9 @@ export function mapWebGalTextboxStyle(
   }
   Object.assign(text, toDropShadow(shadow, fontSize, uniformScale, axisScaleY));
   if (shadow.has) {
-    notes.push('多条 `text-shadow` 已归并为单个 `dropShadow`（按不透明度取主层：'
-      + `blur=${text.dropShadowBlur}、distance=${text.dropShadowDistance}）。`
-      + '引擎不支持多重阴影，四向对称辉光会以单层近似。');
+    notes.push('多条 `text-shadow` 已合并为单层 `dropShadow`（按主要图层取：'
+      + `blur=${text.dropShadowBlur}、distance=${text.dropShadowDistance}）；`
+      + '对称辉光或多重阴影已按单层效果近似。');
   }
 
   // ── Nameplate outline (`.innerName`'s `-webkit-text-stroke`) ──
@@ -558,47 +557,41 @@ export function mapWebGalTextboxStyle(
     const width = innerName.stroke.width > 0 ? Math.max(1, rnd(innerName.stroke.width * (uniformScale || 1))) : 0;
     speaker.strokeColor = rgbOnly(innerName.stroke.color);
     speaker.strokeWidth = width;
-    notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\` / `
-      + `\`strokeWidth=${width}\` ← \`.innerName\` 的 \`-webkit-text-stroke\`。`);
+    notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\`，`
+      + `\`strokeWidth=${width}\`（对应 \`.innerName\` 的 \`-webkit-text-stroke\`）。`);
   }
 
   // ── Nameplate shadow (`.outerName`'s `text-shadow`) ──
   if (nameShadow.has) {
     const nameDrop = toDropShadow(nameShadow, nameSize, uniformScale, axisScaleY);
     Object.assign(speaker, nameDrop);
-    notes.push('**名牌文字阴影**：`speaker.dropShadow` ← `.outerName` 的 `text-shadow`'
+    notes.push('**名牌文字阴影**：`speaker.dropShadow` 提取自 `.outerName` 的 `text-shadow`'
       + `（blur=${nameDrop.dropShadowBlur}、alpha=${nameDrop.dropShadowAlpha}、`
       + `distance=${nameDrop.dropShadowDistance}）。`);
   }
 
   // ── Report ──
-  notes.push(`**字号**：\`text.fontSize=${fontSize}\`；\`speaker.fontSize=${nameSize}\`（计算继承和 inline 优先级后换算）。`);
+  notes.push(`**字号**：\`text.fontSize=${fontSize}\`，\`speaker.fontSize=${nameSize}\`（已按继承与层叠样式换算）。`);
   notes.push(`**名牌几何**：\`x=${nameboxX}, y=${nameboxY}`
     + `, width=${nameMinW}(下限), minHeight=${nameH}\``
-    + `；\`speaker.padding=[left, top, right, bottom]=[${speakerPadding.join(', ')}]\``
-    + '（引擎顺序，非 CSS 顺序）。');
-  notes.push(`**名牌文字对齐**：\`speaker.align=${nameAlign}\`——WebGAL 的 `
-    + '`.TextBox_showName` 内文字默认**左对齐**，左留白由 `padding-left` 给出；'
-    + '引擎会把名字居中（短名字尤其明显），故显式输出该字段。');
-  notes.push(`**底色已随素材生成**：对话框 \`${describePaint(theme.textbox.fill)}\``
-    + `+\`${theme.textbox.border.width || 0}px `
-    + `${theme.textbox.border.color ? rgbOnly(theme.textbox.border.color) : '无'}\``
-    + `，圆角 ${textboxRadius}px；名牌 \`${describePaint(theme.namebox.fill)}\`+\``
-    + `${theme.namebox.border.width || 0}px `
-    + `${theme.namebox.border.color ? rgbOnly(theme.namebox.border.color) : '无'}\``
-    + `，圆角 ${nameboxRadiusCss >= 1000 ? '胶囊' : `${nameboxRadius}px`}\`。`
-    + '素材文件在包内 `assets/ui/dialogue/webgal/`。');
+    + `，\`speaker.padding=[${speakerPadding.join(', ')}]\`（left, top, right, bottom）。`);
+  notes.push(`**名牌文字对齐**：\`speaker.align=${nameAlign}\`（保留左对齐与内边距配置）。`);
+  notes.push(`**面板背景素材**：已生成对话框背景（${describePaint(theme.textbox.fill)}，`
+    + `边框 ${theme.textbox.border.width || 0}px ${theme.textbox.border.color ? rgbOnly(theme.textbox.border.color) : '无'}，`
+    + `圆角 ${textboxRadius}px）与名牌背景（${describePaint(theme.namebox.fill)}，`
+    + `边框 ${theme.namebox.border.width || 0}px ${theme.namebox.border.color ? rgbOnly(theme.namebox.border.color) : '无'}，`
+    + `圆角 ${nameboxRadiusCss >= 1000 ? '胶囊形' : `${nameboxRadius}px`}），`
+    + '保存于 `assets/ui/dialogue/webgal/`。');
   if (textboxDeco || nameboxDeco) {
-    notes.push('**角落装饰**：模板的 `::after` 引用了 `'
+    notes.push('**角落装饰**：模板 `::after` 引用的装饰素材（`'
       + [textboxDeco && textboxDeco.file, nameboxDeco && nameboxDeco.file].filter(Boolean).join('` / `')
-      + '`。它们会被内联进生成的贴图，并裁切到圆角框内 —— 模板用负偏移让装饰只露出一角，'
-      + 'WebGAL 靠父元素的 `overflow: hidden` 遮挡，引擎没有这一层，故按同样的范围裁剪。');
+      + '`）已内联至背景贴图，并按圆角范围裁剪。');
   }
-  notes.push('**入场动画无法迁移**：引擎 `textbox`/`namebox`/`text` 三个图层的参数白名单里'
-    + '**没有任何动画字段**，模板的 `@keyframes` 淡入与逐字显示无法在样式层面还原，需引擎侧新增能力。');
+  notes.push('**入场动画无法迁移**：当前对话框样式仅支持静态展示，'
+    + '模板中的 `@keyframes`（如淡入、逐字显示等动画）未导入。');
   if (!fontFile) {
-    notes.push('模板未声明字体（WebGAL 的字体写在 `template.json`，不在 scss 里）。'
-      + '导入器会尝试读取同级 `template.json` 的 `fonts` 并复制到项目 `fonts/`。');
+    notes.push('样式表中未包含字体声明；若 `template.json` 中配置了 `fonts`，'
+      + '导入器将自动读取并复制对应字体文件。');
   }
 
   const style: WebGalDialogueStyle = {

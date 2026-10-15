@@ -283,6 +283,12 @@ describe('WebGAL SCSS template import', () => {
       'utf8',
     );
 
+    // First import: the bundled styles are the only installed package.
+    const firstInspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+    expect(firstInspection.unverifiableCount).toBe(0);
+    expect(firstInspection.conflicts).toEqual([]);
+    expect(await listPackageDirectories(templatesRoot)).toEqual(['aeonstagery.default']);
+
     const legacyImport = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
     await rm(path.join(legacyImport.installPath, WEBGAL_IMPORT_RECORD_FILE));
 
