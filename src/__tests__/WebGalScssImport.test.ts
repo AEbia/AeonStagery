@@ -262,6 +262,35 @@ describe('WebGAL SCSS template import', () => {
     await expect(stat(templatesRoot)).rejects.toThrow();
   });
 
+  it('does not count the two bundled dialogue styles as old imports without a source record', async () => {
+    const root = await makeRoot('aeonstagery-webgal-builtin-unverifiable-');
+    const templateRoot = path.join(root, 'template');
+    const templatesRoot = path.join(root, 'library');
+    await writeTemplate(templateRoot);
+
+    const bundledManifest = JSON.parse(await readFile(
+      path.join(process.cwd(), 'src', 'templates', 'default', 'manifest.v2.json'),
+      'utf8',
+    )) as { dialogueStyles: Array<{ id: string; renderer: string }> };
+    expect(bundledManifest.dialogueStyles
+      .filter((style) => style.renderer === 'image-dialogue-v1')
+      .map((style) => style.id)).toEqual(['pink-nameplate', 'immersive-subtitle']);
+    const bundledPackageRoot = path.join(templatesRoot, 'aeonstagery.default');
+    await mkdir(bundledPackageRoot, { recursive: true });
+    await writeFile(
+      path.join(bundledPackageRoot, 'manifest.v2.json'),
+      JSON.stringify(bundledManifest),
+      'utf8',
+    );
+
+    const legacyImport = await installWebGalTemplatePackage({ templateRoot, templatesRoot });
+    await rm(path.join(legacyImport.installPath, WEBGAL_IMPORT_RECORD_FILE));
+
+    const inspection = await inspectWebGalTemplateDirectory({ templateRoot, templatesRoot });
+
+    expect(inspection.unverifiableCount).toBe(1);
+  });
+
   it('writes a loadable package with artwork, the font and a source record', async () => {
     const root = await makeRoot('aeonstagery-webgal-install-');
     const templateRoot = path.join(root, 'template');

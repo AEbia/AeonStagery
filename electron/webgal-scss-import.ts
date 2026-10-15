@@ -96,6 +96,8 @@ interface InstalledPackageRecord {
    * their definitions and the assets only they reference.
    */
   replaceable: boolean;
+  /** Whether the package has the artwork path emitted by this WebGAL importer. */
+  hasWebGalGeneratedArtwork: boolean;
   record: WebGalImportRecord | null;
 }
 
@@ -267,6 +269,22 @@ function installedAssetFiles(
   return files;
 }
 
+/**
+ * Older WebGAL imports may not have a sidecar yet. Only count packages that
+ * carry this importer's generated panel artwork as candidates for that legacy
+ * format; ordinary image dialogue styles (including the bundled ones) also
+ * lack sidecars, but were never imported from WebGAL.
+ */
+function hasWebGalGeneratedArtwork(styles: Record<string, unknown>[]): boolean {
+  const generatedPanelPath = (style: Record<string, unknown>, slot: 'textbox' | 'namebox') => {
+    if (!isRecord(style.params)) return false;
+    const panel = style.params[slot];
+    if (!isRecord(panel) || typeof panel.image !== 'string') return false;
+    return panel.image.replace(/\\/g, '/').startsWith('ui/dialogue/webgal/');
+  };
+  return styles.some((style) => generatedPanelPath(style, 'textbox') && generatedPanelPath(style, 'namebox'));
+}
+
 /** Read what is already installed, so conflicts and free names can be reported. */
 async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPackageRecord[]> {
   const records: InstalledPackageRecord[] = [];
@@ -314,6 +332,7 @@ async function scanInstalledPackages(templatesRoot: string): Promise<InstalledPa
         // a replace replaces the whole directory. Anything richer is a valid
         // package this import must not overwrite.
         replaceable: styleIds.length <= 1 && unimportedCapabilities(manifest).length === 0,
+        hasWebGalGeneratedArtwork: hasWebGalGeneratedArtwork(styles),
         // The sidecar records the original stylesheet hash; without it a package
         // can still be matched on the parameters it translates to.
         record: {
@@ -377,7 +396,9 @@ export async function inspectWebGalTemplateDirectory(
     sourceHash,
     paramsSignature,
     conflicts,
-    unverifiableCount: installed.filter((entry) => !entry.record?.sourceHash).length,
+    unverifiableCount: installed.filter((entry) => (
+      entry.hasWebGalGeneratedArtwork && !entry.record?.sourceHash
+    )).length,
     takenPackageNames: installed.map((entry) => entry.packageName),
     notes: build.notes,
   };
