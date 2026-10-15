@@ -160,6 +160,14 @@ describe('ProjectHome collaboration entry', () => {
     expect(onImportTemplatePackage).toHaveBeenCalledOnce();
   });
 
+  it('offers template deletion from the home library manager without creating a project', async () => {
+    const templatePackage = { id: 'webgal.subtitle', name: 'WebGAL Subtitle', version: '1.0.0', scope: 'user' as const, packageRoot: '/library/templates/subtitle' };
+    const onDeleteTemplatePackage = vi.fn(async () => undefined);
+    renderHome({ templatePackages: [templatePackage], onDeleteTemplatePackage });
+    fireEvent.click(screen.getByRole('button', { name: '删除模板包 WebGAL Subtitle' }));
+    await waitFor(() => expect(onDeleteTemplatePackage).toHaveBeenCalledWith(templatePackage));
+  });
+
   it('enables every available template by default and submits deliberate selection changes', async () => {
     const onCreateProject = vi.fn(async () => undefined);
     renderHome({
@@ -183,6 +191,17 @@ describe('ProjectHome collaboration entry', () => {
     expect(onCreateProject).toHaveBeenCalledWith(expect.objectContaining({
       templates: expect.objectContaining({ enabledTemplateIds: ['template.beta'] }),
     }));
+  });
+
+  it('creates a project with no enabled templates after unchecking the last package', async () => {
+    const onCreateProject = vi.fn(async () => undefined);
+    renderHome({ templatePackages: [{ id: 'template.alpha', name: 'Alpha', version: '1.0.0', scope: 'user' }], onCreateProject });
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    const checkbox = screen.getByRole('checkbox', { name: '启用模板 Alpha' }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith(expect.objectContaining({ templates: expect.objectContaining({ enabledTemplateIds: [] }) })));
   });
 
   it('starts the first lesson from the primary home action', () => {

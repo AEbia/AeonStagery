@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
 import type { ICharacterAdapter } from '../../api/interfaces';
-import type { TemplatePackageCatalog } from '../../services/template-package';
+import { createTemplatePackageView, type TemplatePackageCatalog } from '../../services/template-package';
 import { createPerformanceProfileProviderFromTemplatePackages } from '../../services/template-package/TemplatePerformanceProfileProvider';
 import type { ModelCapabilityPort } from '../../services/ai-authoring/EnhancementProcessorRunner';
 import type { CinematicCapabilityPort } from '../../services/ai-authoring/CinematicCapabilityCatalog';
@@ -56,19 +56,15 @@ export function buildEnhancementCapabilityPorts(input: {
   };
 
   const catalog = input.templatePackages ?? null;
-  const summaries = catalog?.getSummaries?.() ?? [];
   const packages = catalog?.getPackages?.() ?? [];
-  const idsFromPackages = packages.flatMap((templatePackage) => (
-    templatePackage.manifest.visualRecipes ?? []
-  )).flatMap((recipe) => typeof recipe.id === 'string' ? [recipe.id] : []);
+  const view = createTemplatePackageView([...packages], {
+    enabledTemplateIds: input.enabledTemplateIds ? [...input.enabledTemplateIds] : undefined,
+  });
+  const presetIds = (presets: Array<Record<string, unknown>>) => presets.flatMap((preset) => typeof preset.id === 'string' ? [preset.id] : []);
   const cinematicCapabilityPort: CinematicCapabilityPort = {
-    cameraPresets: summaries.flatMap((summary) => (
-      (summary.cameraPresets ?? []).map((preset) => preset.id)
-    )),
-    lightingPresets: summaries.flatMap((summary) => (
-      (summary.lightingPresets ?? []).map((preset) => preset.id)
-    )),
-    visualRecipeIds: idsFromPackages,
+    cameraPresets: presetIds(view.cameraPresets),
+    lightingPresets: presetIds(view.lightingPresets),
+    visualRecipeIds: presetIds(view.visualRecipes),
   };
 
   const profileProvider = createPerformanceProfileProviderFromTemplatePackages(
@@ -146,7 +142,7 @@ export function useEnhancementCapabilityPorts(input: {
   // Stable memo key: project metadata is immutable between changes, but the
   // array identity is not guaranteed across renders.
   const enabledTemplateKey = useMemo(
-    () => (enabledTemplateIds ? [...enabledTemplateIds].join('|') : ''),
+    () => JSON.stringify(enabledTemplateIds),
     [enabledTemplateIds],
   );
   const templateCatalogSnapshot = useMemo(
@@ -159,7 +155,7 @@ export function useEnhancementCapabilityPorts(input: {
       document,
       modelCapabilities,
       templatePackages: templateCatalogSnapshot.catalog,
-      enabledTemplateIds: enabledTemplateKey ? enabledTemplateKey.split('|') : null,
+      enabledTemplateIds: JSON.parse(enabledTemplateKey) as string[] | null,
     }),
     [document, modelCapabilities, templateCatalogSnapshot, enabledTemplateKey],
   );

@@ -42,6 +42,7 @@ import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
 import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
+import { TemplatePackageSelector } from './ui/templates/TemplateCapabilityConfig';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
 import { TemplatePerformanceProfileEditor } from './ui/templates/TemplatePerformanceProfileEditor';
 import { WebGalRegenerateDialog } from './ui/WebGalRegenerateDialog';
@@ -127,7 +128,7 @@ function AppContent({ contextValue, sessionBindings }: {
     currentProject, templatePackages, templatePackageRevision, isCollaborationJoinHomeLocked,
     handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
-    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
+    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage, handleDeleteTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
@@ -630,9 +631,13 @@ function AppContent({ contextValue, sessionBindings }: {
                     value={currentProject.metadata.templates}
                     onClose={handleCloseSettings}
                     onSave={handleSaveTemplateConfiguration}
+                    onDeletePackage={handleDeleteTemplatePackage}
                   />
                 ) : (
-                  <p className="settings-template-panel__empty">未打开项目。AI 表演模板可独立编辑；项目模板启用顺序与角色导入会在打开项目后显示。</p>
+                  <>
+                    <p className="settings-template-panel__empty">未打开项目。AI 表演模板可独立编辑；项目模板启用顺序与角色导入会在打开项目后显示。</p>
+                    <TemplatePackageSelector packages={templatePackages} onDeletePackage={handleDeleteTemplatePackage} />
+                  </>
                 )}
                 <TemplatePerformanceProfileEditor
                   service={contextValue.services.templatePerformanceProfiles}
@@ -699,6 +704,7 @@ function AppContent({ contextValue, sessionBindings }: {
             onBrowseCollaborationDirectory={handleBrowseCollaborationDirectory}
             onOpenProject={handleOpenProject}
             onImportTemplatePackage={handleImportTemplatePackage}
+            onDeleteTemplatePackage={handleDeleteTemplatePackage}
             onOpenRecentProject={handleOpenRecentProject}
             onRenameRecentProject={setRenameTarget}
             onRemoveRecentProject={removeRecentProject}

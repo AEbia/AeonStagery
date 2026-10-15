@@ -294,12 +294,17 @@ export class ProjectWorkspaceService {
       // snapshot. Restore it before authoring reads the project defaults.
       const templates = project.metadata.templates;
       if (templates) {
-        const view = createTemplatePackageView(this.getTemplatePackages(), { enabledTemplateIds: templates.enabledTemplateIds });
+        const packages = this.getTemplatePackages();
+        const view = createTemplatePackageView(packages, { enabledTemplateIds: templates.enabledTemplateIds });
         const styleId = templates.defaults?.dialogueStyleId ?? view.defaults.dialogueStyleId;
         const style = view.dialogueStyles.find((candidate) => candidate.id === styleId);
+        const snapshotIsDisabled = !!templates.dialoguePresentation
+          && (templates.enabledTemplateIds.length === 0
+            || packages.some((pkg) => pkg.manifest.dialogueStyles?.some((candidate) => candidate.id === templates.dialoguePresentation?.styleId)));
         const needsSnapshot = style?.renderer === 'image-dialogue-v1'
           ? !templates.dialoguePresentation || templates.dialoguePresentation.styleId !== styleId
-          : style && (templates.dialoguePresentation || templates.dialogueTemplate !== style.renderer);
+          : (style && (templates.dialoguePresentation || templates.dialogueTemplate !== style.renderer))
+            || (!style && snapshotIsDisabled);
         if (needsSnapshot) {
           project = { ...project, metadata: { ...project.metadata, templates: await this.materializeDialoguePresentation(templates) } };
           this.session.setCurrentProject(project);
@@ -515,13 +520,32 @@ export class ProjectWorkspaceService {
   ): Promise<ProjectTemplateConfiguration> {
     const packages = this.getTemplatePackages();
     const view = createTemplatePackageView(packages, { enabledTemplateIds: templates.enabledTemplateIds });
-    const styleId = templates.defaults?.dialogueStyleId ?? view.defaults.dialogueStyleId;
+    const defaults = { ...templates.defaults };
+    const overrideId = defaults.dialogueStyleId;
+    const builtinRenderers = ['glass', 'minimal', 'classic'] as const;
+    const isBuiltinRenderer = (id?: string): id is typeof builtinRenderers[number] => (
+      builtinRenderers.some((renderer) => renderer === id)
+    );
+    const overrideProvidedByPackage = packages.some((pkg) => pkg.manifest.dialogueStyles?.some((style) => style.id === overrideId));
+    if (overrideId && !isBuiltinRenderer(overrideId)
+      && (overrideProvidedByPackage || templates.enabledTemplateIds.length === 0)
+      && !view.dialogueStyles.some((style) => style.id === overrideId)) {
+      delete defaults.dialogueStyleId;
+    }
+    const normalizedTemplates = {
+      ...templates,
+      defaults: Object.keys(defaults).length > 0 ? defaults : undefined,
+      selectedCharacterPresetIds: templates.selectedCharacterPresetIds?.filter((id) => (
+        view.characterPresets.some((preset) => preset.id === id)
+        || (templates.enabledTemplateIds.length > 0 && !packages.some((pkg) => pkg.manifest.characterPresets?.some((preset) => preset.id === id)))
+      )),
+    };
+    const styleId = defaults.dialogueStyleId ?? view.defaults.dialogueStyleId;
     const style = styleId ? view.dialogueStyles.find((candidate) => candidate.id === styleId) : undefined;
     if (!style || style.renderer !== 'image-dialogue-v1' || !style.params) {
-      const { dialoguePresentation: _previous, dialogueTemplate: _template, ...rest } = templates;
-      const builtinRenderer = style && ['glass', 'minimal', 'classic'].includes(style.renderer)
-        ? style.renderer as 'glass' | 'minimal' | 'classic'
-        : undefined;
+      const { dialoguePresentation: _previous, dialogueTemplate: _template, ...rest } = normalizedTemplates;
+      const builtinRenderer = isBuiltinRenderer(style?.renderer) ? style.renderer
+        : isBuiltinRenderer(styleId) ? styleId : undefined;
       return { ...rest, ...(builtinRenderer ? { dialogueTemplate: builtinRenderer } : {}) };
     }
 
@@ -560,7 +584,7 @@ export class ProjectWorkspaceService {
     if (presentation.speaker?.fontFile) {
       presentation.speaker.fontFile = await materialize(presentation.speaker.fontFile, 'font');
     }
-    const { dialogueTemplate: _builtIn, ...rest } = templates;
+    const { dialogueTemplate: _builtIn, ...rest } = normalizedTemplates;
     return { ...rest, dialoguePresentation: presentation };
   }
 

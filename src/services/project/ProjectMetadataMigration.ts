@@ -77,7 +77,7 @@ export function migrateProjectMetadataV1ToV2(
     : [];
   document.templates = {
     ...rawTemplates,
-    enabledTemplateIds: enabledTemplateIds.length > 0 ? enabledTemplateIds : ['aeonstagery.default'],
+    enabledTemplateIds,
     defaults,
     selectedCharacterPresetIds,
     characterVariantImportMode: rawTemplates.characterVariantImportMode === 'all' ? 'all' : 'primary-only',

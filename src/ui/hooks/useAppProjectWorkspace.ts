@@ -3,7 +3,7 @@ import type { BootstrapContext } from '../../engine/Bootstrapper';
 import type { ProjectWorkflowResult } from '../../api/interfaces/IProjectOpenWorkflow';
 import type { ProjectState, ProjectTemplateConfiguration } from '../../api/types/project';
 import type { WebGalImportInput } from '../../services/import/webgal';
-import type { TemplatePackageSummary } from '../../services/template-package';
+import { createTemplatePackageView, templateMetadataMatchesId, type TemplatePackageSummary } from '../../services/template-package';
 import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import { eventBus } from '../../api/events';
 import {
@@ -169,8 +169,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     await contextValue.services.templatePackages.refresh();
     const result = await contextValue.services.projectWorkspace.updateTemplateConfiguration(templates);
     if (!result.success) {
-      showToast(result.error, 'error');
-      return;
+      throw new Error(result.error);
     }
 
     const nextTemplates = result.project.metadata.templates;
@@ -309,6 +308,44 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     );
   }, [contextValue.services.templatePackages]);
 
+  const handleDeleteTemplatePackage = useCallback(async (templatePackage: TemplatePackageSummary) => {
+    const manager = window.aeonStageryAPI.templates;
+    if (!manager?.deletePackage) throw new Error('当前桌面版本不支持删除模板包，请更新应用');
+    if (templatePackage.scope === 'builtin' || !templatePackage.packageRoot) {
+      throw new Error('不能删除内置模板包');
+    }
+    const result = await manager.deletePackage({ id: templatePackage.id, packageRoot: templatePackage.packageRoot });
+    if (!result.success) {
+      if (result.canceled) return;
+      throw new Error(result.error ?? '请检查目录权限后重试');
+    }
+    const project = contextValue.services.projectWorkspace.getCurrentProject();
+    if (project?.metadata.templates) {
+      const removedIds = new Set([templatePackage.id, ...(templatePackage.aliases ?? [])]);
+      const templates = project.metadata.templates;
+      const remainingPackages = contextValue.services.templatePackages.getPackages().filter((pkg) => pkg.source.packageRoot !== templatePackage.packageRoot);
+      const enabledTemplateIds = templates.enabledTemplateIds.filter((id) => (
+        !removedIds.has(id)
+        || remainingPackages.some((pkg) => templateMetadataMatchesId(pkg.manifest.template, id))
+      ));
+      const view = createTemplatePackageView([...remainingPackages], { enabledTemplateIds });
+      const defaults = { ...templates.defaults };
+      if (templatePackage.dialogueStyles?.some((style) => style.id === defaults.dialogueStyleId)
+        && !view.dialogueStyles.some((style) => style.id === defaults.dialogueStyleId)) {
+        delete defaults.dialogueStyleId;
+      }
+      await handleSaveTemplateConfiguration({
+        ...templates,
+        enabledTemplateIds,
+        defaults: Object.keys(defaults).length ? defaults : undefined,
+        selectedCharacterPresetIds: templates.selectedCharacterPresetIds?.filter((id) => view.characterPresets.some((preset) => preset.id === id)),
+      });
+    } else {
+      await contextValue.services.templatePackages.refresh();
+    }
+    showToast(`已删除模板包：${templatePackage.name}`, 'success');
+  }, [contextValue.services.projectWorkspace, contextValue.services.templatePackages, handleSaveTemplateConfiguration]);
+
   const handleChooseExternalLibrary = useCallback(async () => {
     const result = await window.aeonStageryAPI.dialog.showOpen({
       title: '选择外部素材库目录',
@@ -367,7 +404,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult,
     handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
-    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
+    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage, handleDeleteTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   };

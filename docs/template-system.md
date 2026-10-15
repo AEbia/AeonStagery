@@ -10,6 +10,8 @@ Architecture decisions live in [KSM-0001](ksm-adr/ksm-0001-unified-template-syst
 - **Supported Scene Schema Versions**: Manifest schema v2 (`manifest.v2.json`) supports packages targeting scene schema versions 4 and 5. Payloads are validated and materialized into the active `SceneDocumentV5` epoch.
 - **Settings Management**: The "项目模板" (`templates`) tab in `SettingsDialog` allows users to configure project template precedence, default dialogue styles, character imports, and AI performance profiles.
 - **ZIP Package Import**: Installing and updating template packages via ZIP archives is supported directly from both `ProjectHome` and `SettingsDialog`.
+- **Package Removal**: External packages, including WebGAL subtitle styles and their assets, can be deleted from the home library manager or project template settings. Desktop deletion asks the user to select the listed package directory and confirm before moving it to the system trash; builtin packages remain available. Shared template roots containing legacy managed data are protected. The active project drops the removed package and its unavailable defaults; existing dialogue text and project-owned asset copies are retained.
+- **Template Disablement**: Every package can be unchecked, including the last one. Saving an empty selection keeps templates disabled across catalog refreshes and project reopening; unavailable subtitle defaults and AI performance capabilities no longer remain active.
 - **Omission of Deferred Presets**: Camera and lighting preset selectors are omitted from the configuration UI to avoid exposing unassigned runtime capabilities.
 
 ## Voice Profiles

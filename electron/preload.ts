@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   },
   templates: {
     importZip: () => ipcRenderer.invoke('templates:importZip'),
+    deletePackage: (request: import('../src/api/types/template-package-import').TemplatePackageDeleteRequest) => ipcRenderer.invoke('templates:deletePackage', request),
   },
 
   // ─── Live2D Runtime Availability ───────────────────────
