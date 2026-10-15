@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { eventBus } from './api/events';
 import { getLogger } from './engine/Logger';
 import { registerSceneSummaryProvider } from './services/crash/CrashReporter';
@@ -13,6 +13,7 @@ import {
   IconInfo,
   IconMaximize,
   IconMoon,
+  IconPencil,
   IconRefresh,
   IconSettings,
   IconSun,
@@ -39,6 +40,7 @@ import { AppProvider, useTimelineAdapter } from './ui/context/AppContext';
 import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
+import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
 import { TemplatePerformanceProfileEditor } from './ui/templates/TemplatePerformanceProfileEditor';
@@ -123,12 +125,13 @@ function AppContent({ contextValue, sessionBindings }: {
   const project = useAppProjectWorkspace(contextValue, hasLoadedScene);
   const {
     currentProject, templatePackages, templatePackageRevision, isCollaborationJoinHomeLocked,
-    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject,
+    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
     handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
+  const [renameTarget, setRenameTarget] = useState<{ name: string; projectFilePath: string } | null>(null);
   const {
     collaborationController, collaborationServerStatus, effectiveServerCredentials,
     shouldShowCollaborationPanel, handleHostNewCollaboration, handleHostExistingCollaboration,
@@ -193,9 +196,16 @@ function AppContent({ contextValue, sessionBindings }: {
           <img src="./icon.png" alt="AeonStagery" className="top-bar__logo" width={22} height={22} />
           <span className="top-bar__brand">AeonStagery</span>
           {currentProject && (
-            <span className="top-bar__project-name" title={currentProject.rootPath}>
-              {currentProject.metadata.name}
-            </span>
+            <button
+              type="button"
+              className="top-bar__project-name"
+              title={`重命名项目 · ${currentProject.rootPath}`}
+              aria-label={`重命名项目：${currentProject.metadata.name}`}
+              onClick={() => setRenameTarget({ name: currentProject.metadata.name, projectFilePath: currentProject.projectFilePath })}
+            >
+              <span>{currentProject.metadata.name}</span>
+              <IconPencil width={12} height={12} />
+            </button>
           )}
           <button
             className="btn btn--icon top-bar__project-action"
@@ -690,6 +700,7 @@ function AppContent({ contextValue, sessionBindings }: {
             onOpenProject={handleOpenProject}
             onImportTemplatePackage={handleImportTemplatePackage}
             onOpenRecentProject={handleOpenRecentProject}
+            onRenameRecentProject={setRenameTarget}
             onRemoveRecentProject={removeRecentProject}
             onHostNewCollaboration={handleHostNewCollaboration}
             onHostExistingCollaboration={handleHostExistingCollaboration}
@@ -703,6 +714,15 @@ function AppContent({ contextValue, sessionBindings }: {
           />
         ) : null}
       </FirstLessonController>
+
+      {renameTarget && (
+        <ProjectRenameDialog
+          key={renameTarget.projectFilePath}
+          name={renameTarget.name}
+          onSave={(name) => handleRenameProject(renameTarget.projectFilePath, name)}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
 
       <ToastContainer />
     </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
+import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPencil, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
 import { MAX_RECENT_PROJECTS } from '../SettingsStore';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import type {
@@ -71,6 +71,7 @@ interface ProjectHomeProps {
   onOpenProject: () => void | Promise<void>;
   onImportTemplatePackage: () => void | Promise<void>;
   onOpenRecentProject: (projectFilePath: string) => void | Promise<void>;
+  onRenameRecentProject: (project: RecentProjectEntry) => void;
   onRemoveRecentProject: (projectFilePath: string) => void;
   onHostNewCollaboration: (payload: { name: string; rootPath: string; displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
   onHostExistingCollaboration: (payload: { displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
@@ -136,6 +137,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   onOpenProject,
   onImportTemplatePackage,
   onOpenRecentProject,
+  onRenameRecentProject,
   onRemoveRecentProject,
   onHostNewCollaboration,
   onHostExistingCollaboration,
@@ -1619,15 +1621,27 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           </span>
                           <span className="ph-recent-time">{formatRecentTime(project.lastOpenedAt)}</span>
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn--icon btn--danger ph-recent-delete"
-                          onClick={() => setProjectToRemove(project)}
-                          aria-label={`移除最近项目：${project.name}`}
-                          title="移除最近项目"
-                        >
-                          <IconTrash width={14} height={14} />
-                        </button>
+                        <div className="ph-recent-actions">
+                          <button
+                            type="button"
+                            className="btn btn--icon"
+                            onClick={() => onRenameRecentProject(project)}
+                            disabled={openingRecentPath !== null}
+                            aria-label={`重命名项目：${project.name}`}
+                            title="重命名项目"
+                          >
+                            <IconPencil width={14} height={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--icon btn--danger ph-recent-delete"
+                            onClick={() => setProjectToRemove(project)}
+                            aria-label={`移除最近项目：${project.name}`}
+                            title="移除最近项目"
+                          >
+                            <IconTrash width={14} height={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

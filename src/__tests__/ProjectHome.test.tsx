@@ -68,6 +68,7 @@ function renderHome(overrides: Partial<React.ComponentProps<typeof ProjectHome>>
     onOpenProject: vi.fn(),
     onImportTemplatePackage: vi.fn(),
     onOpenRecentProject: vi.fn(),
+    onRenameRecentProject: vi.fn(),
     onRemoveRecentProject: vi.fn(),
     onHostNewCollaboration: vi.fn(),
     onHostExistingCollaboration: vi.fn(),
@@ -94,6 +95,17 @@ function makeRecentProjects(count: number) {
 }
 
 describe('ProjectHome collaboration entry', () => {
+  it('requests renaming a recent project without opening or removing it', () => {
+    const projects = makeRecentProjects(2);
+    const props = renderHome({ recentProjects: projects });
+
+    fireEvent.click(screen.getByRole('button', { name: '重命名项目：Project 2' }));
+
+    expect(props.onRenameRecentProject).toHaveBeenCalledWith(projects[1]);
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    expect(props.onRemoveRecentProject).not.toHaveBeenCalled();
+  });
+
   it('caps recent projects and confirms removal before updating recents', () => {
     const onRemoveRecentProject = vi.fn();
     renderHome({

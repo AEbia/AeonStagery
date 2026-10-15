@@ -79,7 +79,7 @@ flowchart TD
 
 | 视觉区域 / 控件 | 职责描述 | 相关文件与组件 |
 | --- | --- | --- |
-| **标题与项目状态** | Logo、软件版本 Badge、当前打开项目名称 | [`src/App.tsx`](../src/App.tsx) |
+| **标题与项目状态** | Logo、软件版本 Badge、当前打开项目名称（点击重命名，与首页最近项目共用重命名对话框） | [`src/App.tsx`](../src/App.tsx)、[`src/ui/ProjectRenameDialog.tsx`](../src/ui/ProjectRenameDialog.tsx) |
 | **快速操作按钮** | 切换/打开项目 (`IconFolder`)；场景更改始终自动保存，保存快捷键（默认 Ctrl+S）可立即保存并显示成功提示 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/hooks/useAppShortcuts.ts`](../src/ui/hooks/useAppShortcuts.ts) |
 | **校验指示器 (Validation Pill)** | 显示场景语法与校验错误/警告数量，点击定位问题 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/store/ValidationStore.ts`](../src/ui/store/ValidationStore.ts) |
 | **协作连接面板** | 房间连接状态指示器、在线用户头像列表、连接配置浮窗 | [`src/ui/CollaborationConnectPanel.tsx`](../src/ui/CollaborationConnectPanel.tsx) |
