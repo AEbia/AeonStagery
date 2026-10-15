@@ -110,6 +110,32 @@ describe('collaborative text draft inputs', () => {
     expect(onChange).toHaveBeenNthCalledWith(2, 1, false);
   });
 
+  it('adjusts the editing value with the wheel without scrolling its parent', () => {
+    const onChange = vi.fn();
+    const onParentWheel = vi.fn();
+    const { container } = render(
+      <div onWheel={onParentWheel}>
+        <InlineNumericInput value={1} step="0.1" onChange={onChange} />
+      </div>,
+    );
+
+    const scrubber = container.querySelector('.scrubbable-badge') as HTMLElement;
+    fireEvent.mouseDown(scrubber, { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.mouseUp(document, { clientX: 10, clientY: 10 });
+
+    const input = container.querySelector('input.scrubbable-input-mode') as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+
+    const wheelWasNotPrevented = fireEvent.wheel(input, { deltaY: 100 });
+
+    expect(wheelWasNotPrevented).toBe(false);
+    expect(input.value).toBe('0.9');
+    expect(onParentWheel).not.toHaveBeenCalled();
+
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(0.9, false);
+  });
+
   it('triggers dragging on subtle 2px movement without long delay', () => {
     const onChange = vi.fn();
     const { container } = render(

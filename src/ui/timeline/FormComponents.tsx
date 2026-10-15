@@ -334,6 +334,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
   } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editingInputRef = useRef<HTMLInputElement>(null);
   const badgeRef = useRef<HTMLDivElement>(null);
   const badgeValueRef = useRef<HTMLSpanElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -357,6 +358,29 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       if (hoverScrollAnimRef.current !== null) cancelAnimationFrame(hoverScrollAnimRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const input = editingInputRef.current;
+    if (!isEditing || disabled || !input) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (document.activeElement !== input || event.deltaY === 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        if (event.deltaY < 0) input.stepUp();
+        else input.stepDown();
+        setLocalValue(input.value);
+      } catch {
+        // Inputs with step="any" cannot be adjusted with the native step API.
+      }
+    };
+
+    // Keep the input's wheel step while preventing the browser from scrolling the page.
+    input.addEventListener('wheel', handleWheel, { passive: false });
+    return () => input.removeEventListener('wheel', handleWheel);
+  }, [disabled, isEditing]);
 
   const calculatePopoverPosition = useCallback(() => {
     const badgeEl = badgeRef.current;
@@ -980,6 +1004,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
   if (isEditing) {
     return (
       <input
+        ref={editingInputRef}
         type="number"
         disabled={disabled}
         className={`scrubbable-input-mode ${className || ''}`}
