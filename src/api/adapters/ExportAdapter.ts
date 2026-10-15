@@ -1,6 +1,6 @@
 import type { ExportConfig, ExportProgress, ExportResult } from '../types/export';
 import { FrameCaptureEngine } from '../../engine/export/FrameCaptureEngine';
-import { AudioMixer, AudioSource } from '../../engine/export/AudioMixer';
+import { AudioMixer, AudioResourceCache } from '../../engine/export/AudioMixer';
 import { WebCodecsBackend } from '../../engine/export/WebCodecsBackend';
 import { RawPixelsBackend } from '../../engine/export/RawPixelsBackend';
 import type { DocumentStore } from '../../ui/store/DocumentStore';
@@ -57,12 +57,13 @@ export class ExportAdapter implements IExportAdapter {
 
   async export(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal): Promise<ExportResult> {
     let temporaryVideoPath: string | undefined;
-    let finalCopyStarted = false;
     let directCaptureOutputStarted = false;
+    let backendOutputStarted = false;
+    let exportCompleted = false;
     let cancellation: Promise<unknown> | undefined;
     let removeLogListener: (() => void) | undefined;
     const cancel = () => {
-      cancellation ??= Promise.resolve(this.electronAPI.export.cancelExport());
+      cancellation ??= Promise.resolve().then(() => this.electronAPI.export.cancelExport());
       // Observe IPC errors immediately; the cancellation path awaits cleanup below.
       void cancellation.catch(() => {});
     };
@@ -115,14 +116,21 @@ export class ExportAdapter implements IExportAdapter {
 
       const isTranscodeNeeded = hasWebCodecs && codec !== 'libx264';
 
-      // Determine video output path — use temp when audio or transcode follows
+      const basePath = this.playbackAdapter?.getBasePath?.() ?? '';
+      const audioCache = new AudioResourceCache();
+      const audioSources = includeAudio
+        ? await this.audioMixer.collectPreparedSources(preparedScene, rangeStart, basePath, audioCache)
+        : [];
+      signal?.throwIfAborted();
+
+      // Use an intermediate video only when there is actual post-processing.
       let videoPath = outputPath;
-      if (includeAudio || isTranscodeNeeded) {
+      if (audioSources.length > 0 || isTranscodeNeeded) {
         const tempDir = await this.electronAPI.export.getTempDir();
         const ext = format === 'mp4' ? 'mp4' : format === 'mov' ? 'mov' : 'webm';
         videoPath = await this.electronAPI.path.join(
           tempDir,
-          `video_${Date.now()}.${ext}`,
+          `video_${crypto.randomUUID()}.${ext}`,
         );
         temporaryVideoPath = videoPath;
       }
@@ -142,7 +150,7 @@ export class ExportAdapter implements IExportAdapter {
       if (!isSubtitleOnly && !isSubtitleChroma) {
         await voiceLipSync.prepare(preparedScene, rangeStart, rangeEnd, async (voiceScene) => {
           const dialogueOnlyScene = { ...voiceScene, audio: undefined };
-          const sources = await this.audioMixer.collectPreparedSources(dialogueOnlyScene, 0, this.playbackAdapter?.getBasePath?.() ?? '');
+          const sources = await this.audioMixer.collectPreparedSources(dialogueOnlyScene, 0, basePath, audioCache);
           signal?.throwIfAborted();
           const source = sources.find((candidate) => candidate.path);
           if (!source) throw new Error('Voice audio is unavailable for export lip sync.');
@@ -171,17 +179,10 @@ export class ExportAdapter implements IExportAdapter {
         subtitleChroma: isSubtitleChroma,
         signal,
         onBackendStarted: () => {
+          backendOutputStarted = true;
           if (videoPath === outputPath) directCaptureOutputStarted = true;
         },
       });
-      signal?.throwIfAborted();
-
-      // ── Audio Collection ──
-      let audioSources: AudioSource[] = [];
-      if (includeAudio) {
-        const basePath = this.playbackAdapter?.getBasePath?.() ?? '';
-        audioSources = await this.audioMixer.collectPreparedSources(preparedScene, rangeStart, basePath);
-      }
       signal?.throwIfAborted();
 
       // ── Mix Phase ──
@@ -224,44 +225,35 @@ export class ExportAdapter implements IExportAdapter {
         }
 
         onProgress({ phase: 'mix', percent: 100 });
-      } else if (videoPath !== outputPath) {
-        // No transcode and no audio — copy temp to final
-        const tempData = await this.electronAPI.fs.readFile(videoPath);
-        signal?.throwIfAborted();
-        if (!tempData.success || !tempData.data) {
-          return {
-            success: false,
-            error: tempData.error || 'Failed to read temporary video file',
-          };
-        }
-        finalCopyStarted = true;
-        const writeResult = await this.electronAPI.fs.writeFile(outputPath, tempData.data);
-        signal?.throwIfAborted();
-        if (!writeResult?.success) {
-          return {
-            success: false,
-            error: writeResult?.error || 'Failed to write final video file',
-          };
-        }
       }
 
       signal?.throwIfAborted();
       onProgress({ phase: 'done', percent: 100 });
 
+      exportCompleted = true;
       return { success: true, outputPath };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (signal?.aborted) {
-        await cancellation;
         return { success: false, cancelled: true };
       }
-      return { success: false, error: err.message || 'Unknown export error' };
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     } finally {
       signal?.removeEventListener('abort', cancel);
       removeLogListener?.();
-      if (signal?.aborted) {
-        if (temporaryVideoPath) await this.electronAPI.fs.removeFile(temporaryVideoPath);
-        if (finalCopyStarted || directCaptureOutputStarted) {
-          await this.electronAPI.fs.removeFile(config.outputPath);
+      if (!exportCompleted && backendOutputStarted) cancel();
+      if (cancellation) {
+        await cancellation.catch((error: unknown) => console.error('[Export] Cancellation cleanup failed:', error));
+      }
+      const cleanupPaths = [
+        ...(temporaryVideoPath ? [temporaryVideoPath] : []),
+        ...(signal?.aborted && directCaptureOutputStarted ? [config.outputPath] : []),
+      ];
+      for (const cleanupPath of cleanupPaths) {
+        try {
+          const result = await this.electronAPI.fs.removeFile(cleanupPath);
+          if (result?.success === false) console.error('[Export] File cleanup failed:', result.error);
+        } catch (error) {
+          console.error('[Export] File cleanup failed:', error);
         }
       }
     }
