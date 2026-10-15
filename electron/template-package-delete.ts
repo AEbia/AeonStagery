@@ -19,7 +19,11 @@ export async function inspectTemplatePackageForDeletion(
   }
   const resolvedRoot = await realpath(packageRoot);
   for (const protectedRoot of protectedRoots) {
-    const relative = path.relative(path.resolve(protectedRoot), resolvedRoot);
+    // Windows may return an 8.3 short path for a temporary or selected path,
+    // while realpath resolves the package path to its long form. Canonicalize
+    // both sides before checking containment so aliases cannot bypass protection.
+    const resolvedProtectedRoot = await realpath(path.resolve(protectedRoot));
+    const relative = path.relative(resolvedProtectedRoot, resolvedRoot);
     if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
       throw new Error('不能删除内置模板包');
     }
