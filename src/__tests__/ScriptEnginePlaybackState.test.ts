@@ -108,17 +108,72 @@ describe('ScriptEngine playback state synchronization', () => {
     expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
   });
 
-  it.each([true, false])('restores the playing state after seek (forceReconstruct=%s)', async (forceReconstruct) => {
+  it.each([true, false])('pauses immediately and stays paused after a user seek (forceReconstruct=%s)', async (forceReconstruct) => {
+    await loadScene();
+    adapter.play();
+    const states: boolean[] = [];
+    store.subscribe(() => states.push(store.playing));
+    const timeline = engine.getMasterTimeline()!;
+
+    const seeking = adapter.seek(2, forceReconstruct);
+    const immediatelyPlaying = engine.isPlaying();
+    const immediatelyStorePlaying = store.playing;
+    const immediatelyTimelinePaused = timeline.paused();
+    await seeking;
+
+    expect(immediatelyPlaying).toBe(false);
+    expect(immediatelyStorePlaying).toBe(false);
+    expect(immediatelyTimelinePaused).toBe(true);
+    expect(states).toEqual([false]);
+    expect(engine.isPlaying()).toBe(false);
+    expect(store.playing).toBe(false);
+    expect(timeline.paused()).toBe(true);
+    expect(engine.getCurrentTime()).toBeCloseTo(2);
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+  });
+
+  it.each([true, false])('restores the playing state after an internal seek (forceReconstruct=%s)', async (forceReconstruct) => {
     await loadScene();
     adapter.play();
     const states: boolean[] = [];
     store.subscribe(() => states.push(store.playing));
 
-    await adapter.seek(2, forceReconstruct);
+    await engine.seek(2, forceReconstruct);
 
     expect(states).toEqual([false, true]);
     expect(engine.isPlaying()).toBe(true);
     expect(store.playing).toBe(true);
+  });
+
+  it('stays paused through queued scrubbing and the final reconstruction', async () => {
+    await loadScene();
+    adapter.play();
+    const states: boolean[] = [];
+    store.subscribe(() => states.push(store.playing));
+
+    await Promise.all([
+      adapter.seek(1, false),
+      adapter.seek(2, false),
+      adapter.seek(3, true),
+    ]);
+
+    expect(states).toEqual([false]);
+    expect(engine.isPlaying()).toBe(false);
+    expect(engine.getMasterTimeline()!.paused()).toBe(true);
+    expect(engine.getCurrentTime()).toBeCloseTo(3);
+  });
+
+  it('honors an explicit play request during a user seek', async () => {
+    await loadScene();
+    adapter.play();
+
+    const seeking = adapter.seek(2);
+    adapter.play();
+    await seeking;
+
+    expect(engine.isPlaying()).toBe(true);
+    expect(store.playing).toBe(true);
+    expect(engine.getMasterTimeline()!.paused()).toBe(false);
   });
 
   it('tracks the stop and resume during a document edit', async () => {
