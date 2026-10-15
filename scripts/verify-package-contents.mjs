@@ -24,6 +24,9 @@ import {
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
+const packageConfig = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+const electronLanguages = packageConfig.build?.electronLanguages;
+const ALLOWED_ELECTRON_LANGUAGES = ['zh-CN', 'en-US'];
 
 function readArg(name, fallback) {
   const flag = argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -47,9 +50,34 @@ if (!fs.existsSync(unpackedDir)) {
   process.exit(1);
 }
 
+if (!Array.isArray(electronLanguages)
+  || electronLanguages.length !== ALLOWED_ELECTRON_LANGUAGES.length
+  || !ALLOWED_ELECTRON_LANGUAGES.every((language) => electronLanguages.includes(language))) {
+  failures.push('package.json build.electronLanguages must contain exactly zh-CN and en-US');
+}
+
 const resourcesDir = path.join(unpackedDir, 'resources');
+const localesDir = path.join(unpackedDir, 'locales');
 const runtimeResourceDir = path.join(resourcesDir, RUNTIME_RESOURCE_DIR_NAME);
 const asarPath = path.join(resourcesDir, 'app.asar');
+
+// electron-builder places Electron's selected locale packs beside the app executable.
+// Check the packaged output so a config regression cannot silently restore every locale.
+if (!fs.existsSync(localesDir)) {
+  failures.push('Electron locales directory is missing from the packaged tree');
+} else {
+  const expectedLocaleFiles = new Set(ALLOWED_ELECTRON_LANGUAGES.map((language) => `${language}.pak`));
+  const actualEntries = fs.readdirSync(localesDir, { withFileTypes: true });
+  for (const entry of actualEntries) {
+    if (!entry.isFile() || !expectedLocaleFiles.has(entry.name)) {
+      failures.push(`unexpected entry in locales/: ${entry.name}`);
+    }
+  }
+  for (const expectedLocaleFile of expectedLocaleFiles) {
+    const entry = actualEntries.find((candidate) => candidate.name === expectedLocaleFile && candidate.isFile());
+    if (!entry) failures.push(`locales/${expectedLocaleFile} is missing from the packaged tree`);
+  }
+}
 
 if (!fs.existsSync(asarPath)) {
   failures.push(`app.asar is missing under ${path.relative(projectRoot, resourcesDir)}`);

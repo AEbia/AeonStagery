@@ -54,6 +54,7 @@ if (missing.length > 0) {
 
 module.exports = {
   ...pkg.build,
+  electronLanguages: pkg.build.electronLanguages,
   artifactName: '${productName}-${version}-${arch}-verify.${ext}',
   directories: {
     ...pkg.build.directories,
