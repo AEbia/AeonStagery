@@ -120,6 +120,43 @@ describe('Live2D resource motion extent', () => {
     expect(bundle.prepared.durationSeconds).toBe(10);
   });
 
+  it.each([
+    { mainGroup: 'alice/wave', subGroup: 'bob/wave', key: 'alice/wave', end: 8, nested: false },
+    { mainGroup: 'alice/wave', subGroup: 'bob/wave', key: 'alice/wave', end: 8, nested: true },
+    { mainGroup: 'alice/wave', subGroup: 'bob/wave', key: 'bob/wave', end: 16, nested: false },
+    { mainGroup: 'wave', subGroup: 'bob/wave', key: 'wave', end: 8, nested: false },
+    { mainGroup: 'alice/wave', subGroup: 'bob/wave', key: 'wave', end: 7, nested: false },
+    { mainGroup: 'alice/wave', subGroup: 'bob/wave', key: 'other/wave', end: 7, nested: false },
+    { mainGroup: 'alice/wave', subGroup: 'alice/wave', key: 'wave', end: 16, nested: false },
+    { mainGroup: 'idle', subGroup: 'bob/wave', key: 'other/wave', end: 16, nested: false },
+  ])('resolves $key globally for composed groups $mainGroup and $subGroup (nested: $nested)', async ({ mainGroup, subGroup, key, end, nested }) => {
+    const { pipeline, document, files, read } = fixture();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    document.meta.characters![0].model = 'figure/composite.wmdl';
+    document.statements = [{
+      id: 'wave', time: 6, type: 'characterPerformance',
+      params: { target: 'alice', motion: { kind: 'resource', key } },
+    }];
+    files.set('/project/figure/composite.wmdl', JSON.stringify({ modelRelativePath: 'alice.model3.json', subModels: [{ modelRelativePath: nested ? 'nested.wmdl' : 'bob.model3.json' }] }));
+    files.set('/project/figure/nested.wmdl', JSON.stringify({ modelRelativePath: 'bob.model3.json' }));
+    files.set('/project/figure/alice.model3.json', JSON.stringify({ FileReferences: { Motions: { [mainGroup]: [{ File: 'wave.motion3.json' }] } } }));
+    files.set('/project/figure/bob.model3.json', JSON.stringify({ FileReferences: { Motions: { [subGroup]: [{ File: 'bob.motion3.json' }] } } }));
+    files.set('/project/figure/wave.motion3.json', JSON.stringify({ Meta: { Duration: 2 } }));
+    files.set('/project/figure/bob.motion3.json', JSON.stringify({ Meta: { Duration: 10 } }));
+
+    const bundle = await pipeline.processDocument(document);
+
+    expect(bundle.compiled.durationSeconds).toBe(end);
+    expect(bundle.prepared.durationSeconds).toBe(end);
+    if (end === 7) {
+      expect(warning).toHaveBeenCalledOnce();
+      expect(read).not.toHaveBeenCalledWith('/project/figure/wave.motion3.json');
+    } else {
+      expect(warning).not.toHaveBeenCalled();
+    }
+    if (end < 16) expect(read).not.toHaveBeenCalledWith('/project/figure/bob.motion3.json');
+  });
+
   it('preserves known duration while resources are unavailable and recovers on the next preparation', async () => {
     const { pipeline, document, files } = fixture();
     vi.spyOn(console, 'warn').mockImplementation(() => {});

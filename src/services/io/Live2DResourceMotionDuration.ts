@@ -13,6 +13,11 @@ interface MotionEvent {
   readonly speakerId?: string;
 }
 
+interface ResourceMotionModel {
+  readonly directory: string;
+  readonly groups: Record<string, unknown>;
+}
+
 /** Read one finite cycle even when the source file declares a looping motion. */
 export function parseResourceMotionDuration(text: string): number {
   if (text.trimStart().startsWith('{')) {
@@ -121,7 +126,7 @@ class ResourceMotionDurationReader {
     const cacheKey = JSON.stringify([modelPath, key]);
     let result = this.durations.get(cacheKey);
     if (!result) {
-      result = this.readModel(modelPath, key, new Set());
+      result = this.readDuration(modelPath, key);
       this.durations.set(cacheKey, result);
     }
     return result;
@@ -136,7 +141,30 @@ class ResourceMotionDurationReader {
     return result;
   }
 
-  private async readModel(modelPath: string, key: string, ancestors: ReadonlySet<string>): Promise<number> {
+  private async readDuration(modelPath: string, key: string): Promise<number> {
+    const models = await this.readModels(modelPath, new Set());
+    // Match runtime playback: resolve once across the whole composition, then
+    // play only that exact group in each constituent model.
+    const availableGroups = [...new Set(models.flatMap((model) => Object.keys(model.groups)))];
+    const requestedKey = key.trim();
+    const leaf = requestedKey.split('/').at(-1);
+    const matches = availableGroups.filter((group) => group.split('/').at(-1) === leaf);
+    const groupKey = availableGroups.includes(requestedKey)
+      ? requestedKey
+      : matches.length === 1 ? matches[0] : requestedKey;
+    const durations = await Promise.allSettled(models.map(async ({ directory, groups }) => {
+      const group = groups[groupKey];
+      const definition = Array.isArray(group) ? asRecord(group[0]) : undefined;
+      const file = definition?.File ?? definition?.file;
+      if (typeof file !== 'string' || !file) throw new Error(`Motion ${key} has no source file`);
+      return parseResourceMotionDuration(await this.readText(await this.fileAccess.join(directory, file)));
+    }));
+    const resolved = durations.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+    if (resolved.length) return Math.max(...resolved);
+    throw new Error(`Motion ${key} has no readable source file`);
+  }
+
+  private async readModels(modelPath: string, ancestors: ReadonlySet<string>): Promise<ResourceMotionModel[]> {
     if (ancestors.has(modelPath)) throw new Error('Cyclic Live2D composed model reference');
     if (ancestors.size >= 32) throw new Error('Live2D composed model nesting exceeds 32 levels');
     const json: unknown = JSON.parse(await this.readText(modelPath));
@@ -148,21 +176,14 @@ class ResourceMotionDurationReader {
       const paths = [model.modelRelativePath, ...subModels.map((sub) => asRecord(sub)?.modelRelativePath)]
         .filter((path): path is string => typeof path === 'string' && !!path);
       const visited = new Set([...ancestors, modelPath]);
-      const durations = await Promise.allSettled(paths.map(async (path) =>
-        this.readModel(await this.fileAccess.join(directory, path), key, visited)));
-      const resolved = durations.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
-      if (resolved.length) return Math.max(...resolved);
-      throw new Error(`Motion ${key} not found in composed model`);
+      const models = await Promise.allSettled(paths.map(async (path) =>
+        this.readModels(await this.fileAccess.join(directory, path), visited)));
+      const resolved = models.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+      if (resolved.length) return resolved;
+      throw new Error('No readable constituent in composed model');
     }
     const groups = asRecord(asRecord(model.FileReferences)?.Motions) ?? asRecord(model.motions);
-    const requestedKey = key.trim();
-    const leaf = requestedKey.split('/').at(-1);
-    const matches = Object.keys(groups ?? {}).filter((group) => group.split('/').at(-1) === leaf);
-    const group = groups?.[requestedKey] ?? (matches.length === 1 ? groups?.[matches[0]] : undefined);
-    const definition = Array.isArray(group) ? asRecord(group[0]) : undefined;
-    const file = definition?.File ?? definition?.file;
-    if (typeof file !== 'string' || !file) throw new Error(`Motion ${key} has no source file`);
-    return parseResourceMotionDuration(await this.readText(await this.fileAccess.join(directory, file)));
+    return [{ directory, groups: groups ?? {} }];
   }
 }
 
