@@ -47,11 +47,16 @@ export class PlaybackAdapter implements IPlaybackAdapter {
 
   async seek(time: number, forceReconstruct?: boolean): Promise<void> {
     const seekToken = ++this._seekToken;
+    // User seeks pause synchronously, before the engine's asynchronous seek
+    // work captures whether playback should resume.
+    if (this.engine.isPlaying()) {
+      this.pause();
+    }
     this.dispatchTimeUpdate(time);
     if (forceReconstruct !== undefined) {
-      await (this.engine as any).seek(time, forceReconstruct);
+      await this.engine.seek(time, forceReconstruct);
     } else {
-      await (this.engine as any).seek(time);
+      await this.engine.seek(time);
     }
     if (seekToken !== this._seekToken) {
       return;
