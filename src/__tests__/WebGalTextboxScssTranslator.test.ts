@@ -135,7 +135,8 @@ describe('translateWebGalTextboxScss', () => {
         // once the 0.5 container scale is folded in. Reading only the parent
         // would give 30.
         fontSize: 36,
-        fontWeight: '700',
+        // CSS initial font weight is normal and is inherited by both layers.
+        fontWeight: '400',
         color: '#123456',
         x: 540,
         y: 881,
@@ -233,7 +234,8 @@ describe('translateWebGalTextboxScss', () => {
     const inherited = translateWebGalTextboxScss(
       '.TextBox_main { font-size: 30px; }\n.TextBox_showName { font-size: 100%; }',
     );
-    expect(inherited.style.params.speaker!.fontSize).toBe(46);
+    // 30 source px × inline 200% × 0.75 = 45; parent rounding must not intervene.
+    expect(inherited.style.params.speaker!.fontSize).toBe(45);
 
     const forced = translateWebGalTextboxScss(
       '.TextBox_main { font-size: 30px; }\n.TextBox_showName { font-size: 100% !important; }',

@@ -2,23 +2,10 @@
  * Convert a WebGAL dialogue template's `textbox.scss` into
  * `image-dialogue-v1` presentation parameters.
  *
- * WebGAL templates describe their subtitle in a stylesheet, while AeonStagery
- * materials them into an explicit `DialogueImagePresentation`. This module
- * bridges the two: it reads the template's box, text and nameplate rules and
- * emits a presentation snapshot plus the theme metadata needed to draw matching
- * panel artwork (see the SCSS asset builder).
- *
- * Ordering matters and is preserved from the original converter:
- *
- * 1. resolve the font size and line height, because later paddings are derived
- *    from them;
- * 2. resolve the box geometry and the text column;
- * 3. colour, outline and shadow of the body text and the nameplate;
- * 4. apply the template's `transform: scale()` to **everything above** as a final
- *    affine pass, then derive the nine-slice slices from the scaled numbers.
- *
- * Ported from the standalone bridge tooling that shipped this conversion as a
- * browser-side patch; the resulting parameter objects are byte-compatible.
+ * CSS semantics are computed by WebGalComputedStyle. This module maps those
+ * values to the engine's three layers and records approximations (gradient
+ * text, single shadow, auto height, framing). A single final affine pass folds
+ * the main transform into geometry, typography and panel artwork.
  */
 import type {
   DialogueImagePresentation,
@@ -27,42 +14,15 @@ import type {
   DialogueNineSlice,
 } from '../../../api/types/semantic-scene';
 import {
-  alphaOf,
-  declOf,
-  firstLength,
-  hasVisibilityHidden,
-  isImportantDeclaration,
-  lookup,
-  parseBlocks,
-  parseBorder,
-  parseBoxShadow,
-  parseColor,
-  parsePaint,
-  parseScale,
-  parseTextShadow,
-  paintColor,
-  pickDecl,
-  resolveLength,
-  resolveWidthLike,
-  rgbOnly,
-  rnd,
-  sidesWithLonghand,
-  STAGE_SCALE,
-  STAGE_HEIGHT,
-  STAGE_WIDTH,
-  ROOT_FONT_PX,
-  SHADOW_BLUR_RATIO,
-  SHADOW_DIST_RATIO,
-  tryParseColor,
-  urlBasename,
-  type BorderInfo,
-  type BoxShadowInfo,
-  type BoxSides,
-  type Paint,
-  type ScssBlocks,
-  type ScssDeclarations,
-  type ScaleInfo,
+  alphaOf, paintColor, rgbOnly, rnd, STAGE_SCALE, STAGE_HEIGHT, STAGE_WIDTH,
+  SHADOW_BLUR_RATIO, SHADOW_DIST_RATIO,
+  type BorderInfo, type BoxShadowInfo, type BoxSides, type Paint,
+  type ScssBlocks, type ScaleInfo, type TextShadowInfo,
 } from './WebGalScssSyntax';
+import {
+  computeWebGalTextboxStyle, computeWebGalTextboxBlocks,
+  type WebGalComputedStyle,
+} from './WebGalComputedStyle';
 
 /** A corner ornament referenced by a panel's `::after` rule. */
 export interface WebGalPanelDecoration {
@@ -137,86 +97,40 @@ export interface WebGalScssTranslation {
 
 const PANEL_IMAGE_DIR = 'ui/dialogue/webgal/';
 
-/**
- * Read the painting metadata of both panels.
- *
- * Both panels take their base measurement from the **root** font size rather
- * than the resolved text size: `.TextBox_Background` / `.TextBox_showName` are
- * siblings of `.TextBox_main`, so they inherit the root size, and a template's
- * `240%` on `.text` only applies to that element. Using the resolved size here
- * used to inflate a `width: 6em` from 120px to 288px.
- */
+/** Compatibility entry; painting consumes computed values through the same seam. */
 export function extractWebGalTextBoxTheme(blocks: ScssBlocks): WebGalTextBoxTheme {
-  const main = lookup(blocks, '.TextBox_main');
-  const bg = lookup(blocks, '.TextBox_Background');
-  const nameBg = lookup(blocks, '.TextBox_ShowName_Background');
-  const name = lookup(blocks, '.TextBox_showName');
-  const bgAfter = lookup(blocks, '.TextBox_Background::after');
-  const nameAfter = lookup(blocks, '.TextBox_ShowName_Background::after');
+  return themeFromComputedStyle(computeWebGalTextboxBlocks(blocks));
+}
 
-  const base = ROOT_FONT_PX;
-  const nameBase = ROOT_FONT_PX;
-
-  // The background may live on the backdrop element or on the container itself:
-  // some templates paint `.TextBox_Background`, others write the fill directly
-  // on `.TextBox_main`. Checking only one of them yields the wrong (often
-  // fully transparent) fill.
-  const textboxFillRaw = pickDecl(bg, ['background', 'backgroundcolor', 'backgroundimage'])
-    || pickDecl(main, ['background', 'backgroundcolor', 'backgroundimage']);
-
+function themeFromComputedStyle(computed: WebGalComputedStyle): WebGalTextBoxTheme {
+  const { main, background: bg, name, nameBackground: nameBg, backgroundAfter: bgAfter, nameAfter } = computed;
   const textbox: WebGalPanelTheme = {
-    fill: parsePaint(textboxFillRaw) || { kind: 'solid', color: '#00000000' },
-    border: parseBorder(pickDecl(bg, ['border']) || pickDecl(main, ['border']), base),
-    radius: firstLength(pickDecl(bg, ['borderradius']) || declOf(main, 'borderradius'), base) || 0,
-    shadow: parseBoxShadow(pickDecl(bg, ['boxshadow']) || pickDecl(main, ['boxshadow']), base),
-    deco: null,
+    fill: bg.background ?? main.background ?? { kind: 'solid', color: '#00000000' },
+    border: { ...(bg.hasBorder ? bg.border : main.border) },
+    radius: bg.hasRadius ? bg.radius : main.radius,
+    shadow: structuredClone(bg.hasBoxShadow ? bg.boxShadow : main.boxShadow),
+    deco: bgAfter.imageFile ? {
+      file: bgAfter.imageFile, size: bgAfter.decorationSize ?? rnd(120 * STAGE_SCALE),
+      opacity: bgAfter.opacity, rotate: bgAfter.rotation,
+      right: bgAfter.lengths.right ?? 0, bottom: bgAfter.lengths.bottom ?? 0,
+    } : null,
   };
-  const textboxDecoFile = urlBasename(declOf(bgAfter, 'backgroundimage'));
-  if (textboxDecoFile) {
-    const opacity = parseFloat(declOf(bgAfter, 'opacity') || '1');
-    const deg = /(-?[\d.]+)deg/.exec(String(declOf(bgAfter, 'transform') || ''));
-    textbox.deco = {
-      file: textboxDecoFile,
-      size: resolveLength(declOf(bgAfter, 'width', 'backgroundsize'), base)
-        || rnd(base * 6 * STAGE_SCALE),
-      opacity: Number.isNaN(opacity) ? 1 : opacity,
-      rotate: deg ? parseFloat(deg[1]) : 0,
-      right: resolveLength(declOf(bgAfter, 'right'), base) || 0,
-      bottom: resolveLength(declOf(bgAfter, 'bottom'), base) || 0,
-    };
-  }
-
-  // The nameplate fill must not fall back to `.TextBox_showName`'s `background`
-  // unconditionally: WebGAL renders the nameplate as two sibling divs (backdrop
-  // plus label) that share `.TextBox_showName`, and in a frameless subtitle
-  // template that declaration only shades the glyphs rather than becoming a
-  // plate. So a template whose dialogue box is itself transparent keeps a
-  // transparent nameplate; only a box with a fill falls back.
-  const nameFillRaw = pickDecl(nameBg, ['background', 'backgroundcolor', 'backgroundimage']);
-  const boxIsTransparent = !!(textbox.fill && textbox.fill.kind === 'solid'
-    && alphaOf(textbox.fill.color) < 0.004);
+  // Mapping approximation: a shared showName fill shades glyphs in a frameless
+  // template; only a dedicated backdrop fill should create a nameplate there.
+  const boxIsTransparent = textbox.fill.kind === 'solid' && alphaOf(textbox.fill.color) < 0.004;
   const namebox: WebGalPanelTheme = {
-    fill: (!nameFillRaw && boxIsTransparent)
+    fill: !computed.nameBackgroundHasPaint && boxIsTransparent
       ? { kind: 'solid', color: '#00000000' }
-      : (parsePaint(nameFillRaw || pickDecl(name, ['background', 'backgroundcolor', 'backgroundimage']))
-        || { kind: 'solid', color: '#FFFFFF' }),
-    border: parseBorder(pickDecl(nameBg, ['border']) || pickDecl(name, ['border']), nameBase),
-    radius: firstLength(pickDecl(nameBg, ['borderradius']) || declOf(name, 'borderradius'), nameBase) || 0,
-    shadow: parseBoxShadow(pickDecl(nameBg, ['boxshadow']) || pickDecl(name, ['boxshadow']), nameBase),
-    deco: null,
+      : nameBg.background ?? name.background ?? { kind: 'solid', color: '#FFFFFF' },
+    border: { ...(nameBg.hasBorder ? nameBg.border : name.border) },
+    radius: nameBg.hasRadius ? nameBg.radius : name.radius,
+    shadow: structuredClone(nameBg.hasBoxShadow ? nameBg.boxShadow : name.boxShadow),
+    deco: nameAfter.imageFile ? {
+      file: nameAfter.imageFile, size: nameAfter.decorationSize ?? 0,
+      opacity: nameAfter.opacity, rotate: nameAfter.rotation,
+      right: nameAfter.lengths.right ?? 0, bottom: nameAfter.lengths.bottom ?? 0,
+    } : null,
   };
-  const nameDecoFile = urlBasename(declOf(nameAfter, 'backgroundimage'));
-  if (nameDecoFile) {
-    namebox.deco = {
-      file: nameDecoFile,
-      size: resolveLength(declOf(nameAfter, 'width', 'backgroundsize'), nameBase) || 0,
-      opacity: 1,
-      rotate: 0,
-      right: resolveLength(declOf(nameAfter, 'right'), nameBase) || 0,
-      bottom: resolveLength(declOf(nameAfter, 'bottom'), nameBase) || 0,
-    };
-  }
-
   return { textbox, namebox };
 }
 
@@ -247,35 +161,6 @@ function scaleTheme(theme: WebGalTextBoxTheme, sx: number, sy: number): void {
   }
 }
 
-/** Read the alignment a template expresses through `text-align` or flex `align-items`. */
-function resolveTextAlignment(main: ScssDeclarations, textBlock: ScssDeclarations): 'left' | 'center' | 'right' {
-  const ta = String(declOf(textBlock, 'textalign') || declOf(main, 'textalign') || '').trim();
-  const ai = String(main.alignitems || '').trim();
-  if (/^(left|start)$/.test(ta)) return 'left';
-  if (/^(right|end)$/.test(ta)) return 'right';
-  if (ta === 'center') return 'center';
-  if (/^(flex-start|start|left)$/.test(ai)) return 'left';
-  if (/^(flex-end|end|right)$/.test(ai)) return 'right';
-  if (ai === 'center') return 'center';
-  return 'center';
-}
-
-/**
- * Read the nameplate's horizontal alignment.
- *
- * WebGAL's `.TextBox_showName` label is block-level and therefore left aligned
- * (it declares no `text-align` itself), with the left inset coming from
- * `padding-left`; a template may still opt into centring. Rendering it as
- * centred squashes short names into the middle of the plate.
- */
-function resolveNameAlignment(name: ScssDeclarations, nameBackground: ScssDeclarations): 'left' | 'center' | 'right' {
-  const nta = String(declOf(name, 'textalign') || declOf(nameBackground, 'textalign') || '')
-    .trim().toLowerCase();
-  if (nta === 'center') return 'center';
-  if (nta === 'right' || nta === 'end') return 'right';
-  return 'left';
-}
-
 function describePaint(paint: Paint | null): string {
   if (!paint) return '无';
   if (paint.kind === 'solid') {
@@ -288,7 +173,7 @@ function describePaint(paint: Paint | null): string {
 
 /** Convert a `text-shadow` grouping into the engine's `dropShadow*` parameters. */
 function toDropShadow(
-  shadow: ReturnType<typeof parseTextShadow>,
+  shadow: TextShadowInfo,
   fontSize: number,
   uniformScale: number | undefined,
   axisScale: number | undefined,
@@ -303,11 +188,11 @@ function toDropShadow(
     // smear the crisp edge the template asked for.
     dropShadowBlur: shadow.symmetric
       ? Math.max(1, rnd(shadow.blur * (uniformScale || 1)))
-      : Math.max(1, rnd(Math.max(shadow.blur, fontSize * SHADOW_BLUR_RATIO) * (uniformScale || 1))),
+      : Math.max(1, rnd(Math.max(shadow.blur * (uniformScale || 1), fontSize * SHADOW_BLUR_RATIO))),
     // A symmetric group must lose its offset: the engine's drop shadow only
     // points one way, so keeping it turns an even glow into a corner smudge.
     dropShadowDistance: shadow.symmetric ? 0 : Math.max(0, rnd(
-      Math.max(Math.abs(shadow.distance), fontSize * SHADOW_DIST_RATIO) * (axisScale || 1),
+      Math.max(Math.abs(shadow.distance) * (axisScale || 1), fontSize * SHADOW_DIST_RATIO),
     )),
   };
 }
@@ -319,65 +204,20 @@ export function translateWebGalTextboxScss(
   css: string,
   options: WebGalScssTranslationOptions = {},
 ): WebGalScssTranslation {
+  return mapWebGalTextboxStyle(computeWebGalTextboxStyle(css), options);
+}
+
+/** Engine mapping seam: consumes computed values, never raw declarations. */
+export function mapWebGalTextboxStyle(
+  computed: WebGalComputedStyle,
+  options: WebGalScssTranslationOptions = {},
+): WebGalScssTranslation {
   const sourceName = options.sourceName || 'textbox.scss';
   const strictCenter = options.strictCenter === true;
-  const notes: string[] = [];
-  const blocks = parseBlocks(css);
-
-  const main = lookup(blocks, '.TextBox_main');
-  const outer = lookup(blocks, '.outer');
-  const inner = lookup(blocks, '.inner');
-  const name = lookup(blocks, '.TextBox_showName');
-  const outerName = lookup(blocks, '.outerName');
-  const textBlock = lookup(blocks, '.text');
-
-  // ── Font size ──
-  // `.text` declares its own size, which in CSS beats the one inherited from
-  // `.TextBox_main` while its `%` / `em` resolve against that inherited value.
-  // Reading only the parent drops the child's declaration entirely: a `40px`
-  // parent with `.text { font-size: 240% }` renders at 96px, not at 40px.
-  const mainFs = resolveLength(main.fontsize, ROOT_FONT_PX);
-  let fontSize: number;
-  if (textBlock.fontsize != null) {
-    // `.TextBox_main` inherits the root size when it declares none.
-    const parentFs = mainFs ?? ROOT_FONT_PX;
-    fontSize = resolveLength(textBlock.fontsize, parentFs, mainFs != null) ?? parentFs;
-    if (mainFs == null) {
-      notes.push(`\`.TextBox_main\` 未设 \`font-size\`，字号取自 \`.text\` 的 `
-        + `\`${textBlock.fontsize}\`（按 WebGAL 根字号 ${ROOT_FONT_PX}px 换算）。`);
-    }
-  } else if (mainFs != null) {
-    fontSize = mainFs;
-  } else {
-    fontSize = rnd(48 * STAGE_SCALE);
-    notes.push(`模板未声明 \`font-size\`（靠继承），已回退到 ${fontSize}px。`);
-  }
-  // A font size has to be a positive finite number: `0` measures as an empty
-  // text and a negative one is invalid CSS outright, and either would leave the
-  // engine with a layer it cannot lay out. Anything unusable falls back to the
-  // inherited root size rather than being carried through.
-  if (!Number.isFinite(fontSize) || fontSize <= 0) {
-    fontSize = ROOT_FONT_PX * STAGE_SCALE;
-    notes.push(`模板的 \`font-size\` 不是正数，已回退到 ${fontSize}px。`);
-  }
-
-  // ── Line height (ratio or absolute) ──
-  let lineHeight: number;
-  const lineHeightRaw = declOf(textBlock, 'lineheight') || declOf(main, 'lineheight');
-  if (lineHeightRaw != null) {
-    const raw = String(lineHeightRaw).trim().replace(/!\s*\w+\s*$/, '').trim();
-    const absolute = /^(-?[\d.]+)\s*(px|pt)$/.exec(raw);
-    if (absolute) {
-      lineHeight = rnd(parseFloat(absolute[1]) * (absolute[2] === 'pt' ? 96 / 72 : 1) * STAGE_SCALE);
-    } else {
-      const numeric = /^([\d.]+)/.exec(raw);
-      if (numeric) {
-        const num = parseFloat(numeric[1]);
-        lineHeight = rnd(raw.slice(-1) === '%' ? (fontSize * num) / 100 : fontSize * num);
-      } else lineHeight = rnd(fontSize * 1.6);
-    }
-  } else lineHeight = rnd(fontSize * 1.6);
-  lineHeight = Math.max(lineHeight, fontSize);
+  const notes = [...computed.diagnostics];
+  const { main, text: textBlock, outer, inner, name, outerName, innerName } = computed;
+  let fontSize = Math.max(1, textBlock.fontSize);
+  let lineHeight = Math.max(fontSize, textBlock.lineHeight);
 
   // ── Layout ──
   // Engine geometry: `o = max(textbox.height, inset + textHeight + inset)` with
@@ -388,23 +228,24 @@ export function translateWebGalTextboxScss(
   // `bottom` against its height — never against a font size. The stage and the
   // WebGAL canvas are both 3:4, so a percentage of either lands on the same
   // stage pixel and the basis is used unscaled.
-  let left = resolveLength(main.left, ROOT_FONT_PX, false, STAGE_WIDTH);
+  let left = main.lengths.left;
   if (left == null) left = rnd(50 * STAGE_SCALE);
-  let right = resolveLength(main.right, ROOT_FONT_PX, false, STAGE_WIDTH);
+  let right = main.lengths.right;
   if (right == null) right = rnd(25 * STAGE_SCALE);
-  let bottom = resolveLength(main.bottom, ROOT_FONT_PX, false, STAGE_HEIGHT);
+  let bottom = main.lengths.bottom;
   if (bottom == null) bottom = rnd(40 * STAGE_SCALE);
   let boxX = left;
-  let boxW = Math.max(320, STAGE_WIDTH - left - right);
+  let boxW = Math.max(320, main.lengths.width ?? STAGE_WIDTH - left - right);
 
   // CSS resolves every percentage padding against the containing block *width*,
   // including the top and bottom ones.
-  const pads = sidesWithLonghand(main, ROOT_FONT_PX, false, STAGE_WIDTH);
-  if (!main.padding && !main.paddingtop && !main.paddingleft) {
+  const pads = { ...main.padding };
+  if (!main.hasPadding) {
     pads.t = rnd(fontSize * 0.4);
     pads.b = pads.t;
     pads.l = rnd(fontSize * 0.7);
     pads.r = pads.l;
+    notes.push('主容器未声明内边距；按正文大小估算面板留白。');
   }
 
   if (strictCenter) {
@@ -413,8 +254,8 @@ export function translateWebGalTextboxScss(
     boxX = Math.round((STAGE_WIDTH - maxW) / 2);
   }
 
-  let boxH = resolveLength(declOf(main, 'height'), ROOT_FONT_PX, false, STAGE_HEIGHT);
-  if (boxH == null) boxH = resolveLength(declOf(main, 'minheight'), ROOT_FONT_PX, false, STAGE_HEIGHT);
+  let boxH = main.lengths.height;
+  if (boxH == null) boxH = main.lengths.minheight;
   const autoHeight = (boxH == null || boxH <= 0);
   // Tested inline rather than through `autoHeight` so the value is narrowed to a
   // number for the geometry maths below.
@@ -442,12 +283,10 @@ export function translateWebGalTextboxScss(
   // The standard WebGAL idiom is `.outer { color: transparent; background: <c>;
   // background-clip: text }` — the visible colour comes from the background
   // gradient, not from `color`.
-  const clipRaw = declOf(outer, 'webkitbackgroundclip', 'backgroundclip');
-  let outerPaint = parsePaint(declOf(outer, 'background', 'backgroundcolor'));
-  if (!outerPaint) outerPaint = parsePaint(declOf(outer, 'backgroundimage'));
+  const outerPaint = outer.background;
 
   let textColor: string | null = null;
-  if (outerPaint && clipRaw && /text/i.test(clipRaw)) {
+  if (outerPaint && outer.backgroundClipText) {
     if (outerPaint.kind === 'linear') {
       let span = 0;
       let picked = outerPaint.stops[0];
@@ -468,11 +307,9 @@ export function translateWebGalTextboxScss(
     }
   }
   if (!textColor) {
-    const innerCol = tryParseColor(inner.color);
-    const mainCol = tryParseColor(main.color);
-    if (innerCol && alphaOf(innerCol) > 0) textColor = rgbOnly(innerCol);
-    else if (mainCol && alphaOf(mainCol) > 0) textColor = rgbOnly(mainCol);
-    else textColor = '#FFFFFF';
+    if (alphaOf(outer.color) > 0) textColor = rgbOnly(outer.color);
+    else if (alphaOf(inner.color) > 0) textColor = rgbOnly(inner.color);
+    else textColor = rgbOnly(textBlock.color);
   }
 
   // ── Outline ──
@@ -482,87 +319,46 @@ export function translateWebGalTextboxScss(
   // skipped for the same reason.
   let strokeColor = 'transparent';
   let strokeWidth = 0;
-  const strokeRaw = declOf(inner, 'webkittextstroke', 'textstroke');
-  if (hasVisibilityHidden(inner)) {
-    if (strokeRaw) {
-      notes.push('`.inner` 声明了 `-webkit-text-stroke` 但带 `visibility: hidden`'
-        + '（描边层被隐藏），已按**无描边**处理。');
-    }
-  } else if (strokeRaw) {
-    const m = /^([\d.]+)\s*(px|em)?\s+(.+)$/.exec(String(strokeRaw).trim());
-    if (m) {
-      strokeWidth = m[2] === 'em'
-        ? rnd(parseFloat(m[1]) * fontSize) // `fontSize` is already rescaled
-        : rnd(parseFloat(m[1]) * STAGE_SCALE);
-      strokeColor = rgbOnly(parseColor(m[3], '#000000'));
-    }
+  if (inner.hidden) {
+    if (inner.stroke.width > 0) notes.push('`.inner` 描边层被隐藏，已按无描边处理。');
+  } else {
+    strokeWidth = inner.stroke.width;
+    if (strokeWidth > 0) strokeColor = rgbOnly(inner.stroke.color);
   }
 
-  // ── Shadow ──
-  const shadow = parseTextShadow(declOf(inner, 'textshadow') || declOf(outerName, 'textshadow'));
-  // The nameplate carries its own shadow: the engine's speaker layer has a
-  // separate `dropShadow` group, and templates routinely give `.inner` and
-  // `.outerName` different values. Parsed here, resolved once the nameplate font
-  // size is known.
-  const nameShadow = parseTextShadow(declOf(outerName, 'textshadow') || declOf(name, 'textshadow'));
+  const shadow = inner.textShadow;
+  const nameShadow = outerName.textShadow;
 
   // ── Nameplate ──
-  const nameOuter = lookup(blocks, '.outerName');
-  let nameColor = rgbOnly(parseColor(name.color, '#FFFFFF'));
-  const nameClip = declOf(nameOuter, 'webkitbackgroundclip', 'backgroundclip');
-  let nameOuterPaint = parsePaint(declOf(nameOuter, 'background', 'backgroundcolor'));
-  if (!nameOuterPaint) nameOuterPaint = parsePaint(declOf(nameOuter, 'backgroundimage'));
-  if (nameOuterPaint && nameClip && /text/i.test(nameClip)) {
+  let nameColor = rgbOnly(outerName.color);
+  const nameOuterPaint = outerName.background;
+  if (nameOuterPaint && outerName.backgroundClipText) {
     nameColor = paintColor(nameOuterPaint, nameColor);
     notes.push(`名牌文字色取自 \`.outerName\` 的 \`background-clip:text\` → \`${nameColor}\`。`);
   }
 
-  // The nameplate font size has two stacked pitfalls:
-  //  1. `.TextBox_showName`'s `%` / `em` resolve against its **parent**
-  //     (`.TextBox_main`), not the root, so a template with
-  //     `.TextBox_main { font-size: 30px }` would have its `100%` read as 20px.
-  //  2. WebGAL puts an inline `font-size: 200%` on **both** nameplate divs, and
-  //     an inline style outranks a template rule — only `!important` wins. A
-  //     nameplate without `!important` therefore renders at twice its parent.
-  let mainFontSize = resolveLength(main.fontsize, ROOT_FONT_PX);
-  const mainFontSizeDeclared = main.fontsize != null;
-  if (mainFontSize == null) mainFontSize = ROOT_FONT_PX;
-  const nameFontSizeRaw = declOf(name, 'fontsize');
-  let nameSize: number | null;
-  if (nameFontSizeRaw != null && isImportantDeclaration(name, 'fontsize')) {
-    nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
-  } else if (mainFontSizeDeclared) {
-    nameSize = rnd(mainFontSize * 2);
-  } else {
-    nameSize = resolveLength(nameFontSizeRaw, mainFontSize, mainFontSizeDeclared);
-  }
-  if (nameSize == null) nameSize = rnd(fontSize * 0.98);
-  // Same reason as the body size: the nameplate inherits the parent's number,
-  // so a negative `font-size` would otherwise reach the geometry and the
-  // nine-slice with it.
-  if (!Number.isFinite(nameSize) || nameSize <= 0) nameSize = rnd(fontSize * 0.98) || 1;
-
-  let nameLineHeight = resolveLength(name.lineheight, nameSize, true);
-  if (nameLineHeight == null) nameLineHeight = rnd(nameSize * 1.6);
-  const nameTop = resolveLength(name.top, ROOT_FONT_PX, false, STAGE_HEIGHT) ?? -60;
-  const nameLeft = resolveLength(name.left, ROOT_FONT_PX, false, STAGE_WIDTH) ?? 20;
+  let nameSize = Math.max(1, name.fontSize);
+  let nameLineHeight = Math.max(nameSize, name.lineHeight);
+  const nameTop = name.lengths.top ?? -60;
+  const nameLeft = name.lengths.left ?? 20;
   let nameboxX = boxX + nameLeft;
   let nameboxY = boxY + nameTop;
 
   // The height must be a positive finite number: a zero would make the whole
   // template package invalid. Templates that rely on `line-height` set
   // `height: 0px`, so fall back to the line height.
-  let nameH = firstLength(declOf(name, 'height'), nameSize, true, STAGE_HEIGHT);
+  let nameH = name.lengths.height;
   if (nameH == null || nameH <= 0) {
-    nameH = firstLength(declOf(name, 'minheight'), nameSize, true, STAGE_HEIGHT);
+    nameH = name.lengths.minheight;
   }
   if (nameH == null || nameH <= 0) nameH = Math.max(nameLineHeight, rnd(nameSize * 1.9));
   if (!(nameH > 0)) nameH = Math.max(1, rnd(nameSize * 1.9));
 
-  const namePads = sidesWithLonghand(name, nameSize, true, STAGE_WIDTH);
-  if (!name.padding && !name.paddingleft && !name.paddingright) {
+  const namePads = { ...name.padding };
+  if (!name.hasPadding) {
     namePads.l = rnd(nameSize * 1.5);
     namePads.r = namePads.l;
+    notes.push('姓名框未声明内边距；左右留白按姓名字号的 1.5 倍估算。');
   }
   let namePadL = Math.max(0, namePads.l);
   let namePadR = Math.max(0, namePads.r);
@@ -576,24 +372,18 @@ export function translateWebGalTextboxScss(
   // `min-width` acts as a floor; the engine takes the wider of it and the
   // measured label. `width` is required by the schema. Note that `min-width:
   // 25%` resolves against the containing block, not the font size.
-  let nameMinW = resolveWidthLike(declOf(name, 'minwidth'), nameSize, boxW);
-  if (nameMinW == null) nameMinW = resolveWidthLike(declOf(name, 'width'), nameSize, boxW);
+  let nameMinW = name.lengths.minwidth;
+  if (nameMinW == null) nameMinW = name.lengths.width;
   if (nameMinW == null) nameMinW = rnd(namePadL + namePadR + nameSize * 2);
   nameMinW = Math.max(nameMinW, namePadL + namePadR + nameSize, 40);
 
-  const family = options.fontFamily
-    || (declOf(textBlock, 'fontfamily') || declOf(main, 'fontfamily') || 'sans-serif')
-      .split(',')[0].trim().replace(/^["']|["']$/g, '');
+  const family = options.fontFamily || textBlock.fontFamily;
+  const nameFamily = options.fontFamily || name.fontFamily;
   const fontFile = options.fontFile || null;
-
-  const align = resolveTextAlignment(main, textBlock);
-  const nameBackground = lookup(blocks, '.TextBox_ShowName_Background');
-  const nameAlign = resolveNameAlignment(name, nameBackground);
-
-  // ── `transform: scale()` ──
-  const transform = parseScale(main.transform);
-
-  const theme = extractWebGalTextBoxTheme(blocks);
+  const align = textBlock.align ?? main.flexAlign ?? 'center';
+  const nameAlign = name.align ?? 'left';
+  const transform = computed.transform;
+  const theme = themeFromComputedStyle(computed);
 
   // `var` in the original: these stay undefined when the template has no
   // transform, and the later shadow maths relies on that (a missing factor is
@@ -657,6 +447,8 @@ export function translateWebGalTextboxScss(
       + 'WebGAL 靠这层整体缩放定尺寸，引擎没有 transform 概念，'
       + '逐项折算后对话框位置、大小、字号、圆角才与网页端一致。');
   }
+
+  if (strokeWidth > 0) strokeWidth = Math.max(1, rnd(strokeWidth));
 
   // ── Nine-slice slices ──
   // The artwork is drawn 1:1 with what the engine renders, so the fixed slices
@@ -729,8 +521,7 @@ export function translateWebGalTextboxScss(
   const text: DialogueImageTextStyle = {
     fontFamily: family,
     fontSize,
-    fontWeight: /^(bold|bolder|[6-9]00)$/.test(String(declOf(main, 'fontweight') || 'bold').trim())
-      ? '700' : '400',
+    fontWeight: textBlock.fontWeight,
     color: textColor,
     x: textX,
     y: textY,
@@ -741,15 +532,11 @@ export function translateWebGalTextboxScss(
     strokeWidth,
   };
 
-  // `.TextBox_showName` rarely declares `font-weight`, so it inherits
-  // `.TextBox_main`'s `normal` and should read as 400; falling back to 700 for a
-  // missing declaration bolded every nameplate.
+  // Each layer consumes its own computed typography, including inheritance.
   const speaker: DialogueImageSpeakerStyle = {
-    fontFamily: family,
+    fontFamily: nameFamily,
     fontSize: nameSize,
-    fontWeight: /^(bold|bolder|[6-9]00)$/.test(
-      String(name.fontweight || main.fontweight || '').trim().toLowerCase(),
-    ) ? '700' : '400',
+    fontWeight: name.fontWeight,
     color: nameColor,
     align: nameAlign,
     padding: speakerPadding,
@@ -767,25 +554,12 @@ export function translateWebGalTextboxScss(
   }
 
   // ── Nameplate outline (`.innerName`'s `-webkit-text-stroke`) ──
-  const innerName = lookup(blocks, '.innerName');
-  const nameStrokeRaw = declOf(innerName, 'webkittextstroke', 'textstroke');
-  if (nameStrokeRaw && !hasVisibilityHidden(innerName)) {
-    const m = /^([\d.]+)\s*(px|em)?\s+(.+)$/.exec(String(nameStrokeRaw).trim());
-    if (m) {
-      // `nameSize` already carries the transform's uniform scale, so `em` must
-      // not fold it in a second time; `px` is a raw WebGAL length that still
-      // needs both the stage scale and that same transform scale — the same
-      // split the body outline uses. A zero width stays zero rather than being
-      // rounded up to a visible outline.
-      const raw_width = m[2] === 'em'
-        ? parseFloat(m[1]) * nameSize
-        : parseFloat(m[1]) * STAGE_SCALE * (uniformScale || 1);
-      const width = raw_width > 0 ? Math.max(1, rnd(raw_width)) : 0;
-      speaker.strokeColor = rgbOnly(parseColor(m[3], '#000000'));
-      speaker.strokeWidth = width;
-      notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\` / `
-        + `\`strokeWidth=${width}\` ← \`.innerName\` 的 \`-webkit-text-stroke\`。`);
-    }
+  if (innerName.hasStroke && !innerName.hidden) {
+    const width = innerName.stroke.width > 0 ? Math.max(1, rnd(innerName.stroke.width * (uniformScale || 1))) : 0;
+    speaker.strokeColor = rgbOnly(innerName.stroke.color);
+    speaker.strokeWidth = width;
+    notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\` / `
+      + `\`strokeWidth=${width}\` ← \`.innerName\` 的 \`-webkit-text-stroke\`。`);
   }
 
   // ── Nameplate shadow (`.outerName`'s `text-shadow`) ──
@@ -798,9 +572,7 @@ export function translateWebGalTextboxScss(
   }
 
   // ── Report ──
-  notes.push(`**字号**：\`text.fontSize=${fontSize}\`（模板 \``
-    + `${declOf(textBlock, 'fontsize') || main.fontsize || '-'}\` × WebGAL 根字号 `
-    + `${ROOT_FONT_PX}px）；\`speaker.fontSize=${nameSize}\`。`);
+  notes.push(`**字号**：\`text.fontSize=${fontSize}\`；\`speaker.fontSize=${nameSize}\`（计算继承和 inline 优先级后换算）。`);
   notes.push(`**名牌几何**：\`x=${nameboxX}, y=${nameboxY}`
     + `, width=${nameMinW}(下限), minHeight=${nameH}\``
     + `；\`speaker.padding=[left, top, right, bottom]=[${speakerPadding.join(', ')}]\``

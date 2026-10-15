@@ -161,8 +161,10 @@ describe('WebGalScssSyntax', () => {
     const paint = parsePaint('linear-gradient(45deg, rgba(255,255,255,0.8) 0%, rgba(255,192,203,0.9) 100%)');
     expect(paint).toMatchObject({ kind: 'linear', angle: 45 });
     expect(paint && paint.kind === 'linear' ? paint.stops.map((s) => s.pos) : []).toEqual([0, 1]);
-    const first = parsePaint('linear-gradient(#fff), linear-gradient(#000)');
-    expect(first && first.kind === 'linear' ? first.stops.length : 0).toBe(1);
+    const first = parsePaint('linear-gradient(#fff, red), linear-gradient(#000, blue)');
+    expect(first && first.kind === 'linear' ? first.stops.map((stop) => stop.color) : [])
+      .toEqual(['#FFFFFFFF', '#FF0000FF']);
+    expect(parsePaint('linear-gradient(#fff)')).toBeNull();
     expect(parsePaint('none')).toBeNull();
   });
 

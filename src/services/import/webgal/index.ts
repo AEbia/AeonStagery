@@ -14,8 +14,11 @@ export {
 } from './WebGalScssSyntax';
 export {
   extractWebGalTextBoxTheme,
+  mapWebGalTextboxStyle,
   translateWebGalTextboxScss,
 } from './WebGalTextboxScssTranslator';
+export { computeWebGalTextboxStyle } from './WebGalComputedStyle';
+export type { WebGalComputedElement, WebGalComputedStyle } from './WebGalComputedStyle';
 export {
   buildWebGalScssAssetTable,
   rewriteWebGalScssImageParams,

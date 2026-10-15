@@ -1,9 +1,9 @@
 /**
  * Assemble a WebGAL dialogue template into an AeonStagery template package.
  *
- * This is the third and last layer of the SCSS importer: {@link WebGalScssSyntax}
- * parses, {@link WebGalTextboxScssTranslator} maps the stylesheet onto
- * `image-dialogue-v1` parameters, {@link WebGalTextboxScssAssets} draws the
+ * {@link WebGalScssSyntax} preserves declarations, WebGalComputedStyle computes
+ * the supported CSS semantics, {@link WebGalTextboxScssTranslator} maps the
+ * result onto `image-dialogue-v1`, {@link WebGalTextboxScssAssets} draws the
  * panel artwork, and this module writes the manifest that ties them together.
  *
  * Everything here is a pure function of its input: the returned file list is

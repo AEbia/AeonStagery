@@ -3,15 +3,13 @@
  *
  * A WebGAL dialogue template ships a `Stage/TextBox/textbox.scss` that describes
  * its subtitle layout in plain CSS (plus nesting, `&`, and `//` comments). These
- * helpers turn that stylesheet into flat declaration maps and resolved numeric
- * values so the translator can map it onto `DialogueImagePresentation` params.
+ * helpers preserve rule/declaration order and parse the supported CSS values.
+ * WebGalComputedStyle owns cascade, inheritance and property-specific units.
  *
- * ── Unit bases (measured, do not change casually) ───────────────────────────
- * A template's `%` and `em` resolve against the **parent font size**. WebGAL's
- * root font size is `20px`: a 1920px-wide capture of MyGO v3.2.1 pure measures
- * 43.9px letter spacing ÷ 0.9 (the template's `transform`) = 48.8, i.e.
- * `240% × 20px`; its nameplate `min-width: 10em` measures 550px ÷ 0.9 = 550,
- * i.e. `275% × 20px`. Using 16px would scale every length down by ~17%.
+ * ── Unit bases ─────────────────────────────────────────────────────────────
+ * WebGAL's root font size is 20px. Font-size em/% use the parent font;
+ * other em lengths use the element's computed font. Percentage bases depend
+ * on the property (font, containing width, or containing height).
  *
  * ── Stage size ─────────────────────────────────────────────────────────────
  * WebGAL's stage is **2560×1440** (`stageWidth`/`stageHeight` in its engine, see
@@ -66,7 +64,59 @@ export type ScssBlocks = Record<string, string>;
 
 // The public map merges repeated selectors for direct lookups. Keep individual
 // rules too, so merging different selectors can still follow source order.
-const sourceRules = new WeakMap<ScssBlocks, Array<{ selector: string; body: string }>>();
+export interface ScssDeclaration {
+  property: string;
+  value: string;
+  important: boolean;
+}
+
+export interface ScssRule {
+  selector: string;
+  declarations: ScssDeclaration[];
+}
+
+const sourceRules = new WeakMap<ScssBlocks, ScssRule[]>();
+
+/** Split outside strings and parentheses; URLs and quoted semicolons survive. */
+export function splitCssTokens(source: string, separator = ';'): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '\\') { i++; continue; }
+    if (quote) { if (ch === quote) quote = ''; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (!depth && ch === separator) { parts.push(source.slice(start, i)); start = i + 1; }
+  }
+  parts.push(source.slice(start));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+export function parseDeclarationList(body: string): ScssDeclaration[] {
+  return splitCssTokens(body).flatMap((line) => {
+    const colon = line.indexOf(':');
+    if (colon < 0) return [];
+    const property = line.slice(0, colon).trim().toLowerCase();
+    const raw = line.slice(colon + 1).trim();
+    const value = raw.replace(/!\s*important\s*$/i, '').trim();
+    return property && value ? [{ property, value, important: isImportant(raw) }] : [];
+  });
+}
+
+/** Ordered rules are the input seam for computed style, not a declaration map. */
+export function rulesOf(blocks: ScssBlocks): ScssRule[] {
+  return sourceRules.get(blocks) ?? Object.entries(blocks).map(([selector, body]) => ({
+    selector, declarations: parseDeclarationList(body),
+  }));
+}
+
+export function parseScssRules(css: string): ScssRule[] {
+  return rulesOf(parseBlocks(css));
+}
 
 /** A single declaration block, normalised to `propertysansdashes` keys. */
 export type ScssDeclarations = Record<string, string>;
@@ -231,32 +281,16 @@ export function isImportantDeclaration(declarations: ScssDeclarations, property:
     ?? isImportant(declarations[property] ?? '');
 }
 
-/**
- * Merge two declaration bodies the way the cascade does: a later rule only
- * overrides the properties it actually declares, and an earlier `!important`
- * value survives a later plain one.
- */
+/** Concatenate bodies without losing the declaration sequence needed by cascade. */
 function mergeBodies(existing: string, incoming: string): string {
-  const byProperty = new Map<string, string>();
-  for (const body of [existing, incoming]) {
-    for (const part of body.split(';')) {
-      const declaration = part.trim();
-      const colon = declaration.indexOf(':');
-      if (colon < 0) continue;
-      const property = declaration.slice(0, colon).trim().toLowerCase();
-      if (!property) continue;
-      const previous = byProperty.get(property);
-      if (previous && isImportant(previous) && !isImportant(declaration)) continue;
-      byProperty.set(property, declaration);
-    }
-  }
-  return [...byProperty.values()].join(';\n');
+  // Do not deduplicate: a later shorthand must reset earlier longhands.
+  return [existing, incoming].filter(Boolean).join(';\n');
 }
 
 export function parseBlocks(css: string): ScssBlocks {
   const source = stripComments(css);
   const blocks: ScssBlocks = {};
-  const rules: Array<{ selector: string; body: string }> = [];
+  const rules: ScssRule[] = [];
   const stack: Array<[string[], string[]]> = [];
   let buf = '';
   let i = 0;
@@ -269,22 +303,22 @@ export function parseBlocks(css: string): ScssBlocks {
     if (!trimmed || trimmed.indexOf(':') < 0) return;
     const target = curDecls();
     if (!target) return;
-    for (const part of trimmed.split(';')) {
+    for (const part of splitCssTokens(trimmed)) {
       const decl = part.trim();
       if (decl && decl.indexOf(':') >= 0) target.push(decl);
     }
   };
 
-  const closeBlock = (): void => {
-    const top = stack.pop();
+  const flushBlock = (): void => {
+    const top = stack[stack.length - 1];
     if (!top) return;
-    const body = top[1].join(';\n');
+    const body = top[1].splice(0).join(';\n');
     if (!body.trim()) return;
     for (const selector of top[0]) {
       for (const full of selector.split(',')) {
         const name = full.trim();
         if (!name) continue;
-        rules.push({ selector: name, body });
+        rules.push({ selector: name, declarations: parseDeclarationList(body) });
         const existing = blocks[name];
         // The cascade merges: a later rule only overrides the properties it
         // declares. Replacing the body wholesale loses everything an earlier
@@ -309,15 +343,23 @@ export function parseBlocks(css: string): ScssBlocks {
     return n;
   };
 
+  let quote = '';
+  let parens = 0;
   while (i < n) {
     const ch = source[i];
-    if (ch === '{') {
+    if (ch === '\\') { buf += source.slice(i, i + 2); i += 2; continue; }
+    if (quote) { buf += ch; if (ch === quote) quote = ''; i++; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; buf += ch; i++; continue; }
+    if (ch === '(') parens++;
+    if (ch === ')') parens--;
+    if (!parens && ch === '{') {
       const selText = buf.trim();
       buf = '';
       if (selText.charAt(0) === '@') {
         i = skipAtBlock(i);
         continue;
       }
+      flushBlock();
       const parentSels = stack.length ? stack[stack.length - 1][0] : [''];
       const newSels: string[] = [];
       for (const part of selText.split(',')) {
@@ -329,13 +371,14 @@ export function parseBlocks(css: string): ScssBlocks {
         }
       }
       stack.push([newSels.length ? newSels : [''], []]);
-    } else if (ch === '}') {
+    } else if (!parens && ch === '}') {
       if (stack.length) {
         pushDecls(buf);
         buf = '';
-        closeBlock();
+        flushBlock();
+        stack.pop();
       } else buf = '';
-    } else if (ch === ';') {
+    } else if (!parens && ch === ';') {
       if (stack.length) {
         pushDecls(buf);
         buf = '';
@@ -356,22 +399,45 @@ export function parseBlocks(css: string): ScssBlocks {
 
 /** Declaration body → `{ propertySansDashes: value }` (lowercased, vendor prefixes dropped). */
 export function parseDecls(body: string): ScssDeclarations {
-  const d: ScssDeclarations = {};
-  if (!body) return d;
-  const important = new Set<string>();
-  for (const rawLine of mergeBodies('', body).split(';')) {
-    const line = rawLine.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-    const idx = line.indexOf(':');
-    if (idx < 0) continue;
-    const key = line.slice(0, idx).trim().replace(/^-+/, '').toLowerCase().replace(/-/g, '');
-    const rawValue = line.slice(idx + 1).trim();
-    const val = rawValue.replace(/!\s*important\s*$/i, '').trim();
-    if (isImportant(rawValue)) important.add(key);
-    else important.delete(key);
-    if (val) d[key] = val;
+  return cascadeDeclarations(parseDeclarationList(body));
+}
+
+/** Expand supported shorthands before comparing priority and source order. */
+export function expandDeclaration(declaration: ScssDeclaration): ScssDeclaration[] {
+  const { property, value } = declaration;
+  const make = (property: string, value: string): ScssDeclaration => ({ ...declaration, property, value });
+  if (property === 'padding' || property === 'margin') {
+    const tokens = value.split(/\s+/);
+    if (tokens.length < 1 || tokens.length > 4) return [];
+    const [t, r = t, b = t, l = r] = tokens;
+    return ['top', 'right', 'bottom', 'left'].map((side, i) => make(`${property}-${side}`, [t, r, b, l][i]));
   }
-  importantProperties.set(d, important);
-  return d;
+  if (property === 'background') {
+    if (/^(inherit|initial|unset)$/.test(value)) {
+      return ['background-color', 'background-image', 'background-clip'].map((key) => make(key, value));
+    }
+    const image = /(?:linear-gradient|url)\(/i.test(value) ? value : 'none';
+    const solid = tryParseColor(value);
+    const color = solid ? value : splitCssTokens(value, ' ').find((token) => tryParseColor(token)) ?? 'transparent';
+    return [make('background-color', color), make('background-image', image), make('background-clip', 'border-box')];
+  }
+  return [declaration];
+}
+
+export function cascadeDeclarations(declarations: readonly ScssDeclaration[]): ScssDeclarations {
+  const out: ScssDeclarations = {};
+  const important = new Set<string>();
+  for (const declaration of declarations.flatMap(expandDeclaration)) {
+    const normalized = declaration.property.replace(/^-+/, '').replace(/-/g, '');
+    const key = normalized === 'webkitbackgroundclip' ? 'backgroundclip'
+      : normalized === 'webkittextstroke' ? 'textstroke' : normalized;
+    if (important.has(key) && !declaration.important) continue;
+    out[key] = declaration.value;
+    if (declaration.important) important.add(key);
+    else important.delete(key);
+  }
+  importantProperties.set(out, important);
+  return out;
 }
 
 /**
@@ -382,7 +448,7 @@ export function parseDecls(body: string): ScssDeclarations {
  * `.TextBox_main .text` apply, the nested rule is the more specific one and has
  * to win.
  */
-function selectorSpecificity(selector: string): number {
+export function selectorSpecificity(selector: string): number {
   let score = 0;
   for (const part of selector.trim().split(/\s+/)) {
     score += (part.match(/#[\w-]+/g) ?? []).length * 100;
@@ -404,17 +470,10 @@ function selectorSpecificity(selector: string): number {
  */
 export function lookup(blocks: ScssBlocks, selector: string): ScssDeclarations {
   const suffix = ` ${selector}`;
-  const rules = sourceRules.get(blocks)
-    ?? Object.entries(blocks).map(([selector, body]) => ({ selector, body }));
-  const matching = rules
+  const matching = rulesOf(blocks)
     .filter((rule) => rule.selector === selector || rule.selector.endsWith(suffix))
-    .sort((left, right) => (
-      selectorSpecificity(left.selector) - selectorSpecificity(right.selector)
-    ));
-  if (matching.length === 0) return {};
-  let merged = matching[0].body;
-  for (const rule of matching.slice(1)) merged = mergeBodies(merged, rule.body);
-  return parseDecls(merged);
+    .sort((left, right) => selectorSpecificity(left.selector) - selectorSpecificity(right.selector));
+  return cascadeDeclarations(matching.flatMap((rule) => rule.declarations));
 }
 
 /** First non-empty value among `names`, or `null`. */
@@ -436,6 +495,21 @@ export function declOf(obj: ScssDeclarations | null | undefined, ...names: strin
  */
 export function rnd(v: number): number {
   return Math.floor(Math.abs(v) + 0.5) * (v < 0 ? -1 : 1);
+}
+
+/** Resolve a CSS length in source pixels, without scaling or rounding. */
+export function cssLength(value: string | undefined, font: number, percent: number): number | null {
+  if (value == null) return null;
+  const match = /^(-?(?:\d+(?:\.\d*)?|\.\d+))\s*(px|em|rem|pt|%)?$/i.exec(value);
+  if (!match) return null;
+  const number = Number(match[1]);
+  switch (match[2]?.toLowerCase()) {
+    case 'em': return number * font;
+    case 'rem': return number * ROOT_FONT_PX;
+    case 'pt': return number * 96 / 72;
+    case '%': return number * percent / 100;
+    default: return number;
+  }
 }
 
 /** Length → integer stage pixels. Accepts `px` / `em` / `rem` / `pt` / `%` / bare numbers. */
@@ -666,19 +740,33 @@ export function parsePaint(raw: unknown): Paint | null {
 
     const stops: Array<{ color: string; pos: number | null }> = [];
     for (const part of splitTopLevel(body)) {
-      const mc = /(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|\b[a-z]+\b)\s*$/.exec(part)
-        || /(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|\b[a-z]+\b)/.exec(part);
-      if (!mc) continue;
-      const col = tryParseColor(mc[1]);
-      if (!col) continue;
-      const mp = /(-?[\d.]+)%/.exec(part);
-      stops.push({ color: col, pos: mp ? parseFloat(mp[1]) / 100 : null });
+      // The supported stop grammar is a colour followed by one optional
+      // percentage. Do not mistake px stops, hints or unknown colours for an
+      // omitted position: the computed-style caller must diagnose them.
+      const stop = /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|[a-z]+)(?:\s+(-?(?:\d+(?:\.\d*)?|\.\d+))%)?$/i.exec(part);
+      if (!stop) return null;
+      const color = tryParseColor(stop[1]);
+      if (!color) return null;
+      stops.push({ color, pos: stop[2] == null ? null : Number(stop[2]) / 100 });
     }
-    if (!stops.length) return null;
+    if (stops.length < 2) return null;
     if (stops[0].pos == null) stops[0].pos = 0;
     if (stops[stops.length - 1].pos == null) stops[stops.length - 1].pos = 1;
+    // CSS Images 3 color-stop fixup: clamp specified stops first, then
+    // interpolate each run of omitted positions between its two neighbours.
+    let previous = stops[0].pos ?? 0;
+    for (const stop of stops) {
+      if (stop.pos != null) { stop.pos = Math.max(previous, stop.pos); previous = stop.pos; }
+    }
+    let anchor = 0;
     for (let k = 1; k < stops.length; k++) {
-      if (stops[k].pos == null) stops[k].pos = stops[k - 1].pos;
+      if (stops[k].pos == null) continue;
+      const start = stops[anchor].pos ?? 0;
+      const end = stops[k].pos ?? 1;
+      for (let j = anchor + 1; j < k; j++) {
+        stops[j].pos = start + (end - start) * (j - anchor) / (k - anchor);
+      }
+      anchor = k;
     }
     return {
       kind: 'linear',
@@ -729,38 +817,45 @@ export function paintColor(paint: Paint | null | undefined, fallback: string): s
  *    `0 0 12px rgba(0,0,0,.9)` is a common shorthand whose numbers would
  *    otherwise shift by one slot.
  */
-export function parseTextShadow(raw: unknown): TextShadowInfo {
+export function parseTextShadow(raw: unknown, fontPx = ROOT_FONT_PX, currentColor = '#000000FF'): TextShadowInfo {
   const out: TextShadowInfo = {
     has: false, color: '#000000', alpha: 0.85, blur: 10, distance: 2,
     offsetX: 0, symmetric: false,
   };
-  if (!raw) return out;
+  if (!raw || /^none$/i.test(String(raw).trim())) return out;
   const shadows = splitTopLevel(raw);
   if (!shadows.length) return out;
 
-  const parsed = shadows.map((s) => {
+  const parsed = shadows.flatMap((s) => {
     const cm = /(rgba?\([^)]*\)|#[0-9a-fA-F]{3,8})/.exec(s);
     let colorRaw = cm ? cm[1] : null;
     if (!colorRaw) {
       const stripped = s.replace(/-?[\d.]+(px|em|rem|pt|%)?/g, ' ');
       const cm2 = /\b([a-zA-Z]{3,})\b/.exec(stripped);
-      colorRaw = cm2 ? cm2[1] : '#000000';
+      colorRaw = cm2 ? cm2[1] : currentColor;
     }
-    const hexa = parseColor(colorRaw, '#000000FF');
+    const hexa = colorRaw.toLowerCase() === 'currentcolor' ? currentColor : tryParseColor(colorRaw);
+    if (!hexa) return [];
     const noColor = String(s)
       .replace(/rgba?\([^)]*\)/g, ' ')
       .replace(/#[0-9a-fA-F]{3,8}/g, ' ')
       .replace(/\b[a-zA-Z]{3,}\b/g, ' ');
-    const norm = noColor.replace(/(^|[\s,])0(?=[\s,]|$)/g, '$10px');
-    const nums = (norm.match(/(-?[\d.]+)px/g) || []).map((x) => parseFloat(x) * STAGE_SCALE);
-    return {
-      blur: nums.length > 2 ? nums[2] : 0,
-      oy: nums.length > 1 ? nums[1] : 0,
-      ox: nums.length > 0 ? nums[0] : 0,
+    const nums = noColor.trim().split(/\s+/).filter(Boolean).map((token) => {
+      const value = cssLength(token, fontPx, fontPx);
+      return value == null ? null : value * STAGE_SCALE;
+    });
+    if (nums.some((value) => value == null)) return [];
+    const lengths = nums.filter((value): value is number => value != null);
+    if (lengths.length < 2 || lengths.length > 3) return [];
+    return [{
+      blur: lengths[2] ?? 0,
+      oy: lengths[1],
+      ox: lengths[0],
       color: rgbOnly(hexa),
       alpha: alphaOf(hexa),
-    };
+    }];
   });
+  if (!parsed.length) return out;
 
   parsed.sort((a, b) => {
     if (b.alpha !== a.alpha) return b.alpha - a.alpha;
