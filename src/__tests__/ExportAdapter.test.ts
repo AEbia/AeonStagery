@@ -104,6 +104,7 @@ function createMockElectronAPI() {
       exists: vi.fn().mockResolvedValue(false),
       readFile: vi.fn().mockResolvedValue({ success: false }),
       writeFile: vi.fn().mockResolvedValue({ success: true }),
+      copyFile: vi.fn().mockResolvedValue({ success: true }),
     },
     dialog: {
       showSave: vi.fn().mockResolvedValue({ canceled: true }),
@@ -175,7 +176,7 @@ describe('ExportAdapter', () => {
     expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
     expect(electronAPI.export.pushFrame).toHaveBeenCalledTimes(1);
     expect(electronAPI.export.convert).not.toHaveBeenCalled();
-    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(expect.stringMatching(/^\/tmp\/video_/));
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith('/output/test.mp4');
     expect(stageAdapter.resumeTicker).toHaveBeenCalled();
     expect(playbackAdapter.setSilentMode).toHaveBeenLastCalledWith(false);
     expect(live2DManager.setExportMode).toHaveBeenLastCalledWith(false);
@@ -528,40 +529,93 @@ describe('ExportAdapter', () => {
     expect(progressCalls.some((progress) => progress.phase === 'done')).toBe(false);
   });
 
-  it('returns failure and never reports done when the temporary video copy fails', async () => {
+  it('exports directly when audio is requested but no sources are available', async () => {
     documentStore.setPreparedScene(createPreparedScene());
-    electronAPI.fs.readFile.mockResolvedValue({
-      success: true,
-      data: new ArrayBuffer(4),
-    });
-    electronAPI.fs.writeFile.mockResolvedValue({
-      success: false,
-      error: 'destination is not writable',
-    });
+    const result = await adapter.export({
+      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: true, backend: 'rawpixels', outputPath: '/output/direct.mp4',
+    }, vi.fn());
+    expect(result).toEqual({ success: true, outputPath: '/output/direct.mp4' });
+    expect(electronAPI.export.getTempDir).not.toHaveBeenCalled();
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/direct.mp4', expect.anything());
+    expect(electronAPI.fs.readFile).not.toHaveBeenCalled();
+    expect(electronAPI.fs.writeFile).not.toHaveBeenCalled();
+    expect(electronAPI.fs.copyFile).not.toHaveBeenCalled();
+  });
 
-    const progressCalls: any[] = [];
-    const result = await adapter.export(
-      {
-        format: 'mp4',
-        codec: 'libx264',
-        bitrateMbps: 12,
-        fps: 60,
-        width: 1920,
-        height: 1080,
-        rangeStart: 0,
-        rangeEnd: 1 / 60,
-        includeAudio: true,
-        backend: 'rawpixels',
-        outputPath: '/output/copy-failed.mp4',
-      },
-      (progress) => progressCalls.push(progress),
-    );
+  it.each([true, false])('cleans temporary video after conversion success=%s', async (success) => {
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0,
+      params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    }] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    electronAPI.export.convert.mockResolvedValue({ success });
+    const result = await adapter.export({
+      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
+    }, vi.fn());
+    expect(result.success).toBe(success);
+    const temporaryPath = electronAPI.export.startStreamExport.mock.calls[0][0];
+    expect(temporaryPath).toMatch(/^\/tmp\/video_/);
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(temporaryPath);
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalledWith('/output/mixed.mp4');
+    expect(electronAPI.fs.readFile).not.toHaveBeenCalled();
+    expect(electronAPI.fs.exists).toHaveBeenCalledTimes(1);
+  });
 
-    expect(result).toEqual(expect.objectContaining({
-      success: false,
-      error: 'destination is not writable',
-    }));
-    expect(progressCalls.some((progress) => progress.phase === 'done')).toBe(false);
+  it('preserves the export result if temporary-file cleanup fails', async () => {
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0,
+      params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    }] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    electronAPI.fs.removeFile.mockRejectedValue(new Error('cleanup failed'));
+    const result = await adapter.export({
+      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
+    }, vi.fn());
+    expect(result.success).toBe(true);
+  });
+
+  it.each(['cancel', 'failure'])('waits for process cleanup before removing temporary video on %s', async (mode) => {
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0,
+      params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    }] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    const controller = new AbortController();
+    let release!: () => void;
+    let started!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => { started = resolve; });
+    electronAPI.export.cancelExport.mockImplementation(async () => {
+      started();
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { success: true };
+    });
+    electronAPI.export.pushFrame.mockImplementationOnce(async () => {
+      if (mode === 'failure') throw new Error('write failed');
+      controller.abort();
+      return { success: true };
+    });
+    const exporting = adapter.export({
+      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
+      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      includeAudio: true, backend: 'rawpixels', outputPath: '/output/test.mp4',
+    }, vi.fn(), controller.signal);
+    await cleanupStarted;
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
+    release();
+    const result = await exporting;
+    expect(result).toMatchObject(mode === 'cancel'
+      ? { success: false, cancelled: true }
+      : { success: false, error: 'write failed' });
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(electronAPI.export.startStreamExport.mock.calls[0][0]);
   });
 
   it('accepts MOV + Apple ProRes 4444 for subtitle-only exports', async () => {
