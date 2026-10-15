@@ -340,11 +340,6 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                   }
                 />
                 <SettingItem
-                  title="自动保存"
-                  description="编辑时间轴、修改动作或对白时实时将变更写入本地工程 scene.json，防止意外丢失进度。"
-                  control={<Toggle label="自动保存" active={settings.autoSave} onChange={(value) => setSetting('autoSave', value)} />}
-                />
-                <SettingItem
                   title="低性能模式"
                   description="关闭界面毛玻璃模糊、复杂光影粒子与动态过渡特效，在低配置设备或核显笔记本上提供流畅帧率。"
                   control={<Toggle label="低性能模式" active={settings.lowPerformance} onChange={(value) => setSetting('lowPerformance', value)} />}

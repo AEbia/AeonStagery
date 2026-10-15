@@ -14,7 +14,6 @@ import {
   IconMaximize,
   IconMoon,
   IconRefresh,
-  IconSave,
   IconSettings,
   IconSun,
   IconTarget,
@@ -154,7 +153,7 @@ function AppContent({ contextValue, sessionBindings }: {
     viewport, handleStageMouseDown, handleStageReset, handleResetZoom,
     handleRecenter, handleZoomIn, handleZoomOut, isPanning,
   } = useViewport(stageRef, !showProjectHome);
-  const { saveShortcutTitle } = useAppShortcuts({
+  useAppShortcuts({
     contextValue, collaborationStatus, initialized, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
   });
@@ -198,15 +197,6 @@ function AppContent({ contextValue, sessionBindings }: {
               {currentProject.metadata.name}
             </span>
           )}
-          <button
-            className="btn btn--icon top-bar__project-action"
-            onClick={() => void handleSave()}
-            disabled={!hasLoadedScene}
-            title={saveShortcutTitle}
-            aria-label="保存场景"
-          >
-            <IconSave width={15} height={15} />
-          </button>
           <button
             className="btn btn--icon top-bar__project-action"
             onClick={() => void handleOpenProject()}
