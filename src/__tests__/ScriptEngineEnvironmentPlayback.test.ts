@@ -13,7 +13,7 @@ const scene: RuntimeTimelineScene = {
   meta: { title: 'Environment playback', characters: [] },
   timeline: [
     { _id: 'first', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'first.png', duration: 0 } },
-    { _id: 'second', time: 1, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'second.png', transition: 'crossFade', duration: 2 } },
+    { _id: 'second', time: 1, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'second.png', scale: 1.5, transition: 'crossFade', duration: 2 } },
     { _id: 'remove', time: 4, action: 'removeEnvironmentLayer', params: { layerId: 'background', transition: 'fadeOut', duration: 2 } },
   ],
 };
@@ -70,13 +70,27 @@ describe('ScriptEngine environment playback after reconstruction', () => {
       } else {
         const frame = render.mock.lastCall?.[0];
         expect(frame).toBeDefined();
+        expect(frame!.scale).toBe(1.5);
         if (time < 3) {
           expect(frame!.images.map((entry) => entry.weight)).toEqual([(3 - time) / 2, (time - 1) / 2]);
+          expect(frame!.images[0].transform?.scale).toBe(1);
         } else {
           expect(frame!.images).toEqual([{ image: 'second.png', weight: 1 }]);
           expect(frame!.opacityMultiplier ?? 1).toBe(time === 5 ? 0.5 : 1);
         }
       }
+    }
+  });
+
+  it('keeps the new artwork scale fixed throughout forward playback', async () => {
+    const { timeline, onUpdate, render } = createEngine();
+    for (const time of [0.5, 1, 1.5, 2, 2.5, 3]) {
+      timeline.seek(time, false);
+      onUpdate();
+      await vi.waitFor(() => {
+        const frame = render.mock.lastCall?.[0];
+        expect(frame?.scale).toBe(time < 1 ? 1 : 1.5);
+      });
     }
   });
 
