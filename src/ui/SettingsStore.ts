@@ -711,6 +711,13 @@ export function removeRecentProject(projectFilePath: string) {
   );
 }
 
+export function renameRecentProject(projectFilePath: string, name: string) {
+  const existing = settingsManager.get('recentProjects') || [];
+  settingsManager.set('recentProjects', existing.map((entry) => (
+    entry.projectFilePath === projectFilePath ? { ...entry, name } : entry
+  )));
+}
+
 export const settingsProjectRecentsPort = {
   upsertRecentProject,
   removeRecentProject,

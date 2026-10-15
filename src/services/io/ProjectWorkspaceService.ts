@@ -34,6 +34,10 @@ export type WebGalRegenerateResult =
   | { success: true; scenePath: string; webgalReport: WebGalImportReport }
   | { success: false; error: string };
 
+export type RenameProjectResult =
+  | { success: true; project: ProjectState }
+  | { success: false; error: string };
+
 export interface CreateProjectOptions {
   templates?: ProjectTemplateConfiguration;
   webgal?: WebGalImportInput;
@@ -64,6 +68,30 @@ export class ProjectWorkspaceService {
 
   subscribe(listener: () => void): () => void {
     return this.session.subscribe(listener);
+  }
+
+  async renameProjectAt(projectFilePath: string, name: string): Promise<RenameProjectResult> {
+    const trimmedName = name.trim();
+    if (!trimmedName) return { success: false, error: '项目名称不能为空' };
+
+    try {
+      const currentProject = this.session.getCurrentProject();
+      const isSamePath = (path: string) => path.replace(/\\/g, '/') === projectFilePath.replace(/\\/g, '/');
+      const target = currentProject && isSamePath(currentProject.projectFilePath)
+        ? currentProject
+        : await this.projectResources.loadProject(projectFilePath);
+      const project = target.metadata.name === trimmedName
+        ? target
+        : await this.projectResources.saveProjectMetadata(target, { ...target.metadata, name: trimmedName });
+
+      // Renaming a recent project must not open it or change the workspace root.
+      if (this.session.getCurrentProject() === target) {
+        this.session.setCurrentProject(project);
+      }
+      return { success: true, project };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async createProjectAt(

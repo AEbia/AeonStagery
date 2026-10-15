@@ -10,6 +10,7 @@ import {
   createExternalLibraryMount,
   hasExternalLibraryMountPath,
   rebindExternalLibraryMount,
+  renameRecentProject,
   useSettings,
 } from '../SettingsStore';
 import { showToast } from '../Toast';
@@ -283,6 +284,13 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     showProjectWorkflowResult(workflowResult, 'recent');
   }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
 
+  const handleRenameProject = useCallback(async (projectFilePath: string, name: string) => {
+    const result = await contextValue.services.projectWorkspace.renameProjectAt(projectFilePath, name);
+    if (!result.success) throw new Error(result.error);
+    renameRecentProject(projectFilePath, result.project.metadata.name);
+    showToast(`项目已重命名为：${result.project.metadata.name}`, 'success');
+  }, [contextValue.services.projectWorkspace]);
+
   const handleImportTemplatePackage = useCallback(async () => {
     const templateImporter = window.aeonStageryAPI.templates;
     if (!templateImporter) {
@@ -357,7 +365,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   return {
     currentProject, templatePackages, templatePackageRevision,
     isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult,
-    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject,
+    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
     handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,

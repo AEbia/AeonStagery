@@ -139,6 +139,71 @@ describe('ProjectWorkspaceService', () => {
     }
   });
 
+  it('persists the trimmed project name and notifies the active session without changing its root', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    vi.clearAllMocks();
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, '  新项目  ');
+
+    expect(result.success).toBe(true);
+    expect(service.getCurrentProject()?.metadata.name).toBe('新项目');
+    expect(service.getCurrentProject()?.metadata.projectId).toBe(created.project.metadata.projectId);
+    expect(service.getCurrentProject()?.metadata.scenes).toEqual(created.project.metadata.scenes);
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"name": "新项目"'));
+    expect(listener).toHaveBeenCalledOnce();
+    expect(setProjectRoot).not.toHaveBeenCalled();
+    expect(fileAccess.readFile).not.toHaveBeenCalledWith(created.project.projectFilePath);
+    unsubscribe();
+  });
+
+  it('renames an unopened project while retaining unknown metadata and the current workspace', async () => {
+    const created = await service.createProjectAt('D:/projects/recent', 'Recent');
+    if (!created.success) throw new Error(created.error);
+    const recentMetadata = { ...created.project.metadata, futureSettings: { enabled: true } };
+    const active = await service.createProjectAt('D:/projects/active', 'Active');
+    if (!active.success) throw new Error(active.error);
+    fileAccess.readFile.mockResolvedValue({ path: created.project.projectFilePath, data: JSON.stringify(recentMetadata) });
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    vi.clearAllMocks();
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, 'Renamed');
+
+    expect(result.success).toBe(true);
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"name": "Renamed"'));
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"futureSettings"'));
+    expect(service.getCurrentProject()).toBe(active.project);
+    expect(setProjectRoot).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('rejects empty names without reading or writing project files', async () => {
+    const result = await service.renameProjectAt('D:/projects/demo/project.json', '   ');
+
+    expect(result).toEqual({ success: false, error: '项目名称不能为空' });
+    expect(fileAccess.readFile).not.toHaveBeenCalled();
+    expect(fileAccess.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('reports write failures without announcing a renamed active project', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    fileAccess.writeFile.mockRejectedValueOnce(new Error('磁盘只读'));
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, 'Renamed');
+
+    expect(result).toEqual({ success: false, error: '磁盘只读' });
+    expect(service.getCurrentProject()?.metadata.name).toBe('Demo');
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('enables every available template when creating a project without a template selection', async () => {
     const availableTemplates = ['template.one', 'template.two'].map((id) => createLoadedTemplatePackage({
       template: { id, name: id, version: '1.0.0' },

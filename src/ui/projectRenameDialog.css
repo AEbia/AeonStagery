@@ -1,0 +1,14 @@
+.project-rename-dialog {
+  width: min(400px, 90vw);
+}
+
+.project-rename-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-rename-dialog__error {
+  color: var(--error);
+  overflow-wrap: anywhere;
+}

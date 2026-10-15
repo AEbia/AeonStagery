@@ -471,7 +471,7 @@
   position: relative;
   min-height: 44px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: clamp(6px, 1.2vw, 10px);
   padding: clamp(6px, 1vw, 8px) clamp(8px, 1.5vw, 12px);
@@ -529,33 +529,15 @@
   outline-offset: 2px;
 }
 
-.ph-recent-delete {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: clamp(10px, 1.5vw, 14px);
-  margin-block: auto;
-  z-index: 1;
-  opacity: 0;
-  pointer-events: none;
-  background: var(--bg-hover) !important;
-  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+.ph-recent-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.ph-recent-delete:hover:not(:disabled),
-.ph-recent-delete:active:not(:disabled) {
+.ph-recent-actions .btn:hover:not(:disabled),
+.ph-recent-actions .btn:active:not(:disabled) {
   transform: none !important;
-}
-
-.ph-recent-item:hover .ph-recent-delete,
-.ph-recent-item:focus-within .ph-recent-delete {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.ph-recent-item:hover .ph-recent-time,
-.ph-recent-item:focus-within .ph-recent-time {
-  visibility: hidden;
 }
 
 .ph-recent-delete-dialog {

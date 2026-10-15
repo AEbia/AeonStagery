@@ -133,15 +133,48 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .top-bar__project-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   max-width: 220px;
+  min-width: 0;
+  padding: 4px 6px 4px 10px;
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.top-bar__project-name span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding-left: 10px;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+}
+
+.top-bar__project-name svg {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.top-bar__project-name:hover svg,
+.top-bar__project-name:focus-visible svg {
+  opacity: 1;
+}
+
+.top-bar__project-name:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.top-bar__project-name:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 .top-bar__project-action {
