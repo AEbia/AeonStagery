@@ -1,7 +1,7 @@
 ---
 status: accepted
 implementation_status: implemented
-last_updated: 2026-09-04
+last_updated: 2026-10-15
 supersedes_product_scope: ADR-0027
 extends: ADR-0028
 ---
@@ -19,7 +19,7 @@ extends: ADR-0028
 - 导入或注册 `.mtn` / `.motion3.json` 时仍只创建普通资源 Motion，不自动解析成
   自定义 Motion、不生成 Parameter 轨道，也不改变源文件或既有 `playMotion`。
 - “自定义动作”是用户在时间轴上对某个普通资源 Motion 发起的显式内容转换；只有
-  执行该命令后，系统才读取源 Motion 并生成可编辑的场景内联关键帧副本。
+  执行该命令后，系统才从源 Motion 生成可编辑的场景内联关键帧副本。
 - 首版不提供空白自定义 Motion；每个自定义 Motion 都必须由已有 `playMotion`
   转换生成，确保所有可编辑轨道都有可靠来源与起始值。
 - 转换在原时间轴位置直接替换原 `playMotion` 事件，不新增并存事件。原事件的
@@ -40,13 +40,24 @@ extends: ADR-0028
 - `characterPerformance` 的 Motion 输出必须能够区分普通资源 Motion 与内联自定义
   Motion；二者是同一个 Motion 输出的互斥来源，不能在同一输出中并存或叠加。
 - 场景持久化中的 `params.motion` 表示完整的 Motion 输出，并使用 `kind` 判别其来源；
-  普通资源 Motion 保存为 `{ kind: "resource", key, fadeInSeconds? }`，内联自定义
+  普通资源 Motion 保存为 `{ kind: "resource", key, durationSeconds?, fadeInSeconds? }`，内联自定义
   Motion 保存为 `{ kind: "custom", durationSeconds, fadeInSeconds, derivedFrom, tracks }`。
   进入过渡和
   时长等 Motion 专属配置也属于这个对象，不属于整个 `characterPerformance`。
 - `target` 以及 Expression、LookAt、Blink 输出继续是 `params.motion` 的同级字段。
   最终 v4 不再把 `durationSeconds` 作为 `characterPerformance.params` 的顶层公共字段，
   也不在 Motion 输出或角色表演的其他位置保存 `loop` 或 `priority`。
+- 当前 v5 的资源 Motion 时长由统一 source preparation 在编译前物化：Motion3
+  读取 `Meta.Duration`，Cubism 2 `.mtn` 读取最长曲线的样本数与源 FPS，组合模型
+  先在整体动作组中匹配完整名称，缺少精确匹配时仅回退到全局唯一的同名后缀动作组，
+  再取播放该完整动作组的可解析子模型的最大时长；按动作时刻的角色登场 `model`（缺省时使用角色默认
+  模型）和对白 `$speaker` 绑定查找资源，副模型选择由作者入口写入 `model`。
+  时长至少覆盖显式 `fadeInSeconds`，源循环只贡献一个有限周期。
+  加载、导入与编辑都经过此入口；每次准备内复用文件读取，下次准备重新读取以响应
+  资源变化。资源缺失或解析失败时保留已有正时长，否则物化 1 秒并记录诊断。
+  `temporalExtent` 和时间轴几何共用 `motion.durationSeconds`；显式场景结尾不足
+  时只延长，保留尾部留白。编译器、播放与导出均不自行探测资源时长。
+  字段在 v5 内可选以兼容旧 source，旧场景在正常加载准备时补齐，无需离线迁移。
 - 普通资源 Motion 不继续以裸字符串作为新场景的规范写入格式，也不使用
   `string | object` 作为长期数据契约。v4 codec 只接受判别联合的规范形状；
   旧 `motion: "motion-key"` 与无 `kind` 的 `{ key, fadeInSeconds? }` 只由显式的

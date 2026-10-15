@@ -74,6 +74,30 @@ describe('ScriptEngine playback state synchronization', () => {
     expect(onTime).toHaveBeenLastCalledWith(engine.getCurrentTime());
   });
 
+  it('keeps playback running through a final resource motion and stops at its end', async () => {
+    const document: CurrentSceneDocument = {
+      schemaVersion: 5, sceneId: 'final-resource-motion',
+      meta: { title: 'Final resource motion', characters: [{ id: 'alice', name: 'Alice' }] },
+      statements: [{
+        id: 'tail', type: 'characterPerformance', time: 6,
+        params: { target: 'alice', motion: { kind: 'resource', key: 'wave', durationSeconds: 2.5 } },
+      }],
+    };
+    const pipeline = new SemanticScenePipeline({ resolveAsset: (source) => source });
+    const { prepared } = await pipeline.processDocument(document);
+    await engine.loadPreparedScene(prepared);
+    adapter.play();
+    const timeline = engine.getMasterTimeline()!;
+
+    timeline.seek(6, false);
+    expect(store.playing).toBe(true);
+    timeline.seek(8, false);
+    expect(store.playing).toBe(true);
+    expect(timeline.duration()).toBeCloseTo(8.5, 2);
+    timeline.seek(timeline.duration(), false);
+    expect(store.playing).toBe(false);
+  });
+
   it('tracks play and pause called directly on the engine', async () => {
     await loadScene();
     engine.play();

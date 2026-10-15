@@ -383,8 +383,8 @@ const definitions = {
     discriminators: ['params.motion', 'params.expression', 'params.lookAt', 'params.blink'],
     attachableTo: ['dialogue'],
     parseParams: parseCharacterPerformanceParams,
-    temporalExtent: (params) => typeof params.motion === 'object' && params.motion.kind === 'custom'
-      ? params.motion.durationSeconds
+    temporalExtent: (params) => typeof params.motion === 'object'
+      ? duration(params.motion.durationSeconds)
       : 0,
     collectAssetReferences: () => [],
     compiledAssetSlots: [],
