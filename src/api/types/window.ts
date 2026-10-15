@@ -80,7 +80,7 @@ import type {
 import type {
   ProjectAgentPauseReason,
 } from '../../services/project-agent/ProjectAgentTask';
-import type { TemplatePackageImportResult } from './template-package-import';
+import type { TemplatePackageImportResult, TemplatePackageDeleteRequest, TemplatePackageDeleteResult } from './template-package-import';
 
 export interface CollaborationSessionSummary {
   name: string;
@@ -126,6 +126,7 @@ export interface AeonStageryElectronAPI {
   };
   templates?: {
     importZip(): Promise<TemplatePackageImportResult>;
+    deletePackage(request: TemplatePackageDeleteRequest): Promise<TemplatePackageDeleteResult>;
   };
   app: {
     getPath(): Promise<string>;

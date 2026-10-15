@@ -88,6 +88,11 @@ describe('ProjectMetadataMigration', () => {
     expect((doc.templates as Record<string, unknown>).futureTemplateKey).toBe('kept-template');
   });
 
+  it('preserves an explicitly empty enabled-template list during legacy migration', () => {
+    const { document } = migrateProjectMetadataV1ToV2({ name: 'Disabled', templates: { enabledTemplateIds: [] } });
+    expect(validateProjectMetadataV2Stage(document).templates?.enabledTemplateIds).toEqual([]);
+  });
+
   it('throws and fails detached validation if input is not an object', () => {
     expect(() => migrateProjectMetadataV1ToV2('invalid')).toThrow('expects an object input');
     expect(() => migrateProjectMetadataV1ToV2(null)).toThrow('expects an object input');

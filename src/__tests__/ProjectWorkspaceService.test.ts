@@ -111,6 +111,83 @@ describe('ProjectWorkspaceService', () => {
     expect(opened.project.metadata.templates).not.toHaveProperty('dialogueTemplate');
   });
 
+  it('clears disabled WebGAL subtitle defaults and keeps all templates disabled after reopening', async () => {
+    const subtitlePackage = createLoadedTemplatePackage({
+      ...SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest,
+      template: { ...SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.template, id: 'webgal.subtitle', name: 'WebGAL Subtitle' },
+      defaults: { dialogueStyleId: 'pink-nameplate' },
+    }, { scope: 'user', packageRoot: '/library/templates/webgal-subtitle' });
+    projectResources = new ProjectResourceService(fileAccess as unknown as IFileAccess, new ProjectPathResolver(null), () => [], () => session.getCurrentProject());
+    service = new ProjectWorkspaceService(fileAccess as unknown as IFileAccess, projectResources, session, setProjectRoot, () => [subtitlePackage]);
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo', {
+      templates: { enabledTemplateIds: ['webgal.subtitle'], defaults: { dialogueStyleId: 'pink-nameplate' } },
+    });
+    if (!created.success) throw new Error(created.error);
+    expect(created.project.metadata.templates?.dialoguePresentation?.styleId).toBe('pink-nameplate');
+    const disabled = await service.updateTemplateConfiguration({ ...created.project.metadata.templates!, enabledTemplateIds: [] });
+    if (!disabled.success) throw new Error(disabled.error);
+    expect(disabled.project.metadata.templates?.enabledTemplateIds).toEqual([]);
+    expect(disabled.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+    expect(disabled.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(disabled.project.metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.enabledTemplateIds).toEqual([]);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+  });
+
+  it('falls back to the remaining template when the selected WebGAL subtitle package is unchecked', async () => {
+    const imageStyle = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'pink-nameplate')!;
+    const subtitlePackage = createLoadedTemplatePackage({
+      manifestSchemaVersion: 2,
+      template: { id: 'webgal.subtitle', name: 'WebGAL Subtitle', version: '1.0.0', compatibility: { sceneSchemaVersion: 5 } },
+      dialogueStyles: [{ ...imageStyle, id: 'webgal.subtitle-style' }],
+      defaults: { dialogueStyleId: 'webgal.subtitle-style' },
+    }, { scope: 'user', packageRoot: '/library/templates/webgal-subtitle' });
+    projectResources = new ProjectResourceService(fileAccess as unknown as IFileAccess, new ProjectPathResolver(null), () => [], () => session.getCurrentProject());
+    service = new ProjectWorkspaceService(fileAccess as unknown as IFileAccess, projectResources, session, setProjectRoot, () => [SEMANTIC_BUILTIN_TEMPLATE_PACKAGE, subtitlePackage]);
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo', {
+      templates: { enabledTemplateIds: ['aeonstagery.default', 'webgal.subtitle'], defaults: { dialogueStyleId: 'webgal.subtitle-style' } },
+    });
+    if (!created.success) throw new Error(created.error);
+    expect(created.project.metadata.templates?.dialoguePresentation?.styleId).toBe('webgal.subtitle-style');
+    const disabled = await service.updateTemplateConfiguration({ ...created.project.metadata.templates!, enabledTemplateIds: ['aeonstagery.default'] });
+    if (!disabled.success) throw new Error(disabled.error);
+    expect(disabled.project.metadata.templates?.enabledTemplateIds).toEqual(['aeonstagery.default']);
+    expect(disabled.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+    expect(disabled.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+    expect(disabled.project.metadata.templates?.dialogueTemplate).toBe('glass');
+  });
+
+  it('preserves project-owned subtitle snapshots while an enabled package is temporarily undiscovered', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const presentation = { renderer: 'image-dialogue-v1', styleId: 'webgal.subtitle', textbox: { image: 'images/subtitle.png' }, text: {} };
+    const metadata = { ...created.project.metadata, templates: { enabledTemplateIds: ['webgal.package'], defaults: { dialogueStyleId: 'webgal.subtitle' }, dialoguePresentation: presentation } };
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toEqual(presentation);
+  });
+
+  it('removes a stale subtitle snapshot on opening a project with no enabled templates', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const metadata = {
+      ...created.project.metadata,
+      templates: {
+        enabledTemplateIds: [],
+        defaults: { dialogueStyleId: 'webgal.subtitle' },
+        dialoguePresentation: { renderer: 'image-dialogue-v1', styleId: 'webgal.subtitle', textbox: { image: 'images/subtitle.png' }, text: {} },
+      },
+    };
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+    expect(opened.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+  });
+
   it('creates a project and default scene file without loading the scene', async () => {
     const result = await service.createProjectAt('D:/projects/demo', 'Demo');
 

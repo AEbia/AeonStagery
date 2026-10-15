@@ -70,6 +70,7 @@ interface ProjectHomeProps {
   onBrowseCollaborationDirectory: (currentPath: string) => Promise<string | null>;
   onOpenProject: () => void | Promise<void>;
   onImportTemplatePackage: () => void | Promise<void>;
+  onDeleteTemplatePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   onOpenRecentProject: (projectFilePath: string) => void | Promise<void>;
   onRenameRecentProject: (project: RecentProjectEntry) => void;
   onRemoveRecentProject: (projectFilePath: string) => void;
@@ -136,6 +137,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   onBrowseCollaborationDirectory,
   onOpenProject,
   onImportTemplatePackage,
+  onDeleteTemplatePackage,
   onOpenRecentProject,
   onRenameRecentProject,
   onRemoveRecentProject,
@@ -534,8 +536,6 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   };
 
   const toggleTemplate = (templateId: string) => {
-    const isSelected = selectedTemplateIds.includes(templateId);
-    if (isSelected && selectedTemplateIds.length === 1) return;
     hasCustomizedTemplateSelectionRef.current = true;
     setSelectedTemplateIds((current) => {
       if (current.includes(templateId)) {
@@ -813,6 +813,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                     selectedIds={selectedTemplateIds}
                     onToggle={toggleTemplate}
                     onMove={moveTemplate}
+                    onDeletePackage={onDeleteTemplatePackage}
                   />
                 </div>
 
@@ -1656,6 +1657,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                 isBusy={isChoosingLibrary}
                 isImportingTemplate={isImportingTemplate}
                 onImportTemplate={handleImportTemplatePackage}
+                templatePackages={templatePackages}
+                onDeleteTemplatePackage={onDeleteTemplatePackage}
                 onAdd={handleChooseExternalLibrary}
                 onReplace={handleReplaceExternalLibrary}
                 onRemove={handleRemoveExternalLibrary}
@@ -1706,6 +1709,8 @@ const ExternalLibraryManager = ({
   isBusy,
   isImportingTemplate,
   onImportTemplate,
+  templatePackages,
+  onDeleteTemplatePackage,
   onAdd,
   onReplace,
   onRemove,
@@ -1716,6 +1721,8 @@ const ExternalLibraryManager = ({
   isBusy: boolean;
   isImportingTemplate?: boolean;
   onImportTemplate?: () => void | Promise<void>;
+  templatePackages: TemplatePackageSummary[];
+  onDeleteTemplatePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   onAdd: () => void | Promise<void>;
   onReplace: (index: number) => void | Promise<void>;
   onRemove: (index: number) => void | Promise<void>;
@@ -1780,6 +1787,7 @@ const ExternalLibraryManager = ({
         </div>
       )}
     </div>
+    <TemplatePackageSelector packages={templatePackages} onDeletePackage={onDeleteTemplatePackage} />
   </section>
 );
 

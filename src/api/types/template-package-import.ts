@@ -10,3 +10,12 @@ export type TemplatePackageImportResult =
   | { success: true; package: ImportedTemplatePackageSummary }
   | { success: false; canceled?: boolean; error?: string };
 
+export interface TemplatePackageDeleteRequest {
+  id: string;
+  packageRoot: string;
+}
+
+export type TemplatePackageDeleteResult =
+  | { success: true; id: string }
+  | { success: false; canceled?: boolean; error?: string };
+
