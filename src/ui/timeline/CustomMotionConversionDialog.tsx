@@ -13,6 +13,8 @@ export interface CustomMotionConversionDialogState {
   motionKey: string;
   /** Scene-relative source motion duration (seconds). */
   durationSeconds: number;
+  /** Native curve conversion keeps these points without a density fit. */
+  nativeKeyframeCount?: number;
 }
 
 export interface CustomMotionConversionDialogProps {
@@ -130,7 +132,11 @@ export const CustomMotionConversionDialog = memo(({
           </div>
         )}
 
-        <div role="radiogroup" aria-label="关键帧密度" style={{ display: 'grid', gap: 7 }}>
+        {open.nativeKeyframeCount !== undefined ? (
+          <p role="status" style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.5 }}>
+            保留源动作的曲线类型和关键帧，共 {open.nativeKeyframeCount} 个关键帧。眨眼和口型效果会展开为参数轨道。
+          </p>
+        ) : <div role="radiogroup" aria-label="关键帧密度" style={{ display: 'grid', gap: 7 }}>
           {DENSITIES.map((item) => {
             const selected = density === item.id;
             return (
@@ -172,7 +178,7 @@ export const CustomMotionConversionDialog = memo(({
               </button>
             );
           })}
-        </div>
+        </div>}
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
           <button

@@ -26,7 +26,8 @@ describe('semantic timeline view snapshot', () => {
 
   it('shares source, root and companion mappings throughout the tree and refreshes them together', async () => {
     state.store._replaceSemanticScene(await pipeline.processDocument(document()));
-    const sourceReads = vi.spyOn(state.store, 'getCurrentSceneDocumentSnapshot');
+    const viewReads = vi.spyOn(state.store, 'getCurrentSceneDocumentView');
+    const snapshotReads = vi.spyOn(state.store, 'getCurrentSceneDocumentSnapshot');
     const compiledReads = vi.spyOn(state.store, 'getCompiledSceneSnapshot');
     let owner!: SemanticTimelineSnapshot;
     let list!: SemanticTimelineSnapshot;
@@ -47,7 +48,8 @@ describe('semantic timeline view snapshot', () => {
     const initial = owner;
     expect(list).toBe(owner);
     expect(inspector).toBe(owner);
-    expect(sourceReads).toHaveBeenCalledTimes(1);
+    expect(viewReads).toHaveBeenCalledTimes(1);
+    expect(snapshotReads).not.toHaveBeenCalled();
     expect(compiledReads).toHaveBeenCalledTimes(1);
     const companion = owner.items.find((item) => item.companionId === 'performance')!;
     const root = owner.items.find((item) => item.locator.kind === 'statement')!;
@@ -57,14 +59,16 @@ describe('semantic timeline view snapshot', () => {
 
     rerender(<Owner unrelated="another render" />);
     expect(owner).toBe(initial);
-    expect(sourceReads).toHaveBeenCalledTimes(1);
+    expect(viewReads).toHaveBeenCalledTimes(1);
+    expect(snapshotReads).not.toHaveBeenCalled();
 
     const next = await pipeline.processDocument(document('smile'));
     act(() => { state.store._replaceSemanticScene(next); });
     expect(owner).not.toBe(initial);
     expect(list).toBe(owner);
     expect(inspector).toBe(owner);
-    expect(sourceReads).toHaveBeenCalledTimes(2);
+    expect(viewReads).toHaveBeenCalledTimes(2);
+    expect(snapshotReads).not.toHaveBeenCalled();
     expect(compiledReads).toHaveBeenCalledTimes(2);
     const filled = owner.items.find((item) => item.companionId === 'performance')!;
     expect(filled.id).not.toBe(companion.id);

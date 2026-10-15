@@ -2,8 +2,75 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { refreshCubismCoreViews } from '../engine/CubismPixiModel';
+import { submitLive2DBakeFrameBatch } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 
 describe('Cubism Pixi runtime controls', () => {
+  it('matches the authored blink pose in a bake frame and a direct seek at the same scene time', async () => {
+    const stage = new CubismPixiLive2DAdapter().createModelHandle('stage', createCubismModelFixture().model);
+    const bake = new CubismPixiLive2DAdapter().createModelHandle('bake', createCubismModelFixture().model);
+    try {
+      stage.blink.set(true, 1000, 0.75, 0);
+      await stage.performance.restoreSeekState({ id: 'stage', targetSceneTime: 0.75 });
+      bake.blink.set(true, 1000, 0.75, 0);
+      await submitLive2DBakeFrameBatch({
+        operations: [{ handle: bake, isCurrent: () => true, sceneTimeSeconds: 0.75 }],
+        deltaMs: 1000 / 30, isCurrent: () => true,
+      });
+      const values = (handle: typeof stage) => handle.parameters.getParameterValues()?.filter((parameter) => parameter.name.includes('Eye'));
+      expect(values(bake)?.map((parameter) => parameter.value)).toEqual(values(stage)?.map((parameter) => parameter.value));
+      expect(values(bake)?.[0].value).toBeCloseTo(0.5);
+    } finally {
+      stage.dispose({ mode: 'destroy' });
+      bake.dispose({ mode: 'destroy' });
+    }
+  });
+
+  it('applies look-at and resumes an authored transition from its seek position', () => {
+    const { model } = createCubismModelFixture(['ParamAngleX', 'ParamAngleY', 'ParamEyeBallX', 'ParamEyeBallY']);
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const values = () => new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+    handle.focus.apply({ focusX: 0.8, focusY: -0.4, duration: 0 });
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(24);
+    expect(values().get('ParamEyeBallY')).toBeCloseTo(-0.4);
+    handle.focus.apply({ focusX: 0, focusY: 0, duration: 1, options: { fromX: 0.8, fromY: -0.4, elapsed: 0.5, ease: 'none' } });
+    handle.focus.manageAnimations('pause');
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(12);
+    expect(values().get('ParamEyeBallY')).toBeCloseTo(-0.2);
+    handle.focus.manageAnimations('resume');
+    handle.focus.manageAnimations('stop');
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(0);
+    handle.dispose({ mode: 'destroy' });
+  });
+
+  it('keeps a custom eye curve while the other eye blinks and restores blink on release', () => {
+    const { model } = createCubismModelFixture();
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const stage = handle.customMotion.installStage({
+      getState: () => ({
+        motion: {
+          kind: 'custom', durationSeconds: 1, fadeInSeconds: 0,
+          derivedFrom: { key: 'wink' },
+          tracks: [{ parameterId: 'ParamEyeLOpen', keyframes: [{ time: 0, value: 0.4 }, { time: 1, value: 0.4 }] }],
+        },
+        startSceneTime: 0, handoff: { values: {} }, controlledParameterIds: ['ParamEyeLOpen'],
+      }),
+    });
+    expect(stage).not.toBeNull();
+    stage!.setSceneTime(0.75);
+    handle.blink.set(true, 1000, 0.75, 0);
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    const values = () => new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+    expect(values().get('ParamEyeLOpen')).toBeCloseTo(0.4);
+    expect(values().get('ParamEyeROpen')).toBeCloseTo(0.5);
+    stage!.dispose();
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamEyeLOpen')).toBeCloseTo(0.2);
+    handle.dispose({ mode: 'destroy' });
+  });
+
   it('registers an external motion from its runtime URI without changing model settings', async () => {
     const { model, motionManager } = createCubismModelFixture();
     const originalMotions = model.internalModel.settings.motions;

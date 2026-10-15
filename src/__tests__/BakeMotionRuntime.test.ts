@@ -7,6 +7,10 @@ import {
   type BakeMotionRuntimeHost,
 } from '../engine/BakeMotionRuntime';
 import type { CachedResourceMotion, MotionCurveCacheKey } from '../engine/live2d/motionCurveCache';
+import type { CharacterMotionOutput } from '../api/types/semantic-scene';
+import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import { submitLive2DBakeFrameBatch } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createCubismModelFixture } from './helpers/cubismModelFixture';
 
 function cachedMotion(): CachedResourceMotion {
   return {
@@ -120,6 +124,40 @@ describe('BakeMotionRuntime.prepare', () => {
 });
 
 describe('BakeMotionRuntime.applyIntent', () => {
+  it('composes custom curves with expressions, blink and live mouth input in the Bake frame', async () => {
+    const { model, internal, core } = createCubismModelFixture();
+    internal.on('expressionUpdate', () => core.setParameterValueByIndex(4, core.getParameterValueByIndex(4) + 5));
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const injectedParams: Record<string, number> = { ParamMouthOpenY: 0.8 };
+    handle.bindRuntimeSource({ mode: 'bake', injectedParamsSource: { injectedParams }, isCurrent: () => true });
+    const runtime = new BakeMotionRuntime({
+      fps: 30, preloadMotion: async () => {}, getBaseValues: () => ({}),
+      installCustomMotionStage: (_id, input) => handle.customMotion.installStage(input),
+    });
+    const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
+      kind: 'custom', durationSeconds: 1, fadeInSeconds: 0, derivedFrom: { key: 'wink' },
+      tracks: ['ParamAngleX', 'ParamEyeLOpen', 'ParamMouthOpenY'].map((parameterId, index) => ({
+        parameterId, keyframes: [{ time: 0, value: [10, 0.4, 0.2][index] }, { time: 1, value: [10, 0.4, 0.2][index] }],
+      })),
+    };
+    try {
+      runtime.applyIntent({ charId: 'haru', intent: { output: motion, time: 0 }, simTime: 0.75,
+        injectedParams, channelProtected: new Set(['ParamMouthOpenY']) });
+      handle.blink.set(true, 1000, 0.75, 0);
+      await submitLive2DBakeFrameBatch({ operations: [{ handle, isCurrent: () => true, sceneTimeSeconds: 0.75 }],
+        deltaMs: 1000 / 30, isCurrent: () => true });
+      const values = new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+      expect(values.get('ParamAngleX')).toBeCloseTo(15);
+      expect(values.get('ParamEyeLOpen')).toBeCloseTo(0.4);
+      expect(values.get('ParamEyeROpen')).toBeCloseTo(0.5);
+      expect(values.get('ParamMouthOpenY')).toBeCloseTo(0.8);
+      runtime.applyIntent({ charId: 'haru', intent: null, simTime: 0.75, injectedParams });
+      expect(injectedParams.ParamMouthOpenY).toBeCloseTo(0.8);
+    } finally {
+      handle.dispose({ mode: 'destroy' });
+    }
+  });
+
   it('evaluates an authored custom motion through the curve driver without consulting the cache', () => {
     const { cache } = makeCache();
     const host = makeHost({ getBaseValues: vi.fn(() => ({ PARAM_ANGLE_X: 0 })) });

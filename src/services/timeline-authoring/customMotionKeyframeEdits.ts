@@ -5,6 +5,7 @@ import type {
   CustomMotionTrack,
 } from '../../api/types/semantic-scene';
 import { evaluateCustomMotionTrack, solveBezierTime } from '../../engine/live2d/customMotion';
+import { isDeeplyFrozen } from '../../shared/immutable';
 import {
   assertCanonicalCustomMotion,
   CustomMotionContractError,
@@ -12,14 +13,20 @@ import {
 } from '../semantic-scene';
 
 /** Compare persisted motion structure independently of object field insertion order. */
+const immutableFingerprints = new WeakMap<object, string>();
+
 export function customMotionFingerprint(motion: Extract<CharacterMotionOutput, { kind: 'custom' }>): string {
-  return JSON.stringify(motion, (_key, value: unknown) => {
+  const cached = immutableFingerprints.get(motion);
+  if (cached !== undefined) return cached;
+  const fingerprint = JSON.stringify(motion, (_key, value: unknown) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>;
       return Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]));
     }
     return value;
   });
+  if (isDeeplyFrozen(motion)) immutableFingerprints.set(motion, fingerprint);
+  return fingerprint;
 }
 
 export interface CustomMotionKeyframeRef {

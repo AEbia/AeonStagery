@@ -76,6 +76,14 @@ function makeContext(status = 'connected') {
         version: 1,
         filePath: '',
         subscribe,
+        getCurrentSceneDocumentView: () => ({
+          schemaVersion: 4,
+          sceneId: sceneData.sceneId,
+          meta: sceneData.meta,
+          statements: [
+            { id: 'enter-a', time: 1, type: 'characterPresence', params: { mode: 'enter', id: 'A' } },
+          ],
+        }),
         getCurrentSceneDocumentSnapshot: () => ({
           schemaVersion: 4,
           sceneId: sceneData.sceneId,
@@ -206,6 +214,7 @@ describe('TimelineEditor interaction → authoring promise chain', () => {
       params: { target: 'A', motion: '' },
     });
     context.stores.document.getCurrentSceneDocumentSnapshot = () => document;
+    context.stores.document.getCurrentSceneDocumentView = () => document;
 
     render(<AppProvider {...context}><TimelineEditor mode="tracks" /></AppProvider>);
 

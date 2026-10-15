@@ -522,6 +522,7 @@ export class Live2DStageRuntime {
 
           const frameResult = runtime.frame.submit({
             deltaMs: deltaInMs,
+            sceneTimeSeconds: this.callbacks.resolveCustomMotionSceneTime(entry, manualTimeMs),
             shouldAdvance: (shouldStepModels || commitNativeSeek) && !freezeNativeMotion,
             forceZeroDeltaCommit: commitNativeSeek,
             forceStep,

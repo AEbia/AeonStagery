@@ -186,6 +186,8 @@ export interface Live2DSeekMotionOffsetResult {
 
 export interface Live2DFrameSubmissionInput {
   deltaMs: number;
+  /** Absolute authored time for deterministic effect channels. */
+  sceneTimeSeconds?: number;
   shouldAdvance: boolean;
   forceZeroDeltaCommit?: boolean;
   forceStep?: boolean;
@@ -198,6 +200,7 @@ export interface Live2DFrameSubmissionInput {
 /** One bound model's complete Bake frame request; SDK update/render ordering stays adapter-owned. */
 export interface Live2DBakeFrameInput {
   deltaMs: number;
+  sceneTimeSeconds?: number;
   renderer?: PIXI.Renderer;
   label?: string;
   flushCore?: boolean;
@@ -212,6 +215,7 @@ export interface Live2DBakeFrameOperation {
   readonly isCurrent: () => boolean;
   readonly renderer?: PIXI.Renderer;
   readonly flushCore?: boolean;
+  readonly sceneTimeSeconds?: number;
   /** Bound state preparation performed under the batch's shared clock transaction. */
   readonly resetRuntimeState?: Live2DRuntimeResetInput;
   /** Apply a previously captured pose under the batch's shared clock transaction. */
@@ -220,6 +224,7 @@ export interface Live2DBakeFrameOperation {
   readonly submitFrame?: boolean;
   readonly stopMotion?: boolean;
   readonly expression?: string | null;
+  readonly expressionState?: Live2DSeekExpressionState & { readonly previousKey?: string | null };
   readonly motionStart?: Live2DBakeMotionStartInput;
   readonly resetForPlayback?: {
     readonly idleSnapshot: ModelSnapshot;
@@ -291,6 +296,7 @@ export interface Live2DDisposeOptions {
 export interface Live2DFocusInput {
   focusX: number;
   focusY: number;
+  /** Full authored transition duration, including options.elapsed. */
   duration?: number;
   options?: Live2DFocusOptions;
 }

@@ -143,6 +143,28 @@ export function solveBezierTime(
   if (targetX >= next.time - EPSILON) return 1;
 
   const linearGuess = (targetX - current.time) / span;
+  // Motion3 restricted Beziers have a linear time axis; preserve their exact
+  // curve values without a grid scan or root search at every parameter/frame.
+  const expectedP1 = current.time + span / 3;
+  const expectedP2 = current.time + span * 2 / 3;
+  const roundingTolerance = Number.EPSILON * Math.max(1, Math.abs(current.time), Math.abs(next.time)) * 4;
+  if (Math.abs(p1.time - expectedP1) <= roundingTolerance
+    && Math.abs(p2.time - expectedP2) <= roundingTolerance) return linearGuess;
+
+  // Canonical authored control times are ordered inside the segment. This
+  // guarantees one root; keep the multi-root scan below for legacy curves.
+  if (current.time <= p1.time && p1.time <= p2.time && p2.time <= next.time) {
+    let low = 0;
+    let high = 1;
+    for (let iteration = 0; iteration < 40; iteration++) {
+      const t = (low + high) / 2;
+      const x = cubicBezier(t, current.time, p1.time, p2.time, next.time);
+      if (Math.abs(x - targetX) < BEZIER_ROOT_EPSILON) return t;
+      if (x < targetX) low = t;
+      else high = t;
+    }
+    return (low + high) / 2;
+  }
   let bestT = clamp(linearGuess, 0, 1);
   let bestError = Number.POSITIVE_INFINITY;
   const consider = (t: number, error: number) => {

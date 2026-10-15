@@ -1,6 +1,7 @@
 import {
   parseCubism3MotionBuffer,
   type Cubism3MotionParseResult,
+  type Cubism3MotionParserOptions,
 } from './cubism3MotionParser';
 
 /** Runtime-owned settings needed to resolve a Cubism 3+ motion resource. */
@@ -34,6 +35,8 @@ interface MotionDefinition {
 interface MotionSettings {
   readonly motions?: Record<string, unknown>;
   readonly resolveURL?: (file: string) => string;
+  readonly getEyeBlinkParameters?: () => readonly string[];
+  readonly getLipSyncParameters?: () => readonly string[];
 }
 
 function settingsOf(target: Cubism3MotionSamplerTarget): MotionSettings {
@@ -75,6 +78,7 @@ export async function loadCubism3Motion(
   target: Cubism3MotionSamplerTarget,
   motionKey: string,
   fetchFile: (url: string) => Promise<ArrayBuffer> = fetchMotionFile,
+  options: Pick<Cubism3MotionParserOptions, 'fps'> = {},
 ): Promise<Cubism3MotionParseResult> {
   const url = resolveFileUrl(target, motionKey);
   let buffer: ArrayBuffer;
@@ -87,7 +91,13 @@ export async function loadCubism3Motion(
     );
   }
   try {
-    return parseCubism3MotionBuffer(buffer, { derivedFromKey: motionKey });
+    const settings = settingsOf(target);
+    const lipSyncIds = settings.getLipSyncParameters?.();
+    return parseCubism3MotionBuffer(buffer, {
+      ...options, derivedFromKey: motionKey,
+      eyeBlinkParameterIds: settings.getEyeBlinkParameters?.(),
+      lipSyncParameterIds: lipSyncIds?.length ? lipSyncIds : ['ParamMouthOpenY'],
+    });
   } catch (error) {
     throw new Cubism3MotionSamplingError(
       `Failed to parse Cubism 3+ motion "${url}": ${String(error)}`,
@@ -104,7 +114,7 @@ export async function resolveCubism3MotionMeta(
   const parsed = await loadCubism3Motion(target, motionKey, fetchFile);
   const fadeOutSeconds = parsed.motion.derivedFrom.fadeOutSeconds ?? 0;
   return {
-    durationSeconds: parsed.motion.durationSeconds,
+    durationSeconds: parsed.sourceDurationSeconds,
     fadeInSeconds: parsed.motion.fadeInSeconds,
     fadeOutSeconds,
     hasNonParameterCurves: parsed.ignoredCurves.length > 0,

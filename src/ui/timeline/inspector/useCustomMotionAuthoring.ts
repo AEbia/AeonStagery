@@ -23,23 +23,24 @@ export function useCustomMotionAuthoring(args: {
   const conversionMode = conversionDialog?.mode;
 
   useEffect(() => {
-    if (conversionMode !== 'convert' || !conversionTargetId || !conversionMotionKey) return;
+    if (!conversionMode || !conversionTargetId || !conversionMotionKey) return;
     if (!characterAdapter.sampleMotion) return;
     let active = true;
     void characterAdapter.sampleMotion(conversionTargetId, conversionMotionKey, { fps, zeroSourceFades: true }).then((sampled) => {
       if (!active) return;
       const meta = sampled.metadata;
       if (!meta) return;
+      const nativeKeyframeCount = sampled.motion?.tracks.reduce((count, track) => count + track.keyframes.length, 0);
       if (meta.durationSeconds > 0) {
         setConversionDialog((prev) => (
-          prev && prev.targetId === conversionTargetId && prev.motionKey === conversionMotionKey && Math.abs(prev.durationSeconds - meta.durationSeconds) > 0.001
-            ? { ...prev, durationSeconds: meta.durationSeconds }
+          prev && prev.targetId === conversionTargetId && prev.motionKey === conversionMotionKey
+            ? { ...prev, ...(conversionMode === 'convert' ? { durationSeconds: meta.durationSeconds } : {}), nativeKeyframeCount }
             : prev
         ));
       }
     }).catch(() => {});
     return () => { active = false; };
-  }, [conversionMode, conversionTargetId, conversionMotionKey, characterAdapter]);
+  }, [conversionMode, conversionTargetId, conversionMotionKey, characterAdapter, fps]);
 
   const customMotionTarget = React.useMemo<CustomMotionEditTarget | null>(() => (
     semanticItem ? {

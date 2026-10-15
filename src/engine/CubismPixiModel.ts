@@ -4,6 +4,7 @@ import { captureModelSnapshot, type ModelSnapshot } from './Live2DConfig';
 import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestoreResult } from './runtime/Live2DRuntimeContracts';
 import type { Live2DPerformanceMetadata, PerformanceCompatibility, PreparedAssetRef } from './runtime/Live2DRuntimeContracts';
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
+import { manageRuntimeFocusAnimations } from './live2d/runtime/RuntimeFocus';
 
 function parameterId(id: any): string {
   const value = typeof id === 'string' ? id : id?.getString?.();
@@ -138,7 +139,14 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   let expressionEpoch = 0;
   let expressionKey: string | null = null;
   let sceneTime = 0;
+  let nextSceneTime: number | undefined;
+  let nextFrameDeltaMs: number | undefined;
+  let lastFrameSceneTime = 0;
+  const pendingFrameDeltaMs = () => nextSceneTime === undefined || nextFrameDeltaMs === 0
+    ? 0 : Math.max(0, nextSceneTime - lastFrameSceneTime) * 1000;
+  const frameSdkTimeSeconds = () => (model.elapsedTime + pendingFrameDeltaMs()) / 1000;
   let blink = createBlinkControlState(false);
+  const customMotionOwners = new Set<ReadonlySet<string>>();
   const sourceFadeIns = new WeakMap<object, number>();
   const sourceCurveFadeIns = new WeakMap<object, number[]>();
   const externalMotions = new Map<string, any>();
@@ -230,10 +238,16 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   internal.updateNaturalMovements = () => {
     writeParameter('ParamBreath', 0.5 + 0.5 * Math.sin(sceneTime * Math.PI * 2 / 3.2345));
   };
+  const isCustomMotionParameter = (id: string) => {
+    for (const owned of customMotionOwners) if (owned.has(id)) return true;
+    return false;
+  };
   const beforeCoreUpdate = () => {
     const multiplier = evaluateBlinkMultiplier(sceneTime, blink);
     if (blink.enabled) {
       for (const index of blinkIndices) {
+        const id = parameterId(core.getParameterId(index));
+        if (isCustomMotionParameter(id)) continue;
         core.setParameterValueByIndex(index, core.getParameterValueByIndex(index) * multiplier);
       }
     }
@@ -247,8 +261,11 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   model.update = (deltaMs: number) => {
     if (disposed || !Number.isFinite(deltaMs) || deltaMs < 0) return;
     refreshCubismCoreViews(core);
-    originalUpdate(deltaMs);
-    sceneTime += deltaMs / 1000;
+    originalUpdate(deltaMs === 0 ? 0 : nextSceneTime === undefined ? deltaMs : pendingFrameDeltaMs());
+    sceneTime = nextSceneTime ?? (sceneTime + deltaMs / 1000);
+    nextSceneTime = undefined;
+    nextFrameDeltaMs = undefined;
+    lastFrameSceneTime = sceneTime;
     blink.sceneTimeSeconds = sceneTime;
     core.loadParameters();
     internal.update(model.deltaTime, model.elapsedTime);
@@ -375,7 +392,7 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
       const entry = queueEntries(queue).find((candidate) => candidate?._motion === external)
         ?? queue?.getCubismMotionQueueEntry?.(handle);
       if (!entry) return false;
-      const now = model.elapsedTime / 1000;
+      const now = frameSdkTimeSeconds();
       external.setupMotionQueueEntry?.(entry, now);
       const start = now - Math.max(0, Number.isFinite(offsetSeconds) ? offsetSeconds : 0);
       entry.setStartTime?.(start);
@@ -414,7 +431,7 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
       model.stopAllMotions();
       return false;
     }
-    const now = model.elapsedTime / 1000;
+    const now = frameSdkTimeSeconds();
     motion.setupMotionQueueEntry(entry, now);
     const start = now - Math.max(0, Number.isFinite(offsetSeconds) ? offsetSeconds : 0);
     entry.setStartTime(start);
@@ -426,7 +443,7 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   const setExpression = async (
     key: string | null,
     elapsedSeconds?: number,
-    _previousExpressionKey?: string | null,
+    previousExpressionKey?: string | null,
     isCurrent: () => boolean = () => true,
   ) => {
     // The character API and inspector use an empty string to clear expressions.
@@ -442,20 +459,50 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
       expressionManager.resetExpression();
     }
     if (key === null) return;
+    const now = frameSdkTimeSeconds();
+    let previous: object | null = null;
+    if (Number.isFinite(elapsedSeconds) && previousExpressionKey && previousExpressionKey !== key) {
+      const previousIndex = expressionManager.getExpressionIndex(previousExpressionKey);
+      previous = externalExpressions.get(previousExpressionKey)
+        ?? (previousIndex >= 0 ? await expressionManager.loadExpression(previousIndex) : null);
+      if (disposed || epoch !== expressionEpoch || !isCurrent()) return;
+      if (previous) {
+        expressionManager.currentExpression = previous;
+        expressionManager.restoreExpression();
+        for (const entry of queueEntries(expressionManager.queueManager)) {
+          if (entry._motion !== previous) continue;
+          entry._motion.setupMotionQueueEntry(entry, now);
+          const start = now - Math.max(0, elapsedSeconds!) - Math.max(0, entry._motion.getFadeInTime());
+          entry.setStartTime(start);
+          entry.setFadeInStartTime(start);
+        }
+      }
+    }
+    const restoreQueueTime = (expression: object, elapsed: number) => {
+      for (const entry of queueEntries(expressionManager.queueManager)) {
+        if (entry._motion === expression) {
+          entry._motion.setupMotionQueueEntry(entry, now);
+          entry.setStartTime(now - elapsed);
+          entry.setFadeInStartTime(now - elapsed);
+        } else if (entry._motion === previous) {
+          entry.startFadeOut(entry._motion.getFadeOutTime(), now - elapsed);
+        }
+      }
+    };
     const external = externalExpressions.get(key);
     if (external) {
       const queue = expressionManager.queueManager;
-      queue?.stopAllMotions?.();
       expressionManager.currentExpression = external;
       const handle = queue?.startMotion?.(external, false);
       const entry = queueEntries(queue).find((candidate) => candidate?._motion === external)
         ?? queue?.getCubismMotionQueueEntry?.(handle);
       if (entry) {
-        const now = model.elapsedTime / 1000;
         external.setupMotionQueueEntry?.(entry, now);
-        const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds!) : Math.max(0, external.getFadeInTime?.() ?? 0);
+        const elapsed = elapsedSeconds === undefined ? 0 : Number.isFinite(elapsedSeconds)
+          ? Math.max(0, elapsedSeconds!) : Math.max(0, external.getFadeInTime?.() ?? 0);
         entry.setStartTime?.(now - elapsed);
         entry.setFadeInStartTime?.(now - elapsed);
+        if (previous) restoreQueueTime(external, elapsed);
       }
       return;
     }
@@ -467,17 +514,12 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     else await expressionManager.setExpression(index);
     if (disposed || epoch !== expressionEpoch || !isCurrent()) return;
     if (elapsedSeconds !== undefined) {
-      const now = model.elapsedTime / 1000;
       // A legacy state without a start timestamp requests the final latch.
       // Keep queue timestamps finite so subsequent playback remains valid.
       const elapsed = Number.isFinite(elapsedSeconds)
         ? Math.max(0, elapsedSeconds)
         : Math.max(0, expression.getFadeInTime());
-      for (const entry of queueEntries(expressionManager.queueManager)) {
-        entry._motion.setupMotionQueueEntry(entry, now);
-        entry.setStartTime(now - elapsed);
-        entry.setFadeInStartTime(now - elapsed);
-      }
+      restoreQueueTime(expression, elapsed);
     }
   };
   model.setExpression = (key: string | null) => {
@@ -493,6 +535,16 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
       startTimeSeconds: startTime ?? (enabled && !blink.enabled ? at : blink.startTimeSeconds),
     };
     sceneTime = at;
+  };
+  model.claimCustomMotionParameters = (parameterIds: readonly string[]): (() => void) => {
+    const owned = new Set(parameterIds);
+    customMotionOwners.add(owned);
+    return () => { customMotionOwners.delete(owned); };
+  };
+  model.setSceneTime = (time: number, deltaMs?: number) => {
+    if (!Number.isFinite(time)) return;
+    nextSceneTime = Math.max(0, time);
+    nextFrameDeltaMs = deltaMs;
   };
   model.syncInputParameters = () => { refreshCubismCoreViews(core); core.update(); };
   model.captureRuntimeSnapshot = (_id: string, motionStartTime?: number): ModelSnapshot | null => {
@@ -519,7 +571,11 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
     // are evaluated at the requested scene time. This is O(1) for any offset;
     // replaying 60Hz updates here made late seeks linearly expensive.
     sceneTime = Math.max(0, input.targetSceneTime);
+    nextSceneTime = undefined;
+    nextFrameDeltaMs = undefined;
+    lastFrameSceneTime = sceneTime;
     blink.sceneTimeSeconds = sceneTime;
+    if (internal.focusController) manageRuntimeFocusAnimations([internal.focusController], 'stop');
     resetCubismStateForRestore(internal, core);
     const baseline = input.handoffSnapshot ?? input.idleSnapshot ?? input.snapshot;
     if (baseline) model.applyRuntimeSnapshot(baseline);
@@ -575,9 +631,11 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
   model.destroy = (options: any) => {
     if (disposed) return;
     disposed = true;
+    if (internal.focusController) manageRuntimeFocusAnimations([internal.focusController], 'stop');
     expressionEpoch++;
     externalMotions.clear();
     externalExpressions.clear();
+    customMotionOwners.clear();
     internal.off('beforeModelUpdate', beforeCoreUpdate);
     bakeTexture?.destroy(true);
     bakeTexture = null;

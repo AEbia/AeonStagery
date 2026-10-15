@@ -60,6 +60,39 @@ function delayedAuthority() {
 async function settle() { for (let index = 0; index < 12; index++) await Promise.resolve(); }
 
 describe('CustomMotionEditing session interface', () => {
+  it('previews a dense motion in a 100-action scene without copying the scene', async () => {
+    const source = document();
+    source.statements = Array.from({ length: 100 }, (_, index) => ({
+      id: `performance-${index}`, type: 'characterPerformance', time: index * 10,
+      params: { target: 'alice', motion: {
+        kind: 'custom', durationSeconds: 7.6, fadeInSeconds: 1, derivedFrom: { key: 'large' },
+        tracks: Array.from({ length: 140 }, (_, track) => ({
+          parameterId: `Param${track}`, keyframes: [
+            { time: 0, value: 0, segment: { type: 'linear' } },
+            ...(track < 36 ? [{ time: 1, value: 1, segment: { type: 'linear' as const } }] : []),
+            { time: 3.8, value: 2, segment: { type: 'linear' } },
+            { time: 7.6, value: 0 },
+          ],
+        })),
+      } },
+    }));
+    const { store, editing } = await harness(undefined, source);
+    const copies = vi.spyOn(store, 'getCurrentSceneDocumentSnapshot');
+    try {
+      const canonical = store.getCurrentSceneDocumentView();
+      const session = editing.open({ statementId: 'performance-0' });
+      expect(await session.ready).toEqual({ status: 'held' });
+      const keyframe = editing.getSnapshot().keyframes.find(point => point.parameterId === 'Param0' && point.time === 3.8)!.ref;
+      for (let value = 3; value < 8; value++) {
+        expect(session.preview({ type: 'update-keyframe', keyframe, value }).status).toBe('previewed');
+      }
+      expect(copies).not.toHaveBeenCalled();
+      expect(store.getCurrentSceneDocumentView()).toBe(canonical);
+      expect(editing.getSnapshot().motion?.tracks[0].keyframes[2].value).toBe(7);
+      await session.close();
+    } finally { copies.mockRestore(); await editing.dispose(); }
+  });
+
   it('keeps previews outside the document and commits one gesture as one undo record', async () => {
     const { store, authoring, editing, preview } = await harness();
     const initialVersion = store.version;

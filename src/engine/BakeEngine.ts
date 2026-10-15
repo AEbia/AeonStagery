@@ -29,9 +29,11 @@ import type {
   Live2DBakeFrameBatchInput,
   Live2DBakeFrameBatchResult,
   Live2DBakeFrameOperation,
+  Live2DSeekExpressionState,
 } from './runtime/Live2DRuntimeContracts';
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeControlModule';
+import type { CustomMotionStageHandle } from './live2d/customMotionStage';
 
 /**
  * Mouth parameters written by the deterministic dialogue text-mouth channel.
@@ -56,6 +58,7 @@ interface BakeModel {
   motionStartTime?: number;
   lastOffset?: number;
   expressionKey?: string | null;
+  customMotionStage?: CustomMotionStageHandle | null;
   injectedParams: Record<string, number>;
   idleSnapshot: { params: Float32Array; opacities: Float32Array };
 }
@@ -318,156 +321,172 @@ export class BakeEngine {
     let lastCharacters = new Set<string>(seededCharacters);
     let lastYieldTime = performance.now();
 
-    while (simTime <= effectiveEnd) {
-      if (!isCurrent()) break;
+    try {
+      while (simTime <= effectiveEnd) {
+        if (!isCurrent()) break;
 
-        // 1. Prepare domain state before submitting one complete runtime frame.
-        const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
-        const resetForPlaybackIds = new Set<string>();
-        const expressionUpdates = new Map<string, string | null>();
-        for (const [id, state] of characters) {
-          let entry = this.models.get(id);
-          const targetResolvedPath = state.model ? resolvedModelPaths.get(state.model) : undefined;
+          // 1. Prepare domain state before submitting one complete runtime frame.
+          const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
+          const resetForPlaybackIds = new Set<string>();
+          const expressionUpdates = new Map<string, Live2DSeekExpressionState & { previousKey?: string | null }>();
+          for (const [id, state] of characters) {
+            let entry = this.models.get(id);
+            const targetResolvedPath = state.model ? resolvedModelPaths.get(state.model) : undefined;
 
-          if (entry && targetResolvedPath && entry.modelPath !== targetResolvedPath) {
-            this.removeModel(id);
-            await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
-          } else if (!entry && targetResolvedPath) {
-            await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+            if (entry && targetResolvedPath && entry.modelPath !== targetResolvedPath) {
+              motionRuntime.releaseCharacter(id, entry.injectedParams);
+              this.removeModel(id);
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+            } else if (!entry && targetResolvedPath) {
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+            }
+
+            if (!isCurrent()) break;
+            entry = this.models.get(id);
+            if (entry) {
+              // 核心修复：如果这个角色是刚被 addCharacter 的（无论是第一次出现，还是 remove 后重新出现）
+              // 必须强制清空它可能残留的任何动作状态，恢复为 Idle。
+              if (!lastCharacters.has(id)) {
+                resetForPlaybackIds.add(id);
+              }
+
+              this.applyBakeMotionState(entry, state, dialogue, simTime, motionRuntime);
+
+              const expressionKey = state.expression?.key ?? null;
+              if (entry.expressionKey !== expressionKey) {
+                const expressionTime = state.expression?.time;
+                expressionUpdates.set(id, {
+                  key: expressionKey,
+                  elapsedSeconds: Number.isFinite(expressionTime) ? Math.max(0, simTime - expressionTime) : Number.POSITIVE_INFINITY,
+                  previousKey: state.expression?.previousKey,
+                });
+              }
+
+              this.applyDialogueInjectedParams(entry, dialogue, characters, simTime);
+              const focus = state.lookAt?.focus ?? [0, 0];
+              entry.runtimeHandle.focus.apply({ focusX: focus[0], focusY: focus[1], duration: 0 });
+              const blink = state.blink;
+              entry.runtimeHandle.blink.set(blink?.enabled ?? false, blink?.intervalMs ?? 4000,
+                simTime, blink?.startTime ?? 0, blink?.intervalRangeMs ?? 0);
+
+              if (state.position) {
+                const pos = resolveVec2(state.position);
+                entry.displayObject.position.set(pos.x * 1920, pos.y * 1080);
+              }
+              if (state.scale !== undefined) entry.displayObject.scale.set(state.scale, state.scale);
+              if (state.rotation !== undefined) entry.displayObject.rotation = state.rotation;
+              if (state.opacity !== undefined) entry.displayObject.alpha = state.opacity;
+            }
+          }
+
+          // 绝不在此处 removeModel！避免角色被短暂 removeCharacter 后再 addCharacter 导致模型反复加载/释放引发内存泄漏。
+          lastCharacters = new Set(characters.keys());
+
+          if (!isCurrent()) break;
+
+          // 2. The runtime starts native motions, coordinates the shared clock,
+          //    advances it once, then submits every bound model's complete frame.
+          const frameEntries = [...this.models.values()];
+          const operations = frameEntries.map((entry) => {
+            const pending = motionRuntime.pendingNativeStart(entry.id);
+            const operation = {
+              handle: entry.runtimeHandle,
+              sceneTimeSeconds: simTime,
+              isCurrent: () => this.isEntryCurrent(entry, isCurrent),
+              renderer: this.app.renderer,
+              stopMotion: motionRuntime.hasPendingNativeStop(entry.id),
+              ...(expressionUpdates.has(entry.id) ? { expressionState: expressionUpdates.get(entry.id)! } : {}),
+              ...(resetForPlaybackIds.has(entry.id)
+                ? {
+                    resetForPlayback: {
+                      idleSnapshot: entry.idleSnapshot as ModelSnapshot,
+                      restartIdleMotion: !entry.customMotionStage,
+                    },
+                  }
+                : {}),
+              ...(pending
+                ? {
+                    motionStart: {
+                      motionKey: pending.motionKey,
+                      priority: pending.priority,
+                      offsetSeconds: pending.offsetSeconds,
+                      sceneTimeSeconds: pending.sceneTimeSeconds,
+                      fadeInSeconds: pending.fadeInSeconds,
+                    },
+                  }
+                : {}),
+            };
+            return operation;
+          });
+          const batch = await this.submitBakeFrameBatch({
+            operations,
+            deltaMs: step * 1000,
+            isCurrent,
+          });
+          if (batch.status !== 'submitted') {
+            eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
+            return { snapshotHistory: [], motionReport: motionRuntime.report() };
+          }
+          for (const entry of frameEntries) {
+            const transition = batch.transitions.get(entry.id);
+            if (transition) motionRuntime.completeNativeStart(entry.id, transition);
+            if (motionRuntime.hasPendingNativeStop(entry.id)) motionRuntime.completeNativeStop(entry.id);
+            if (expressionUpdates.has(entry.id)) entry.expressionKey = expressionUpdates.get(entry.id)!.key;
           }
 
           if (!isCurrent()) break;
-          entry = this.models.get(id);
-          if (entry) {
-            // 核心修复：如果这个角色是刚被 addCharacter 的（无论是第一次出现，还是 remove 后重新出现）
-            // 必须强制清空它可能残留的任何动作状态，恢复为 Idle。
-            if (!lastCharacters.has(id)) {
-              resetForPlaybackIds.add(id);
-            }
 
-            this.applyBakeMotionState(entry, state, dialogue, simTime, motionRuntime);
+          // Capture snapshots
+          const models = new Map<string, ModelSnapshot>();
+          for (const entry of this.models.values()) {
+            if (!this.isEntryCurrent(entry, isCurrent)) continue;
+            const snap = this.captureSnapshot(entry);
+            if (snap) models.set(entry.id, snap);
+          }
+          // Only store snapshots within the requested range
+          if (models.size > 0 && simTime >= rangeStart) {
+            this.appendSnapshot(simTime, models);
+          }
 
-            const expressionKey = state.expression?.key ?? null;
-            if (entry.expressionKey !== expressionKey) {
-              expressionUpdates.set(id, expressionKey);
-            }
+        simTime += step;
+        stepCount++;
 
-            this.applyDialogueInjectedParams(entry, dialogue, characters, simTime);
+        // Yield aggressively (time-based) to keep the UI at 60+ FPS (16ms budget)
+        if (performance.now() - lastYieldTime > 12) {
+          if (stepCount % 5 === 0) {
+            eventBus.emit(silent ? 'pb-daemon:progress' : 'bake:progress', {
+              progress: Math.min(0.99, simTime / (totalDuration || 1)),
+              time: simTime
+            });
+          }
 
-            if (state.position) {
-              const pos = resolveVec2(state.position);
-              entry.displayObject.position.set(pos.x * 1920, pos.y * 1080);
-            }
-            if (state.scale !== undefined) entry.displayObject.scale.set(state.scale, state.scale);
-            if (state.rotation !== undefined) entry.displayObject.rotation = state.rotation;
-            if (state.opacity !== undefined) entry.displayObject.alpha = state.opacity;
+          await new Promise((r) => setTimeout(r, 0));
+          lastYieldTime = performance.now();
+
+          // Check if task was cancelled while we were yielding
+          if (!isCurrent()) {
+            console.warn('[BakeEngine] Simulation aborted after yield.');
+            eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
+            return { snapshotHistory: [], motionReport: motionRuntime.report() }; // 返回空，防止污染主引擎快照
           }
         }
-
-        // 绝不在此处 removeModel！避免角色被短暂 removeCharacter 后再 addCharacter 导致模型反复加载/释放引发内存泄漏。
-        lastCharacters = new Set(characters.keys());
-
-        if (!isCurrent()) break;
-
-        // 2. The runtime starts native motions, coordinates the shared clock,
-        //    advances it once, then submits every bound model's complete frame.
-        const frameEntries = [...this.models.values()];
-        const operations = frameEntries.map((entry) => {
-          const pending = motionRuntime.pendingNativeStart(entry.id);
-          const operation = {
-            handle: entry.runtimeHandle,
-            isCurrent: () => this.isEntryCurrent(entry, isCurrent),
-            renderer: this.app.renderer,
-            stopMotion: motionRuntime.hasPendingNativeStop(entry.id),
-            ...(expressionUpdates.has(entry.id) ? { expression: expressionUpdates.get(entry.id)! } : {}),
-            ...(resetForPlaybackIds.has(entry.id)
-              ? {
-                  resetForPlayback: {
-                    idleSnapshot: entry.idleSnapshot as ModelSnapshot,
-                    restartIdleMotion: true,
-                  },
-                }
-              : {}),
-            ...(pending
-              ? {
-                  motionStart: {
-                    motionKey: pending.motionKey,
-                    priority: pending.priority,
-                    offsetSeconds: pending.offsetSeconds,
-                    sceneTimeSeconds: pending.sceneTimeSeconds,
-                    fadeInSeconds: pending.fadeInSeconds,
-                  },
-                }
-              : {}),
-          };
-          return operation;
-        });
-        const batch = await this.submitBakeFrameBatch({
-          operations,
-          deltaMs: step * 1000,
-          isCurrent,
-        });
-        if (batch.status !== 'submitted') {
-          eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
-          return { snapshotHistory: [], motionReport: motionRuntime.report() };
-        }
-        for (const entry of frameEntries) {
-          const transition = batch.transitions.get(entry.id);
-          if (transition) motionRuntime.completeNativeStart(entry.id, transition);
-          if (motionRuntime.hasPendingNativeStop(entry.id)) motionRuntime.completeNativeStop(entry.id);
-          if (expressionUpdates.has(entry.id)) entry.expressionKey = expressionUpdates.get(entry.id)!;
-        }
-
-        if (!isCurrent()) break;
-
-        // Capture snapshots
-        const models = new Map<string, ModelSnapshot>();
-        for (const entry of this.models.values()) {
-          if (!this.isEntryCurrent(entry, isCurrent)) continue;
-          const snap = this.captureSnapshot(entry);
-          if (snap) models.set(entry.id, snap);
-        }
-        // Only store snapshots within the requested range
-        if (models.size > 0 && simTime >= rangeStart) {
-          this.appendSnapshot(simTime, models);
-        }
-
-      simTime += step;
-      stepCount++;
-
-      // Yield aggressively (time-based) to keep the UI at 60+ FPS (16ms budget)
-      if (performance.now() - lastYieldTime > 12) {
-        if (stepCount % 5 === 0) {
-          eventBus.emit(silent ? 'pb-daemon:progress' : 'bake:progress', { 
-            progress: Math.min(0.99, simTime / (totalDuration || 1)),
-            time: simTime 
-          });
-        }
-        
-        await new Promise((r) => setTimeout(r, 0));
-        lastYieldTime = performance.now();
-        
-        // Check if task was cancelled while we were yielding
-        if (!isCurrent()) {
-          console.warn('[BakeEngine] Simulation aborted after yield.');
-          eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
-          return { snapshotHistory: [], motionReport: motionRuntime.report() }; // 返回空，防止污染主引擎快照
-        }
       }
-    }
 
-    if (!isCurrent()) {
-      eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
-      return { snapshotHistory: [], motionReport: motionRuntime.report() };
-    }
+      if (!isCurrent()) {
+        eventBus.emit(silent ? 'pb-daemon:cancel' : 'bake:cancel');
+        return { snapshotHistory: [], motionReport: motionRuntime.report() };
+      }
 
-    // --- 正常完成路径 ---
-    const duration = performance.now() - startTime;
-    eventBus.emit(silent ? 'pb-daemon:complete' : 'bake:complete', { 
-      snapshotCount: this.snapshotHistory.length,
-      durationMs: duration
-    });
-    return { snapshotHistory: this.snapshotHistory, motionReport: motionRuntime.report() };
+      // --- 正常完成路径 ---
+      const duration = performance.now() - startTime;
+      eventBus.emit(silent ? 'pb-daemon:complete' : 'bake:complete', {
+        snapshotCount: this.snapshotHistory.length,
+        durationMs: duration
+      });
+      return { snapshotHistory: this.snapshotHistory, motionReport: motionRuntime.report() };
+    } finally {
+      motionRuntime.dispose();
+    }
   }
 
   destroy(): void {
@@ -576,6 +595,24 @@ export class BakeEngine {
         return this.getBakeParameterBaseValues(entry, parameterIds, excludeParameterIds);
       },
       getSeedSceneTime: () => seedSceneTime,
+      installCustomMotionStage: (charId, input) => {
+        const entry = this.models.get(charId);
+        if (!entry || !this.isEntryCurrent(entry, isCurrent)) return null;
+        entry.customMotionStage?.dispose();
+        entry.runtimeHandle.lifecycle.stopAllMotions();
+        entry.runtimeHandle.parameters.restoreIdleBaseline(entry.idleSnapshot);
+        const stage = entry.runtimeHandle.customMotion.installStage(input);
+        if (!stage) return null;
+        const owned: CustomMotionStageHandle = {
+          setSceneTime: (time) => stage.setSceneTime(time),
+          dispose: () => {
+            stage.dispose();
+            if (entry.customMotionStage === owned) entry.customMotionStage = null;
+          },
+        };
+        entry.customMotionStage = owned;
+        return owned;
+      },
     };
 
     const runtime = new BakeMotionRuntime(host);
@@ -642,6 +679,7 @@ export class BakeEngine {
     this.modelResources.cancelLoad(id, 'discard');
     const entry = this.models.get(id);
     if (!entry) return;
+    entry.customMotionStage?.dispose();
     entry.release('discard');
     this.models.delete(id);
   }
@@ -834,6 +872,7 @@ export class BakeEngine {
   async resetAllModelsToIdle(isTaskCurrent: () => boolean = () => true): Promise<boolean> {
     const entries = [...this.models.values()].filter(entry => this.isEntryCurrent(entry, isTaskCurrent));
     for (const entry of entries) {
+      entry.customMotionStage?.dispose();
       // A new range gets a new BakeMotionRuntime, but reuses these models.
       // The new curve driver cannot release parameters owned by the previous
       // run. Drop those writers before warmup or the core update hook writes

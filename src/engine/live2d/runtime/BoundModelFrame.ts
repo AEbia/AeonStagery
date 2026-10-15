@@ -49,6 +49,8 @@ export function createBoundModelFrame(
     }
 
     if (input.shouldAdvance && isCurrent()) {
+      const sceneTime = input.sceneTimeSeconds ?? (input.manualTimeMs !== undefined ? input.manualTimeMs / 1000 : undefined);
+      if (sceneTime !== undefined && Number.isFinite(sceneTime)) controls.setSceneTime?.(model, sceneTime, input.forceZeroDeltaCommit ? 0 : input.deltaMs);
       controls.advanceFrame(model, input.forceZeroDeltaCommit ? 0 : input.deltaMs);
     }
     if (!isCurrent()) return { status: 'cancelled', retainedHandoffBoundary };
@@ -75,6 +77,9 @@ export function createBoundModelFrame(
     const renderer = display.visible === false || display.renderable === false
       ? undefined
       : input.renderer;
+    if (input.sceneTimeSeconds !== undefined && Number.isFinite(input.sceneTimeSeconds)) {
+      controls.setSceneTime?.(model, input.sceneTimeSeconds, input.deltaMs);
+    }
     controls.stepBakeFrame(
       model,
       input.deltaMs,

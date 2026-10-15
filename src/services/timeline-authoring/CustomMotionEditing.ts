@@ -384,7 +384,7 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
   private refresh(): void {
     const record = this.active;
     if (!record || record.closing) return;
-    const document = this.options.store.getCurrentSceneDocumentSnapshot();
+    const document = this.options.store.getCurrentSceneDocumentView();
     const current = document && resolveCustomMotionInDocument(document, record.target);
     if (!document || document.sceneId !== record.target.sceneId || this.options.store.filePath !== record.path || !current) {
       void this.closeActive('scene-changed');
@@ -396,8 +396,8 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
       record.target = { ...record.target, characterId };
       this.readonly(record, 'target-changed');
     }
-    const fingerprint = customMotionFingerprint(current);
-    if (fingerprint !== customMotionFingerprint(record.motion)) {
+    if (current !== record.motion && customMotionFingerprint(current) !== customMotionFingerprint(record.motion)) {
+      const fingerprint = customMotionFingerprint(current);
       const ownWrite = record.entered && record.candidate && fingerprint === customMotionFingerprint(record.candidate);
       if (!ownWrite) {
         record.motion = current;
@@ -449,7 +449,7 @@ function leaseTarget(record: SessionRecord): CollaborationLeaseTargetV3 {
 }
 
 export function resolveCustomMotionEditTarget(store: DocumentStore, target: CustomMotionEditTarget): ResolvedTarget | null {
-  const document = store.getCurrentSceneDocumentSnapshot();
+  const document = store.getCurrentSceneDocumentView();
   if (!document) return null;
   const compiled = store.getCompiledSceneSnapshot()?.actions.find((action) => 'actionId' in target
     ? action.id === target.actionId

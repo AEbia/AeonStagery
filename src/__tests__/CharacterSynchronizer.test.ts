@@ -1,4 +1,6 @@
 import { characterInfoFixture } from './helpers/characterInfoFixture';
+import { gsap } from 'gsap';
+import { applyRuntimeFocus, manageRuntimeFocusAnimations } from '../engine/live2d/runtime/RuntimeFocus';
 if (typeof window === 'undefined') {
   (global as any).window = {};
 }
@@ -365,6 +367,10 @@ describe('CharacterSynchronizer', () => {
   it('keeps the in-progress look-at transition when a seek lands inside it', async () => {
     live2D.hasCharacter.mockReturnValue(true);
     live2D.listCharacters.mockReturnValue(['char1']);
+    const controller = { x: 0, y: 0, targetX: 0, targetY: 0, update: () => {} };
+    live2D.lookAt.mockImplementation((_id, focusX, focusY, duration, options) => {
+      applyRuntimeFocus(controller, { focusX, focusY, duration, options });
+    });
 
     await synchronizer.syncTo({
       time: 1.5,
@@ -393,9 +399,18 @@ describe('CharacterSynchronizer', () => {
       'char1',
       1,
       0,
-      0.5,
+      1,
       { fromX: 0, fromY: 0, elapsed: 0.5 },
     );
+    try {
+      expect(controller.x).toBeCloseTo(0.75);
+      const tween = gsap.getTweensOf(controller)[0];
+      expect(tween).toBeDefined();
+      tween.pause().time(0.75);
+      expect(controller.x).toBeCloseTo(0.9375);
+    } finally {
+      manageRuntimeFocusAnimations([controller], 'stop');
+    }
   });
 
   it('finishes a completed look-at transition after its duration elapses', async () => {

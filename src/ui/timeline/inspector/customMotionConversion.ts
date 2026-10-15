@@ -57,21 +57,6 @@ export function createCustomMotionConversion(deps: CustomMotionConversionDeps) {
       durationSeconds: initialDuration,
     });
 
-    if (!isCustom && charId && motionKey && characterAdapter) {
-      if (characterAdapter.sampleMotion) {
-        void characterAdapter.sampleMotion(charId, motionKey, { fps: 60, zeroSourceFades: true }).then((sampled: { metadata?: { durationSeconds: number } }) => {
-          const meta = sampled.metadata;
-          if (!meta) return;
-          if (meta.durationSeconds > 0) {
-            setConversionDialog((prev) => (
-              prev && prev.motionKey === motionKey && prev.targetId === charId
-                ? { ...prev, durationSeconds: meta.durationSeconds }
-                : prev
-            ));
-          }
-        }).catch(() => {});
-      }
-    }
   };
 
   const handleConvertConfirm = async (density: CustomMotionDensity) => {

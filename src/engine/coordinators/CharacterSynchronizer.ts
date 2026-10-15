@@ -569,7 +569,7 @@ export class CharacterSynchronizer {
                   id,
                   toFocus[0],
                   toFocus[1],
-                  remaining,
+                  duration,
                   {
                     fromX: fromFocus[0],
                     fromY: fromFocus[1],

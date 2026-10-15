@@ -25,7 +25,7 @@ AeonStagery 是一款面向视觉叙事与动画制作的交互式场景编辑�
 
 如果你希望快速熟悉 AeonStagery 的基本操作流程，请遵循以下 6 个步骤制作你的首个短场景：
 
-1. **准备项目与素材**：创建或选定项目目录，备好角色模型（Cubism 2.1）、背景图片、对白配音或动画文件。素材可以直接放在项目内，也可以使用本机素材库挂载（`@mount`）。
+1. **准备项目与素材**：创建或选定项目目录，备好角色模型（Cubism 2.1 或 Cubism 3/4/5）、背景图片、对白配音或动画文件。素材可以直接放在项目内，也可以使用本机素材库挂载（`@mount`）。
 2. **新建或打开场景**：在项目管理器中新建项目（自动登记默认场景）或打开已有 `project.json`。
 3. **放置角色与背景**：在场景时间轴的起点（0 秒）添加角色登场，并添加环境背景图层。
 4. **编排对白与演出**：添加一条带有明确时长的对白，并为角色配置动作（Motion）或表情（Expression），或挂载镜头特写。
@@ -178,13 +178,13 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
 当你需要对 Live2D 动作的每个参数（Parameter）曲线进行逐帧修改或精确打点时，可将普通资源 Motion 转换为场景内联的自定义动作：
 
 1. **发起转换**：在时间轴上选中已有动作片段，在右侧 Inspector 或菜单中点击“转为自定义动作”。
-2. **选择采样密度**：根据需要选择采样精细度：
+2. **确认转换方式**：Cubism 3/4/5 保留原生曲线和关键帧；Cubism 2.1 根据需要选择采样密度：
    - `sparse`（稀疏，适合粗略微调）
    - `standard`（标准，日常推荐）
    - `fine`（精细，捕捉细腻动作）
    - `frame`（逐帧，百分之百高保真采样）
 3. **编辑关键帧**：展开时间轴下方的关键帧编辑器，在轨道视图、曲线视图或列表视图中框选并调整控制点的时间、数值与插值类型（贝塞尔、线性、阶梯等）。
-4. **重新转换**：如果想放弃手调并重置回源动作，可选择“重新转换”并重新选择采样密度。
+4. **重新转换**：如果想放弃手调并重置回源动作，可选择“重新转换”。Cubism 2.1 可重新选择采样密度，Cubism 3/4/5 恢复源曲线分段。
 
 ```json
 {
@@ -217,12 +217,12 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
 ### 需要注意的规则
 
 > **注意：Live2D 模型版本边界**
-> - **当前支持**：仅 **Cubism 2.1** 具备完整可用的运行时驱动、表情动作调度与关键帧编辑。
-> - **不支持**：Cubism 3+/4+/5（`.model3.json`、`.moc3`）的关键帧编辑。
+> - **当前支持**：Cubism 2.1 与 Cubism 3/4/5 的眨眼、视线、表情、动作调度、自定义动作关键帧及资源动作转换。
+> - Cubism 3/4/5 需要安装 Core 脚本。高版本组合模型、特殊离屏/混合渲染及完整 Physics/Pose 状态重建仍有运行时边界，见 [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md)。
 
-- **非破坏性内联转换**：转换自定义 Motion 后，关键帧数据直接内嵌保存在场景文件中，源 `.mtn` 文件不会被修改，播放时也不再强依赖源文件。
+- **非破坏性内联转换**：转换自定义 Motion 后，关键帧数据直接内嵌保存在场景文件中，源 `.mtn` / `.motion3.json` 文件不会被修改，播放时也不再强依赖源文件。Motion3 保留原生曲线分段、子帧时间和逐轨道淡入，不应用关键帧密度拟合。
 - **不支持从空白手绘**：目前不支持直接创建全新的空白 Custom Motion，必须基于已有的资源 Motion 转换派生。
-- **转换不包含动态附加项**：呼吸（Breath）、眨眼（Blink）、口型（Lip-sync）及物理（Physics）运算属于运行时动态逻辑，不会被采样烘焙进关键帧。
+- **动态附加项**：自动呼吸、自动眨眼、实时口型及物理运算继续在运行时执行。Motion3 文件内的 Model EyeBlink / LipSync 曲线按模型效果参数配置展开为普通关键帧轨道。
 - **重新转换覆盖提示**：执行“重新转换”会彻底替换当前轨道与关键帧的手工修改，请谨慎操作或通过 Undo 撤回。
 - **多人协作独占租约**：在多人协作项目中，编辑某个自定义 Motion 会自动申请并持有该角色表演实体的编辑租约（Lease），其他协作者可实时查看和预览，但无法并发覆写该实体的表演属性。
 
@@ -474,12 +474,12 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 | 异常现象 | 核心检查点 | 解决方案与能力边界 |
 | :--- | :--- | :--- |
 | **画面出现红叉，提示 mount/file 无法读取** | 检查引用是相对路径还是 `@mount`，确认本机挂载点是否移动或未配置。 | 重新在设置中配置有效挂载路径，或直接执行 Projectize 将素材复制到项目内。 |
-| **识别到了 `.model3.json`，但角色无法显示或报错** | 检查模型是 Cubism 2.1 还是 Cubism 3+/4+/5。 | 当前仅 **Cubism 2.1** 具备可用运行时。Cubism 3+ 当前仅作元数据识别，不可用于实际播放。 |
+| **识别到了 `.model3.json`，但角色无法显示或报错** | 检查 Cubism 3/4/5 Core 脚本和模型资源是否完整。 | 安装 `live2dcubismcore.min.js`，确认 `.moc3`、纹理及引用文件可读取；特殊渲染效果的限制见 ADR-0019。 |
 | **图片图层显示正常，但导出或 Seek 时位置/透明度异常** | 确认是否使用了图形图层复杂的连续 Transform 或移除。 | `graphicLayer` 目前属于部分支持能力，建议简化图层变换或在关键时间节点手动拆分图层。 |
 | **WebGAL 导入后没有声音，部分分支选择消失** | 查看导入完成时弹出的 Report 转换报告。 | 单文件脚手架仅转换演出向事实。分支选择、变量计算与 BGM 属于明确的跳过项（非目标）。 |
 | **GPT-SoVITS 语音生成失败，无可用候选** | 检查本地模型推理服务是否存活，模型权重、参考音频与 Prompt 是否完备。 | 修复本地服务环境后重试。生成失败不会产生残缺音频，引擎不提供云端批量代跑服务。 |
 | **配音候选生成成功，但提示与对白文本不一致** | 检查试听候选识别出的文本与时间轴文本差异。 | 按需选择“同步文本并应用”或“仅保存到项目”。采用配音后请手动确认对白时长。 |
-| **“转为自定义动作”按钮置灰或转换失败** | 确认目标角色为舞台上激活的 Cubism 2.1 模型，且动作中不仅含有 Parts 曲线。 | 确保模型加载正常后重试。目前不支持从空白或 Cubism 3+ 模型发起动作转换。 |
+| **“转为自定义动作”按钮置灰或转换失败** | 确认目标角色已加载，且资源动作包含可转换的 Parameter 或 Model 效果曲线。 | Cubism 2.1 与 Cubism 3/4/5 均可转换；仅含 Parts / Opacity 的动作无法生成参数轨道。 |
 | **自定义动作提示被锁定，无法调整关键帧** | 检查协作面板中的成员状态。 | 另一位协作者正在编辑该角色动作并持有租约，等待对方退出编辑或租约释放即可。 |
 | **协作房间点击“发布”提示被阻断** | 检查资源预检面板中列出的红项。 | 外部挂载文件尚未 Projectize，或本地文件存在校验缺失。一键项目化后即可通过验证。 |
 
@@ -492,7 +492,7 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 | 创作意图 | 语义语句 / 术语 | 状态 | 说明与限制 | 深入规范 |
 | :--- | :--- | :--- | :--- | :--- |
 | **角色或旁白台词** | `dialogue` | **当前支持** | 记录发言人、台词与明确时长；支持挂载单层 Companions，配音不篡改时长。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
-| **角色登场或离场** | `characterPresence` | **当前支持** | 维护角色稳定身份与模型映射；仅限 Cubism 2.1 运行时。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
+| **角色登场或离场** | `characterPresence` | **当前支持** | 维护角色稳定身份与模型映射；支持 Cubism 2.1 与 Cubism 3/4/5。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
 | **角色位移/缩放/旋转** | `characterTransform` | **当前支持** | 平滑插值空间属性；未声明的参数自动继承；不处理登场销毁。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **角色肢体与面部表演** | `characterPerformance` | **当前支持** | 调度 Motion、Expression、注视与眨眼；需指定明确演出时长。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
 | **Live2D 关键帧曲线** | `kind: 'custom'` Motion | **当前支持** | 非破坏性生成内联副本；支持多轨道曲线微调；协作独占租约。 | [ADR-0029](adr/0029-live2d-custom-motion-keyframe-authoring.md) |
@@ -508,7 +508,7 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 | **声明式动效与 HTML** | `customAnimation` | **当前支持** | 播放安全的预制动画文件；禁止运行任意外部不受信任代码。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **自动对白镜头生成** | `自动镜头调度` | **延期规划** | 暂未提供全自动文本语义推导镜头，需创作者手动配置。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **模板编辑器与社区中心**| `template editor / registry`| **延期规划** | 模板可视化编辑工具与线上分享仓库尚未开放完整工作流。 | [KSM-0001](ksm-adr/ksm-0001-unified-template-system.md) |
-| **Cubism 3+/4+/5 运行时** | `Cubism 3+ Runtime` | **不支持** | 识别元数据不代表可用运行时，暂无预览及导出能力。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
+| **Cubism 3/4/5 运行时** | `Cubism 3+ Runtime` | **当前支持** | 支持预览、Seek、Bake、自定义动作及原生曲线转换；特殊渲染与完整物理状态重建仍有限制。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
 | **WebGAL 完整玩法迁移**| `完整 WebGAL Gameplay` | **非目标** | 仅提供单文件单场景演出脚手架，不迁移游戏引擎变量及分支逻辑。 | [ADR-0026](adr/0026-webgal-script-import-scaffolding-source.md) |
 | **GPT-SoVITS 训练与托管** | `Voice Training / Cloud` | **非目标** | 仅支持本地已就绪模型的推理采纳，不承载模型训练与云端算力。 | [ADR-0020](adr/0020-gpt-sovits-voice-authoring.md) |
 | **历史废弃别名与旧模板** | `Legacy alias / payload` | **不支持** | 统一采用规范化 v5 命名与结构，不再支持隐式模糊解析。 | [KSM-0001](ksm-adr/ksm-0001-unified-template-system.md) |
@@ -591,7 +591,7 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 - [KSM-0003：Semantic Scene Statements](ksm-adr/ksm-0003-semantic-scene-statements.md) — 语义语句族、Companions、编译与准备态管线。
 - [KSM-0001：Unified Template System](ksm-adr/ksm-0001-unified-template-system.md) — 模板包 Manifest v2 规范、语义 Payload 与物化机制。
 - [ADR-0018：协作与资源就绪检查](adr/0018-timeline-authoring-collaboration-resource-seams.md) — 协同资源边界、Projectize 项目化与阻断策略。
-- [ADR-0019：Live2D/Cubism 运行时边界](adr/0019-live2d-cubism-multiversion-runtime.md) — Cubism 2.1 运行时适配与 3+ 占位符约束。
+- [ADR-0019：Live2D/Cubism 运行时边界](adr/0019-live2d-cubism-multiversion-runtime.md) — Cubism 2.1 与 Cubism 3/4/5 运行时、创作功能及渲染边界。
 - [ADR-0020：GPT-SoVITS 语音生成集成](adr/0020-gpt-sovits-voice-authoring.md) — 候选生成、资源先行原则、文本同步机制与设计边界。
 - [ADR-0021：外部素材库稳定挂载](adr/0021-stable-external-library-mount-references.md) — `@mount` 机制与跨设备项目化交付。
 - [ADR-0026：WebGAL 剧本导入脚手架](adr/0026-webgal-script-import-scaffolding-source.md) — 单文件导入转换、时长估算与 Report 过滤机制。

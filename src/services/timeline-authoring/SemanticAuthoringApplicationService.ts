@@ -381,7 +381,9 @@ export class SemanticAuthoringApplicationService {
   }
 
   private requireDocument(): CurrentSceneDocument {
-    const document = this.documentStore.getCurrentSceneDocumentSnapshot();
+    // Transactions and undo records consume an immutable source. Detached
+    // save snapshots would copy every other inline motion on each edit.
+    const document = this.documentStore.getCurrentSceneDocumentView();
     if (!document) throw new Error('No semantic scene document loaded');
     return document;
   }

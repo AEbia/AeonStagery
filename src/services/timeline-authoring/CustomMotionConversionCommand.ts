@@ -58,8 +58,7 @@ export interface CustomMotionConversionPorts {
   /** Shared application authority; standalone callers use in-memory ownership. */
   authority?: CustomMotionEditAuthority;
   /**
-   * Injectable sampler seam (tests substitute fakes here). Defaults to the
-   * real Cubism 2.1 sampler implementation.
+   * Legacy sampled-curve seam. Native curve segments use sampleMotion instead.
    */
   sampler?: CustomMotionConversionSampler;
 }
@@ -138,6 +137,7 @@ export class CustomMotionConversionCommand {
 
     let meta: Live2DMotionSamplingMetadata;
     let merged: readonly Live2DMotionSampledCurve[];
+    let nativeMotion: Extract<CharacterMotionOutput, { kind: 'custom' }> | undefined;
     try {
       if (this.ports.sampleMotion) {
         const sampled = await this.ports.sampleMotion(characterId, motionKey, {
@@ -149,10 +149,8 @@ export class CustomMotionConversionCommand {
         }
         meta = sampled.metadata;
         if (sampled.motion) {
-          merged = sampled.motion.tracks.map((track) => ({
-            parameterId: track.parameterId,
-            samples: track.keyframes.map((keyframe) => ({ time: keyframe.time, value: keyframe.value })),
-          }));
+          nativeMotion = structuredClone(sampled.motion);
+          merged = [];
         } else {
           merged = sampled.curves ?? [];
         }
@@ -214,15 +212,38 @@ export class CustomMotionConversionCommand {
             ?? CUSTOM_MOTION_CONVERSION_DEFAULT_FADE_IN_SECONDS;
 
         try {
-          conversion = convertSampledMotionToCustomMotion({
-            durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds),
-            fadeInSeconds,
-            derivedFromKey: motionKey,
-            derivedFromFadeInSeconds: meta.fadeInSeconds,
-            derivedFromFadeOutSeconds: meta.fadeOutSeconds,
-            density: request.density,
-            sampledTracks,
-          });
+          if (nativeMotion) {
+            if (nativeMotion.tracks.length === 0) throw new Error('Expected at least one convertible parameter track');
+            conversion = {
+              motion: {
+                ...nativeMotion,
+                durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds,
+                  ...nativeMotion.tracks.map((track) => track.fadeInSeconds ?? 0)),
+                fadeInSeconds,
+                derivedFrom: {
+                  key: motionKey,
+                  ...(meta.fadeInSeconds !== undefined ? { fadeInSeconds: meta.fadeInSeconds } : {}),
+                  ...(meta.fadeOutSeconds !== undefined ? { fadeOutSeconds: meta.fadeOutSeconds } : {}),
+                },
+              },
+              staticTrackIds: nativeMotion.tracks.filter((track) => track.keyframes.length > 0
+                && track.keyframes.every((point) => point.value === track.keyframes[0].value
+                  && (point.segment?.type !== 'bezier'
+                    || point.segment.controlPoints.every((control) => control.value === point.value))))
+                .map((track) => track.parameterId),
+              simplifiedTrackIds: [],
+            };
+          } else {
+            conversion = convertSampledMotionToCustomMotion({
+              durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds),
+              fadeInSeconds,
+              derivedFromKey: motionKey,
+              derivedFromFadeInSeconds: meta.fadeInSeconds,
+              derivedFromFadeOutSeconds: meta.fadeOutSeconds,
+              density: request.density,
+              sampledTracks,
+            });
+          }
           // Conversion adapter: the engine layer stays free of semantic-scene
           // dependencies, so the canonical contract (ADR-0029) is enforced
           // here on the produced motion before it can be committed. Non-finite

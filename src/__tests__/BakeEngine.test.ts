@@ -125,6 +125,54 @@ describe('BakeEngine runtime routing', () => {
     };
   }
 
+  it.each([
+    { seeded: false, simultaneous: false }, { seeded: true, simultaneous: false },
+    { seeded: false, simultaneous: true }, { seeded: true, simultaneous: true },
+  ])('restores the authored predecessor expression when baking (seeded: $seeded, simultaneous: $simultaneous)', async ({ seeded, simultaneous }) => {
+    const modelPath = 'figure/rana/rana.model3.json';
+    const snapshot = { params: new Float32Array([0]), opacities: new Float32Array([1]) };
+    const restoreExpression = vi.fn(async () => {});
+    const controls = mockControls({
+      captureSnapshot: () => snapshot,
+      captureIdleSnapshot: () => snapshot,
+      setExpressionForSeek: restoreExpression,
+    });
+    vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
+      runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true,
+    });
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+      id: 'untitled-pixi-live2d-engine-cubism',
+      createModel: async () => Object.assign(new PIXI.Container(), {
+        anchor: new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+      }),
+      createTestControls: () => controls,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ FileReferences: { Moc: 'rana.moc3' } }) })));
+    const base = createBasePreparedScene(modelPath);
+    const expressions = simultaneous ? ['first', 'intermediate', 'second'] : ['first', 'second'];
+    const scene: PreparedCompiledScene = {
+      ...base, durationSeconds: 2.25,
+      actions: [
+        { ...base.actions[0], params: { ...base.actions[0].params, duration: 2.25 } },
+        ...expressions.map((key, index) => ({
+          id: `expression-${key}`, time: index === 0 ? 0 : 1, action: 'setExpression' as const,
+          params: { id: 'rana', expression: key },
+          source: { statementId: `expression-${key}`, outputKey: 'primary' },
+        })),
+      ],
+    };
+    const engine = new BakeEngine(createApp());
+    try {
+      await engine.bakePreparedRange(scene, new Map([[modelPath, modelPath]]), 1, seeded ? 1.25 : 0, 2.25, 0.25,
+        seeded ? { time: 1.25, models: new Map([['rana', snapshot]]) } : undefined, true);
+      expect(restoreExpression).toHaveBeenCalledWith(expect.anything(), 'second', seeded ? 0.25 : 0,
+        'first', expect.any(Function), undefined);
+    } finally {
+      engine.destroy();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('routes prepared bake loads through the adapter and preserves a seeded pose on the first resumed frame', async () => {
     const officialCreateModel = vi.fn(async () => {
       const model = new PIXI.Container() as any;

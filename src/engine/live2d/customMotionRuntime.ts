@@ -1,5 +1,6 @@
 import type { CharacterMotionOutput, CustomMotionTrack } from '../../api/types/semantic-scene';
 import { evaluateCustomMotion, evaluateCustomMotionTrack } from './customMotion';
+import { isDeeplyFrozen } from '../../shared/immutable';
 
 /**
  * Runtime evaluation of an inline custom motion with statement-level fade-in.
@@ -37,7 +38,11 @@ interface MotionFadeCache {
  * Only computed during an active fade so dense curves do not get scanned on
  * every frame after the transition has ended.
  */
+const immutableFadeSignatures = new WeakMap<object, number>();
+
 function motionFadeSignature(motion: Extract<CharacterMotionOutput, { kind: 'custom' }>): number {
+  const cached = immutableFadeSignatures.get(motion);
+  if (cached !== undefined) return cached;
   let hash = motion.tracks.length * 31 + Math.round((motion.fadeInSeconds ?? 0) * 1000);
   for (const track of motion.tracks) {
     hash = (hash * 31 + track.parameterId.length) | 0;
@@ -56,6 +61,9 @@ function motionFadeSignature(motion: Extract<CharacterMotionOutput, { kind: 'cus
       }
     }
   }
+  // Authored candidates and prepared runtime motions are deeply frozen. Mutable
+  // legacy inputs still need a fresh signature so edits invalidate fade frames.
+  if (isDeeplyFrozen(motion)) immutableFadeSignatures.set(motion, hash);
   return hash;
 }
 

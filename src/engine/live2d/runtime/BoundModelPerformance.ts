@@ -34,6 +34,8 @@ export function createBoundModelPerformance(
   performance: Pick<Live2DModelHandle, 'performance'>['performance'];
   transitionInTransaction(input: Live2DPerformanceTransitionInput, transaction?: Live2DClockTransaction): Promise<Live2DPerformanceTransitionResult>;
   resetMotionTracking(): void;
+  restoreExpressionBeforeFrame(key: string | null, elapsed: number, previousKey: string | null | undefined,
+    isCurrent: () => boolean, transaction?: Live2DClockTransaction): Promise<boolean>;
 } {
   let motionStartUtTimeMs: number | undefined;
 
@@ -164,6 +166,7 @@ export function createBoundModelPerformance(
     previousExpressionKey: string | null | undefined,
     isCurrent: () => boolean,
     transaction?: Live2DClockTransaction,
+    commitPose = true,
   ): Promise<boolean> {
     if (!isCurrent()) return false;
     if (!controls.setExpressionForSeek) {
@@ -172,7 +175,7 @@ export function createBoundModelPerformance(
     }
     await controls.setExpressionForSeek(model, expressionKey, elapsedSeconds, previousExpressionKey, isCurrent, transaction);
     if (!isCurrent()) return false;
-    if (capabilities.evaluatesPoseOnZeroDelta) controls.advanceFrame(model, 0);
+    if (commitPose && capabilities.evaluatesPoseOnZeroDelta) controls.advanceFrame(model, 0);
     return isCurrent();
   }
 
@@ -186,5 +189,7 @@ export function createBoundModelPerformance(
     },
     transitionInTransaction: transition,
     resetMotionTracking: () => { motionStartUtTimeMs = undefined; },
+    restoreExpressionBeforeFrame: (key, elapsed, previousKey, isCurrent, transaction) =>
+      restoreExpression(key, elapsed, previousKey, isCurrent, transaction, false),
   };
 }

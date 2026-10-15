@@ -19,6 +19,7 @@ import type {
 } from './Live2DRuntimeContracts';
 import type { Live2DRuntimeControlPort } from './Live2DRuntimeControlPort';
 import { finiteOrUndefined, resolveCubismParameterId, resolveHeadAnchorFromSettings } from './modelMetadata';
+import { applyRuntimeFocus, manageRuntimeFocusAnimations } from '../live2d/runtime/RuntimeFocus';
 
 async function registerExternalPerformance(
   model: any,
@@ -330,6 +331,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       model?.render?.(renderer);
     },
     getConcreteModels: (model) => (model ? [model] : []),
+    setSceneTime: (model, time, deltaMs) => (model as { setSceneTime?: (time: number, deltaMs?: number) => void }).setSceneTime?.(time, deltaMs),
     advanceFrame: (model, deltaMs) => {
       model?.update?.(deltaMs);
     },
@@ -337,7 +339,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       // The native runtime advances motion queues inside its own update pass.
     },
     stepBakeFrame: (model, deltaMs, renderer, label, flushCore) => {
-      if (deltaMs > 0) model?.update?.(deltaMs);
+      model?.update?.(Math.max(0, deltaMs));
       this.controls.renderForBake(model, renderer ?? null, label, undefined);
       if (flushCore !== false) model?.syncInputParameters?.();
     },
@@ -390,7 +392,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       if (options?.isCurrent && !options.isCurrent()) return { ok: false, offsetReplayMs: 0, cancelled: true };
       return { ok: !!started, offsetReplayMs: 0 };
     },
-    sampleMotion: async (model, motionKey, _options) => {
+    sampleMotion: async (model, motionKey, options) => {
       const targets = this.controls.getConcreteModels(model)
         .map((concrete) => concrete?.internalModel)
         .filter((internal): internal is { settings: unknown } => !!internal?.settings)
@@ -399,11 +401,11 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       if (!target) {
         return { status: 'unsupported', diagnostics: ['Cubism 3+ motion settings are unavailable.'] };
       }
-      const parsed = await loadCubism3Motion(target, motionKey);
+      const parsed = await loadCubism3Motion(target, motionKey, undefined, { fps: options.fps });
       return {
         status: 'sampled',
         metadata: {
-          durationSeconds: parsed.motion.durationSeconds,
+          durationSeconds: parsed.sourceDurationSeconds,
           fadeInSeconds: parsed.motion.derivedFrom.fadeInSeconds,
           fadeOutSeconds: parsed.motion.derivedFrom.fadeOutSeconds,
           hasNonParameterCurves: parsed.ignoredCurves.length > 0,
@@ -449,14 +451,28 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         })
         .filter((target): target is NonNullable<typeof target> => target !== null);
       if (targets.length === 0) return null;
-      return installCustomMotionStage({ ...input, targets });
+      const stage = installCustomMotionStage({ ...input, targets });
+      if (!stage) return null;
+      const parameterIds = input.getState()?.controlledParameterIds ?? [];
+      const releases = this.controls.getConcreteModels(model)
+        .map((concrete): (() => void) | undefined => concrete?.claimCustomMotionParameters?.(parameterIds))
+        .filter((release): release is () => void => typeof release === 'function');
+      return {
+        setSceneTime: (time) => stage.setSceneTime(time),
+        dispose: () => {
+          stage.dispose();
+          releases.forEach((release) => release());
+        },
+      };
     },
     quiesceModel: (model) => {
+      this.controls.manageFocusAnimations(model, 'stop');
       model?.stopAllMotions?.();
       model?.setExpression?.(null);
     },
     disposeModel: (model, options) => {
       if (!model) return;
+      this.controls.manageFocusAnimations(model, 'stop');
       if (options.detach) {
         try {
           if (model.parent) model.parent.removeChild(model);
@@ -501,11 +517,13 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
         model?.setBlink?.(enabled, intervalMs, sceneTimeSeconds, startTimeSeconds);
       }
     },
-    applyFocus: () => {
-      // Retain the previous Cubism 3+ focus control contract.
+    applyFocus: (model, input) => {
+      for (const controller of this.controls.getFocusControllers(model)) applyRuntimeFocus(controller, input);
     },
-    getFocusControllers: () => [],
-    manageFocusAnimations: () => {},
+    getFocusControllers: (model) => this.controls.getConcreteModels(model)
+      .map((concrete) => concrete?.internalModel?.focusController)
+      .filter(Boolean),
+    manageFocusAnimations: (model, action) => manageRuntimeFocusAnimations(this.controls.getFocusControllers(model), action),
     getHeadAnchor: (model) => resolveHeadAnchorFromSettings(model?.internalModel?.settings),
   };
 
