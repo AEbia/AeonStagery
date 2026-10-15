@@ -125,7 +125,10 @@ export const StatusBar = () => {
         <div className={`status-dot status-dot--${saveStatus}`} />
         <span className="status-bar__project-name">{title || '未命名剧本'}</span>
         <span className="status-bar__divider">·</span>
-        <span className={`status-bar__save-text status-bar__save-text--${saveStatus}`}>
+        <span
+          className={`status-bar__save-text status-bar__save-text--${saveStatus}`}
+          title="场景更改会自动保存到本地文件"
+        >
           {saveLabel()}
         </span>
         <span className="status-bar__divider">·</span>

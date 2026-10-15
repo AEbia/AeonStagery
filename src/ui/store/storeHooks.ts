@@ -267,9 +267,7 @@ export function useEditorState() {
     handleSave: async (): Promise<SaveResult | undefined> => {
       if (sceneFileService) {
         const res = await sceneFileService.save();
-        if (res.success) {
-          showToast('剧本保存成功！', 'success');
-        } else if ('error' in res) {
+        if ('error' in res) {
           showToast(`剧本保存失败: ${res.error}`, 'error');
         } else if ('cancelled' in res) {
           // Explicitly matched: User cancelled dialog. No error toast shown.

@@ -46,7 +46,6 @@ function normalizeTheme(value: unknown): AppTheme {
 export interface AppSettings {
   lowPerformance: boolean;
   showTimelineSelectionBar: boolean;
-  autoSave: boolean;
   theme: AppTheme;
 
   assetsPath: string;
@@ -112,7 +111,6 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   lowPerformance: false,
   showTimelineSelectionBar: true,
-  autoSave: true,
   theme: 'system',
   assetsPath: '',
   externalLibraryMounts: [],
@@ -260,11 +258,13 @@ class SettingsManager {
           externalLibraryPaths?: unknown;
           apiKey?: unknown;
           credential?: unknown;
+          autoSave?: unknown;
         };
         const {
           externalLibraryPaths,
           apiKey: _droppedApiKey,
           credential: _droppedCredential,
+          autoSave: _droppedAutoSave,
           ...currentSettings
         } = parsed;
         // Drop obsolete timelinePresentationPreferences from persisted settings.
