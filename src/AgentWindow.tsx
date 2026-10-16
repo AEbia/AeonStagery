@@ -331,29 +331,42 @@ function isHostInjectedUserText(text: string): boolean {
  * limits shared with the readImage tool (ADR0023): max dimension and byte cap.
  */
 async function processPickedImage(file: File): Promise<ImageAttachment> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('无法处理图片');
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, 'image/jpeg', 0.85);
-  });
-  if (!blob) throw new Error('无法处理图片');
-  if (blob.size > MAX_IMAGE_BYTES) throw new Error('图片过大，请选择更小的图片');
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  return {
-    name: file.name,
-    mimeType: blob.type || 'image/jpeg',
-    bytes,
-    previewUrl: URL.createObjectURL(blob),
-  };
+  if (file.size === 0) throw new Error('图片为空，请选择有效的图片。');
+  if (file.size > 32 * 1024 * 1024) throw new Error('原图超过 32 MB，请缩小后重试。');
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error('无法读取这张图片，请使用 PNG、JPEG、WebP 或 GIF 格式。');
+  }
+  try {
+    if (bitmap.width * bitmap.height > 40_000_000) throw new Error('图片分辨率过高，请缩小后重试。');
+    let scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('无法处理图片，请重试。');
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9);
+      });
+      if (!blob) throw new Error('无法编码图片，请选择其他图片后重试。');
+      if (blob.size <= MAX_IMAGE_BYTES) {
+        return {
+          name: file.name || '粘贴的图片.png',
+          mimeType: blob.type,
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          previewUrl: URL.createObjectURL(blob),
+        };
+      }
+      scale *= 0.75;
+    }
+    throw new Error('图片过大，请选择更小的图片。');
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**
@@ -381,6 +394,10 @@ export const AgentWindow: React.FC = () => {
   const [fullAccess, setFullAccess] = useState(false);
   const [context, setContext] = useState<ProjectAgentProjectContext | null>(null);
   const [imageAttachment, setImageAttachment] = useState<ImageAttachment | null>(null);
+  const [imageProcessing, setImageProcessing] = useState(false);
+  const imagePickSequence = useRef(0);
+  const supplementSendingRef = useRef(false);
+  const [supplementSending, setSupplementSending] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -678,6 +695,14 @@ export const AgentWindow: React.FC = () => {
     setShowBackToBottom(false);
     threadRef.current?.scrollTo?.({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    imagePickSequence.current += 1;
+    setImageProcessing(false);
+    setImageAttachment(null);
+    setAttachError(null);
+    return () => { imagePickSequence.current += 1; };
+  }, [selectedId, context?.projectId]);
 
   useEffect(() => () => {
     if (imageAttachment) URL.revokeObjectURL(imageAttachment.previewUrl);
@@ -1211,11 +1236,12 @@ export const AgentWindow: React.FC = () => {
     ));
   }, [records, searchQuery]);
 
-  const canAttachImage = !anyRunning && context?.imageInputSupported !== false;
+  const canAttachImage = (!anyRunning || selectedRunning) && !selectedNoContinue
+    && !pendingStartId && !supplementSending && context?.imageInputSupported !== false;
 
   const startTask = () => {
     const text = draft.trim();
-    if ((!text && !imageAttachment) || pendingStartId || anyRunning) return;
+    if ((!text && !imageAttachment) || imageProcessing || pendingStartId || anyRunning) return;
     const knownBefore = new Set<string>([
       ...statusesRef.current.keys(),
       ...records.map((record) => record.identity.taskId),
@@ -1304,65 +1330,64 @@ export const AgentWindow: React.FC = () => {
 
   const sendToSelected = () => {
     const text = draft.trim();
-    if (!text || !selectedId || !context?.projectId || !bridge) return;
-    setDraft('');
-    setStartError(null);
-    if (selectedRunning) {
-      const pending: PendingSupplement = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        text,
-        conversationId: selectedId,
-        queued: true,
-      };
-      setPendingQueue((queue) => [...queue, pending]);
-      followRef.current = true;
-      setShowBackToBottom(false);
-      void bridge.sendSupplement(selectedId, text);
-      return;
-    }
+    if ((!text && !imageAttachment) || !selectedId || !context?.projectId || !bridge
+      || imageProcessing || pendingStartId || supplementSendingRef.current) return;
     if (selectedNoContinue) {
       setStartError('该对话已不可继续执行，只能浏览或删除。');
       return;
     }
-    if (anyRunning) {
+    if (anyRunning && !selectedRunning) {
       setStartError('另一个对话正在执行，请等待其回合结束后再发送。');
       return;
     }
+    const attachment = imageAttachment;
+    const image = attachment ? {
+      name: attachment.name, mimeType: attachment.mimeType,
+      bytes: attachment.bytes, detail: 'auto' as const,
+    } : undefined;
     const pending: PendingSupplement = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text,
+      text: [text, ...(image ? ['[已附加图片]'] : [])].filter(Boolean).join('\n'),
       conversationId: selectedId,
+      ...(selectedRunning ? { queued: true } : {}),
     };
+    supplementSendingRef.current = true;
+    setSupplementSending(true);
+    setStartError(null);
     setPendingQueue((queue) => [...queue, pending]);
-    // A new execution round begins: reset the latest-round timing and resume
-    // following so the running status line and fresh work stay in view.
     if (!selectedRunning) {
       setRoundStart(null);
       setRoundEnd(null);
     }
     followRef.current = true;
     setShowBackToBottom(false);
-    // Switching rehydrates even an idle persisted Conversation as suspended
-    // until the editor owns it again, so any non-running selection needs an
-    // execution request after its new user message is relayed.
-    const needsExecution = !selectedRunning;
     const issuedAt = Date.now();
     void (async () => {
-      const switched = await bridge.switchConversation(context.projectId, selectedId);
-      if (!switched.ok) {
+      try {
+        if (!selectedRunning) {
+          const switched = await bridge.switchConversation(context.projectId, selectedId);
+          if (!switched.ok) throw new Error(switched.error ?? '无法切换到该对话。');
+          if (!await waitForSwitchSettle(selectedId, issuedAt)) {
+            throw new Error('切换对话超时，请确认编辑器窗口可用后重试。');
+          }
+        }
+        const sent = image
+          ? await bridge.sendSupplement(selectedId, text, image)
+          : await bridge.sendSupplement(selectedId, text);
+        if (!sent.ok) throw new Error(sent.error || '消息发送失败，请重试。');
+        setDraft((current) => current.trim() === text ? '' : current);
+        setImageAttachment((current) => current === attachment ? null : current);
+        setAttachError(null);
+        if (!selectedRunning) {
+          const continued = await bridge.requestContinue(selectedId);
+          if (!continued.ok) setStartError(continued.error || '消息已保存，请重试继续执行。');
+        }
+      } catch (error) {
         setPendingQueue((queue) => queue.filter((entry) => entry.id !== pending.id));
-        setStartError(switched.error ?? '无法切换到该对话。');
-        return;
-      }
-      const settled = await waitForSwitchSettle(selectedId, issuedAt);
-      if (!settled) {
-        setPendingQueue((queue) => queue.filter((entry) => entry.id !== pending.id));
-        setStartError('切换对话超时，请确认编辑器窗口可用后重试。');
-        return;
-      }
-      await bridge.sendSupplement(selectedId, text);
-      if (needsExecution) {
-        await bridge.requestContinue(selectedId);
+        setStartError(error instanceof Error ? error.message : '消息发送失败，请重试。');
+      } finally {
+        supplementSendingRef.current = false;
+        setSupplementSending(false);
       }
     })();
   };
@@ -1436,6 +1461,8 @@ export const AgentWindow: React.FC = () => {
   };
 
   const newConversation = () => {
+    imagePickSequence.current += 1;
+    setImageProcessing(false);
     setSelectedId(null);
     setDraft('');
     setImageAttachment(null);
@@ -1560,35 +1587,40 @@ export const AgentWindow: React.FC = () => {
   };
 
   const handlePickImage = () => {
+    if (canAttachImage && !imageProcessing) fileInputRef.current?.click();
+  };
+
+  const attachImage = async (file: File) => {
     if (!canAttachImage) return;
-    if (selectedId) {
-      setAttachError('仅发起新对话时可附加图片。');
-      return;
+    const sequence = ++imagePickSequence.current;
+    setAttachError(null);
+    setImageProcessing(true);
+    try {
+      const attachment = await processPickedImage(file);
+      if (sequence !== imagePickSequence.current) {
+        URL.revokeObjectURL(attachment.previewUrl);
+        return;
+      }
+      setImageAttachment(attachment);
+    } catch (error) {
+      if (sequence === imagePickSequence.current) {
+        setAttachError(error instanceof Error ? error.message : '图片处理失败，请选择有效的图片后重试。');
+      }
+    } finally {
+      if (sequence === imagePickSequence.current) setImageProcessing(false);
     }
-    fileInputRef.current?.click();
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file) return;
-    setAttachError(null);
-    try {
-      const attachment = await processPickedImage(file);
-      setImageAttachment((previous) => {
-        if (previous) URL.revokeObjectURL(previous.previewUrl);
-        return attachment;
-      });
-    } catch (error) {
-      setAttachError(error instanceof Error ? error.message : '图片处理失败。');
-    }
+    if (file) await attachImage(file);
   };
 
   const removeImage = () => {
-    setImageAttachment((previous) => {
-      if (previous) URL.revokeObjectURL(previous.previewUrl);
-      return null;
-    });
+    imagePickSequence.current += 1;
+    setImageProcessing(false);
+    setImageAttachment(null);
   };
 
   /**
@@ -1613,9 +1645,9 @@ export const AgentWindow: React.FC = () => {
     else startTask();
   };
 
-  const composerSendDisabled = selectedId
-    ? !draft.trim() || composerBlocked || selectedNoContinue || !!pendingStartId
-    : ((!draft.trim() && !imageAttachment) || !!pendingStartId || anyRunning);
+  const composerSendDisabled = imageProcessing || supplementSending || (selectedId
+    ? (!draft.trim() && !imageAttachment) || composerBlocked || selectedNoContinue || !!pendingStartId
+    : ((!draft.trim() && !imageAttachment) || !!pendingStartId || anyRunning));
 
   const greeting = `我们该在 ${projectName} 中做什么？`;
 
@@ -2120,7 +2152,18 @@ export const AgentWindow: React.FC = () => {
           </main>
         )}
         <div className="agent-composer-wrap">
-          <div className="agent-promptbox">
+          <div className="agent-promptbox"
+            onDragOver={(event) => {
+              if (canAttachImage && event.dataTransfer.types.includes('Files')) event.preventDefault();
+            }}
+            onDrop={(event) => {
+              if (!event.dataTransfer.files.length) return;
+              event.preventDefault();
+              const file = Array.from(event.dataTransfer.files).find((entry) => entry.type.startsWith('image/'));
+              if (file) void attachImage(file);
+            }}
+          >
+            {imageProcessing && <p className="agent-promptbox__hint" role="status">正在处理图片…</p>}
             {imageAttachment && (
               <div className="agent-promptbox__preview">
                 <img
@@ -2151,6 +2194,13 @@ export const AgentWindow: React.FC = () => {
               rows={3}
               disabled={selectedId ? (composerBlocked || selectedNoContinue) : false}
               onChange={handleDraftChange}
+              onPaste={(event) => {
+                const file = Array.from(event.clipboardData.files).find((entry) => entry.type.startsWith('image/'));
+                if (file && canAttachImage) {
+                  event.preventDefault();
+                  void attachImage(file);
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown' && mentionOpen && mentionCandidates.length > 0) {
                   event.preventDefault();
@@ -2207,7 +2257,7 @@ export const AgentWindow: React.FC = () => {
               </div>
             )}
 
-            {attachError && <p className="agent-promptbox__attach-error">{attachError}</p>}
+            {attachError && <p className="agent-promptbox__attach-error" role="alert">{attachError}</p>}
 
             {!selectedId && fullAccess && (
               <div className="agent-promptbox__access-warning" role="status">
@@ -2237,14 +2287,10 @@ export const AgentWindow: React.FC = () => {
                   type="button"
                   className="agent-promptbox__tool"
                   onClick={handlePickImage}
-                  disabled={!canAttachImage}
-                  title={selectedId
-                    ? '仅发起新对话时可附加图片'
-                    : !canAttachImage && anyRunning
-                      ? '另一个对话执行中，不能附加图片'
-                      : context?.imageInputSupported === false
-                        ? '当前模型不支持图片输入'
-                        : '上传图片'}
+                  disabled={!canAttachImage || imageProcessing}
+                  title={context?.imageInputSupported === false
+                    ? '当前模型不支持图片输入'
+                    : imageProcessing ? '正在处理图片…' : '上传图片（也可粘贴或拖入）'}
                   aria-label="上传图片"
                 >
                   <IconPlus width={15} height={15} />
@@ -2270,7 +2316,7 @@ export const AgentWindow: React.FC = () => {
                   <span>{effectiveModel || '未配置模型'}</span>
                   <IconChevronDown width={12} height={12} aria-hidden="true" />
                 </button>
-                {selectedRunning && !draft.trim() ? (
+                {selectedRunning && !draft.trim() && !imageAttachment && !imageProcessing ? (
                   <button
                     type="button"
                     className="agent-promptbox__stop"
@@ -2288,7 +2334,7 @@ export const AgentWindow: React.FC = () => {
                     onClick={sendComposer}
                     aria-label="发送"
                   >
-                    {pendingStartId
+                    {pendingStartId || supplementSending || imageProcessing
                       ? <span className="agent-promptbox__send-spinner" aria-hidden="true" />
                       : <IconSend width={15} height={15} />}
                   </button>

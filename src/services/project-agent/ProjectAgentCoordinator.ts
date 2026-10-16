@@ -32,6 +32,8 @@ import {
 } from './ProjectAgentLease';
 import {
   createDefaultFingerprints,
+  encodeStoredContentBlock,
+  decodeStoredContentBlock,
   InMemoryProjectAgentJournalPort,
   ProjectAgentConversationStore,
   ProjectAgentJournal,
@@ -57,6 +59,7 @@ import {
   type ProjectAgentProviderPauseDetail,
   type ProjectAgentTaskSnapshot,
   type ProjectAgentTerminalReport,
+  type ProjectAgentUserSupplement,
 } from './ProjectAgentTask';
 import type { ProjectAgentToolRegistry } from './ProjectAgentToolRegistry';
 import {
@@ -385,9 +388,8 @@ export interface ProjectAgentStartRequest {
   /** Explicit per-conversation authorization persisted in the task identity. */
   readonly accessMode?: import('../../api/types/project-agent').ProjectAgentAccessMode;
   /**
-   * User-attached image delivered with the FIRST model request only
-   * (ADR0023): bytes stay in current runtime memory and model context, are
-   * replaced with a text placeholder afterwards, and never enter the journal.
+   * User-attached image stored once with its user message until compaction,
+   * using the same persistence and recovery contract as readImage results.
    */
   readonly initialImage?: ProjectAgentImageAttachment;
 }
@@ -405,6 +407,7 @@ export type ProjectAgentPerRequestSettingsResult =
       readonly endpoint: string;
       readonly model: string;
       readonly contextWindow?: number;
+      readonly imageInputSupported?: boolean;
     }
   | {
       readonly ok: false;
@@ -468,6 +471,8 @@ export class ProjectAgentCoordinator {
   private conversationStore: ProjectAgentConversationStore | null = null;
   /** Monotonic id seed so rebuilt/continued stores never reuse a messageId. */
   private messageSeq = 0;
+  private conversationMutation: Promise<void> = Promise.resolve();
+  private conversationGeneration = 0;
   private systemPrompt = '';
   /** Effective system prompt text with the catalog injected when available. */
   private systemMessageText = '';
@@ -476,16 +481,6 @@ export class ProjectAgentCoordinator {
   private catalogFingerprint: string | null = null;
   private endpoint = '';
   private model = '';
-  /**
-   * User-attached initial image (ADR0023): bytes stay in current runtime
-   * memory only, ride the FIRST model request via the assembled context and
-   * are never persisted — the stored user message carries a text placeholder.
-   */
-  private pendingInitialImage: {
-    readonly mimeType: string;
-    readonly bytes: Uint8Array;
-    readonly detail: AiImageDetail;
-  } | null = null;
   private continuationSummary: AgentConversationSummaryV1 | null = null;
   private readonly protocolTracker = new AiProtocolFailureTracker();
   /** UI-facing context-window usage facts of the last completed model request. */
@@ -617,13 +612,6 @@ export class ProjectAgentCoordinator {
     this.systemMessageText = request.systemPrompt;
     this.endpoint = request.endpoint;
     this.model = request.model;
-    this.pendingInitialImage = request.initialImage
-      ? {
-          mimeType: request.initialImage.mimeType,
-          bytes: request.initialImage.bytes,
-          detail: request.initialImage.detail,
-        }
-      : null;
     this.continuationSummary = null;
     this.catalogFingerprint = null;
     this.protocolTracker.reset();
@@ -633,16 +621,7 @@ export class ProjectAgentCoordinator {
     this.pendingRecoveryProjection = null;
     this.messageSeq = 0;
     this.conversationStore = new ProjectAgentConversationStore(this.journal, await this.freshSkeleton());
-    // The user message is persisted WITHOUT the attached image bytes: the
-    // stored copy carries a text placeholder and the bytes ride only the
-    // first model request through the assembled context (ADR0023).
-    await this.appendConversationMessage({
-      role: 'user',
-      content: [
-        { type: 'text', text: request.originalTaskText },
-        ...(request.initialImage ? [{ type: 'text' as const, text: '[已附加图片]' }] : []),
-      ],
-    });
+    await this.appendConversationMessage(userMessageWithImage(request.originalTaskText, request.initialImage));
 
     // Regenerate and directly inject the performance catalog at task start
     // (ADR0023). A resolution failure keeps the base prompt; it never blocks.
@@ -653,9 +632,75 @@ export class ProjectAgentCoordinator {
     return { ok: true, task: this.task.snapshot() };
   }
 
-  enqueueSupplement(text: string): void {
+  enqueueSupplement(text: string, image?: ProjectAgentImageAttachment): ProjectAgentUserSupplement {
     if (!this.task) throw new Error('No task');
-    this.task.enqueueSupplement(text, this.now());
+    const stored = image ? encodeStoredContentBlock({ type: 'image', ...image }) : undefined;
+    return this.task.enqueueSupplement(text, this.now(), stored?.type === 'image' ? stored : undefined);
+  }
+
+  /** Acknowledge input only after its pending payload is durable. */
+  async acceptSupplement(text: string, image?: ProjectAgentImageAttachment): Promise<void> {
+    await this.withConversationMutation(async () => {
+      if (!this.task) throw new Error('No task');
+      const pending = this.enqueueSupplement(text, image);
+      try {
+        await this.persistRunningSnapshot();
+      } catch (error) {
+        this.task.removePendingSupplement(pending.id);
+        throw error;
+      }
+    });
+  }
+
+  private pendingImageMessages(): AiUserMessage[] {
+    return (this.task?.peekPendingSupplements() ?? []).flatMap((s) => s.image
+      ? [{ role: 'user' as const, content: [decodeStoredContentBlock(s.image)] }]
+      : []);
+  }
+
+  private withConversationMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const generation = this.conversationGeneration;
+    const result = this.conversationMutation.then(() => {
+      if (generation !== this.conversationGeneration) throw new Error('Conversation mutation interrupted');
+      return operation();
+    });
+    this.conversationMutation = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async commitPendingSupplements(replacementMessages?: readonly AiConversationMessage[]): Promise<void> {
+    await this.withConversationMutation(async () => {
+      if (!this.task || !this.conversationStore) throw new Error('No task');
+      const generation = this.conversationGeneration;
+      const pending = this.task.peekPendingSupplements();
+      const ids = new Set(pending.map((s) => s.id));
+      const appended = [...(replacementMessages ?? []), ...pending.map(supplementMessage)];
+      if (pending.length > 0) this.task.touchLastActivity(this.now());
+      const skeleton = await this.freshSkeleton();
+      const store = this.rebuildConversationStore({
+        ...skeleton,
+        supplements: skeleton.supplements.map((entry) => {
+          if (!ids.has(entry.id)) return entry;
+          const { image: _image, ...metadata } = entry;
+          return { ...metadata, deliveredToModel: true };
+        }),
+      }, this.conversationStore.toState());
+      await store.replaceMessages({
+        keptMessageIds: replacementMessages ? [] : store.getCurrentMessageIds(),
+        appendedMessages: appended.map((message) => ({ message })),
+      });
+      if (generation !== this.conversationGeneration) return;
+      this.task.markSupplementsDelivered([...ids]);
+      this.conversationStore = store;
+      this.messages = this.buildRequestMessages();
+    });
+  }
+
+  private interruptConversationMutations(): void {
+    // Lifecycle pauses cannot wait for a hung journal append. New writes use
+    // the last committed store; late completions cannot replace that context.
+    this.conversationGeneration += 1;
+    this.conversationMutation = Promise.resolve();
   }
 
   /**
@@ -692,6 +737,7 @@ export class ProjectAgentCoordinator {
     this.discardCurrentRound = true;
     this.abortCurrentModelRequest();
     this.abortCurrentWrite();
+    this.interruptConversationMutations();
 
     // Wait for in-flight commit (tests can interleave via runTurn barriers).
     while (this.committingTransaction) {
@@ -788,6 +834,7 @@ export class ProjectAgentCoordinator {
     this.task.touchLastActivity(this.now());
     this.abortCurrentModelRequest();
     this.abortCurrentWrite();
+    this.interruptConversationMutations();
 
     while (this.committingTransaction) {
       await yieldTick();
@@ -833,7 +880,6 @@ export class ProjectAgentCoordinator {
     this.discardCurrentRound = false;
     this.roundAssistant = null;
     this.pendingRecoveryProjection = null;
-    this.pendingInitialImage = null;
     this.messageSeq = 0;
 
     this.toolRegistry.resetTaskState();
@@ -1108,7 +1154,7 @@ export class ProjectAgentCoordinator {
       ...(options?.recoveryProjectionText ? [options.recoveryProjectionText] : []),
     ];
     const estimate = this.contextBudget.estimate({
-      messages: this.messages,
+      messages: [...this.messages, ...this.pendingImageMessages()],
       tools,
       pendingSupplements: pending,
       fixedContext: this.fixedContextForEstimate(),
@@ -1187,7 +1233,6 @@ export class ProjectAgentCoordinator {
       this.task.clearTurnAborted();
       this.pendingRecoveryProjection = null;
     }
-    const pending = this.task.peekPendingSupplements();
     const appended: AiConversationMessage[] = [
       { role: 'user', content: [{ type: 'text', text: this.task.originalTaskText }] },
       {
@@ -1203,10 +1248,6 @@ export class ProjectAgentCoordinator {
             content: [{ type: 'text' as const, text: options.recoveryProjectionText }],
           }]
         : []),
-      ...pending.map((s): AiUserMessage => ({
-        role: 'user',
-        content: [{ type: 'text', text: s.text }],
-      })),
     ];
     // A successful replacement belongs in the durable activity stream so the
     // user can see the compaction in order with the surrounding tool work.
@@ -1215,16 +1256,7 @@ export class ProjectAgentCoordinator {
       toolName: 'compactContext',
       text: '上下文已压缩',
     }]);
-    const store = await this.currentStoreWithFreshSkeleton();
-    await store.replaceMessages({
-      keptMessageIds: [],
-      appendedMessages: appended.map((message) => ({ message })),
-    });
-    this.conversationStore = store;
-    this.messages = this.buildRequestMessages();
-    if (pending.length > 0) {
-      this.task.markSupplementsDelivered(pending.map((s) => s.id));
-    }
+    await this.commitPendingSupplements(appended);
     return { ok: true, summary };
   }
 
@@ -1404,6 +1436,16 @@ export class ProjectAgentCoordinator {
       return { status: 'suspended', task: this.task.snapshot() };
     }
 
+    if (resolvedSettings.imageInputSupported === false
+      && (this.messages.some((message) => message.content.some((block) => block.type === 'image'))
+        || this.task.peekPendingSupplements().some((s) => s.image))) {
+      await this.pause('provider_configuration_required', {
+        code: 'vision_unavailable',
+        message: '当前对话包含图片，请切换支持图片输入的模型后继续。',
+      });
+      return { status: 'suspended', task: this.task.snapshot() };
+    }
+
     const settingsChanged = resolvedSettings.endpoint !== this.endpoint
       || resolvedSettings.model !== this.model
       || (resolvedSettings.contextWindow !== undefined
@@ -1415,7 +1457,7 @@ export class ProjectAgentCoordinator {
       // context incompatibility error and let the user adjust settings.
       const toolsForEstimate = this.buildToolDefinitions();
       const estimate = this.contextBudget.estimate({
-        messages: this.messages,
+        messages: [...this.messages, ...this.pendingImageMessages()],
         tools: toolsForEstimate,
         pendingSupplements: [
           ...this.task.peekPendingSupplements().map((s) => s.text),
@@ -1473,13 +1515,7 @@ export class ProjectAgentCoordinator {
     }
     const pending = this.task.peekPendingSupplements();
     if (pending.length > 0) {
-      for (const s of pending) {
-        await this.appendConversationMessage({
-          role: 'user',
-          content: [{ type: 'text', text: s.text }],
-        });
-      }
-      this.task.markSupplementsDelivered(pending.map((s) => s.id));
+      await this.commitPendingSupplements();
     }
 
     const tools = this.buildToolDefinitions();
@@ -1505,13 +1541,6 @@ export class ProjectAgentCoordinator {
     } catch (error) {
       return this.handleTransportFailure(error);
     }
-
-    // The user-attached image was delivered with this first request; the
-    // stored user message keeps its text placeholder and later rounds/requests
-    // reference the stored copy (ADR0023: the attached image stays a
-    // per-request runtime delivery, never a stored message block).
-    this.pendingInitialImage = null;
-    this.messages = this.buildRequestMessages();
 
     // Actual provider usage calibrates the estimator only; the 80% threshold
     // and the absence of cumulative budgets never change (ADR0023).
@@ -2097,7 +2126,7 @@ export class ProjectAgentCoordinator {
     // A suspend/cancel won the race for the in-flight request (abort, window
     // close, lease loss): the round is already settled with the correct reason
     // and must not be re-suspended as a provider failure.
-    if (!this.task.isSchedulingAllowed() && this.task.getExecutionRoundState() !== 'cancelling') {
+    if (!this.task.isSchedulingAllowed()) {
       return {
         status: 'scheduling_stopped',
         task: this.task.snapshot(),
@@ -2167,30 +2196,32 @@ export class ProjectAgentCoordinator {
   }
 
   private async discardUnfinishedAssistantRoundFromHistory(): Promise<boolean> {
-    if (!this.conversationStore) return false;
-    // Drop the whole unclosed trailing round — the assistant envelope plus
-    // any trailing partial tool results — with the SAME detection as crash
-    // recovery (findUnclosedTrailingRound, ADR0023): the in-process pause
-    // strip and the crash/hydration path agree on what an unclosed round is,
-    // so the projection's discard claim always matches the persisted store.
-    // Returns whether an unclosed round was actually dropped: a text-only
-    // assistant reply is a CLOSED round (findUnclosedTrailingRound only
-    // matches assistants with unclosed tool calls), so nothing is discarded
-    // and the caller must not record a turn_aborted marker for it.
-    const dropFrom = findUnclosedTrailingRound(this.conversationStore.assembleMessages());
-    if (dropFrom < 0) {
+    return this.withConversationMutation(async () => {
+      if (!this.conversationStore) return false;
+      // Drop the whole unclosed trailing round — the assistant envelope plus
+      // any trailing partial tool results — with the SAME detection as crash
+      // recovery (findUnclosedTrailingRound, ADR0023): the in-process pause
+      // strip and the crash/hydration path agree on what an unclosed round is,
+      // so the projection's discard claim always matches the persisted store.
+      // Returns whether an unclosed round was actually dropped: a text-only
+      // assistant reply is a CLOSED round (findUnclosedTrailingRound only
+      // matches assistants with unclosed tool calls), so nothing is discarded
+      // and the caller must not record a turn_aborted marker for it.
+      const dropFrom = findUnclosedTrailingRound(this.conversationStore.assembleMessages());
+      if (dropFrom < 0) {
+        this.messages = this.buildRequestMessages();
+        return false;
+      }
+      const before = this.conversationStore.getCurrentMessageIds().length;
+      if (dropFrom < before) {
+        const store = await this.currentStoreWithFreshSkeleton();
+        const keptIds = store.getCurrentMessageIds().slice(0, dropFrom);
+        await store.replaceMessages({ keptMessageIds: keptIds, appendedMessages: [] });
+        this.conversationStore = store;
+      }
       this.messages = this.buildRequestMessages();
-      return false;
-    }
-    const before = this.conversationStore.getCurrentMessageIds().length;
-    if (dropFrom < before) {
-      const store = await this.currentStoreWithFreshSkeleton();
-      const keptIds = store.getCurrentMessageIds().slice(0, dropFrom);
-      await store.replaceMessages({ keptMessageIds: keptIds, appendedMessages: [] });
-      this.conversationStore = store;
-    }
-    this.messages = this.buildRequestMessages();
-    return true;
+      return true;
+    });
   }
 
   private buildToolDefinitions(): AiToolDefinition[] {
@@ -2214,6 +2245,10 @@ export class ProjectAgentCoordinator {
   }
 
   private async persistRunning(): Promise<void> {
+    await this.withConversationMutation(() => this.persistRunningSnapshot());
+  }
+
+  private async persistRunningSnapshot(): Promise<void> {
     if (!this.task || this.task.isTerminal()) return;
     const skeleton = await this.freshSkeleton();
     await this.journal.saveRunning({
@@ -2255,26 +2290,28 @@ export class ProjectAgentCoordinator {
    * with a stable messageId) and keep the assembled model context in sync.
    */
   private async appendConversationMessage(message: AiConversationMessage): Promise<void> {
-    // User-visible activity (ADR0023): every user message append advances the
-    // conversation's last activity time on the persisted record.
-    if (message.role === 'user') {
-      this.task?.touchLastActivity(this.now());
-    }
-    const store = await this.currentStoreWithFreshSkeleton();
-    this.messageSeq = Math.max(this.messageSeq, store.getCurrentMessageIds().length);
-    const id = `conv-msg-${Date.now().toString(36)}-${this.messageSeq + 1}-${Math.random().toString(36).slice(2, 8)}`;
-    await store.appendMessage(message, id);
-    this.conversationStore = store;
-    this.messageSeq = Math.max(this.messageSeq, store.getCurrentMessageIds().length);
-    this.messages = this.buildRequestMessages();
+    await this.withConversationMutation(async () => {
+      const generation = this.conversationGeneration;
+      // User-visible activity (ADR0023): every user message append advances the
+      // conversation's last activity time on the persisted record.
+      if (message.role === 'user') {
+        this.task?.touchLastActivity(this.now());
+      }
+      const store = await this.currentStoreWithFreshSkeleton();
+      this.messageSeq = Math.max(this.messageSeq, store.getCurrentMessageIds().length);
+      const id = `conv-msg-${Date.now().toString(36)}-${this.messageSeq + 1}-${Math.random().toString(36).slice(2, 8)}`;
+      await store.appendMessage(message, id);
+      if (generation !== this.conversationGeneration) return;
+      this.conversationStore = store;
+      this.messageSeq = Math.max(this.messageSeq, store.getCurrentMessageIds().length);
+      this.messages = this.buildRequestMessages();
+    });
   }
 
   /**
    * Assemble the current model context: the host system message (with the
    * injected catalog) followed by the store's current ordered message set.
-   * A pending user-attached image rides the assembled copy only while its
-   * bytes are still in current runtime memory; the stored message never
-   * carries them (ADR0023).
+   * Images stay with their owning message until context compaction.
    */
   private buildRequestMessages(): AiConversationMessage[] {
     const system: AiConversationMessage = {
@@ -2282,35 +2319,7 @@ export class ProjectAgentCoordinator {
       content: [{ type: 'text', text: this.currentSystemPromptText() }],
     };
     if (!this.conversationStore) return [system];
-    let stored = this.conversationStore.assembleMessages();
-    if (this.pendingInitialImage) {
-      const image = this.pendingInitialImage;
-      let injected = false;
-      stored = stored.map((message) => {
-        if (injected || message.role !== 'user') return message;
-        if (message.content.some((block) => block.type === 'image')) return message;
-        injected = true;
-        let replaced = false;
-        const content = message.content.map((block) => {
-          if (block.type === 'text' && block.text.startsWith('[已附加图片')) {
-            replaced = true;
-            return {
-              type: 'image' as const,
-              mimeType: image.mimeType,
-              bytes: image.bytes,
-              detail: image.detail,
-            };
-          }
-          return block;
-        });
-        return {
-          ...message,
-          content: replaced
-            ? content
-            : [...content, { type: 'image' as const, mimeType: image.mimeType, bytes: image.bytes, detail: image.detail }],
-        };
-      });
-    }
+    const stored = this.conversationStore.assembleMessages();
     return [system, ...stored];
   }
 
@@ -2754,4 +2763,24 @@ function buildPauseRecoveryProjection(facts: ProjectAgentPauseRecoveryFacts): st
     );
   }
   return parts.join(' ');
+}
+
+function userMessageWithImage(text: string, image?: ProjectAgentImageAttachment): AiUserMessage {
+  return {
+    role: 'user',
+    content: [
+      ...(text ? [{ type: 'text' as const, text }] : []),
+      ...(image ? [{ type: 'image' as const, mimeType: image.mimeType, bytes: image.bytes, detail: image.detail }] : []),
+    ],
+  };
+}
+
+function supplementMessage(supplement: ProjectAgentUserSupplement): AiUserMessage {
+  return {
+    role: 'user',
+    content: [
+      ...(supplement.text ? [{ type: 'text' as const, text: supplement.text }] : []),
+      ...(supplement.image ? [decodeStoredContentBlock(supplement.image)] : []),
+    ],
+  };
 }

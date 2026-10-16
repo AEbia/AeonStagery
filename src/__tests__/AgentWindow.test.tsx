@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => {
   let startResultHandler: ((payload: ProjectAgentStartResultPayload) => void) | null = null;
   return {
     emitted: [] as ProjectAgentTaskStatusPayload[],
-    sendSupplement: vi.fn(async () => ({ ok: true })),
+    sendSupplement: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
     requestStart: vi.fn((payload: { requestId?: string }) => {
       if (payload.requestId && startResultHandler) {
         startResultHandler({ requestId: payload.requestId, ok: true });
@@ -156,7 +156,8 @@ const CONTEXT: ProjectAgentProjectContext = {
 
 beforeEach(() => {
   mocks.emitted.length = 0;
-  mocks.sendSupplement.mockClear();
+  mocks.sendSupplement.mockReset();
+  mocks.sendSupplement.mockResolvedValue({ ok: true });
   mocks.requestStart.mockClear();
   mocks.requestPause.mockClear();
   mocks.requestCancel.mockClear();
@@ -235,6 +236,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** Mount with a conversation record + context so the thread surface shows. */
@@ -1102,7 +1104,79 @@ describe('AgentWindow conversation thread', () => {
   });
 });
 
+function mockImageProcessing() {
+  const bitmap = { width: 100, height: 50, close: vi.fn() };
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => bitmap));
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL = vi.fn(() => 'blob:test-image');
+    static revokeObjectURL = vi.fn();
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() => ({
+    drawImage: vi.fn(),
+  })) as unknown as typeof HTMLCanvasElement.prototype.getContext);
+  const blob = new Blob(['png'], { type: 'image/png' });
+  Object.defineProperty(blob, 'arrayBuffer', { value: async () => new Uint8Array([1, 2, 3]).buffer });
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => callback(blob));
+  return bitmap;
+}
+
 describe('AgentWindow composer', () => {
+  it.each(['running', 'idle', 'suspended'] as const)('sends an image-only supplement to a %s conversation', async (lifecycle) => {
+    mockImageProcessing();
+    await renderWithConversation();
+    const current = () => status({ lifecycle, phase: lifecycle === 'running' ? 'model_request' : 'settled', updatedAt: Date.now() + 1000 });
+    mocks.getTaskStatus.mockImplementation(async () => current());
+    mocks.publish(current());
+    const file = new File(['png'], 'reference.png', { type: 'image/png' });
+    const picker = document.querySelector('input[type="file"]');
+    if (!picker) throw new Error('Missing image picker');
+    fireEvent.change(picker, { target: { files: [file] } });
+    await screen.findByAltText('reference.png');
+    const send = screen.getByRole('button', { name: /^发送$/ });
+    expect((send as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(send);
+    await waitFor(() => expect(mocks.sendSupplement).toHaveBeenCalledWith('task-1', '', {
+      name: 'reference.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto',
+    }));
+    await waitFor(() => expect(screen.queryByAltText('reference.png')).toBeNull());
+  });
+
+  it('keeps the image and draft when the editor rejects a supplement', async () => {
+    mockImageProcessing();
+    mocks.sendSupplement.mockResolvedValue({ ok: false, error: '当前模型不支持图片输入' });
+    await renderWithConversation();
+    mocks.publish(status());
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    fireEvent.change(input, { target: { value: '看这张图' } });
+    fireEvent.paste(input, { clipboardData: { files: [new File(['png'], 'pasted.png', { type: 'image/png' })] } });
+    await screen.findByAltText('pasted.png');
+    fireEvent.click(screen.getByRole('button', { name: /^发送$/ }));
+    await screen.findByText('当前模型不支持图片输入');
+    expect((input as HTMLTextAreaElement).value).toBe('看这张图');
+    expect(screen.getByAltText('pasted.png')).toBeTruthy();
+  });
+
+  it('accepts a dropped image and rejects an unreadable image without losing the draft', async () => {
+    mockImageProcessing();
+    await renderWithConversation();
+    mocks.publish(status());
+    const composer = document.querySelector('.agent-promptbox');
+    if (!composer) throw new Error('Missing composer');
+    fireEvent.drop(composer, { dataTransfer: { files: [new File(['png'], 'dropped.png', { type: 'image/png' })] } });
+    await screen.findByAltText('dropped.png');
+    vi.mocked(createImageBitmap).mockRejectedValueOnce(new Error('decode failed'));
+    fireEvent.drop(composer, { dataTransfer: { files: [new File(['bad'], 'broken.png', { type: 'image/png' })] } });
+    await screen.findByText(/无法读取这张图片/);
+    expect(screen.getByAltText('dropped.png')).toBeTruthy();
+  });
+
+  it('allows attaching an image while the selected conversation is running', async () => {
+    await renderWithConversation();
+    mocks.publish(status());
+    const attach = await screen.findByRole('button', { name: /上传图片/i });
+    expect((attach as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('keeps one composer seat and card across the welcome and conversation states', () => {
     mocks.journalListByProject.mockResolvedValue([]);
     mocks.getProjectContext.mockResolvedValue(CONTEXT);

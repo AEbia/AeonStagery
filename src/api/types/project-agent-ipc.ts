@@ -41,9 +41,8 @@ export interface ProjectAgentBeginTaskRequest {
 }
 
 /**
- * User-attached image carried with a task start (window → editor). Bytes are
- * transient: they never enter the Agent journal — the persisted conversation
- * replaces image blocks with a text placeholder (ADR0023).
+ * User-attached image (window → editor). Bytes persist once with the owning
+ * message until compaction; UI projections expose only a text placeholder.
  */
 export interface ProjectAgentImageAttachment {
   readonly name: string;
@@ -62,6 +61,13 @@ export interface ProjectAgentStartRequest {
    * window can surface admission/vision failures instead of a silent no-op.
    */
   readonly requestId?: string;
+}
+
+export interface ProjectAgentSupplementRequest {
+  readonly taskId: string;
+  readonly text: string;
+  readonly image?: ProjectAgentImageAttachment;
+  readonly requestId: string;
 }
 
 /** Renderer-to-main terminal invocation. Only full-access task identities pass main's gate. */
@@ -177,8 +183,8 @@ export function projectConversationLogFromMessages(
 
 function conversationTextOf(content: readonly { readonly type: string; readonly text?: string }[]): string {
   return content
-    .filter((block): block is { readonly type: 'text'; readonly text: string } => block.type === 'text')
-    .map((block) => block.text)
+    .map((block) => block.type === 'image' ? '[已附加图片]' : block.type === 'text' ? block.text ?? '' : '')
+    .filter(Boolean)
     .join('\n');
 }
 

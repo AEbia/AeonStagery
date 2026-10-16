@@ -22,6 +22,8 @@ import type {
   ProjectAgentProjectContext,
   ProjectAgentRenameConversationResult,
   ProjectAgentStartRequest,
+  ProjectAgentImageAttachment,
+  ProjectAgentSupplementRequest,
   ProjectAgentStartResultPayload,
   ProjectAgentTerminalCommandRequest,
   ProjectAgentTaskStatusPayload,
@@ -159,8 +161,10 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('projectAgent:publishStatus', status),
     getTaskStatus: (taskId: string) =>
       ipcRenderer.invoke('projectAgent:getTaskStatus', taskId),
-    sendSupplement: (taskId: string, text: string) =>
-      ipcRenderer.invoke('projectAgent:sendSupplement', taskId, text),
+    sendSupplement: (taskId: string, text: string, image?: ProjectAgentImageAttachment) =>
+      ipcRenderer.invoke('projectAgent:sendSupplement', taskId, text, image),
+    publishSupplementResult: (payload: ProjectAgentStartResultPayload) =>
+      ipcRenderer.invoke('projectAgent:supplementResult', payload),
     requestStart: (payload: ProjectAgentStartRequest) =>
       ipcRenderer.invoke('projectAgent:requestStart', payload),
     runTerminalCommand: (request: ProjectAgentTerminalCommandRequest) =>
@@ -228,8 +232,8 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.on('projectAgent:setEffort', listener);
       return () => ipcRenderer.removeListener('projectAgent:setEffort', listener);
     },
-    onSupplement: (callback: (payload: { taskId: string; text: string }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, payload: { taskId: string; text: string }) => callback(payload);
+    onSupplement: (callback: (payload: ProjectAgentSupplementRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: ProjectAgentSupplementRequest) => callback(payload);
       ipcRenderer.on('projectAgent:supplement', listener);
       return () => ipcRenderer.removeListener('projectAgent:supplement', listener);
     },

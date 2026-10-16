@@ -61,6 +61,8 @@ provider 原生允许 multimodal tool result 时，adapter 直接映射统一消
 
 `readImage` 的图片 bytes 与文字/JSON content block 使用相同的单份消息持久化规则：只要所属 message 仍在当前 Agent 模型上下文中，经过既有字节和解码限制的 bytes 就随该 message 保存一次；每轮请求只引用并重新组装消息，不复制 bytes。上下文压缩原子替换旧 messages 后删除不再属于当前模型上下文的图片 bytes。Conversation 恢复时直接恢复当前完整 messages，不自动重读资源；资源后来不存在或内容变化时，Agent 必须通过工具重新取得当前事实。
 
+用户附加的图片遵循同样的消息生命周期：新对话、已有对话及执行中的补充消息均接受图片，允许只发图片；执行中的补充图片排队到当前工具轮完整闭合后交给模型。排队期间 payload 以 JSON-safe 形式保存在 supplement 中，交付时在同一次持久化中移入对应 user message 并移除队列中的 payload；后续请求和恢复直接使用该消息，不能首轮后退化为占位文字。对话日志与线程仅投影「已附加图片」提示，不携带 bytes。窗口支持文件选择、剪贴板粘贴和拖入，处理图片时禁止发送；编辑器校验目标对话和当前模型的图片能力并保存输入后，才返回发送成功。切换至不支持图片的模型而当前上下文仍含图片时，暂停并提示更换模型，保留原上下文。
+
 恢复后若资源不存在或内容指纹变化，只向 Agent 报告当前状态，不能把旧视觉观察当作当前资源事实。正常 80% 上下文压缩可以让摘要模型消费当前模型上下文中的图片并提取文字化关键发现；摘要替换提交成功后删除旧图片 payload。
 
 Project Agent 的模型请求可以请求 SSE 流式响应。main-process provider adapter 独占 SSE 读取与聚合，只有在完整 assistant message 可规范化后，业务层才校验 tool calls、把该 message 单份写入 Conversation store 并开始工具调度。renderer/main IPC 只传按 requestId 隔离的无内容进度事实：连接已建立、首次模型输出以及当前工具类别/名称；renderer 永远不接收 CoT、正文 delta、provider raw response 或未完成的 tool arguments，也不在 renderer 拼接 provider-specific 参数。首次收到 reasoning、正文或 tool-call delta 才开始“正在工作”计时；请求 stream 但 provider 回退为完整非流式响应时保持“正在连接”，不伪造工作时间。模型完整消息进入工具阶段或该轮结束时立即移除计时。工具开始时显示读取、校验或写入状态；完成后才以真实 tool call/result 投影出可展开、脱敏且限长的持久化活动事实。

@@ -606,6 +606,34 @@ describe('ProjectAgentCoordinator compaction behavior', () => {
     expect(JSON.stringify(coordinator.getMessages())).not.toContain('Continuation summary');
   });
 
+  it('lets the summary model see attached images before deleting their old payloads', async () => {
+    const summary = capturingTransport([VALID_SUMMARY_JSON]);
+    const journalPort = new InMemoryProjectAgentJournalPort();
+    const coordinator = new ProjectAgentCoordinator({
+      transport: capturingTransport([assistantText('seen')]).transport,
+      toolRegistry: createRegistry(), journalPort, contextWindow: 120_000,
+      continuationSummarizer: new ModelProjectAgentContinuationSummarizer({ transport: summary.transport }),
+    });
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    await coordinator.start({ projectId: 'proj', targetSceneIdentity: 'scene-cc', originalTaskText: 'See image', systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: 'attached-summary', initialImage: image });
+    expect((await coordinator.forceCompact()).ok).toBe(true);
+    expect(summary.requests[0]?.messages.flatMap((m) => m.content)).toContainEqual({ type: 'image', mimeType: image.mimeType, bytes: image.bytes, detail: 'auto' });
+    expect(coordinator.getMessages().flatMap((m) => m.content).some((b) => b.type === 'image')).toBe(false);
+    expect(JSON.stringify(await journalPort.load('proj', 'attached-summary'))).not.toContain('bytesBase64');
+  });
+
+  it('preserves pending image supplements through compaction and includes their visual token cost', async () => {
+    const coordinator = await compactingCoordinator({ contextWindow: 120_000 });
+    coordinator.enqueueSupplement('', { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'high' });
+    const budget = await coordinator.maybeCompactBeforeModelCall();
+    expect(budget.estimate.breakdown?.imageTokens).toBeGreaterThan(0);
+    expect((await coordinator.forceCompact()).ok).toBe(true);
+    expect(coordinator.getMessages().flatMap((m) => m.content)).toContainEqual({
+      type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'high',
+    });
+    expect(coordinator.getTask()?.peekPendingSupplements()).toHaveLength(0);
+  });
+
   it('preserves undelivered supplements verbatim after compaction', async () => {
     const coordinator = await compactingCoordinator({ contextWindow: 12_000 });
     coordinator.enqueueSupplement('keep this exact instruction');
