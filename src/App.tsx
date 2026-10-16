@@ -6,6 +6,7 @@ import { buildRedactedSceneSummary } from './services/crash/sceneSummary';
 import {
   IconAgent,
   IconAiProse,
+  IconArrowLeft,
   IconBell,
   IconCrosshair,
   IconFilm,
@@ -54,6 +55,7 @@ import { useAppDialogs } from './ui/hooks/useAppDialogs';
 import { useAppInitialization } from './ui/hooks/useAppInitialization';
 import { useAppLayout } from './ui/hooks/useAppLayout';
 import { useAppProjectWorkspace } from './ui/hooks/useAppProjectWorkspace';
+import { useAppProjectClose } from './ui/hooks/useAppProjectClose';
 import { useAppShortcuts } from './ui/hooks/useAppShortcuts';
 import { useWorkspaceToolsBridge } from './ui/hooks/useWorkspaceToolsBridge';
 
@@ -139,6 +141,20 @@ function AppContent({ contextValue, sessionBindings }: {
     handleJoinCollaboration, handleStopCollaborationServer,
   } = useAppCollaborationRoom(contextValue, sessionBindings, project);
   const { status: collaborationStatus, peers: collaborationPeers } = sessionBindings;
+  const { handleCloseProject, isClosingProject } = useAppProjectClose(
+    contextValue,
+    collaborationController.disconnect,
+    project.waitForPendingProjectOperations,
+  );
+  const handleReturnHome = useCallback(async () => {
+    if (!await handleCloseProject()) return;
+    project.setIsCollaborationJoinHomeLocked(false);
+    setShowAIWorkbench(false);
+    setShowVoiceWorkbench(false);
+    setShowExport(false);
+    setShowWebGalRegenerate(false);
+    setRenameTarget(null);
+  }, [handleCloseProject, project.setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
   const layout = useAppLayout(hasLoadedScene);
   const {
     contextTab, sidePanelView, isTracksMode, leftPanelWidth, sidePanelWidth,
@@ -158,7 +174,7 @@ function AppContent({ contextValue, sessionBindings }: {
     handleRecenter, handleZoomIn, handleZoomOut, isPanning,
   } = useViewport(stageRef, !showProjectHome);
   useAppShortcuts({
-    contextValue, collaborationStatus, initialized, hasLoadedScene, showProjectHome,
+    contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
   });
   const validationBanner = useMemo(() => {
@@ -186,6 +202,8 @@ function AppContent({ contextValue, sessionBindings }: {
   return (
     <div
       className="app-container"
+      ref={(element) => { element?.toggleAttribute('inert', isClosingProject); }}
+      aria-busy={isClosingProject}
       data-timeline-layout={navigatorPriorityActive ? 'list' : 'tracks'}
       style={{
         '--workbench-timeline-extension': `${timelineHeight + 4}px`,
@@ -194,8 +212,21 @@ function AppContent({ contextValue, sessionBindings }: {
     >
       <div className="top-bar">
         <div className="top-bar__title">
-          <img src="./icon.png" alt="AeonStagery" className="top-bar__logo" width={22} height={22} />
-          <span className="top-bar__brand">AeonStagery</span>
+          <button
+            type="button"
+            className={`top-bar__brand-control${currentProject && !isCollaborationJoinHomeLocked ? ' top-bar__brand-control--return' : ''}`}
+            onClick={() => void handleReturnHome()}
+            disabled={!initialized || !currentProject || isCollaborationJoinHomeLocked || isClosingProject}
+            title={currentProject ? '保存并关闭当前项目，返回项目主页' : 'AeonStagery'}
+            aria-label={currentProject ? '关闭项目并返回主页' : 'AeonStagery'}
+          >
+            <img src="./icon.png" alt="" className="top-bar__logo top-bar__brand-identity" width={22} height={22} />
+            <IconArrowLeft className="top-bar__brand-return top-bar__brand-return-icon" width={22} height={22} aria-hidden="true" />
+            <span className="top-bar__brand top-bar__brand-identity" aria-hidden="true">AeonStagery</span>
+            <span className="top-bar__brand top-bar__brand-return" aria-hidden="true">
+              {isClosingProject ? '正在关闭…' : '返回主页'}
+            </span>
+          </button>
           {currentProject && (
             <button
               type="button"
@@ -211,6 +242,7 @@ function AppContent({ contextValue, sessionBindings }: {
           <button
             className="btn btn--icon top-bar__project-action"
             onClick={() => void handleOpenProject()}
+            disabled={isClosingProject}
             title="打开项目 (Ctrl+O)"
             aria-label="打开项目"
           >
@@ -466,7 +498,8 @@ function AppContent({ contextValue, sessionBindings }: {
                     </button>
                     <button
                       className="btn"
-                      onClick={() => contextValue.services.projectWorkspace.closeProject()}
+                      onClick={() => void handleReturnHome()}
+                      disabled={isClosingProject}
                       style={{ ...stageLoadButtonStyle, background: 'rgba(255,255,255,0.1)', color: '#e2e8f0' }}
                     >
                       返回项目主页
@@ -477,7 +510,7 @@ function AppContent({ contextValue, sessionBindings }: {
 
               {initialized && <React.Suspense fallback={null}><BakeProgressOverlay /></React.Suspense>}
             </div>
-            <React.Suspense fallback={null}><PlaybackControls /></React.Suspense>
+            {!showProjectHome && <React.Suspense fallback={null}><PlaybackControls /></React.Suspense>}
           </div>
         </ErrorBoundary>
 
