@@ -11,20 +11,26 @@ export const ImageDialogueTemplate: DialogueTemplate = {
   resolveTextStyle(config) {
     const style = config.presentation?.text;
     if (!style) return {};
+    const hidden = style.hidden === true;
     return {
       fontFamily: style.fontFamily || DEFAULT_FONT_FAMILY,
       fontSize: style.fontSize,
       fontWeight: style.fontWeight,
-      fill: config.textColor || style.color,
+      fill: hidden ? 'transparent' : config.textColor || style.color,
       lineHeight: style.lineHeight,
+      letterSpacing: style.letterSpacing,
       align: style.align,
-      stroke: { color: style.strokeColor ?? 'transparent', width: style.strokeWidth ?? 0 },
-      dropShadow: style.dropShadow
+      stroke: {
+        color: hidden ? 'transparent' : style.strokeColor ?? 'transparent',
+        width: hidden ? 0 : style.strokeWidth ?? 0,
+      },
+      dropShadow: !hidden && style.dropShadow
         ? {
             color: style.dropShadowColor ?? '#000000',
             alpha: style.dropShadowAlpha ?? 1,
             blur: style.dropShadowBlur ?? 0,
             distance: style.dropShadowDistance ?? 5,
+            ...(style.dropShadowAngle != null ? { angle: style.dropShadowAngle } : {}),
           }
         : false,
       wordWrapWidth: style.maxWidth,
@@ -79,7 +85,7 @@ function createImagePanel(style: DialogueImagePanelStyle, height: number, width 
       style.nineSlice[3],
     )
     : new PIXI.Sprite(texture);
-  panel.x = style.x;
+  panel.x = style.x - width * (style.anchorX ?? 0);
   panel.y = style.y;
   panel.width = width;
   panel.height = height;
@@ -109,6 +115,7 @@ function renderNamebox(
     fontSize: speakerStyle?.fontSize ?? Math.round((presentation.text.fontSize ?? config.fontSize ?? 44) * 0.9),
     fontWeight: (speakerStyle?.fontWeight || '700') as any,
     fill: color,
+    letterSpacing: speakerStyle?.letterSpacing ?? 0,
     align: speakerStyle?.align ?? 'center',
     // Nameplate typography mirrors the body text layer so imported templates can
     // carry their own plate outline and glow instead of a flat fill.
@@ -122,6 +129,7 @@ function renderNamebox(
           alpha: speakerStyle.dropShadowAlpha ?? 1,
           blur: speakerStyle.dropShadowBlur ?? 0,
           distance: speakerStyle.dropShadowDistance ?? 5,
+          ...(speakerStyle.dropShadowAngle != null ? { angle: speakerStyle.dropShadowAngle } : {}),
         }
       : false,
     padding: shadowPadding,
@@ -140,7 +148,7 @@ function renderNamebox(
   const speakerAlign = speakerStyle?.align ?? 'center';
   const innerWidth = Math.max(0, panelWidth - paddingLeft - paddingRight);
   speakerText.anchor.set(speakerAlign === 'left' ? 0 : speakerAlign === 'right' ? 1 : 0.5, 0.5);
-  speakerText.x = panelStyle.x
+  speakerText.x = panel.x
     + paddingLeft
     + (speakerAlign === 'left' ? 0 : speakerAlign === 'right' ? innerWidth : innerWidth / 2)
     + (speakerStyle?.textOffset?.[0] ?? 0);

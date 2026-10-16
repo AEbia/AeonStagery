@@ -9,6 +9,7 @@ import type { ActionInspectorProps } from '../ActionInspector';
 import type { TimelineAction, TimelineScene } from '../semanticTimelineTypes';
 import { asRecord } from './asRecord';
 import type { WebGalStyleImportActions } from './paramControls/context';
+import type { DialogueStyleRefresh } from '../../../services/timeline-authoring/SemanticAuthoringApplicationService';
 
 export interface InspectorMutationsDeps {
   appContext: ReturnType<typeof useApp>;
@@ -242,9 +243,30 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
         // package is enabled for the project, so enable it while persisting the
         // project template configuration.
         await enableImportedPackage(result.package.id);
+        let updatedDialogues = 0;
+        const semanticAuthoring = appContext.services?.semanticAuthoring;
+        if (result.package.replaced && projectWorkspace?.getCurrentProject() && semanticAuthoring) {
+          try {
+            const styles = templatePackageCatalog?.getSummaries()
+              .find((candidate) => candidate.id === result.package.id)?.dialogueStyles ?? [];
+            const updates: DialogueStyleRefresh[] = [];
+            for (const style of styles.filter((candidate) => candidate.renderer === 'image-dialogue-v1')) {
+              const prepared = await projectWorkspace.prepareDialogueStyle(style.id);
+              if (!prepared.dialoguePresentation) throw new Error(`字幕样式不可用：${style.name}`);
+              updates.push({
+                presentation:prepared.dialoguePresentation,
+                ...(projectDialogueStyleId === style.id ? { previousPresentation:projectDialoguePresentation } : {}),
+              });
+            }
+            updatedDialogues = await semanticAuthoring.refreshDialogueStyles(updates);
+          } catch (error) {
+            return { ok:false, message:`模板包已更新，但当前场景对白更新失败：${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
         return {
           ok: true,
-          message: `${result.package.replaced ? '已更新' : '已导入'}字幕样式：${result.package.name}`,
+          message: `${result.package.replaced ? '已更新' : '已导入'}字幕样式：${result.package.name}`
+            + (updatedDialogues > 0 ? `，已同步当前场景 ${updatedDialogues} 句对白（可撤销）` : ''),
         };
       } catch (error) {
         return {

@@ -14,14 +14,13 @@ import type {
   DialogueNineSlice,
 } from '../../../api/types/semantic-scene';
 import {
-  alphaOf, paintColor, rgbOnly, rnd, STAGE_SCALE, STAGE_HEIGHT, STAGE_WIDTH,
-  SHADOW_BLUR_RATIO, SHADOW_DIST_RATIO,
+  alphaOf, cssLength, paintColor, rgbOnly, rnd, STAGE_SCALE, STAGE_HEIGHT, STAGE_WIDTH,
   type BorderInfo, type BoxShadowInfo, type BoxSides, type Paint,
   type ScssBlocks, type ScaleInfo, type TextShadowInfo,
 } from './WebGalScssSyntax';
 import {
   computeWebGalTextboxStyle, computeWebGalTextboxBlocks,
-  type WebGalComputedStyle,
+  type WebGalComputedStyle, type WebGalComputedElement,
 } from './WebGalComputedStyle';
 
 /** A corner ornament referenced by a panel's `::after` rule. */
@@ -55,6 +54,8 @@ export interface WebGalNineSlicePanelGeometry {
   width: number;
   height: number;
   nineSlice: DialogueNineSlice;
+  /** Body rectangle inside an expanded artwork canvas. */
+  content?: { x: number; y: number; width: number; height: number };
 }
 
 /** Draw size of the generated artwork, matching what the engine renders at 1:1. */
@@ -104,7 +105,11 @@ export function extractWebGalTextBoxTheme(blocks: ScssBlocks): WebGalTextBoxThem
 
 function themeFromComputedStyle(computed: WebGalComputedStyle): WebGalTextBoxTheme {
   const { main, background: bg, name, nameBackground: nameBg, backgroundAfter: bgAfter, nameAfter } = computed;
-  const textbox: WebGalPanelTheme = {
+  const hiddenPanel = (): WebGalPanelTheme => ({
+    fill: { kind: 'solid', color: '#00000000' },
+    border: { width: 0, color: null }, radius: 0, shadow: null, deco: null,
+  });
+  const textbox: WebGalPanelTheme = main.hidden || bg.hidden ? hiddenPanel() : {
     fill: bg.background ?? main.background ?? { kind: 'solid', color: '#00000000' },
     border: { ...(bg.hasBorder ? bg.border : main.border) },
     radius: bg.hasRadius ? bg.radius : main.radius,
@@ -115,17 +120,19 @@ function themeFromComputedStyle(computed: WebGalComputedStyle): WebGalTextBoxThe
       right: bgAfter.lengths.right ?? 0, bottom: bgAfter.lengths.bottom ?? 0,
     } : null,
   };
-  // Mapping approximation: a shared showName fill shades glyphs in a frameless
-  // template; only a dedicated backdrop fill should create a nameplate there.
-  const boxIsTransparent = textbox.fill.kind === 'solid' && alphaOf(textbox.fill.color) < 0.004;
-  const namebox: WebGalPanelTheme = {
-    fill: !computed.nameBackgroundHasPaint && boxIsTransparent
-      ? { kind: 'solid', color: '#00000000' }
-      : nameBg.background ?? name.background ?? { kind: 'solid', color: '#FFFFFF' },
-    border: { ...(nameBg.hasBorder ? nameBg.border : name.border) },
-    radius: nameBg.hasRadius ? nameBg.radius : name.radius,
-    shadow: structuredClone(nameBg.hasBoxShadow ? nameBg.boxShadow : name.boxShadow),
-    deco: nameAfter.imageFile ? {
+  // The visible label paints its own box even when the separate backdrop is
+  // display:none. Body-panel transparency says nothing about that paint.
+  const backdrop = nameBg.hidden ? name : nameBg;
+  const labelHasFill = name.background != null
+    && (name.background.kind !== 'solid' || alphaOf(name.background.color) > 0);
+  const labelHasVisibleBorder = name.border.width > 0 && alphaOf(name.border.color) > 0;
+  const namebox: WebGalPanelTheme = main.hidden ? hiddenPanel() : {
+    fill: (labelHasFill ? name.background : backdrop.background) ?? { kind: 'solid', color: '#00000000' },
+    // A transparent foreground border doesn't erase its sibling's border.
+    border: { ...(labelHasVisibleBorder ? name.border : backdrop.border) },
+    radius: name.hasRadius ? name.radius : backdrop.radius,
+    shadow: structuredClone(name.hasBoxShadow ? name.boxShadow : backdrop.boxShadow),
+    deco: !nameBg.hidden && nameAfter.imageFile ? {
       file: nameAfter.imageFile, size: nameAfter.decorationSize ?? 0,
       opacity: nameAfter.opacity, rotate: nameAfter.rotation,
       right: nameAfter.lengths.right ?? 0, bottom: nameAfter.lengths.bottom ?? 0,
@@ -140,9 +147,10 @@ function themeFromComputedStyle(computed: WebGalComputedStyle): WebGalTextBoxThe
  * Radii and blur use the smaller factor so non-uniform scaling never stretches
  * them; offsets follow their own axis.
  */
-function scaleTheme(theme: WebGalTextBoxTheme, sx: number, sy: number): void {
+function scaleTheme(theme: WebGalTextBoxTheme, sx: number, sy: number,
+  slots: readonly ('textbox' | 'namebox')[] = ['textbox', 'namebox']): void {
   const uniform = Math.min(sx, sy);
-  for (const slot of ['textbox', 'namebox'] as const) {
+  for (const slot of slots) {
     const panel = theme[slot];
     if (!panel) continue;
     if (panel.radius) panel.radius = rnd(panel.radius * uniform);
@@ -174,27 +182,44 @@ function describePaint(paint: Paint | null): string {
 /** Convert a `text-shadow` grouping into the engine's `dropShadow*` parameters. */
 function toDropShadow(
   shadow: TextShadowInfo | null,
-  fontSize: number,
-  uniformScale: number | undefined,
-  axisScale: number | undefined,
+  sx: number,
+  sy: number,
 ): Partial<DialogueImageTextStyle> {
   if (!shadow?.has) return {};
+  const dx = shadow.offsetX * sx;
+  const dy = shadow.distance * sy;
   return {
     dropShadow: true,
     dropShadowColor: shadow.color,
     dropShadowAlpha: rnd(shadow.alpha * 1000) / 1000,
-    // A symmetric layer group is an outline: its blur is a fixed pixel value in
-    // the stylesheet and must not be inflated by the font size, which would
-    // smear the crisp edge the template asked for.
-    dropShadowBlur: shadow.symmetric
-      ? Math.max(1, rnd(shadow.blur * (uniformScale || 1)))
-      : Math.max(1, rnd(Math.max(shadow.blur * (uniformScale || 1), fontSize * SHADOW_BLUR_RATIO))),
+    dropShadowBlur: Math.max(0, rnd(shadow.blur * Math.min(sx, sy))),
     // A symmetric group must lose its offset: the engine's drop shadow only
     // points one way, so keeping it turns an even glow into a corner smudge.
-    dropShadowDistance: shadow.symmetric ? 0 : Math.max(0, rnd(
-      Math.max(Math.abs(shadow.distance) * (axisScale || 1), fontSize * SHADOW_DIST_RATIO),
-    )),
+    dropShadowDistance: shadow.symmetric ? 0 : rnd(Math.hypot(dx, dy)),
+    ...(!shadow.symmetric ? { dropShadowAngle: Math.atan2(dy, dx) } : {}),
   };
+}
+
+/** Resolve an element's transform origin in its unscaled border box. */
+function origin(element: WebGalComputedElement, width: number, height: number): [number, number] {
+  return [
+    cssLength(element.transformOrigin[0], element.fontSize, width) ?? width / 2,
+    cssLength(element.transformOrigin[1], element.fontSize, height) ?? height / 2,
+  ];
+}
+
+/** Reserve the full visible box-shadow bounds around the nameplate body. */
+function nameboxShadowInsets(shadow: BoxShadowInfo | null): [left: number, top: number, right: number, bottom: number] {
+  if (!shadow) return [0, 0, 0, 0];
+  // The SVG uses stdDeviation = CSS blur / 2; three standard deviations cover
+  // the rendered blur while leaving a small antialiasing margin after rounding.
+  const extent = shadow.spread + Math.max(0, shadow.blur) * 1.5;
+  return [
+    Math.max(0, Math.ceil(extent - shadow.dx)),
+    Math.max(0, Math.ceil(extent - shadow.dy)),
+    Math.max(0, Math.ceil(extent + shadow.dx)),
+    Math.max(0, Math.ceil(extent + shadow.dy)),
+  ];
 }
 
 /**
@@ -266,6 +291,46 @@ export function mapWebGalTextboxStyle(
   let textX = boxX + pads.l;
   let textW = Math.max(1, boxW - pads.l - pads.r);
   let textY = boxY + pads.t;
+  const absoluteText = textBlock.position === 'absolute';
+  const textLeft = absoluteText ? textBlock.lengths.left : null;
+  const textRight = absoluteText ? textBlock.lengths.right : null;
+  const textTop = absoluteText ? textBlock.lengths.top : null;
+  const textInsetL = textBlock.padding.l + textBlock.border.width;
+  const textInsetR = textBlock.padding.r + textBlock.border.width;
+  const explicitTextW = textBlock.lengths.width;
+  // Resolve the content width before alignment. Absolute insets constrain an
+  // auto-sized box; relative insets only move its already laid-out border box.
+  textW = Math.max(1, explicitTextW == null
+    ? textW - (textLeft ?? 0) - (textRight ?? 0)
+      - textBlock.margin.l - textBlock.margin.r - textInsetL - textInsetR
+    : explicitTextW - (textBlock.boxSizing === 'border-box' ? textInsetL + textInsetR : 0));
+  textX += (textLeft ?? 0) + textBlock.margin.l + textInsetL;
+  textY += (textTop ?? 0) + textBlock.margin.t + textBlock.padding.t;
+  if (textBlock.lengths.width != null && textLeft == null && textRight == null && main.flexAlign === 'center') {
+    textX = boxX + pads.l
+      + (boxW - pads.l - pads.r - textW - textInsetL - textInsetR
+        - textBlock.margin.l - textBlock.margin.r) / 2
+      + textBlock.margin.l + textInsetL;
+  } else if (textRight != null && textLeft == null && textBlock.lengths.width != null) {
+    textX = boxX + boxW - pads.r - textRight - textBlock.margin.r - textW - textInsetR;
+  }
+  if (textBlock.position === 'relative') {
+    textX += textBlock.lengths.left ?? -(textBlock.lengths.right ?? 0);
+    textY += textBlock.lengths.top ?? -(textBlock.lengths.bottom ?? 0);
+  }
+  textX = rnd(textX);
+  let bodySx = textBlock.scale?.sx ?? 1;
+  let bodySy = textBlock.scale?.sy ?? 1;
+  const bodyUniform = Math.min(bodySx, bodySy);
+  if (textBlock.scale) {
+    const [ox, oy] = origin(textBlock, textW, textBlock.lengths.height ?? lineHeight);
+    textX = rnd(textX + ox * (1 - bodySx));
+    textY = rnd(textY + oy * (1 - bodySy));
+    textW = Math.max(1, rnd(textW * bodySx));
+    fontSize = Math.max(1, rnd(fontSize * bodyUniform));
+    lineHeight = Math.max(fontSize, rnd(lineHeight * bodySy));
+    notes.push('已将 `.text` 的独立缩放与 transform-origin 折算到正文位置、宽度和字形。');
+  }
 
   const centerOffset = (boxX + boxW / 2) - (STAGE_WIDTH / 2);
   if (strictCenter) {
@@ -322,7 +387,7 @@ export function mapWebGalTextboxStyle(
   if (inner.hidden) {
     if (inner.stroke.width > 0) notes.push('`.inner` 描边层设置为隐藏，已按无描边处理。');
   } else {
-    strokeWidth = inner.stroke.width;
+    strokeWidth = inner.stroke.width * bodyUniform;
     if (strokeWidth > 0) strokeColor = rgbOnly(inner.stroke.color);
   }
 
@@ -377,6 +442,43 @@ export function mapWebGalTextboxStyle(
   if (nameMinW == null) nameMinW = rnd(namePadL + namePadR + nameSize * 2);
   nameMinW = Math.max(nameMinW, namePadL + namePadR + nameSize, 40);
 
+  // Relative flex items keep their normal centered position before top/left
+  // offsets. Keep an anchor in the presentation: the final name width is only
+  // known after the renderer measures the actual speaker label.
+  const centeredName = name.position !== 'absolute' && main.flexAlign === 'center';
+  let nameAnchorX = centeredName ? 0.5 : 0;
+  if (centeredName) nameboxX = boxX + pads.l + (boxW - pads.l - pads.r) / 2 + (name.lengths.left ?? 0);
+  if (name.boxSizing !== 'border-box') {
+    nameH += namePads.t + namePads.b + name.border.width * 2;
+    nameMinW += name.border.width * 2;
+  }
+  const nameSx = name.scale?.sx ?? 1;
+  const nameSy = name.scale?.sy ?? 1;
+  const nameUniform = Math.min(nameSx, nameSy);
+  if (name.scale) {
+    const [ox, oy] = origin(name, nameMinW, nameH);
+    // The border box may grow with the measured speaker label. Express the
+    // width-dependent origin correction as an anchor on its scaled width:
+    // left = x - unscaledWidth * anchor + origin * (1 - scale).
+    const originFraction = name.transformOrigin[0].endsWith('%')
+      ? (cssLength(name.transformOrigin[0], name.fontSize, 1) ?? 0.5) : 0;
+    nameAnchorX = (nameAnchorX - originFraction * (1 - nameSx)) / nameSx;
+    if (!name.transformOrigin[0].endsWith('%')) nameboxX += ox * (1 - nameSx);
+    nameboxY = rnd(nameboxY + oy * (1 - nameSy));
+    nameMinW = Math.max(1, rnd(nameMinW * nameSx));
+    nameH = Math.max(1, rnd(nameH * nameSy));
+    nameSize = Math.max(1, rnd(nameSize * nameUniform));
+    nameLineHeight = Math.max(nameSize, rnd(nameLineHeight * nameSy));
+    namePads.l = rnd(namePads.l * nameSx);
+    namePads.r = rnd(namePads.r * nameSx);
+    namePads.t = rnd(namePads.t * nameSy);
+    namePads.b = rnd(namePads.b * nameSy);
+    namePadL = Math.max(0, namePads.l);
+    namePadR = Math.max(0, namePads.r);
+    speakerPadding = [namePadL, namePads.t, namePadR, namePads.b];
+    notes.push('已将 `.TextBox_showName` 的独立缩放折算到姓名框和姓名文字。');
+  }
+
   // WebGAL themes commonly declare fonts on the visible overlay layers rather
   // than their `.text` / `.TextBox_showName` wrappers.
   const family = options.fontFamily || outer.fontFamily || textBlock.fontFamily;
@@ -386,26 +488,28 @@ export function mapWebGalTextboxStyle(
   const nameAlign = name.align ?? 'left';
   const transform = computed.transform;
   const theme = themeFromComputedStyle(computed);
+  scaleTheme(theme, nameSx, nameSy, ['namebox']);
 
   // `var` in the original: these stay undefined when the template has no
   // transform, and the later shadow maths relies on that (a missing factor is
   // treated as 1 rather than throwing).
   let uniformScale: number | undefined;
-  let axisScaleY: number | undefined;
 
   if (transform) {
     // `transform-origin` defaults to 50% 50%, so scale about the centre of the
     // **unscaled** box.
     const sx = transform.sx;
     const sy = transform.sy;
-    const originX = boxX + boxW / 2;
-    const originY = boxY + boxH / 2;
+    const [ox, oy] = origin(main, boxW, boxH);
+    const originX = boxX + ox;
+    const originY = boxY + oy;
     const scaleX = (p: number): number => rnd(originX + (p - originX) * sx);
     const scaleY = (p: number): number => rnd(originY + (p - originY) * sy);
     const scaleW = (w: number): number => Math.max(1, rnd(w * sx));
     const scaleH = (h: number): number => Math.max(1, rnd(h * sy));
     uniformScale = Math.min(sx, sy); // fonts and radii take the smaller factor
-    axisScaleY = sy;
+    bodySx *= sx;
+    bodySy *= sy;
 
     const previousTextX = textX;
     const previousTextY = textY;
@@ -492,10 +596,19 @@ export function mapWebGalTextboxStyle(
     nameboxRightSlice = Math.max(nameboxRightSlice, Math.min(nameMinW / 3, (nameboxDeco.size || 0) + 8));
   }
   const nameboxVerticalSlice = Math.max(0, Math.min(Math.floor(nameH / 3), 24));
+  const [nameboxShadowLeft, nameboxShadowTop, nameboxShadowRight, nameboxShadowBottom]
+    = nameboxShadowInsets(theme.namebox.shadow);
+  const nameboxTextureW = nameMinW + nameboxShadowLeft + nameboxShadowRight;
+  const nameboxTextureH = nameH + nameboxShadowTop + nameboxShadowBottom;
+  const nameboxContent = nameboxShadowLeft || nameboxShadowTop || nameboxShadowRight || nameboxShadowBottom
+    ? { x: nameboxShadowLeft, y: nameboxShadowTop, width: nameMinW, height: nameH }
+    : undefined;
+  const nameboxCanvasX = rnd(nameboxX
+    + nameAnchorX * (nameboxShadowLeft + nameboxShadowRight) - nameboxShadowLeft);
+  const nameboxCanvasY = rnd(nameboxY - nameboxShadowTop);
 
-  // A downward `box-shadow` is painted outside the element and takes no layout
-  // space, but the artwork has a fixed canvas, so reserve the offset or the
-  // shadow is clipped. Artwork height = box height + dy.
+  // A box shadow does not affect CSS layout. Keep the body's minHeight separate
+  // from the larger artwork canvas used to avoid clipping its full shadow.
   const textboxShadowDy = (theme.textbox.shadow && theme.textbox.shadow.dy > 0)
     ? Math.max(1, Math.round(theme.textbox.shadow.dy))
     : 0;
@@ -508,9 +621,15 @@ export function mapWebGalTextboxStyle(
       nineSlice: [textboxPad, textboxPad, textboxRightSlice, textboxBottomSlice],
     },
     namebox: {
-      width: nameMinW,
-      height: nameH,
-      nineSlice: [nameboxPadSlice, nameboxVerticalSlice, nameboxRightSlice, nameboxVerticalSlice],
+      width: nameboxTextureW,
+      height: nameboxTextureH,
+      nineSlice: [
+        nameboxShadowLeft + nameboxPadSlice,
+        nameboxShadowTop + nameboxVerticalSlice,
+        nameboxShadowRight + nameboxRightSlice,
+        nameboxShadowBottom + nameboxVerticalSlice,
+      ],
+      ...(nameboxContent ? { content: nameboxContent } : {}),
     },
   };
 
@@ -527,9 +646,11 @@ export function mapWebGalTextboxStyle(
     y: textY,
     maxWidth: textW,
     lineHeight,
+    ...(outer.letterSpacing !== 0 ? { letterSpacing: rnd(outer.letterSpacing * bodySx) } : {}),
     align,
     strokeColor,
     strokeWidth,
+    ...(main.hidden || textBlock.hidden ? { hidden: true } : {}),
   };
 
   // Each layer consumes its own computed typography, including inheritance.
@@ -539,14 +660,27 @@ export function mapWebGalTextboxStyle(
     fontWeight: outerName.fontWeight,
     color: nameColor,
     align: nameAlign,
-    padding: speakerPadding,
+    padding: [
+      speakerPadding[0] + nameboxShadowLeft,
+      speakerPadding[1] + nameboxShadowTop,
+      speakerPadding[2] + nameboxShadowRight,
+      speakerPadding[3] + nameboxShadowBottom,
+    ],
+    ...(outerName.letterSpacing !== 0 ? { letterSpacing: rnd(outerName.letterSpacing * nameSx * (transform?.sx ?? 1)) } : {}),
   };
+  const speakerScaleX = nameSx * (transform?.sx ?? 1);
+  const speakerScaleY = nameSy * (transform?.sy ?? 1);
+  const speakerOffset: [number, number] = [
+    rnd((outerName.lengths.left ?? 0) * speakerScaleX),
+    rnd((outerName.lengths.top ?? 0) * speakerScaleY),
+  ];
+  if (speakerOffset.some((value) => value !== 0)) speaker.textOffset = speakerOffset;
 
   if (fontFile) {
     text.fontFile = fontFile;
     speaker.fontFile = fontFile;
   }
-  Object.assign(text, toDropShadow(shadow, fontSize, uniformScale, axisScaleY));
+  Object.assign(text, toDropShadow(shadow, bodySx, bodySy));
   if (shadow?.has) {
     notes.push('多条 `text-shadow` 已合并为单层 `dropShadow`（按主要图层取：'
       + `blur=${text.dropShadowBlur}、distance=${text.dropShadowDistance}）；`
@@ -555,7 +689,7 @@ export function mapWebGalTextboxStyle(
 
   // ── Nameplate outline (`.innerName`'s `-webkit-text-stroke`) ──
   if (innerName.hasStroke && !innerName.hidden) {
-    const width = innerName.stroke.width > 0 ? Math.max(1, rnd(innerName.stroke.width * (uniformScale || 1))) : 0;
+    const width = innerName.stroke.width > 0 ? Math.max(1, rnd(innerName.stroke.width * nameUniform * (uniformScale || 1))) : 0;
     speaker.strokeColor = rgbOnly(innerName.stroke.color);
     speaker.strokeWidth = width;
     notes.push(`**名牌文字描边**：\`speaker.strokeColor=${speaker.strokeColor}\`，`
@@ -564,11 +698,26 @@ export function mapWebGalTextboxStyle(
 
   // ── Nameplate shadow (`.outerName`'s `text-shadow`) ──
   if (nameShadow?.has) {
-    const nameDrop = toDropShadow(nameShadow, nameSize, uniformScale, axisScaleY);
+    const nameDrop = toDropShadow(nameShadow, speakerScaleX, speakerScaleY);
     Object.assign(speaker, nameDrop);
     notes.push('**名牌文字阴影**：`speaker.dropShadow` 提取自 `.outerName` 的 `text-shadow`'
       + `（blur=${nameDrop.dropShadowBlur}、alpha=${nameDrop.dropShadowAlpha}、`
       + `distance=${nameDrop.dropShadowDistance}）。`);
+  }
+  // Some themes draw a second clipped glyph layer instead of text-shadow.
+  // Its displacement is relative to the visible foreground, not the wrapper.
+  if (!nameShadow?.has && !innerName.hidden && innerName.backgroundClipText && innerName.background) {
+    const color = paintColor(innerName.background, innerName.color);
+    const alpha = innerName.background.kind === 'solid' ? alphaOf(innerName.background.color) : 1;
+    const dx = ((innerName.lengths.left ?? 0) - (outerName.lengths.left ?? 0)) * speakerScaleX;
+    const dy = ((innerName.lengths.top ?? 0) - (outerName.lengths.top ?? 0)) * speakerScaleY;
+    if (alpha > 0 && (dx !== 0 || dy !== 0)) {
+      Object.assign(speaker, {
+        dropShadow: true, dropShadowColor: rgbOnly(color), dropShadowAlpha: rnd(alpha * 1000) / 1000,
+        dropShadowBlur: 0, dropShadowDistance: rnd(Math.hypot(dx, dy)), dropShadowAngle: Math.atan2(dy, dx),
+      });
+      notes.push('已将 `.innerName` 的错位裁切文字层转换为姓名文字阴影。');
+    }
   }
 
   // ── Report ──
@@ -591,8 +740,7 @@ export function mapWebGalTextboxStyle(
   notes.push('**入场动画无法迁移**：当前对话框样式仅支持静态展示，'
     + '模板中的 `@keyframes`（如淡入、逐字显示等动画）未导入。');
   if (!fontFile) {
-    notes.push('样式表中未包含字体声明；若 `template.json` 中配置了 `fonts`，'
-      + '导入器将自动读取并复制对应字体文件。');
+    notes.push(`已保留字体族名称（正文：${family}；姓名：${nameFamily}），但模板未附带可复制的字体文件，显示效果取决于本机已安装字体。`);
   }
 
   const style: WebGalDialogueStyle = {
@@ -612,16 +760,21 @@ export function mapWebGalTextboxStyle(
       namebox: {
         image: `${PANEL_IMAGE_DIR}namebox.svg`,
         nineSlice: assetGeom.namebox.nineSlice,
-        x: nameboxX,
-        y: nameboxY,
-        width: nameMinW,
+        x: nameboxCanvasX,
+        y: nameboxCanvasY,
+        width: nameboxTextureW,
+        ...(nameboxTextureH !== nameH ? { height: nameboxTextureH } : {}),
         minHeight: nameH,
-        ...(computed.nameBackground.opacity !== 1 ? { opacity: computed.nameBackground.opacity } : {}),
+        ...(nameAnchorX !== 0 ? { anchorX: nameAnchorX } : {}),
+        ...((computed.nameBackground.hidden ? name.opacity : computed.nameBackground.opacity) !== 1
+          ? { opacity: computed.nameBackground.hidden ? name.opacity : computed.nameBackground.opacity } : {}),
       },
       text,
       speaker,
     },
   };
+
+  if (main.hidden || name.hidden) delete style.params.namebox;
 
   return { style, notes, theme, assetGeom };
 }

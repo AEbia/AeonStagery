@@ -29,7 +29,7 @@ const FIXTURE = `
   transform: scale(0.5);
   align-items: flex-start;
 }
-.text { font-size: 240%; line-height: 1.4; }
+.text { font-size: 240% !important; line-height: 1.4; padding-left:0 !important; }
 .TextBox_Background {
   background: rgba(255, 255, 255, 0.8);
   border: 2px solid black;

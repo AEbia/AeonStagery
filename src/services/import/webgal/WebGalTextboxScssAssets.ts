@@ -18,6 +18,8 @@ import type { BoxSides, Paint } from './WebGalScssSyntax';
 export interface WebGalPanelDrawSize {
   width: number;
   height: number;
+  /** Body rectangle inside an expanded artwork canvas. */
+  content?: { x: number; y: number; width: number; height: number };
 }
 
 /** Draw sizes for both panels. Only the extent is needed — slices are not. */
@@ -311,19 +313,43 @@ export function buildNameboxSvg(
   const nb = theme || ({} as WebGalPanelTheme);
   const W = Math.max(2, round3(geom.width));
   const H = Math.max(2, round3(geom.height));
+  const content = geom.content || { x: 0, y: 0, width: W, height: H };
+  const sh = nb.shadow;
+  const boxW = Math.max(2, content.width);
+  const boxH = Math.max(2, content.height);
   const border = nb.border || { width: 0, color: null };
   const bw = Math.max(0, Number(border.width) || 0);
   const inset = bw > 0 ? bw / 2 : 0.5;
-  const rx = Math.max(0, Math.min(Number(nb.radius) || 0, Math.floor(H / 2) - inset));
-  const rect = { x: inset, y: inset, w: W - inset * 2, h: H - inset * 2 };
-  if (rect.w <= 0) rect.w = W;
-  if (rect.h <= 0) rect.h = H;
+  const rx = Math.max(0, Math.min(Number(nb.radius) || 0, Math.floor(boxH / 2) - inset));
+  const rect = {
+    x: content.x + inset, y: content.y + inset,
+    w: boxW - inset * 2, h: boxH - inset * 2,
+  };
+  if (rect.w <= 0) rect.w = boxW;
+  if (rect.h <= 0) rect.h = boxH;
 
   const defs: string[] = [];
   const gradient = gradientDef('wgNbFill', nb.fill, rect);
   if (gradient) defs.push(gradient);
 
   const body: string[] = [];
+  if (sh && (sh.dx || sh.dy || sh.blur || sh.spread)) {
+    const color = splitColor(sh.color);
+    const spread = sh.spread;
+    const shadowW = Math.max(0, rect.w + spread * 2);
+    const shadowH = Math.max(0, rect.h + spread * 2);
+    const shadowRx = Math.max(0, Math.min(rx + spread, shadowW / 2, shadowH / 2));
+    if (sh.blur > 0) {
+      defs.push(`<filter id="wgNbShadowBlur" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">`
+        + `<feGaussianBlur stdDeviation="${round3(sh.blur / 2)}"/></filter>`);
+    }
+    defs.push(`<mask id="wgNbShadowMask" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">`
+      + `<rect width="${W}" height="${H}" fill="#FFFFFF"/>`
+      + `<rect x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}" rx="${rx}" fill="#000000"/></mask>`);
+    body.push(`<g mask="url(#wgNbShadowMask)"${sh.blur > 0 ? ' filter="url(#wgNbShadowBlur)"' : ''}>`
+      + `<rect x="${round3(rect.x + sh.dx - spread)}" y="${round3(rect.y + sh.dy - spread)}" width="${round3(shadowW)}"`
+      + ` height="${round3(shadowH)}" rx="${round3(shadowRx)}" fill="${color.hex}" fill-opacity="${round3(color.alpha)}"/></g>`);
+  }
   body.push(`<rect x="${round3(rect.x)}" y="${round3(rect.y)}" width="${round3(rect.w)}"`
     + ` height="${round3(rect.h)}" rx="${round3(rx)}" `
     + fillRef(nb.fill, 'wgNbFill', '#FFFFFF', 1) + strokeAttrs(border, bw) + '/>');
@@ -331,8 +357,8 @@ export function buildNameboxSvg(
   if (decoSrc && nb.deco) {
     const d = nb.deco;
     const size = Math.max(1, Number(d.size) || 0);
-    const dx = W - size - (Number(d.right) || 0);
-    const dy = H - size - (Number(d.bottom) || 0);
+    const dx = content.x + boxW - size - (Number(d.right) || 0);
+    const dy = content.y + boxH - size - (Number(d.bottom) || 0);
     defs.push(`<clipPath id="wgNbDecoClip"><rect x="${round3(rect.x)}" y="${round3(rect.y)}"`
       + ` width="${round3(rect.w)}" height="${round3(rect.h)}" rx="${round3(rx)}"/></clipPath>`);
     body.push(`<g clip-path="url(#wgNbDecoClip)" opacity="${round3(d.opacity == null ? 1 : d.opacity)}">`

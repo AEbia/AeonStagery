@@ -244,7 +244,7 @@ export function WebGalScssImportDialog({
               )}
               <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.5 }}>
                 {replaceableConflicts.length > 0
-                  ? '选择「覆盖已有」将保留原包名与样式 ID，场景中已引用该样式的对白不受影响。'
+                  ? '选择「覆盖已有」将保留原包名与样式 ID，并同步更新当前场景中引用该样式的对白；对白更新可撤销。'
                   : '该模板包含多个对话框样式，覆盖操作会导致其他样式与资源丢失，建议选择「另存为新的一份」。'}
               </div>
             </div>

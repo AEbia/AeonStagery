@@ -7,6 +7,7 @@ import gsap from 'gsap';
 import SubtitleRenderer from '../engine/SubtitleRenderer';
 import { ImageDialogueTemplate } from '../engine/ImageDialogueTemplate';
 import { parseDialogueImagePresentation } from '../services/semantic-scene/SceneStatementParamParsers';
+import { translateWebGalTextboxScss } from '../services/import/webgal/WebGalTextboxScssTranslator';
 
 const stageState = vi.hoisted(() => ({
   subtitleLayer: null as any,
@@ -68,6 +69,20 @@ function renderTemplate(presentation: ReturnType<typeof presentationWith>) {
 }
 
 describe('dialogue speaker style contract', () => {
+  it('round-trips spacing, shadow direction and a measured panel anchor', () => {
+    const source = presentationWith({ letterSpacing:2, dropShadowAngle:-Math.PI / 2 });
+    const presentation = parseDialogueImagePresentation({
+      ...source, namebox:{ ...PANEL, anchorX:0.5 },
+      text:{ ...TEXT_LINE, letterSpacing:3, dropShadow:true, dropShadowAngle:Math.PI / 2 },
+    }, 'presentation');
+    expect(presentation?.namebox?.anchorX).toBe(0.5);
+    expect(presentation?.speaker).toMatchObject({ letterSpacing:2, dropShadowAngle:-Math.PI / 2 });
+    expect(ImageDialogueTemplate.resolveTextStyle?.({ speaker:'Hero', text:'Hello', presentation }))
+      .toMatchObject({ letterSpacing:3, dropShadow:{ angle:Math.PI / 2 } });
+    expect(() => presentationWith({ letterSpacing:NaN })).toThrow();
+    expect(() => presentationWith({ dropShadowAngle:Infinity })).toThrow();
+  });
+
   it('accepts the extended nameplate fields and keeps them on the presentation', () => {
     const presentation = presentationWith({
       color: '#FFFFFF',
@@ -134,6 +149,61 @@ describe('nameplate rendering', () => {
   afterEach(() => {
     gsap.globalTimeline.clear();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    [40, 'left', 1, 0], [400, 'left', 1, 0],
+    [40, 'right', 0, 0], [400, 'right', 0, 0],
+    [40, '25%', 0.75, 0], [400, '25%', 0.75, 0],
+    [40, '40px', 1, 15], [400, '40px', 1, 15],
+  ])('applies the measured nameplate origin with minimum width %s and origin %s', (width, origin, anchor, offset) => {
+    const { params } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0; align-items:center; }
+      .TextBox_showName { position:relative; min-width:${width}px; padding:0;
+        font-size:20px !important; text-align:center; scale:0.5; transform-origin:${origin} top; }
+    `).style;
+    const presentation = parseDialogueImagePresentation({ renderer:'image-dialogue-v1', ...params }, 'presentation');
+    const { container, speakerText } = renderTemplate(presentation);
+    const panel = container.children[1];
+    // A half-scale plate is anchored at its right edge for a left origin, at
+    // its left edge for a right origin, or between them for a percentage origin.
+    expect(panel.x + panel.width * anchor).toBe(960 + offset);
+    if (width === 40) expect(panel.width).toBeGreaterThan(params.namebox!.width);
+    expect(speakerText.x).toBe(panel.x + panel.width / 2);
+  });
+
+  it('keeps the measured transform origin inside the nameplate artwork shadow', () => {
+    const { style, assetGeom } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0; align-items:center;
+        transform:scale(0.5); transform-origin:left top; }
+      .TextBox_showName { position:relative; min-width:40px; padding:0;
+        font-size:20px !important; scale:0.5; transform-origin:left top; }
+      .TextBox_ShowName_Background { box-shadow:8px 0 4px black; }
+    `);
+    const presentation = parseDialogueImagePresentation({ renderer:'image-dialogue-v1', ...style.params }, 'presentation');
+    const { container } = renderTemplate(presentation);
+    const panel = container.children[1];
+    const geometry = assetGeom.namebox;
+    const content = geometry.content!;
+    const shadowRight = geometry.width - content.x - content.width;
+    expect(shadowRight).toBeGreaterThan(0);
+    expect(panel.width).toBeGreaterThan(geometry.width);
+    // The main transform halves the content center to 480; the nameplate's
+    // scaled body still ends there, with the shadow extending beyond it.
+    expect(panel.x + panel.width - shadowRight).toBe(480);
+  });
+
+  it.each([40, 400])('centers a measured nameplate with minimum width %s', (width) => {
+    const source = presentationWith({ align:'center', letterSpacing:2, dropShadow:true, dropShadowAngle:Math.PI / 2 });
+    const presentation = parseDialogueImagePresentation({
+      ...source, namebox:{ ...PANEL, x:960, width, anchorX:0.5 },
+    }, 'presentation');
+    const { container, speakerText } = renderTemplate(presentation);
+    const panel = container.children[1];
+    expect(panel.x + panel.width / 2).toBe(960);
+    expect(speakerText.x).toBe(960);
+    expect(speakerText.style.letterSpacing).toBe(2);
+    expect(speakerText.style.dropShadow).toMatchObject({ angle:Math.PI / 2 });
   });
 
   it('keeps legacy templates centered when no alignment is authored', () => {

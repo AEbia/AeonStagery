@@ -20,7 +20,7 @@ const FIXTURE = `
   transform: scale(0.5);
   align-items: flex-start;
 }
-.text { font-size: 240%; line-height: 1.4; }
+.text { font-size: 240% !important; line-height: 1.4; padding-left:0 !important; }
 .TextBox_Background {
   background: rgba(255, 255, 255, 0.8);
   border: 2px solid black;
@@ -49,6 +49,60 @@ const FIXTURE = `
 `;
 
 describe('translateWebGalTextboxScss', () => {
+  it.each([
+    ['right:200px', -150],
+    ['left:200px', 150],
+    ['left:200px; right:100px', 150],
+  ])('moves relative text without changing its wrapping width: %s', (offsets, shift) => {
+    const scss = `
+      .TextBox_main { left:0; right:0; padding:0; }
+      .text { position:relative; padding:0 !important; }
+    `;
+    const baseline = translateWebGalTextboxScss(scss).style.params.text;
+    const moved = translateWebGalTextboxScss(`${scss} .text { ${offsets}; }`).style.params.text;
+    expect(moved.maxWidth).toBe(baseline.maxWidth);
+    expect(moved.x).toBe(baseline.x + shift);
+  });
+
+  it.each([
+    ['static', 'border-box', '', 600],
+    ['relative', 'border-box', '', 600],
+    ['absolute', 'border-box', '', 600],
+    ['static', 'border-box', 'border:10px solid black;', 584],
+    ['static', 'content-box', '', 750],
+  ])('resolves explicit %s text content width with %s and %s', (position, boxSizing, border, maxWidth) => {
+    const { text } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0; }
+      .text { position:${position}; width:1000px; box-sizing:${boxSizing};
+        padding:0 100px !important; ${border} }
+    `).style.params;
+    expect(text).toMatchObject({ x:border ? 83 : 75, maxWidth });
+  });
+
+  it('centers a relative explicit-width text box before applying its offset', () => {
+    const { text } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0; align-items:center; }
+      .text { position:relative; right:200px; width:1000px; box-sizing:border-box; padding:0 100px !important; }
+    `).style.params;
+    expect(text).toMatchObject({ x:510, maxWidth:600 });
+  });
+
+  it('positions absolute border-box text using its outer width', () => {
+    const { text } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0; }
+      .text { position:absolute; right:200px; width:1000px; box-sizing:border-box; padding:0 100px !important; }
+    `).style.params;
+    expect(text).toMatchObject({ x:1095, maxWidth:600 });
+  });
+
+  it('centers a nameplate inside the main content box', () => {
+    const { namebox } = translateWebGalTextboxScss(`
+      .TextBox_main { left:0; right:0; padding:0 0 0 200px; align-items:center; }
+      .TextBox_showName { position:relative; }
+    `).style.params;
+    expect(namebox).toMatchObject({ x:1035, anchorX:0.5 });
+  });
+
   it('converts important colors, alignment and font weights without falling back', () => {
     const { style, theme } = translateWebGalTextboxScss(`
       .TextBox_main {
@@ -67,7 +121,7 @@ describe('translateWebGalTextboxScss', () => {
   it('uses the root font size for rem typography and nameplate geometry', () => {
     const { style } = translateWebGalTextboxScss(`
       .TextBox_main { font-size: 40px; }
-      .text { font-size: 2rem; }
+      .text { font-size: 2rem !important; }
       .TextBox_showName {
         font-size: 1rem !important; height: 4rem; min-width: 10rem;
         padding-left: 2rem; padding-right: 2rem;
@@ -81,7 +135,7 @@ describe('translateWebGalTextboxScss', () => {
   it('uses explicit body declarations before inherited parent values', () => {
     const { style } = translateWebGalTextboxScss(`
       .TextBox_main { font-size:40px; line-height:2 !important; text-align:right !important; font-family:Parent !important; }
-      .text { font-size:100%; line-height:1.5; text-align:left; font-family:Child; }
+      .text { font-size: 100% !important; line-height:1.5; text-align:left; font-family:Child; }
     `);
     expect(style.params.text).toMatchObject({
       fontSize: 30, lineHeight: 45, align: 'left', fontFamily: 'Child',
@@ -91,7 +145,7 @@ describe('translateWebGalTextboxScss', () => {
   it('falls back to inherited body declarations when the child declares none', () => {
     const { style } = translateWebGalTextboxScss(`
       .TextBox_main { font-size:40px; line-height:2; text-align:right; font-family:Parent; }
-      .text { font-size:100%; }
+      .text { font-size: 100% !important; }
     `);
     expect(style.params.text).toMatchObject({
       fontSize: 30, lineHeight: 60, align: 'right', fontFamily: 'Parent',
@@ -210,15 +264,14 @@ describe('translateWebGalTextboxScss', () => {
     expect(fourWay.style.params.text.dropShadowAlpha).toBeCloseTo(217 / 255, 3);
   });
 
-  it('drops the nameplate fill when the dialogue box is frameless', () => {
+  it('keeps an authored nameplate fill when the dialogue box is frameless', () => {
     const frameless = translateWebGalTextboxScss(`
       .TextBox_main { left: 50px; right: 25px; bottom: 40px; height: 200px; font-size: 30px; }
       .TextBox_Background { background: transparent; }
       .TextBox_showName { background: rgba(0,0,0,.65); }
     `);
-    // `.TextBox_showName`'s background only shades the glyphs in this style, so it
-    // must not become a plate behind the name.
-    expect(frameless.theme.namebox.fill).toEqual({ kind: 'solid', color: '#00000000' });
+    // The visible label has its own background independently of the body panel.
+    expect(frameless.theme.namebox.fill).toEqual({ kind: 'solid', color: '#000000a6' });
 
     const framed = translateWebGalTextboxScss(`
       .TextBox_main { left: 50px; right: 25px; bottom: 40px; height: 200px; font-size: 30px; }
@@ -248,7 +301,7 @@ describe('translateWebGalTextboxScss', () => {
   it('resolves the body font size against the parent, not the root', () => {
     const { style } = translateWebGalTextboxScss(
       '.TextBox_main { left: 60px; right: 60px; bottom: 40px; height: 200px; font-size: 40px; }\n'
-      + '.text { font-size: 240%; }',
+      + '.text { font-size: 240% !important; }',
     );
     // The parent resolves to 30 stage px, so `240%` of it is 72 — not 30 (the
     // parent, as if `.text` had said nothing) and not 38 (the root size).
@@ -321,8 +374,8 @@ describe('translateWebGalTextboxScss', () => {
   it('lets the nested rule win over the plain one', () => {
     // `.text` inherits 40px from `.TextBox_main`, and 200% of that is 80 WebGAL
     // px → 60 stage px. Reading only the plain `.text` gave 100% of 40px = 30.
-    const nested = `.TextBox_main { font-size:40px; .text { font-size:200%; } }
-.text { font-size:100%; }
+    const nested = `.TextBox_main { font-size:40px; .text { font-size: 200% !important; } }
+.text { font-size: 100% !important; }
 .outer { }
 .inner { }
 .outerName { }
@@ -443,11 +496,11 @@ describe('translateWebGalTextboxScss', () => {
     expect(px.text.strokeWidth).toBe(6);
     expect(px.speaker!.strokeWidth).toBe(px.text.strokeWidth);
     // `em`: each element resolves it against its own font size, and the
-    // nameplate's is twice the body's (WebGAL's inline 200%). `nameSize` already
+    // body and name use WebGAL's inline 205% / 200% sizes. `nameSize` already
     // carries the transform scale, so applying it again would make the plate
     // 24px instead of 12px.
     const em = stroked('0.1em white');
-    expect(em.text.strokeWidth).toBe(6);
+    expect(em.text.strokeWidth).toBe(12);
     expect(em.speaker!.strokeWidth).toBe(12);
     // A zero outline stays zero instead of being rounded up to 1px.
     expect(stroked('0px white').speaker!.strokeWidth).toBe(0);

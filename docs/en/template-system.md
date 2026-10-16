@@ -56,6 +56,14 @@ Discovery assigns scope by root:
 - `user`: packages under external library roots.
 - `builtin`: packages shipped with the app.
 
+## WebGAL Subtitle Style Import
+
+The importer converts `Stage/TextBox/textbox.scss` into an `image-dialogue-v1` style and panel SVGs. Main, body, and nameplate positioning, margins, scale, and transform origins are mapped independently. A transparent body panel does not remove the nameplate's own fill. Centered nameplates remain centered after measuring the actual speaker label. Letter spacing, text strokes, directional text shadows, offset name glyph layers, and nameplate box shadows are preserved within the renderer's supported subset.
+
+Typography uses WebGAL 4.5.12's medium defaults: inline body size `205%`, body left padding `0.1em`, and name size `200%`. Stylesheets need `!important` to override these inline values. Local dialogue font preferences still apply at runtime. Panel `anchorX` anchors the final measured width (`0.5` centers it); body and speaker `letterSpacing` uses stage pixels, and `dropShadowAngle` uses radians. Existing styles without these optional fields keep their rendering defaults.
+
+This is a static CSS subset. Gradient text and multiple shadows are approximated; animations, conditional rules, variables, and unsupported declarations are reported in the import notes. Font families are retained, but files can only be copied if supplied by the template; otherwise install the fonts on the rendering device. Overwriting an imported package also refreshes matching materialized dialogue presentations in the open scene and recompiles them as one undoable edit. Dialogues using other styles are preserved. Stored snapshots in other scenes still need the style reapplied.
+
 ## Precedence
 
 Merged template views include only packages listed in `templates.enabledTemplateIds` when project configuration is present. Enabled packages then use this precedence:

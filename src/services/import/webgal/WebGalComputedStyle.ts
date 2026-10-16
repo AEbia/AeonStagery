@@ -30,6 +30,13 @@ export interface WebGalComputedElement {
   color: string;
   align: CssAlignment | null;
   flexAlign: CssAlignment | null;
+  letterSpacing: number;
+  margin: BoxSides;
+  position: string;
+  display: string;
+  boxSizing: string;
+  scale: ScaleInfo | null;
+  transformOrigin: readonly [string, string];
   padding: BoxSides;
   hasPadding: boolean;
   lengths: Record<LengthProperty, number | null>;
@@ -76,17 +83,17 @@ const SELECTORS: Record<Node, string> = {
   innerName: '.innerName', backgroundAfter: '.TextBox_Background::after',
   nameAfter: '.TextBox_ShowName_Background::after',
 };
-// WebGAL's name label and backdrop are sibling divs; both carry showName and
-// both receive inline font-size:200%. Text layers inherit from .text.
+// Both pairs of foreground/backdrop divs are siblings and share their main /
+// showName class. Only text layers inherit from .text.
 const PARENTS: Record<Node, Node | null> = {
-  main: null, text: 'main', outer: 'text', inner: 'text', background: 'main',
+  main: null, text: 'main', outer: 'text', inner: 'text', background: null,
   name: 'main', nameBackground: 'main', outerName: 'name', innerName: 'name',
   backgroundAfter: 'background', nameAfter: 'nameBackground',
 };
 
 const INHERITED = new Set([
   'fontsize', 'fontfamily', 'fontweight', 'lineheight', 'color', 'textalign',
-  'textshadow', 'visibility', 'webkittextstroke', 'textstroke',
+  'textshadow', 'visibility', 'webkittextstroke', 'textstroke', 'letterspacing',
 ]);
 const INITIAL: Record<string, string> = {
   fontsize: `${ROOT_FONT_PX}px`, fontfamily: 'sans-serif', fontweight: 'normal',
@@ -94,6 +101,8 @@ const INITIAL: Record<string, string> = {
   visibility: 'visible', backgroundcolor: 'transparent', backgroundimage: 'none',
   backgroundclip: 'border-box', border: 'none', borderradius: '0', boxshadow: 'none',
   opacity: '1',
+  letterspacing: 'normal', position: 'static', display: 'block',
+  boxsizing: 'content-box', transformorigin: '50% 50%', scale: 'none',
 };
 function initialValue(property: string): string {
   if ((LENGTHS as readonly string[]).includes(property)) {
@@ -106,16 +115,25 @@ const SUPPORTED = new Set([
   'padding', 'paddingtop', 'paddingright', 'paddingbottom', 'paddingleft',
   'background', 'webkitbackgroundclip', 'backgroundsize', 'transform', 'alignitems',
   'webkittextstroke', 'textstroke',
+  'margin', 'margintop', 'marginright', 'marginbottom', 'marginleft',
 ]);
 // Recognized layout/animation declarations outside the engine style mapping.
 const IGNORED = new Set([
-  'position', 'display', 'overflow', 'zindex', 'pointerevents', 'content',
+  'overflow', 'zindex', 'pointerevents', 'content',
   'animation', 'animationname', 'animationduration', 'animationtimingfunction',
   'animationfillmode', 'animationdelay', 'transition', 'cursor', 'userselect',
-  'justifycontent', 'flexdirection', 'whitespace',
+  'justifycontent', 'flexdirection', 'flexflow', 'whitespace',
 ]);
 const normalize = (property: string): string => property.replace(/^-+/, '').replace(/-/g, '');
 const stage = (value: number): number => rnd(value * STAGE_SCALE);
+
+function transformOrigin(raw: string): readonly [string, string] {
+  const tokens = raw.trim().split(/\s+/);
+  let [x, y = 'center'] = tokens;
+  if (/^(top|bottom)$/.test(x)) [x, y] = [tokens[1] ?? 'center', x];
+  const keyword: Record<string, string> = { left: '0%', top: '0%', center: '50%', right: '100%', bottom: '100%' };
+  return [keyword[x] ?? x, keyword[y] ?? y];
+}
 
 function alignment(value: string): CssAlignment | null {
   if (/^(left|start|flex-start)$/.test(value)) return 'left';
@@ -138,6 +156,7 @@ function matches(selector: string, node: Node): boolean {
   const matchPart = (part: string, target: Node): boolean => {
     const aliases = [SELECTORS[target]];
     if (target === 'nameBackground') aliases.push('.TextBox_showName');
+    if (target === 'background') aliases.push('.TextBox_main');
     return aliases.includes(part) || part === '*';
   };
   if (!tokens.length || !matchPart(tokens[tokens.length - 1], node)) return false;
@@ -196,7 +215,15 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
         && declaration.value !== 'auto' && length(declaration.value, ROOT_FONT_PX, WEBGAL_STAGE_WIDTH) == null;
       const invalidLine = property === 'lineheight' && !keyword && declaration.value !== 'normal'
         && (length(declaration.value, ROOT_FONT_PX, ROOT_FONT_PX) ?? -1) < 0;
-      if (invalidPadding || invalidFont || invalidColor || invalidBackground || invalidLength || invalidLine) {
+      const invalidSpacing = property === 'letterspacing' && !keyword && declaration.value !== 'normal'
+        && length(declaration.value, ROOT_FONT_PX, ROOT_FONT_PX) == null;
+      const invalidMargin = property.startsWith('margin') && !keyword && (
+        !expanded.length || expanded.some((part) => length(part.value, ROOT_FONT_PX, WEBGAL_STAGE_WIDTH) == null)
+      );
+      const invalidScale = property === 'scale' && !keyword && declaration.value !== 'none'
+        && !/^(?:\d+(?:\.\d*)?|\.\d+)(?:\s+(?:\d+(?:\.\d*)?|\.\d+))?$/.test(declaration.value);
+      if (invalidPadding || invalidFont || invalidColor || invalidBackground || invalidLength || invalidLine
+        || invalidSpacing || invalidMargin || invalidScale) {
         report(`无法计算 CSS 声明：${SELECTORS[node]} 的 ${declaration.property}: ${declaration.value}；已忽略。`);
         continue;
       }
@@ -212,6 +239,12 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     const cascaded = cascadeDeclarations(accepted);
     if ((node === 'name' || node === 'nameBackground') && !isImportantDeclaration(cascaded, 'fontsize')) {
       cascaded.fontsize = '200%';
+    }
+    // WebGAL 4.5.12: UI/getTextSize.ts and Stage/TextBox/IMSSTextbox.tsx.
+    // The medium setting is 205%; inline styles win unless CSS is important.
+    if (node === 'text') {
+      if (!isImportantDeclaration(cascaded, 'fontsize')) cascaded.fontsize = '205%';
+      if (!isImportantDeclaration(cascaded, 'paddingleft')) cascaded.paddingleft = '0.1em';
     }
     valuesByNode.set(node, cascaded);
   }
@@ -252,7 +285,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
       if (absolute == null) report(`无法计算 CSS 行高：${SELECTORS[node]} 的 ${values.lineheight}，按 1.6 倍字号近似。`);
     }
     // Main's containing block is the stage; absolute nameplate divs use main.
-    const container = node === 'main' ? null : sources.get('main') ?? resolve('main');
+    const container = node === 'main' || node === 'background' ? null : sources.get('main') ?? resolve('main');
     const containingWidth = container?.width ?? WEBGAL_STAGE_WIDTH;
     const containingHeight = container?.height ?? WEBGAL_STAGE_HEIGHT;
     const sourceLengths = Object.fromEntries(LENGTHS.map((key) => {
@@ -264,10 +297,12 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
       return [key, result];
     })) as Record<LengthProperty, number | null>;
     const padding: BoxSides = { t: 0, r: 0, b: 0, l: 0 };
+    const margin: BoxSides = { t: 0, r: 0, b: 0, l: 0 };
     for (const [side, key] of [['top', 't'], ['right', 'r'], ['bottom', 'b'], ['left', 'l']] as const) {
       const sourcePadding = length(values[`padding${side}`], safeFont, containingWidth) ?? 0;
       padding[key] = stage(sourcePadding);
       values[`padding${side}`] = `${sourcePadding}px`;
+      margin[key] = (length(values[`margin${side}`], safeFont, containingWidth) ?? 0) * STAGE_SCALE;
     }
     const color = values.color.toLowerCase() === 'currentcolor' ? parent?.result.color ?? '#FFFFFFFF'
       : tryParseColor(values.color) ?? parent?.result.color ?? '#FFFFFFFF';
@@ -287,11 +322,26 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     const shadowInherited = authored.textshadow == null || authored.textshadow === 'inherit' || authored.textshadow === 'unset';
     const textShadow = shadowInherited && parent ? parent.result.textShadow : parseTextShadow(values.textshadow, safeFont, color);
     if (values.textshadow !== 'none' && !textShadow.has) report(`无法计算 CSS 阴影：${SELECTORS[node]} 的 ${values.textshadow}。`);
+    const transformValue = values.transform;
+    if (transformValue && !/^(none|(?:scale(?:X|Y)?\([^)]*\)\s*)+)$/i.test(transformValue)) {
+      report(`不支持的 transform：${SELECTORS[node]} 的 ${transformValue}（仅支持 scale/scaleX/scaleY）。`);
+    }
+    const transformScale = parseScale(transformValue);
+    const independentScale = parseScale(`scale(${values.scale.replace(/\s+/, ',')})`);
+    const sx = (transformScale?.sx ?? 1) * (independentScale?.sx ?? 1);
+    const sy = (transformScale?.sy ?? 1) * (independentScale?.sy ?? 1);
+    const scale = sx === 1 && sy === 1 ? null : { sx, sy };
+    const origin = transformOrigin(values.transformorigin);
+    const normalizedOrigin = origin.map((value) => value.endsWith('%') ? value
+      : `${stage(length(value, safeFont, safeFont) ?? 0)}px`) as [string, string];
+    const spacing = values.letterspacing === 'normal' ? 0 : length(values.letterspacing, safeFont, safeFont) ?? 0;
     const result: WebGalComputedElement = {
       fontSize: stage(safeFont), lineHeight: stage(line.kind === 'ratio' ? safeFont * line.value : line.value),
       fontFamily: values.fontfamily.split(',')[0].trim().replace(/^["']|["']$/g, ''),
       fontWeight: /^(bold|bolder|[6-9]00)$/.test(values.fontweight) ? '700' : '400',
       color, align: alignment(values.textalign), flexAlign: alignment(values.alignitems),
+      letterSpacing: spacing * STAGE_SCALE, margin, position: values.position, display: values.display,
+      boxSizing: values.boxsizing, scale, transformOrigin: normalizedOrigin,
       padding, hasPadding: Object.keys(authored).some((key) => key.startsWith('padding')),
       lengths: Object.fromEntries(LENGTHS.map((key) => [key, sourceLengths[key] == null ? null : stage(sourceLengths[key])])) as Record<LengthProperty, number | null>,
       background, backgroundClipText: /text/i.test(values.webkitbackgroundclip || values.backgroundclip),
@@ -300,7 +350,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
       boxShadow: parseBoxShadow(values.boxshadow, safeFont), hasBoxShadow: authored.boxshadow != null, textShadow,
       hasStroke: !!strokeMatch,
       stroke: { width: Math.max(0, (strokeWidth ?? 0) * STAGE_SCALE), color: tryParseColor(strokeMatch?.[2]) ?? '#000000FF' },
-      hidden: /^(hidden|collapse)$/.test(values.visibility), imageFile: urlBasename(backgroundImage),
+      hidden: /^(hidden|collapse)$/.test(values.visibility) || values.display === 'none', imageFile: urlBasename(backgroundImage),
       decorationSize: sourceLengths.width != null ? stage(sourceLengths.width)
         : values.backgroundsize ? stage(length(values.backgroundsize.split(/\s+/)[0], safeFont, containingWidth) ?? 0) : null,
       opacity: Number.isFinite(Number(values.opacity)) ? Math.max(0, Math.min(1, Number(values.opacity))) : 1,
@@ -311,6 +361,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     values.fontsize = `${safeFont}px`;
     values.lineheight = line.kind === 'ratio' ? String(line.value) : `${line.value}px`;
     values.color = color;
+    values.letterspacing = `${spacing}px`;
     values.backgroundcolor = backgroundColor;
     for (const key of LENGTHS) {
       if (sourceLengths[key] != null) values[key] = `${sourceLengths[key]}px`;
@@ -332,11 +383,7 @@ function compute(rules: readonly ScssRule[], diagnostics: string[]): WebGalCompu
     return source;
   };
   const elements = Object.fromEntries((Object.keys(SELECTORS) as Node[]).map((node) => [node, resolve(node).result])) as Record<Node, WebGalComputedElement>;
-  const transformValue = valuesByNode.get('main')?.transform;
-  if (transformValue && !/^(none|(?:scale(?:X|Y)?\([^)]*\)\s*)+)$/i.test(transformValue)) {
-    report(`不支持的主容器 transform：${transformValue}（仅支持映射 scale/scaleX/scaleY）。`);
-  }
-  return { ...elements, nameBackgroundHasPaint, transform: parseScale(transformValue), diagnostics };
+  return { ...elements, nameBackgroundHasPaint, transform: elements.main.scale, diagnostics };
 }
 
 export function computeWebGalTextboxStyle(css: string): WebGalComputedStyle {

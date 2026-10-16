@@ -26,7 +26,7 @@ describe('WebGAL CSS fidelity', () => {
       templateId: 'typography', templateName: 'Typography',
       scss: `
         .TextBox_main { font-size:40px; transform:scale(0.5); }
-        .text { font-size:40px; font-weight:400; }
+        .text { font-size: 40px !important; font-weight:400; }
         .outer { font-size:2em; font-weight:700; line-height:1.5; }
         .TextBox_showName { font-weight:400; }
         .outerName { font-size:1.5em; font-weight:700; line-height:2; }
@@ -64,17 +64,17 @@ describe('WebGAL CSS fidelity', () => {
     const { params } = translateWebGalTextboxScss(`
       .TextBox_main { padding-left: 80px; padding: 0 !important; }
     `).style;
-    expect(params.text.x).toBe(params.textbox.x);
-    expect(params.text.maxWidth).toBe(params.textbox.width);
+    expect(params.text.x - params.textbox.x).toBe(3);
+    expect(params.text.maxWidth).toBe(params.textbox.width - 3);
   });
 
   it('uses the main element font size for em padding', () => {
     const { params } = translateWebGalTextboxScss(`
       .TextBox_main { font-size: 40px; padding: 1em; }
     `).style;
-    expect(params.text.x - params.textbox.x).toBe(30);
+    expect(params.text.x - params.textbox.x).toBe(36);
     expect(params.text.y - params.textbox.y).toBe(30);
-    expect(params.textbox.width - params.text.maxWidth).toBe(60);
+    expect(params.textbox.width - params.text.maxWidth).toBe(66);
   });
 
   it('applies inline 200% name font size to an inherited root font', () => {
@@ -221,7 +221,7 @@ describe('computed WebGAL style seam', () => {
   it('keeps unrounded parent fonts until dependent units have been evaluated', () => {
     const style = computeWebGalTextboxStyle(`
       .TextBox_main { font-size:30px; padding:2em; }
-      .text { font-size:200%; }
+      .text { font-size: 200% !important; }
     `);
     expect(style.main.fontSize).toBe(23);
     expect(style.main.padding.l).toBe(45);
@@ -234,7 +234,7 @@ describe('computed WebGAL style seam', () => {
   ])('inherits computed line height while preserving unitless ratios: %s', (lineHeight, expected) => {
     const style = computeWebGalTextboxStyle(`
       .TextBox_main { font-size:40px; line-height:${lineHeight}; }
-      .text { font-size:200%; }
+      .text { font-size: 200% !important; }
     `);
     expect(style.text.lineHeight).toBe(expected);
   });
@@ -242,7 +242,7 @@ describe('computed WebGAL style seam', () => {
   it('inherits computed lengths rather than resolving parent em against child fonts', () => {
     const style = computeWebGalTextboxStyle(`
       .TextBox_main { font-size:40px; padding:1em; height:10em; text-shadow:0 0 .5em red; -webkit-text-stroke:.1em blue; }
-      .text { font-size:200%; }
+      .text { font-size: 200% !important; }
       .TextBox_showName { padding:inherit; height:inherit; }
     `);
     expect(style.name.padding).toEqual({ t: 30, r: 30, b: 30, l: 30 });
@@ -278,7 +278,7 @@ describe('computed WebGAL style seam', () => {
       @media (max-width:600px) { .TextBox_main { color:blue; } }
     `);
     expect(result.style.params.text.color).toBe('#FF0000');
-    expect(result.style.params.text.x - result.style.params.textbox.x).toBe(30);
+    expect(result.style.params.text.x - result.style.params.textbox.x).toBe(33);
     expect(result.notes).toEqual(expect.arrayContaining([
       expect.stringContaining('calc('), expect.stringContaining('var('),
       expect.stringContaining('invalid'), expect.stringContaining('filter'), expect.stringContaining('at-rule'),
@@ -303,23 +303,23 @@ describe('computed WebGAL style seam', () => {
     const first = mapWebGalTextboxStyle(computed);
     expect(computed).toEqual(before);
     expect(mapWebGalTextboxStyle(computed)).toEqual(first);
-    expect(first.style.params.text.fontSize).toBe(60);
-    expect(first.style.params.text.x - first.style.params.textbox.x).toBe(60);
-    expect(first.style.params.text.dropShadowBlur).toBe(21);
+    expect(first.style.params.text.fontSize).toBe(124);
+    expect(first.style.params.text.x - first.style.params.textbox.x).toBe(72);
+    expect(first.style.params.text.dropShadowBlur).toBe(6);
     expect(first.theme.textbox.border.width).toBe(6);
   });
 
   it('resolves shadow currentColor at the element where the shadow is declared', () => {
     const inherited = computeWebGalTextboxStyle(`
       .TextBox_main { color:red; text-shadow:0 0 10px; }
-      .text { font-size:200%; color:blue; }
+      .text { font-size: 200% !important; color:blue; }
     `);
     expect(inherited.inner.textShadow).toMatchObject({ color: '#FF0000', blur: 7.5 });
     const own = computeWebGalTextboxStyle(`
       .TextBox_main { color:red; }
       .text { color:blue; text-shadow:0 0 1em currentColor; }
     `);
-    expect(own.inner.textShadow).toMatchObject({ color: '#0000FF', blur: 15 });
+    expect(own.inner.textShadow).toMatchObject({ color: '#0000FF', blur: 30.75 });
   });
 
   it('carries faithful computed values through manifest and SVG generation', () => {
@@ -335,7 +335,7 @@ describe('computed WebGAL style seam', () => {
       `,
     });
     const { params } = result.style;
-    expect(params.text.x - params.textbox.x).toBe(30);
+    expect(params.text.x - params.textbox.x).toBe(36);
     expect(params.speaker?.fontSize).toBe(60);
     expect(params.text.dropShadow ?? false).toBe(false);
     expect(params.speaker?.dropShadow ?? false).toBe(false);
