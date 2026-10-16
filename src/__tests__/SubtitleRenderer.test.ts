@@ -201,12 +201,15 @@ describe('SubtitleRenderer', () => {
     renderer.ensureDialogueOnStage(config, 3);
     const container = stageState.subtitleLayer.children[0] as PIXI.Container;
     const lines = container.children.filter((child) => child instanceof PIXI.Text) as PIXI.Text[];
+    const usesFixedLineReveal = image || styleId === 'minimal';
     if (image) expect(lines.length).toBeGreaterThan(1);
+    if (styleId === 'minimal') expect(lines.length).toBeGreaterThan(1);
     expect(lines.map((line) => line.text.replace(/\u200B/g, '')).join('')).toBe(content);
     for (const line of lines) {
       const metrics = PIXI.CanvasTextMetrics.measureText(line.text, line.style);
       expect(metrics.maxLineWidth).toBeLessThanOrEqual(line.style.wordWrapWidth);
-      if (!image) expect(metrics.lines.length).toBeGreaterThan(1);
+      if (usesFixedLineReveal) expect(metrics.lines.length).toBe(1);
+      else expect(metrics.lines.length).toBeGreaterThan(1);
       expect(line.y + metrics.height).toBeLessThanOrEqual(1080);
     }
   });
@@ -325,6 +328,38 @@ describe('SubtitleRenderer', () => {
     }
   });
 
+  it('reveals minimal dialogue with the configured typewriter speed', () => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
+      ? 0.1 : key === 'dialogueEntranceAnimation' ? false : '');
+    const content = 'Minimal';
+    vi.mocked(PIXI.CanvasTextMetrics.measureText).mockReturnValue({
+      lines: [content], lineWidths: [content.length * 48], lineHeight: 67, maxLineWidth: content.length * 48,
+      width: content.length * 48, height: 67, fontProperties: { ascent: 40, descent: 8, fontSize: 48 },
+    } as any);
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: 'minimal-typewriter',
+      speaker: '',
+      text: content,
+      style: 'typewriter' as const,
+      template: 'minimal',
+      duration: 2,
+    };
+    const timeline = renderer.showDialogue(config).pause();
+    const tween = timeline.getChildren().find((child) => 'count' in child.vars);
+    expect(tween).toBeDefined();
+
+    renderer.ensureDialogueOnStage(config, 0.35);
+
+    const reveal = (tween as gsap.core.Tween).targets()[0] as { count: number };
+    expect(reveal.count).toBeCloseTo(3.5);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+    expect(text.text).toBe('Min');
+    expect(text.mask).toBeFalsy();
+    renderer.clear();
+  });
+
   it('rebuilds the active typewriter timeline when dialogue text speed changes', () => {
     let dialogueTextSpeed = 0.01;
     stageState.getSetting.mockImplementation((key: string) => key === 'dialogueTextSpeed'
@@ -434,6 +469,47 @@ describe('SubtitleRenderer', () => {
     expect(text.text.replace(/\u200B/g, '')).toBe(content);
     sync(0.15);
     expect(text.text.replace(/\u200B/g, '')).toBe(content.slice(0, 1));
+  });
+
+  it('reveals only typed characters in minimal dialogue during coordinated playback', () => {
+    stageState.getSetting.mockImplementation((key: string) => key === 'dialogueEntranceAnimation'
+      ? false : key === 'dialogueTextSpeed' ? 0.1 : '');
+    const content = '逐字显示';
+    vi.mocked(PIXI.CanvasTextMetrics.measureText).mockReturnValue({
+      lines: [content], lineWidths: [content.length * 48], lineHeight: 67, maxLineWidth: content.length * 48,
+      width: content.length * 48, height: 67, fontProperties: { ascent: 40, descent: 8, fontSize: 48 },
+    } as any);
+    const config = {
+      _id: 'minimal-coordinator-typewriter',
+      speaker: '',
+      text: content,
+      style: 'typewriter' as const,
+      template: 'minimal',
+      duration: 2,
+    };
+    const renderer = new SubtitleRenderer();
+    const dialogueTimeline = renderer.showDialogue(config);
+    const master = gsap.timeline({ paused: true }).add(dialogueTimeline, 1);
+    const coordinator = new DialogueCoordinator(renderer, {
+      stop: vi.fn(),
+      setTextMouthAt: vi.fn(),
+      startAudioDrivenLipSync: vi.fn(),
+    });
+    const sync = (offset: number) => {
+      master.seek(1 + offset, true);
+      coordinator.sync(1 + offset, { ...config, startTime: 1 }, false, vi.fn(), (path) => path, vi.fn());
+    };
+
+    sync(0.05);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const getDialogueText = () => container.children
+      .filter((child) => child instanceof PIXI.Text)
+      .map((child) => (child as PIXI.Text).text.replace(/\u200B/g, ''))
+      .join('');
+    expect(getDialogueText()).toBe('');
+
+    sync(0.15);
+    expect(getDialogueText()).toBe('逐');
   });
 
   it('keeps wrapped image dialogue lines aligned while revealing Unicode characters and seeking backwards', () => {

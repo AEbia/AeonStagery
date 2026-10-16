@@ -371,10 +371,12 @@ export const DEFAULT_PROJECT_ASSET_ROOTS: ProjectAssetRoots = {
   template: 'template',
 };
 
+export const DEFAULT_DIALOGUE_STYLE_ID = 'immersive-subtitle';
+
 export const DEFAULT_PROJECT_TEMPLATE_CONFIGURATION: ProjectTemplateConfiguration = {
   enabledTemplateIds: ['aeonstagery.default'],
   defaults: {
-    dialogueStyleId: 'glass',
+    dialogueStyleId: DEFAULT_DIALOGUE_STYLE_ID,
   },
   selectedCharacterPresetIds: [],
   characterVariantImportMode: 'primary-only',

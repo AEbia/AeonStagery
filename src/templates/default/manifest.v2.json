@@ -14,7 +14,7 @@
     "root": "assets"
   },
   "defaults": {
-    "dialogueStyleId": "glass"
+    "dialogueStyleId": "immersive-subtitle"
   },
   "authoringCombos": [
     {

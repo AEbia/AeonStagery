@@ -11,6 +11,8 @@ describe('builtin image dialogue assets', () => {
     const builtin = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE;
     const view = createTemplatePackageView([builtin], { enabledTemplateIds: ['aeonstagery.default'] });
     expect(packageJson.build.files).toContain(`${builtin.source.packageRoot}/assets/**/*`);
+    expect(builtin.manifest.defaults?.dialogueStyleId).toBe('immersive-subtitle');
+    expect(view.defaults.dialogueStyleId).toBe('immersive-subtitle');
     for (const [id, name] of [['pink-nameplate', '粉色名牌'], ['immersive-subtitle', '沉浸字幕']]) {
       const style = view.dialogueStyles.find((candidate) => candidate.id === id);
       expect(style?.name).toBe(name);

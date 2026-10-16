@@ -1612,14 +1612,22 @@ export const DialogueTemplateSelect = React.memo(({
   value: string;
   onChange: (val: string) => void;
   customOptions?: Array<{ value: string; label: string; disabled?: boolean }>;
-}) => (
-  <SelectInput
-    label="对话框样式"
-    value={value || 'glass'}
-    onChange={onChange}
-    options={[...DIALOGUE_TEMPLATE_OPTIONS, ...customOptions]}
-  />
-));
+}) => {
+  const loadedStyleIds = new Set(customOptions.map((option) => option.value));
+  const options = [
+    ...DIALOGUE_TEMPLATE_OPTIONS.filter((option) => !loadedStyleIds.has(option.value)),
+    ...customOptions,
+  ];
+
+  return (
+    <SelectInput
+      label="对话框样式"
+      value={value || 'glass'}
+      onChange={onChange}
+      options={options}
+    />
+  );
+});
 
 const FONT_FAMILY_OPTIONS = [
   { value: "'Outfit', 'Inter', 'Noto Sans SC', sans-serif", label: 'Outfit (推荐)' },

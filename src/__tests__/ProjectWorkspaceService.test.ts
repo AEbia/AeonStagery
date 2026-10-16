@@ -155,8 +155,8 @@ describe('ProjectWorkspaceService', () => {
     if (!disabled.success) throw new Error(disabled.error);
     expect(disabled.project.metadata.templates?.enabledTemplateIds).toEqual(['aeonstagery.default']);
     expect(disabled.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
-    expect(disabled.project.metadata.templates?.dialoguePresentation).toBeUndefined();
-    expect(disabled.project.metadata.templates?.dialogueTemplate).toBe('glass');
+    expect(disabled.project.metadata.templates?.dialoguePresentation?.styleId).toBe('immersive-subtitle');
+    expect(disabled.project.metadata.templates?.dialogueTemplate).toBeUndefined();
   });
 
   it('preserves project-owned subtitle snapshots while an enabled package is temporarily undiscovered', async () => {

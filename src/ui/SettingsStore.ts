@@ -132,9 +132,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   preBakeDebounce: 500,
   snapshotMaxCount: 5000,
   typewriterSpeed: 0.025,
-  dialogueTextSpeed: 0.025,
+  dialogueTextSpeed: 0.06,
   dialogueFontSize: 48,
-  dialogueEntranceAnimation: true,
+  dialogueEntranceAnimation: false,
   defaultDialogueDurationSeconds: DEFAULT_DIALOGUE_DURATION_SECONDS,
   scriptReadingSpeed: DEFAULT_SCRIPT_READING_SPEED,
   aiProse: {
@@ -289,7 +289,7 @@ class SettingsManager {
           dialogueTextSpeed: restSettings.dialogueTextSpeed === undefined
             ? normalizeDialogueTextSpeed(restSettings.typewriterSpeed)
             : normalizeDialogueTextSpeed(restSettings.dialogueTextSpeed),
-          dialogueEntranceAnimation: restSettings.dialogueEntranceAnimation !== false,
+          dialogueEntranceAnimation: restSettings.dialogueEntranceAnimation === true,
           dialogueFontSize: normalizeDialogueFontSize(restSettings.dialogueFontSize),
           defaultDialogueDurationSeconds: normalizeDefaultDialogueDurationSeconds(
             restSettings.defaultDialogueDurationSeconds,
@@ -387,7 +387,7 @@ class SettingsManager {
   private normalizeValue<K extends keyof AppSettings>(key: K, value: AppSettings[K]): AppSettings[K] {
     switch (key) {
       case 'dialogueEntranceAnimation':
-        return (value !== false) as AppSettings[K];
+        return (value === true) as AppSettings[K];
       case 'dialogueTextSpeed':
         return normalizeDialogueTextSpeed(value) as AppSettings[K];
       case 'dialogueFontSize':

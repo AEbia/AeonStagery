@@ -143,6 +143,24 @@ describe('DialogueTemplates render contract', () => {
     }
   });
 
+  it('lifts the minimal dialogue text area while keeping its speaker nameplate anchored', () => {
+    const metrics = { width: 640, height: 120 } as PIXI.CanvasTextMetrics;
+    const container = new PIXI.Container();
+    const layout = templates.minimal.render(container, {
+      speaker: 'Tomori',
+      text: 'Keep this nameplate in place.',
+      fontSize: 44,
+      position: 'bottom',
+    }, metrics);
+    const speaker = container.children[0] as PIXI.Text;
+    const originalBoxY = 1080 - (metrics.height + 100) - 80;
+
+    expect(layout.boxY).toBe(originalBoxY - 24);
+    expect(layout.textY).toBe(originalBoxY - 4);
+    expect(speaker.x).toBe(960);
+    expect(speaker.y).toBe(originalBoxY - 60);
+  });
+
   it('renders the configured glass signature as two adjacent text runs', () => {
     getSetting.mockImplementation((key: string) => ({
       dialogueSignatureText1: 'AEON',

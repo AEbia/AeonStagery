@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPencil, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
 import { MAX_RECENT_PROJECTS } from '../SettingsStore';
+import { DEFAULT_DIALOGUE_STYLE_ID } from '../../api/types/project';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import type {
   CharacterVariantImportMode,
@@ -322,7 +323,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       templatePackages,
       selectedTemplateIds,
       defaultOverrides,
-      'glass',
+      DEFAULT_DIALOGUE_STYLE_ID,
     ),
     [defaultOverrides, selectedTemplateIds, templatePackages],
   );

@@ -4,6 +4,7 @@ import type {
   CharacterVariantImportMode,
   ProjectTemplateDefaults,
 } from '../../api/types/project';
+import { DEFAULT_DIALOGUE_STYLE_ID } from '../../api/types/project';
 import { IconChevronDown, IconChevronUp, IconTrash } from '../icons';
 import { FormSelect } from '../FormSelect';
 import { InfoTip } from '../Tooltip';
@@ -72,7 +73,12 @@ export const buildAvailableDialogueStyles = (
     .filter((templatePackage) => selectedTemplateIdSet.has(templatePackage.id))
     .flatMap((templatePackage) => (templatePackage.dialogueStyles ?? []).map((style) => ({
       ...style,
-      name: ({ glass: '玻璃', minimal: '极简', classic: '经典' } as Record<string, string>)[style.id] ?? style.name,
+      name: ({
+        glass: '玻璃',
+        minimal: '极简',
+        classic: '经典',
+        [DEFAULT_DIALOGUE_STYLE_ID]: '沉浸字幕',
+      } as Record<string, string>)[style.id] ?? style.name,
       templateScope: templatePackage.scope,
       templateId: templatePackage.id,
       templateName: templatePackage.name,
