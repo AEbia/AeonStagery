@@ -7,6 +7,7 @@ import type {
 import { IconChevronDown, IconChevronUp, IconTrash } from '../icons';
 import { FormSelect } from '../FormSelect';
 import { InfoTip } from '../Tooltip';
+import './template-package-selector.css';
 
 export type CharacterPresetListItem = NonNullable<TemplatePackageSummary['characterPresets']>[number] & {
   templateScope: TemplatePackageSummary['scope'];
@@ -134,12 +135,16 @@ export const TemplatePackageSelector = ({
   onToggle,
   onMove,
   onDeletePackage,
+  compact = false,
+  headerActions,
 }: {
   packages: TemplatePackageSummary[];
   selectedIds?: string[];
   onToggle?: (templateId: string) => void;
   onMove?: (templateId: string, direction: -1 | 1) => void;
   onDeletePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
+  compact?: boolean;
+  headerActions?: React.ReactNode;
 }) => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState('');
@@ -156,23 +161,33 @@ export const TemplatePackageSelector = ({
     }
   };
   return (
-    <div style={templateSelectorStyle}>
-      <div style={templateSelectorHeaderStyle}>
-        <div>
+    <div className={compact ? 'template-package-selector--compact' : undefined} style={templateSelectorStyle}>
+      <div className="template-package-selector-header" style={templateSelectorHeaderStyle}>
+        <div className="template-package-selector-heading">
           <div style={fieldLabelStyle}>
             {onToggle ? '项目模板' : '已发现模板包'}
             <InfoTip content={onToggle ? '后加载模板会覆盖同名资产和组合母板。取消勾选全部模板可停用所有模板能力，保存配置后生效。' : '可删除外部模板包，包括随包导入的 WebGAL 字幕样式。内置模板可在项目中取消勾选。'} />
           </div>
+          {compact && <div style={hintTextStyle}>{onToggle ? `${selectedIds.length} 个已勾选 / ${packages.length} 个模板包` : `${packages.length} 个模板包`}</div>}
         </div>
-        <div style={hintTextStyle}>{onToggle ? `${selectedIds.length} 个已勾选` : `${packages.length} 个模板包`}</div>
+        {!compact && <div style={hintTextStyle}>{onToggle ? `${selectedIds.length} 个已勾选` : `${packages.length} 个模板包`}</div>}
+        {headerActions}
       </div>
 
-      <div style={templatePackageListStyle}>
+      <div
+        className="template-package-selector-list"
+        style={templatePackageListStyle}
+        role={compact && packages.length > 0 ? 'region' : undefined}
+        aria-label={compact && packages.length > 0 ? (onToggle ? '项目模板列表' : '模板包列表') : undefined}
+        tabIndex={compact && packages.length > 0 ? 0 : undefined}
+      >
         {packages.map((templatePackage) => {
           const checked = selectedIds.includes(templatePackage.id);
           const selectedIndex = selectedIds.indexOf(templatePackage.id);
+          const scopeLabel = ({ builtin: '内置', project: '项目', user: '用户', community: '社区' })[templatePackage.scope];
+          const metadata = `${templatePackage.id} · ${templatePackage.version} · ${scopeLabel}`;
           return (
-            <div key={templatePackage.id} style={{ ...templatePackageRowStyle, gridTemplateColumns: onToggle ? 'auto minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto' }}>
+            <div className="template-package-selector-row" key={templatePackage.id} style={{ ...templatePackageRowStyle, gridTemplateColumns: onToggle ? 'auto minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto' }}>
               {onToggle && <label style={templatePackageCheckStyle}>
                 <input
                   type="checkbox"
@@ -183,11 +198,11 @@ export const TemplatePackageSelector = ({
                 />
               </label>}
               <span style={templatePackageTextStyle}>
-                <span style={templatePackageNameStyle}>
+                <span className="template-package-selector-name" title={templatePackage.name} style={compact ? { ...templatePackageNameStyle, display: 'block' } : templatePackageNameStyle}>
                   {templatePackage.name}
                 </span>
-                <span style={templatePackageMetaStyle}>
-                  {templatePackage.id} · {templatePackage.version} · {({ builtin: '内置', project: '项目', user: '用户', community: '社区' })[templatePackage.scope]}
+                <span title={metadata} style={templatePackageMetaStyle}>
+                  {metadata}
                 </span>
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -235,6 +250,7 @@ export const TemplatePackageSelector = ({
           );
         })}
       </div>
+      {compact && packages.length === 0 && <div style={hintTextStyle}>暂无模板包</div>}
       {deletingId && <div role="status" style={hintTextStyle}>正在删除模板包…</div>}
       {deleteError && <div role="alert" style={{ ...hintTextStyle, color: 'var(--error)' }}>{deleteError}</div>}
     </div>
