@@ -235,12 +235,6 @@ function mapDirectToolResultContent(message: AiToolMessage): string | unknown[] 
   return parts;
 }
 
-interface ToolRoundImageProjection {
-  readonly toolCallId: string;
-  readonly name: string;
-  readonly imageBlocks: readonly AiImageContentBlock[];
-}
-
 function mapReadyToolCall(call: AiToolCall): Record<string, unknown> | null {
   if (call.status !== 'ready') return null;
   return {
@@ -293,8 +287,8 @@ export interface AiConversationProviderProjectionOptions {
  * Deterministic bidirectional mapping between the provider-neutral
  * conversation payload and the OpenAI-compatible chat completions payload.
  * Invalid tool calls never leave the host: their invalid_arguments results are
- * delivered to the business layer once, and history remapping keeps only
- * protocol-closed ready calls and their matching tool results.
+ * delivered to the business layer once, then projected as user corrections
+ * after all ready calls have received their matching tool results.
  *
  * Multimodal tool results are projected per provider protocol (ADR0023): when
  * images are rejected on tool-role messages, all text/JSON tool results of the
@@ -309,59 +303,80 @@ export function mapAiConversationRequestToProviderPayload(
   options: AiConversationProviderProjectionOptions = {},
 ): Record<string, unknown> {
   const toolRoleImages = options.toolRoleImages ?? false;
-  let pendingToolCallIds: ReadonlySet<string> = new Set();
-  let roundProjection: ToolRoundImageProjection[] | null = null;
+  let round: {
+    calls: Map<string, AiToolCall>;
+    results: Map<string, AiToolMessage>;
+  } | null = null;
   const messages: unknown[] = [];
 
-  const flushRoundProjection = (): void => {
-    if (!roundProjection || roundProjection.length === 0) return;
-    const content: unknown[] = [];
-    for (const item of roundProjection) {
-      content.push({
-        type: 'text',
-        text: `Tool result image from tool call ${item.toolCallId} (${item.name}):`,
+  const flushToolRound = (): void => {
+    if (!round) return;
+    const projection: unknown[] = [];
+    for (const call of round.calls.values()) {
+      const result = round.results.get(call.toolCallId);
+      if (!result) {
+        throw new AiConversationTransportError('protocol', `Missing tool result for call ${call.toolCallId}.`);
+      }
+      if (call.status === 'invalid') {
+        projection.push({ type: 'text', text: `Invalid tool call ${call.toolCallId} (${call.name}):` });
+        projection.push(...result.content.map(mapContentBlock));
+        continue;
+      }
+      const imageBlocks = result.content.filter(
+        (block): block is AiImageContentBlock => block.type === 'image',
+      );
+      const textResult: AiToolMessage = {
+        ...result,
+        content: result.content.filter((block) => block.type !== 'image'),
+      };
+      messages.push({
+        role: 'tool',
+        tool_call_id: call.toolCallId,
+        content: toolRoleImages
+          ? mapDirectToolResultContent(result)
+          : mapToolResultContent(textResult)
+            || (imageBlocks.length > 0 ? 'Tool result images are provided in the following user message.' : ''),
       });
-      for (const block of item.imageBlocks) content.push(mapContentBlock(block));
+      if (imageBlocks.length > 0 && !toolRoleImages) {
+        projection.push({
+          type: 'text',
+          text: `Tool result image from tool call ${call.toolCallId} (${call.name}):`,
+        });
+        projection.push(...imageBlocks.map(mapContentBlock));
+      }
     }
-    messages.push({ role: 'user', content });
-    roundProjection = null;
+    if (projection.length > 0) messages.push({ role: 'user', content: projection });
+    round = null;
   };
 
   for (const message of request.messages) {
     if (message.role === 'tool') {
-      if (!pendingToolCallIds.has(message.toolCallId)) continue;
-      const imageBlocks = message.content.filter(
-        (block): block is AiImageContentBlock => block.type === 'image',
-      );
-      if (imageBlocks.length > 0 && !toolRoleImages) {
-        (roundProjection ??= []).push({
-          toolCallId: message.toolCallId,
-          name: message.name,
-          imageBlocks,
-        });
-        continue;
+      if (!round?.calls.has(message.toolCallId)) {
+        throw new AiConversationTransportError('protocol', `Unexpected tool result for call ${message.toolCallId}.`);
       }
-      messages.push({
-        role: 'tool',
-        tool_call_id: message.toolCallId,
-        content: toolRoleImages
-          ? mapDirectToolResultContent(message)
-          : mapToolResultContent(message),
-      });
+      if (round.results.has(message.toolCallId)) {
+        throw new AiConversationTransportError('protocol', `Duplicate tool result for call ${message.toolCallId}.`);
+      }
+      round.results.set(message.toolCallId, message);
       continue;
     }
+    flushToolRound();
     if (message.role === 'assistant') {
-      // The previous tool round is fully closed before the next assistant
-      // message; its images (if any) are projected as a user message here.
-      flushRoundProjection();
+      const calls = new Map<string, AiToolCall>();
+      for (const call of message.toolCalls) {
+        if (calls.has(call.toolCallId)) {
+          throw new AiConversationTransportError('protocol', `Duplicate tool call id ${call.toolCallId}.`);
+        }
+        calls.set(call.toolCallId, call);
+      }
+      if (calls.size > 0) round = { calls, results: new Map() };
       const readyCalls = message.toolCalls
         .map(mapReadyToolCall)
         .filter((call): call is Record<string, unknown> => call !== null);
-      const toolCallIds = new Set(
-        message.toolCalls
-          .filter((call) => call.status === 'ready')
-          .map((call) => call.toolCallId),
-      );
+      // An all-invalid round without assistant content is represented entirely
+      // by its correction projection; avoid sending an empty assistant shell.
+      if (calls.size > 0 && readyCalls.length === 0
+        && message.content.length === 0 && message.reasoningContent === undefined) continue;
       messages.push({
         role: 'assistant',
         content: message.content.map(mapContentBlock),
@@ -370,18 +385,14 @@ export function mapAiConversationRequestToProviderPayload(
           : {}),
         ...(readyCalls.length > 0 ? { tool_calls: readyCalls } : {}),
       });
-      pendingToolCallIds = toolCallIds;
       continue;
     }
-    // user/system messages: supplements and initial prompts open a new turn,
-    // so a pending image projection is flushed before them.
-    flushRoundProjection();
     messages.push({
       role: message.role,
       content: message.content.map(mapContentBlock),
     });
   }
-  flushRoundProjection();
+  flushToolRound();
   return {
     model: request.model,
     messages,
@@ -445,6 +456,16 @@ function extractAiConversationStreamDelta(payload: unknown): {
   };
 }
 
+function validateAiConversationFinishReason(reason: unknown): void {
+  if (reason === undefined || reason === null) return;
+  if (reason !== 'stop' && reason !== 'tool_calls') {
+    throw new AiConversationTransportError(
+      'protocol',
+      `AI conversation provider did not complete the response (finish_reason: ${String(reason)}).`,
+    );
+  }
+}
+
 async function normalizeAiConversationStreamingResponse(
   response: Response,
   options: { requestId: string; contextWindow?: number; onProgress?: (progress: AiConversationProviderProgress) => void },
@@ -459,11 +480,41 @@ async function normalizeAiConversationStreamingResponse(
   let usage: AiConversationUsage | undefined;
   const calls = new Map<number, { id?: string; name?: string; arguments: string }>();
   let emitted = false;
+  let sawChoice = false;
+  let finished = false;
+  let done = false;
   const processBlock = (block: string): void => {
     const data = block.split(/\r?\n/u).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n').trim();
-    if (!data || data === '[DONE]') return;
+    if (!data || done) return;
+    if (data === '[DONE]') {
+      done = true;
+      return;
+    }
     let payload: unknown;
-    try { payload = JSON.parse(data); } catch { return; }
+    try { payload = JSON.parse(data); } catch {
+      throw new AiConversationTransportError('protocol', 'AI conversation provider returned malformed streaming JSON.');
+    }
+    if (isRecord(payload) && payload.error !== undefined) {
+      const error = payload.error;
+      const type = isRecord(error) ? error.type ?? error.code : undefined;
+      const configuration = type === 'invalid_request_error' || type === 'authentication_error'
+        || type === 'permission_error' || type === 'invalid_api_key';
+      const detail = isRecord(error) && typeof error.message === 'string'
+        ? error.message.slice(0, 240)
+        : typeof error === 'string' ? error.slice(0, 240) : 'Unknown streaming error.';
+      throw new AiConversationTransportError(
+        configuration ? 'configuration' : 'transient',
+        `AI conversation provider streaming error: ${detail}`,
+        { retryable: !configuration },
+      );
+    }
+    const choice = isRecord(payload) && Array.isArray(payload.choices) && isRecord(payload.choices[0])
+      ? payload.choices[0] : undefined;
+    if (choice) {
+      sawChoice = true;
+      validateAiConversationFinishReason(choice.finish_reason);
+      if (choice.finish_reason !== undefined && choice.finish_reason !== null) finished = true;
+    }
     const delta = extractAiConversationStreamDelta(payload);
     model = model ?? delta.model;
     usage = delta.usage ?? usage;
@@ -495,19 +546,37 @@ async function normalizeAiConversationStreamingResponse(
       options.onProgress?.({ kind: 'model_output' });
     }
   };
-  while (true) {
-    const result = await reader.read();
-    buffer += decoder.decode(result.value ?? new Uint8Array(), { stream: !result.done });
-    let separator = buffer.search(/\r?\n\r?\n/u);
-    while (separator >= 0) {
-      const length = buffer[separator] === '\r' ? 4 : 2;
-      processBlock(buffer.slice(0, separator));
-      buffer = buffer.slice(separator + length);
-      separator = buffer.search(/\r?\n\r?\n/u);
+  try {
+    while (true) {
+      const result = await reader.read();
+      buffer += decoder.decode(result.value ?? new Uint8Array(), { stream: !result.done });
+      let separator = buffer.search(/\r?\n\r?\n/u);
+      while (separator >= 0) {
+        const length = buffer[separator] === '\r' ? 4 : 2;
+        processBlock(buffer.slice(0, separator));
+        buffer = buffer.slice(separator + length);
+        separator = buffer.search(/\r?\n\r?\n/u);
+      }
+      if (done) {
+        await reader.cancel().catch(() => undefined);
+        break;
+      }
+      if (result.done) break;
     }
-    if (result.done) break;
+    if (buffer.trim()) processBlock(buffer);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
-  if (buffer.trim()) processBlock(buffer);
+  // Some compatible providers send DONE without finish_reason; others close
+  // after a terminal choice. Either is sufficient, but bare EOF is not.
+  if (!sawChoice || (!done && !finished)) {
+    throw new AiConversationTransportError(
+      'transient', 'AI conversation provider stream ended before completion.', { retryable: true },
+    );
+  }
   const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call]) => ({
     id: call.id ?? `stream-call-${index}`,
     type: 'function',
@@ -581,6 +650,9 @@ function normalizeAiConversationProviderResponse(
   request: AiConversationRequest,
   options: { requestId: string; contextWindow?: number },
 ): AiConversationResponse {
+  if (isRecord(payload) && Array.isArray(payload.choices) && isRecord(payload.choices[0])) {
+    validateAiConversationFinishReason(payload.choices[0].finish_reason);
+  }
   const messageCandidate = mapProviderAssistantMessageToCandidate(
     extractAiConversationFirstChoiceMessage(payload),
   );
