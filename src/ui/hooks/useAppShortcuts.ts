@@ -22,19 +22,21 @@ export function useAppShortcuts({
   setShowExport: (open: boolean) => void;
 }) {
   const handlePlayPause = useCallback(() => {
+    if (showProjectHome || !hasLoadedScene) return;
     const playback = contextValue.adapters.playback;
     if (contextValue.stores.playback.playing) {
       playback.pause();
     } else {
       playback.play();
     }
-  }, [contextValue]);
+  }, [contextValue, hasLoadedScene, showProjectHome]);
 
   const handleFrameStep = useCallback((dir: 1 | -1) => {
+    if (showProjectHome || !hasLoadedScene) return;
     const playback = contextValue.adapters.playback;
     const t = playback.getCurrentTime();
     playback.seek(Math.max(0, t + dir * (1 / 60)));
-  }, [contextValue]);
+  }, [contextValue, hasLoadedScene, showProjectHome]);
 
   const handleUndo = useCallback(() => {
     if (isCollaborationUndoDisabled(collaborationStatus)) {
