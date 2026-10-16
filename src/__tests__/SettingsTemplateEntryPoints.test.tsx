@@ -58,8 +58,9 @@ describe('settings template entry point', () => {
     expect(fontSize.getAttribute('aria-valuetext')).toBe('64 像素');
     expect(findSettingsCategories('字号').map((category) => category.id)).toContain('dialogue');
     const entrance = screen.getByRole('switch', { name: '文本框入场动画' });
+    expect(entrance.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(entrance);
-    expect(settingsManager.get('dialogueEntranceAnimation')).toBe(false);
+    expect(settingsManager.get('dialogueEntranceAnimation')).toBe(true);
     fireEvent.click(screen.getByRole('combobox', { name: '默认对白样式' }));
     expect(screen.getByRole('option', { name: '玻璃' })).toBeTruthy();
     fireEvent.click(screen.getByRole('option', { name: '粉色名牌' }));

@@ -239,7 +239,10 @@ export const MinimalTemplate: DialogueTemplate = {
     const boxWidth = STAGE_WIDTH - 400;
     const boxX = 200;
     const boxHeight = metrics.height + 100;
-    const boxY = position === 'bottom' ? STAGE_HEIGHT - boxHeight - 80 : position === 'top' ? 80 : (STAGE_HEIGHT - boxHeight) / 2;
+    const nameplateAnchorY = position === 'bottom'
+      ? STAGE_HEIGHT - boxHeight - 80
+      : position === 'top' ? 80 : (STAGE_HEIGHT - boxHeight) / 2;
+    const boxY = nameplateAnchorY - 24;
 
     const finalSpeakerColor = speakerColor || '#FFD700';
 
@@ -255,7 +258,7 @@ export const MinimalTemplate: DialogueTemplate = {
       } });
       speakerText.anchor.set(0.5, 0.5);
       speakerText.x = STAGE_WIDTH / 2;
-      speakerText.y = boxY - 60;
+      speakerText.y = nameplateAnchorY - 60;
       container.addChild(speakerText);
     }
 

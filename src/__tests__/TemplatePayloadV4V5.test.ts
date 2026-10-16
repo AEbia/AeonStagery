@@ -737,7 +737,7 @@ describe('Ticket 13: Template v4 and v5 payloads materialization as scene v5', (
       expect(semanticPkg.manifest.template.compatibility?.sceneSchemaVersion).toBe(4);
 
       const defaults = resolveTemplateDefaults([semanticPkg]);
-      expect(defaults.dialogueStyleId).toBe('glass');
+      expect(defaults.dialogueStyleId).toBe('immersive-subtitle');
 
       const characters = createInitialCharactersFromTemplates([semanticPkg]);
       expect(characters).toEqual([]);

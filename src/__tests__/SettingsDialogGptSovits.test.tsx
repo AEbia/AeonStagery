@@ -212,9 +212,9 @@ describe('SettingsDialog GPT-SoVITS settings', () => {
     const speedSlider = screen.getByRole('slider', { name: '对白文本速度' }) as HTMLInputElement;
     const durationSlider = screen.getByRole('slider', { name: '默认对白时长' }) as HTMLInputElement;
 
-    expect(speedSlider.value).toBe('0.025');
+    expect(speedSlider.value).toBe('0.06');
     expect(durationSlider.value).toBe('2');
-    expect(screen.getByText('0.025 秒/字')).toBeTruthy();
+    expect(screen.getByText('0.06 秒/字')).toBeTruthy();
     expect(screen.getByText('2 秒')).toBeTruthy();
 
     await act(async () => {

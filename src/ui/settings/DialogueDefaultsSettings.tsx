@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
-import { DEFAULT_PROJECT_TEMPLATE_CONFIGURATION } from '../../api/types/project';
+import { DEFAULT_DIALOGUE_STYLE_ID, DEFAULT_PROJECT_TEMPLATE_CONFIGURATION } from '../../api/types/project';
 import { useOptionalApp } from '../context/AppContext';
 import { FormSelect } from '../FormSelect';
 import { buildAvailableDialogueStyles, resolveTemplateDefaultValue } from '../templates/TemplateCapabilityConfig';
@@ -22,7 +22,9 @@ export function DialogueDefaultsSettings() {
   const summaries = catalog?.getSummaries() ?? [];
   const templates = project?.metadata.templates ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION;
   const styles = buildAvailableDialogueStyles(summaries, templates.enabledTemplateIds);
-  const resolved = resolveTemplateDefaultValue('dialogueStyleId', summaries, templates.enabledTemplateIds, templates.defaults, 'glass');
+  const resolved = resolveTemplateDefaultValue(
+    'dialogueStyleId', summaries, templates.enabledTemplateIds, templates.defaults, DEFAULT_DIALOGUE_STYLE_ID,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,7 +55,7 @@ export function DialogueDefaultsSettings() {
         <FormSelect
           aria-label="默认对白样式"
           style={{ flex: 1, minWidth: 0 }}
-          value={resolved.value ?? 'glass'}
+          value={resolved.value ?? DEFAULT_DIALOGUE_STYLE_ID}
           disabled={!project || saving || styles.length === 0}
           options={styles.map((style) => ({ value: style.id, label: style.name }))}
           onChange={(value) => void saveStyle(value)}
