@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { CollaborativeAssetManifest } from '../api/types/collaboration';
@@ -166,6 +166,65 @@ describe('ProjectHome collaboration entry', () => {
     renderHome({ templatePackages: [templatePackage], onDeleteTemplatePackage });
     fireEvent.click(screen.getByRole('button', { name: '删除模板包 WebGAL Subtitle' }));
     await waitFor(() => expect(onDeleteTemplatePackage).toHaveBeenCalledWith(templatePackage));
+  });
+
+  it('keeps many libraries and templates reachable with their own actions and full text', async () => {
+    const paths = Array.from({ length: 10 }, (_, index) => `D:/素材库/${'较长的目录名称/'.repeat(8)}library-${index}`);
+    const packages = Array.from({ length: 12 }, (_, index) => ({
+      id: `template.${'long-id.'.repeat(8)}${index}`,
+      name: `${'较长的模板名称'.repeat(8)} ${index}`,
+      version: '1.0.0',
+      scope: 'user' as const,
+    }));
+    const props = renderHome({ externalLibraryPaths: paths, templatePackages: packages });
+    const libraries = screen.getByRole('region', { name: '外部库列表' });
+    const templates = screen.getByRole('region', { name: '模板包列表' });
+
+    expect(screen.getByText('10 个外部库')).toBeTruthy();
+    expect(screen.getByText('12 个模板包')).toBeTruthy();
+    expect(libraries.tabIndex).toBe(0);
+    expect(templates.tabIndex).toBe(0);
+    expect(within(libraries).getByTitle(paths[9]).textContent).toBe(paths[9]);
+    expect(within(templates).getByTitle(packages[11].name).textContent).toBe(packages[11].name);
+    expect(within(templates).getByTitle(`${packages[11].id} · 1.0.0 · 用户`)).toBeTruthy();
+    expect(libraries.contains(screen.getByRole('button', { name: /添加外部库/ }))).toBe(false);
+    expect(templates.contains(screen.getByRole('button', { name: /导入模板包/ }))).toBe(false);
+
+    fireEvent.click(within(libraries).getAllByRole('button', { name: '修改' })[9]);
+    await waitFor(() => expect(props.onReplaceExternalLibrary).toHaveBeenCalledWith(9));
+    fireEvent.click(within(libraries).getAllByRole('button', { name: '移除' })[8]);
+    await waitFor(() => expect(props.onRemoveExternalLibrary).toHaveBeenCalledWith(8));
+  });
+
+  it('keeps template deletion failure feedback outside the scrollable list', async () => {
+    const templatePackage = { id: 'template.demo', name: 'Demo', version: '1.0.0', scope: 'user' as const, packageRoot: '/library/demo' };
+    const onDeleteTemplatePackage = vi.fn(async () => { throw new Error('目录被占用'); });
+    renderHome({ templatePackages: [templatePackage], onDeleteTemplatePackage });
+
+    fireEvent.click(screen.getByRole('button', { name: '删除模板包 Demo' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('目录被占用'));
+
+    const list = screen.getByRole('region', { name: '模板包列表' });
+    expect(list.contains(screen.getByRole('alert'))).toBe(false);
+    expect(within(list).getByTitle('Demo')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '删除模板包 Demo' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('submits template order changes from the compact create list', async () => {
+    const props = renderHome({
+      templatePackages: [
+        { id: 'template.alpha', name: 'Alpha', version: '1.0.0', scope: 'user' },
+        { id: 'template.beta', name: 'Beta', version: '1.0.0', scope: 'user' },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    const templates = screen.getByRole('region', { name: '项目模板列表' });
+    fireEvent.click(within(templates).getByRole('button', { name: 'Beta 上移' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+
+    await waitFor(() => expect(props.onCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      templates: expect.objectContaining({ enabledTemplateIds: ['template.beta', 'template.alpha'] }),
+    })));
   });
 
   it('enables every available template by default and submits deliberate selection changes', async () => {

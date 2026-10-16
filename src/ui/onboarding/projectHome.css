@@ -5,8 +5,9 @@
 ──────────────────────────────────────────────────────────────────*/
 
 .ph-overlay {
+  --ph-resource-list-max-height: clamp(160px, 26vh, 240px);
   position: absolute;
-  inset: 44px 0 0;
+  inset: 44px 0 28px;
   z-index: 20;
   display: flex;
   align-items: flex-start;
@@ -99,6 +100,8 @@
   position: relative;
   z-index: 1;
   width: min(920px, 100%);
+  min-width: 0;
+  flex-shrink: 0;
   display: grid;
   gap: clamp(12px, 2.2vw, 20px);
   margin: auto 0;
@@ -157,6 +160,8 @@
 /* ─── Surfaces & Containers ─────────────────────────────────── */
 .ph-surface {
   display: grid;
+  min-width: 0;
+  align-content: start;
   gap: clamp(12px, 2vw, 16px);
   padding: clamp(14px, 2.5vw, 20px);
   border: 1px solid var(--border-default);
@@ -169,6 +174,7 @@
 
 .ph-start-surface {
   display: grid;
+  min-width: 0;
   gap: clamp(12px, 2vw, 16px);
 }
 
@@ -446,8 +452,16 @@
 /* ─── Dual Content Grid (Recent Projects & External Library) ─── */
 .ph-content-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
   gap: clamp(12px, 1.8vw, 16px);
+}
+
+@media (max-width: 799.98px) {
+  .ph-content-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* ─── Recent Projects Panel ─────────────────────────────────── */
@@ -624,12 +638,56 @@
 }
 
 /* ─── External Library Panel ────────────────────────────────── */
+.ph-resource-group {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.ph-resource-group--templates {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 16px;
+}
+
+.ph-resource-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ph-resource-group-heading {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.ph-resource-group-title {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.ph-resource-group-header > .btn,
+.ph-resource-group .template-package-selector-header > .btn {
+  flex-shrink: 0;
+}
+
 .ph-library-list {
   display: grid;
+  min-width: 0;
   gap: 8px;
-  max-height: clamp(160px, 26vh, 240px);
+  max-height: var(--ph-resource-list-max-height);
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.ph-library-list:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .ph-library-item {
@@ -664,6 +722,7 @@
 .ph-library-empty {
   min-height: clamp(75px, 12vh, 90px);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -673,6 +732,87 @@
   color: var(--text-muted);
   font-size: 12.5px;
   background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+}
+
+/* In two columns, size the panels from the space between the app bars.
+   Keep the scroll boundaries at the lists, including the recent-project list. */
+@media (min-width: 800px) {
+  .ph-launcher--start {
+    height: auto;
+    max-height: 100%;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ph-launcher--start .ph-start-surface {
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ph-launcher--start .ph-action-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ph-launcher--start .ph-content-grid {
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .ph-recent-surface {
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ph-recent-surface .ph-recent-list {
+    min-height: 0;
+    max-height: none;
+    align-content: start;
+  }
+
+  .ph-resource-manager {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .ph-resource-manager > .ph-section-title {
+    flex-shrink: 0;
+  }
+
+  .ph-resource-manager > .ph-resource-group {
+    min-height: 90px;
+    flex: 0 1 auto;
+    grid-template-rows: auto minmax(42px, 1fr);
+  }
+
+  .ph-resource-manager > .ph-resource-group--templates {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 104px;
+  }
+
+  .ph-resource-manager .ph-library-list {
+    min-height: 0;
+    align-content: start;
+  }
+
+  .ph-resource-manager .ph-library-empty {
+    min-height: 42px;
+    padding: 8px;
+  }
+
+  .ph-resource-manager .template-package-selector--compact {
+    min-height: 0;
+    flex: 1;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ph-resource-manager .template-package-selector-list {
+    min-height: 0;
+    max-height: none;
+    align-content: start;
+  }
 }
 
 /* ─── Forms & Fields ────────────────────────────────────────── */
@@ -1514,6 +1654,7 @@
 /* ─── Compact Height Viewport Optimization ──────────────────── */
 @media (max-height: 720px) {
   .ph-overlay {
+    --ph-resource-list-max-height: 140px;
     padding: clamp(8px, 1.5vh, 16px) clamp(10px, 2vw, 18px);
     align-items: flex-start;
   }
@@ -1546,8 +1687,18 @@
     max-height: calc(140px + var(--ph-recent-hover-headroom) * 2);
   }
 
-  .ph-library-list {
-    max-height: 140px;
+  .ph-resource-manager,
+  .ph-resource-group {
+    gap: 8px;
+  }
+
+  .ph-resource-manager > .ph-resource-group {
+    min-height: 86px;
+  }
+
+  .ph-resource-manager > .ph-resource-group--templates {
+    min-height: 96px;
+    padding-top: 8px;
   }
 }
 
