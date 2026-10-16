@@ -26,14 +26,23 @@ describe('dialogue settings persistence', () => {
     expect(reloaded.settingsManager.get('dialogueFontSize')).toBe(64);
   });
 
-  it('persists the entrance switch and defaults missing or invalid values to enabled', async () => {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueEntranceAnimation: 'disabled' }));
-    const { settingsManager } = await import('../ui/SettingsStore');
-    expect(settingsManager.get('dialogueEntranceAnimation')).toBe(true);
-    settingsManager.set('dialogueEntranceAnimation', false);
+  it('defaults the entrance switch to disabled and persists explicit choices', async () => {
+    const { settingsManager, DEFAULT_SETTINGS } = await import('../ui/SettingsStore');
+    expect(DEFAULT_SETTINGS.dialogueEntranceAnimation).toBe(false);
+    expect(settingsManager.get('dialogueEntranceAnimation')).toBe(false);
+    settingsManager.set('dialogueEntranceAnimation', true);
     vi.resetModules();
-    const reloaded = await import('../ui/SettingsStore');
-    expect(reloaded.settingsManager.get('dialogueEntranceAnimation')).toBe(false);
+    const enabled = await import('../ui/SettingsStore');
+    expect(enabled.settingsManager.get('dialogueEntranceAnimation')).toBe(true);
+    enabled.settingsManager.set('dialogueEntranceAnimation', false);
+    vi.resetModules();
+    const disabled = await import('../ui/SettingsStore');
+    expect(disabled.settingsManager.get('dialogueEntranceAnimation')).toBe(false);
+
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueEntranceAnimation: 'disabled' }));
+    vi.resetModules();
+    const invalid = await import('../ui/SettingsStore');
+    expect(invalid.settingsManager.get('dialogueEntranceAnimation')).toBe(false);
   });
 
   it('clears the legacy built-in glass signature while preserving custom signature text', async () => {
@@ -77,6 +86,7 @@ describe('dialogue settings persistence', () => {
 
     const { DEFAULT_SETTINGS, settingsManager } = await import('../ui/SettingsStore');
 
+    expect(DEFAULT_SETTINGS.dialogueTextSpeed).toBe(0.06);
     expect(settingsManager.get('dialogueTextSpeed')).toBe(DEFAULT_SETTINGS.dialogueTextSpeed);
     expect(settingsManager.get('defaultDialogueDurationSeconds')).toBe(DEFAULT_SETTINGS.defaultDialogueDurationSeconds);
   });

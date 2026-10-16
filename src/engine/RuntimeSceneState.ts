@@ -468,9 +468,13 @@ export function computeSceneStateAtTime(
         break;
       case 'setExpression':
         if (characters.has(p.id)) {
+          const previous: { key: string | null; time: number; previousKey?: string | null } | null = characters.get(p.id).expression;
           characters.get(p.id).expression = {
             key: p.expression,
             time: action.time,
+            // Same-time replacements share the expression from before that
+            // timestamp, matching Seek's predecessor lookup.
+            previousKey: previous && previous.time === action.time ? previous.previousKey ?? null : previous?.key ?? null,
           };
         }
         break;

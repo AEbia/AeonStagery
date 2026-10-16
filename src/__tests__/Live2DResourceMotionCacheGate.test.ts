@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 /**
  * @vitest-environment jsdom
  */
@@ -35,13 +36,13 @@ function installCharacter(overrides: Record<string, unknown> = {}) {
     runtime: { adapterId: 'pixi-live2d-display-cubism2' },
     ...overrides,
   };
-  (live2DManager as any).characters.set('char1', entry);
+  live2DStageState(live2DManager).characters.set('char1', entry);
   return entry;
 }
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  (live2DManager as any).characters.clear();
+  live2DStageState(live2DManager).characters.clear();
 });
 
 describe('Live2DManager resource motion cache gate', () => {

@@ -1,7 +1,7 @@
 ---
 status: accepted
-implementation_status: architecture-decided; editor-session-implementation-pending
-last_updated: 2026-09-04
+implementation_status: implemented
+last_updated: 2026-10-15
 supersedes_product_scope: ADR-0027
 extends: ADR-0028
 ---
@@ -14,12 +14,12 @@ extends: ADR-0028
 计算结束后追加一个 Parameter 覆盖层。
 
 - 自定义 Motion 与普通 `playMotion` 属于同一级角色动作。
-- Cubism 2.1 是第一优先级；Cubism 3/4/5 在相同抽象下后续接入。
+- Cubism 2.1 与 Cubism 3/4/5 使用相同的自定义 Motion 创作契约。
 - 主要入口是选中已有 `playMotion` 并选择“自定义动作”。
 - 导入或注册 `.mtn` / `.motion3.json` 时仍只创建普通资源 Motion，不自动解析成
   自定义 Motion、不生成 Parameter 轨道，也不改变源文件或既有 `playMotion`。
 - “自定义动作”是用户在时间轴上对某个普通资源 Motion 发起的显式内容转换；只有
-  执行该命令后，系统才读取源 Motion 并生成可编辑的场景内联关键帧副本。
+  执行该命令后，系统才从源 Motion 生成可编辑的场景内联关键帧副本。
 - 首版不提供空白自定义 Motion；每个自定义 Motion 都必须由已有 `playMotion`
   转换生成，确保所有可编辑轨道都有可靠来源与起始值。
 - 转换在原时间轴位置直接替换原 `playMotion` 事件，不新增并存事件。原事件的
@@ -40,13 +40,24 @@ extends: ADR-0028
 - `characterPerformance` 的 Motion 输出必须能够区分普通资源 Motion 与内联自定义
   Motion；二者是同一个 Motion 输出的互斥来源，不能在同一输出中并存或叠加。
 - 场景持久化中的 `params.motion` 表示完整的 Motion 输出，并使用 `kind` 判别其来源；
-  普通资源 Motion 保存为 `{ kind: "resource", key, fadeInSeconds? }`，内联自定义
+  普通资源 Motion 保存为 `{ kind: "resource", key, durationSeconds?, fadeInSeconds? }`，内联自定义
   Motion 保存为 `{ kind: "custom", durationSeconds, fadeInSeconds, derivedFrom, tracks }`。
   进入过渡和
   时长等 Motion 专属配置也属于这个对象，不属于整个 `characterPerformance`。
 - `target` 以及 Expression、LookAt、Blink 输出继续是 `params.motion` 的同级字段。
   最终 v4 不再把 `durationSeconds` 作为 `characterPerformance.params` 的顶层公共字段，
   也不在 Motion 输出或角色表演的其他位置保存 `loop` 或 `priority`。
+- 当前 v5 的资源 Motion 时长由统一 source preparation 在编译前物化：Motion3
+  读取 `Meta.Duration`，Cubism 2 `.mtn` 读取最长曲线的样本数与源 FPS，组合模型
+  先在整体动作组中匹配完整名称，缺少精确匹配时仅回退到全局唯一的同名后缀动作组，
+  再取播放该完整动作组的可解析子模型的最大时长；按动作时刻的角色登场 `model`（缺省时使用角色默认
+  模型）和对白 `$speaker` 绑定查找资源，副模型选择由作者入口写入 `model`。
+  时长至少覆盖显式 `fadeInSeconds`，源循环只贡献一个有限周期。
+  加载、导入与编辑都经过此入口；每次准备内复用文件读取，下次准备重新读取以响应
+  资源变化。资源缺失或解析失败时保留已有正时长，否则物化 1 秒并记录诊断。
+  `temporalExtent` 和时间轴几何共用 `motion.durationSeconds`；显式场景结尾不足
+  时只延长，保留尾部留白。编译器、播放与导出均不自行探测资源时长。
+  字段在 v5 内可选以兼容旧 source，旧场景在正常加载准备时补齐，无需离线迁移。
 - 普通资源 Motion 不继续以裸字符串作为新场景的规范写入格式，也不使用
   `string | object` 作为长期数据契约。v4 codec 只接受判别联合的规范形状；
   旧 `motion: "motion-key"` 与无 `kind` 的 `{ key, fadeInSeconds? }` 只由显式的
@@ -279,6 +290,9 @@ extends: ADR-0028
   `EyeBlink` 与目标眼睛 Parameter 曲线相乘，`LipSync` 与目标嘴部 Parameter 曲线
   相加；目标 Parameter 已有直接源曲线时，先按 Cubism SDK 规则组合，再生成一条
   自包含的最终 Parameter 轨道。
+  平滑组合按场景帧率采样，同时保留源分段边界；`stepped` 和 `inverseStepped`
+  的突变必须保留原始时间，不能被线性采样提前、延后或抹平。必要时以相邻浮点
+  时间点记录突变两侧值，并以保持分段连接，仍遵守精确时间唯一性契约。
 - Motion3 的 `Model Opacity` 与 `PartOpacity` 都属于直接透明度变化，转换时忽略，
   不生成 Parameter 轨道。
 - Expression 是位于 Motion 之上的独立覆盖/混合层。转换 Motion 时不采样当前
@@ -350,7 +364,7 @@ extends: ADR-0028
 
 ### Cubism 3/4/5
 
-- 后续直接解析 `.motion3.json` 的 Parameter 目标曲线，精确保留原生 Linear、
+- 直接解析 `.motion3.json` 的 Parameter 目标曲线，精确保留原生 Linear、
   Bezier、Stepped 和 Inverse Stepped 分段、源关键点及其运行曲线。直接
   `PartOpacity` / Parts 可见性曲线不生成自定义 Motion 轨道。
 - 同时解析 `Target: "Model"` 的 `EyeBlink` 与 `LipSync` 曲线，并根据当前目标模型
@@ -378,7 +392,7 @@ extends: ADR-0028
 - 当前 AeonStagery 没有消费 Motion3 `UserData` Motion 事件；转换忽略这些事件，不把
   底层库的 `motion:<value>` 发射扩展为场景字段。未来若产品引入 Motion 事件语义，
   必须另行定义普通 Motion 与自定义 Motion 的共同契约。
-- 接入 Cubism 3/4/5 原生创作时，曲线编辑器应支持其原生分段类型和控制点编辑，
+- Cubism 3/4/5 曲线编辑器支持其原生分段类型和控制点编辑，
   不把 Bezier 或阶梯分段压成线性关键帧。
 
 ### Cubism 2.1 关键帧生成密度
@@ -438,7 +452,7 @@ extends: ADR-0028
 关键帧编辑采用 ADR-0028 定义的应用级 `CustomMotionEditing` 深模块。它是关键帧
 写入的唯一 UI seam：轨道区、曲线区、Inspector 和动作菜单只提交会话内的编辑意图，
 不直接调用 `CustomMotionEditLeaseGate`、`CustomMotionKeyframeEditCommand` 或
-`SemanticAuthoringApplicationService`。`CustomMotionAuthoring` 只可作为转换流程的
+`SemanticAuthoringApplicationService`。`CustomMotionConversion` 作为转换流程的
 内部协调器，不能继续承担一层“每批 acquire、finally release”的公开 facade。
 
 会话有一个不透明代际句柄和四种可观察阶段：`pending`、`held`、`readonly`、

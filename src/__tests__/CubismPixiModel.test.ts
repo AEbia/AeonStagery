@@ -2,8 +2,160 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import { refreshCubismCoreViews } from '../engine/CubismPixiModel';
+import { submitLive2DBakeFrameBatch } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 
 describe('Cubism Pixi runtime controls', () => {
+  it('matches the authored blink pose in a bake frame and a direct seek at the same scene time', async () => {
+    const stage = new CubismPixiLive2DAdapter().createModelHandle('stage', createCubismModelFixture().model);
+    const bake = new CubismPixiLive2DAdapter().createModelHandle('bake', createCubismModelFixture().model);
+    try {
+      stage.blink.set(true, 1000, 0.75, 0);
+      await stage.performance.restoreSeekState({ id: 'stage', targetSceneTime: 0.75 });
+      bake.blink.set(true, 1000, 0.75, 0);
+      await submitLive2DBakeFrameBatch({
+        operations: [{ handle: bake, isCurrent: () => true, sceneTimeSeconds: 0.75 }],
+        deltaMs: 1000 / 30, isCurrent: () => true,
+      });
+      const values = (handle: typeof stage) => handle.parameters.getParameterValues()?.filter((parameter) => parameter.name.includes('Eye'));
+      expect(values(bake)?.map((parameter) => parameter.value)).toEqual(values(stage)?.map((parameter) => parameter.value));
+      expect(values(bake)?.[0].value).toBeCloseTo(0.5);
+    } finally {
+      stage.dispose({ mode: 'destroy' });
+      bake.dispose({ mode: 'destroy' });
+    }
+  });
+
+  it('applies look-at and resumes an authored transition from its seek position', () => {
+    const { model } = createCubismModelFixture(['ParamAngleX', 'ParamAngleY', 'ParamEyeBallX', 'ParamEyeBallY']);
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const values = () => new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+    handle.focus.apply({ focusX: 0.8, focusY: -0.4, duration: 0 });
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(24);
+    expect(values().get('ParamEyeBallY')).toBeCloseTo(-0.4);
+    handle.focus.apply({ focusX: 0, focusY: 0, duration: 1, options: { fromX: 0.8, fromY: -0.4, elapsed: 0.5, ease: 'none' } });
+    handle.focus.manageAnimations('pause');
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(12);
+    expect(values().get('ParamEyeBallY')).toBeCloseTo(-0.2);
+    handle.focus.manageAnimations('resume');
+    handle.focus.manageAnimations('stop');
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamAngleX')).toBeCloseTo(0);
+    handle.dispose({ mode: 'destroy' });
+  });
+
+  it('keeps a custom eye curve while the other eye blinks and restores blink on release', () => {
+    const { model } = createCubismModelFixture();
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const stage = handle.customMotion.installStage({
+      getState: () => ({
+        motion: {
+          kind: 'custom', durationSeconds: 1, fadeInSeconds: 0,
+          derivedFrom: { key: 'wink' },
+          tracks: [{ parameterId: 'ParamEyeLOpen', keyframes: [{ time: 0, value: 0.4 }, { time: 1, value: 0.4 }] }],
+        },
+        startSceneTime: 0, handoff: { values: {} }, controlledParameterIds: ['ParamEyeLOpen'],
+      }),
+    });
+    expect(stage).not.toBeNull();
+    stage!.setSceneTime(0.75);
+    handle.blink.set(true, 1000, 0.75, 0);
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    const values = () => new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+    expect(values().get('ParamEyeLOpen')).toBeCloseTo(0.4);
+    expect(values().get('ParamEyeROpen')).toBeCloseTo(0.5);
+    stage!.dispose();
+    handle.frame.submit({ deltaMs: 0, shouldAdvance: true });
+    expect(values().get('ParamEyeLOpen')).toBeCloseTo(0.2);
+    handle.dispose({ mode: 'destroy' });
+  });
+
+  it('registers an external motion from its runtime URI without changing model settings', async () => {
+    const { model, motionManager } = createCubismModelFixture();
+    const originalMotions = model.internalModel.settings.motions;
+    const motion = {
+      _motionData: { duration: 2.5, curves: [] },
+      getFadeInTime: () => 0,
+      setFadeInTime: vi.fn(), setFadeOutTime: vi.fn(), setOffsetTime: vi.fn(),
+      setupMotionQueueEntry: vi.fn(),
+    };
+    const createMotion = vi.fn(() => motion);
+    motionManager.createMotion = createMotion;
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(8),
+    })));
+    const entries: any[] = [];
+    motionManager.queueManager = {
+      startMotion: vi.fn(() => { entries.push({ _motion: motion }); return 1; }),
+      getCubismMotionQueueEntries: () => entries,
+      stopAllMotions: vi.fn(),
+    };
+
+    try {
+      const result = await model.registerExternalMotion('wave', {
+        source: 'wave.motion3.json', runtimeUri: 'asset://wave.motion3.json',
+      });
+      expect(result.status).toBe('compatible');
+      expect(createMotion).toHaveBeenCalledWith(expect.any(ArrayBuffer), 'wave', expect.objectContaining({ File: 'wave.motion3.json' }));
+      expect(model.internalModel.settings.motions).toBe(originalMotions);
+      await model.preloadMotion('wave');
+      expect(model.getMotionDuration('wave')).toBe(2.5);
+      expect(await model.startMotion('wave')).toBe(true);
+      expect(motionManager.queueManager.startMotion).toHaveBeenCalledWith(motion, false);
+      expect(model.getExternalPerformanceKeys('motion')).toEqual(['wave']);
+      model.unregisterExternalPerformance('wave');
+      expect(model.getExternalPerformanceKeys('motion')).toEqual([]);
+      expect(await model.startMotion('wave')).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('resolves a registered external expression through the normal expression control', async () => {
+    const { model, expressionManager } = createCubismModelFixture();
+    const expression = { getFadeInTime: () => 0, setupMotionQueueEntry: vi.fn() };
+    expressionManager.createExpression = vi.fn(() => expression);
+    const startMotion = vi.fn(() => 1);
+    expressionManager.queueManager = {
+      startMotion,
+      getCubismMotionQueueEntries: () => [{ _motion: expression }],
+      stopAllMotions: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })));
+
+    try {
+      const result = await model.registerExternalExpression('happy', {
+        source: 'happy.exp3.json', runtimeUri: 'asset://happy.exp3.json',
+      });
+      expect(result.status).toBe('compatible');
+      await model.setExpressionForSeek('happy', 0.4);
+      expect(startMotion).toHaveBeenCalledWith(expression, false);
+      expect(expressionManager.currentExpression).toBe(expression);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('returns structured diagnostics when an external performance cannot be fetched', async () => {
+    const { model } = createCubismModelFixture();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) })));
+    try {
+      const result = await model.registerExternalMotion('missing', {
+        source: 'missing.motion3.json', runtimeUri: 'asset://missing.motion3.json',
+      });
+      expect(result).toEqual(expect.objectContaining({
+        status: 'incompatible', missingParameterIds: [], ignoredParameterIds: [],
+      }));
+      expect(result.diagnostics.join(' ')).toContain('fetch');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('preserves the legacy Core drawable render orders', () => {
     const { core } = createCubismModelFixture();
     const orders = new Int32Array([2, 0, 1]);
@@ -94,6 +246,33 @@ describe('Cubism Pixi runtime controls', () => {
     model.setBlink(false, 1000, 0.8, 0);
     model.update(0);
     expect(drawn()[0]).toBe(1);
+  });
+  it('restores Cubism 3+ state with an O(1) native queue offset', async () => {
+    const { model, internal } = createCubismModelFixture();
+    const physics = { initialize: vi.fn() };
+    const pose = { reset: vi.fn() };
+    const focus = { focus: vi.fn(), vx: 4, vy: -3 };
+    internal.physics = physics;
+    internal.pose = pose;
+    internal.focusController = focus;
+    const update = vi.spyOn(internal, 'update');
+    const startMotion = vi.spyOn(model, 'startMotion').mockResolvedValue(true);
+
+    const result = await model.restoreAtSceneTime({
+      id: 'haru',
+      targetSceneTime: 1,
+      motion: { key: 'wave', offset: 120, sceneTime: 1 },
+    });
+
+    expect(result).toEqual({ status: 'restored', tierUsed: 'native', diagnostics: [] });
+    expect(startMotion).toHaveBeenCalledWith('wave', 0, 3, 120, undefined);
+    expect(physics.initialize).toHaveBeenCalledOnce();
+    expect(pose.reset).toHaveBeenCalledOnce();
+    expect(focus.focus).toHaveBeenCalledWith(0, 0, true);
+    expect(focus.vx).toBe(0);
+    expect(focus.vy).toBe(0);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(expect.any(Number), expect.any(Number));
   });
   it('evaluates breath every frame even when a resource motion writes that parameter', () => {
     const { model, internal, core, drawn } = createCubismModelFixture();

@@ -81,6 +81,8 @@ import type {
   ProjectAgentPauseReason,
 } from '../../services/project-agent/ProjectAgentTask';
 import type {
+  TemplatePackageDeleteRequest,
+  TemplatePackageDeleteResult,
   TemplatePackageImportResult,
   WebGalScssImportInstallRequest,
   WebGalScssImportInstallResult,
@@ -137,6 +139,7 @@ export interface AeonStageryElectronAPI {
     installWebgalScss?(
       request: WebGalScssImportInstallRequest,
     ): Promise<WebGalScssImportInstallResult>;
+    deletePackage(request: TemplatePackageDeleteRequest): Promise<TemplatePackageDeleteResult>;
   };
   app: {
     getPath(): Promise<string>;
@@ -298,6 +301,7 @@ export interface AeonStageryElectronAPI {
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;
+    cancelExport(): Promise<{ success: boolean; error?: string }>;
     onLog(callback: (msg: string) => void): () => void;
   };
   path: {
@@ -407,8 +411,8 @@ export interface CharacterAPI {
   setZIndex(id: string, zIndex: number): void;
   /** Get available motion keys for a character */
   getMotions(id: string): string[];
-  /** Get the raw PixiJS Live2D model for advanced manipulation */
-  getModel(id: string): any;
+  /** Typed Pixi display capabilities for character animation. */
+  getDisplayObject(id: string): import('pixi.js').Container | null;
   /** Get the normalized bounds/points of a character for cinematic framing */
   getPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center'): Vec2 | null;
   /** List all active characters */

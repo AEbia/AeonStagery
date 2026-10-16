@@ -361,6 +361,8 @@ export type CharacterMotionOutput =
   | {
       readonly kind: 'resource';
       readonly key: string;
+      /** Finite scene extent, materialized from the resource before compilation. */
+      readonly durationSeconds?: number;
       readonly fadeInSeconds?: number;
     }
   | {

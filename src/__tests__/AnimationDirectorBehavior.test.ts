@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import gsap from 'gsap';
 
 const live2DMocks = vi.hoisted(() => ({
-  getModel: vi.fn(),
+  getDisplayObject: vi.fn(),
   getContainer: vi.fn(),
   removeCharacter: vi.fn(),
 }));
@@ -16,7 +16,7 @@ import AnimationDirector from '../engine/AnimationDirector';
 describe('AnimationDirector public behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    live2DMocks.getModel.mockReturnValue(undefined);
+    live2DMocks.getDisplayObject.mockReturnValue(undefined);
     live2DMocks.getContainer.mockReturnValue(undefined);
     gsap.globalTimeline.clear();
   });
@@ -44,7 +44,7 @@ describe('AnimationDirector public behavior', () => {
   });
 
   it('slides an entering character from the left using its model width', () => {
-    live2DMocks.getModel.mockReturnValue({ width: 800 });
+    live2DMocks.getDisplayObject.mockReturnValue({ width: 800 });
     const director = new AnimationDirector();
     const proxy = { x: 1000, y: 540, scale: 1, opacity: 1 };
     const timeline = director.characterEnter('tomori', 'slideFromLeft', 1, 'linear', proxy);
@@ -76,7 +76,7 @@ describe('AnimationDirector public behavior', () => {
   });
 
   it('drops an entering character from a model-height offset', () => {
-    live2DMocks.getModel.mockReturnValue({ height: 1000 });
+    live2DMocks.getDisplayObject.mockReturnValue({ height: 1000 });
     const director = new AnimationDirector();
     const proxy = { x: 960, y: 500, scale: 1, opacity: 1 };
     const timeline = director.characterEnter('tomori', 'dropIn', 1, 'linear', proxy);
@@ -173,7 +173,7 @@ describe('AnimationDirector public behavior', () => {
 
   it('preserves a horizontally flipped sign while scaling a character', () => {
     const model = { scale: { x: -1, y: 1 } };
-    live2DMocks.getModel.mockReturnValue(model);
+    live2DMocks.getDisplayObject.mockReturnValue(model);
     const director = new AnimationDirector();
     const tween = director.characterScale('tomori', 1.5, 1, 'linear');
 
@@ -187,7 +187,7 @@ describe('AnimationDirector public behavior', () => {
 
   it('fades a loaded character model to the requested opacity', () => {
     const model = { alpha: 1 };
-    live2DMocks.getModel.mockReturnValue(model);
+    live2DMocks.getDisplayObject.mockReturnValue(model);
     const director = new AnimationDirector();
     const tween = director.characterFade('tomori', 0.35, 1, 'linear');
 

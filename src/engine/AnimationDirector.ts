@@ -85,7 +85,7 @@ class AnimationDirector {
     // in the same master-controlled timeline as the current `fadeIn` preset.
     const normalizedPreset = (preset as string) === 'fade' ? 'fadeIn' : preset;
     const resolvedEase = normalizeCharacterEase(ease, DEFAULT_CHARACTER_ENTER_EASE);
-    const model = live2DManager.getModel(characterId);
+    const model = live2DManager.getDisplayObject(characterId);
     const container = live2DManager.getContainer(characterId);
     const target = proxy || container;
 
@@ -177,7 +177,7 @@ class AnimationDirector {
     // explicit fadeIn/fadeOut preset names were introduced.
     const normalizedPreset = (preset as string) === 'fade' ? 'fadeOut' : preset;
     const resolvedEase = normalizeCharacterEase(ease, DEFAULT_CHARACTER_EXIT_EASE);
-    const model = live2DManager.getModel(characterId);
+    const model = live2DManager.getDisplayObject(characterId);
     const container = live2DManager.getContainer(characterId);
     const target = proxy || model || container;
     
@@ -288,7 +288,7 @@ class AnimationDirector {
     duration: number = 0.5,
     ease: string = 'power2.inOut'
   ): gsap.core.Tween {
-    const model = live2DManager.getModel(characterId);
+    const model = live2DManager.getDisplayObject(characterId);
     if (!model) {
       console.warn(`[AnimationDirector] Character "${characterId}" not found for scale`);
       return gsap.to({}, { duration: 0 });
@@ -312,7 +312,7 @@ class AnimationDirector {
     duration: number = 0.5,
     ease: string = 'power2.inOut'
   ): gsap.core.Tween {
-    const model = live2DManager.getModel(characterId);
+    const model = live2DManager.getDisplayObject(characterId);
     if (!model) {
       console.warn(`[AnimationDirector] Character "${characterId}" not found for fade`);
       return gsap.to({}, { duration: 0 });

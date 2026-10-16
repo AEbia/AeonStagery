@@ -273,9 +273,12 @@ class SubtitleRenderer {
       y: 0, duration: 0.45, ease: 'back.out(1.4)',
       onUpdate: syncEntrance,
     }, 0);
-    // Image dialogue reveals text itself so sprite/stencil batching cannot
-    // expose the unrevealed suffix. Wrap and alignment use the full metrics.
-    if (style === 'typewriter' && config.presentation?.renderer === 'image-dialogue-v1') {
+    // Image dialogue and minimal text reveal their actual line contents so
+    // renderer batching or mask behavior cannot expose the unrevealed suffix.
+    // Wrap and alignment continue to use the full-text metrics.
+    if (style === 'typewriter' && (
+      config.presentation?.renderer === 'image-dialogue-v1' || templateId === 'minimal'
+    )) {
       dialogueText.mask = null;
       // This branch positions every line itself, so undo the anchored alignment above.
       dialogueText.anchor.x = 0;

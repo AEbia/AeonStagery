@@ -1,8 +1,14 @@
+import { live2DStageState } from './helpers/live2DStageState';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { Live2DCompositeModel } from '../engine/Live2DCompositeModel';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import {
+  acquireSharedRuntimeClockLock,
+  registerSharedRuntimeClockProvider,
+  releaseSharedRuntimeClockLock,
+} from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 
 vi.mock('../engine/Live2DMotionController', () => ({
   Live2DMotionController: class {
@@ -25,6 +31,7 @@ vi.mock('../engine/Live2DMotionController', () => ({
 describe('Live2DManager.getPoint', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    registerSharedRuntimeClockProvider(() => null);
   });
 
   it('prefers model hit areas for the head anchor when available', async () => {
@@ -56,7 +63,7 @@ describe('Live2DManager.getPoint', () => {
       },
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const point = manager.getPoint('soyo', 'head');
 
@@ -80,7 +87,7 @@ describe('Live2DManager.getPoint', () => {
       },
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const point = manager.getPoint('soyo', 'head');
 
@@ -99,7 +106,7 @@ describe('Live2DManager.getPoint', () => {
         internalModel: {},
       },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     const out = { x: 0, y: 0 };
     expect(manager.getPoint('soyo', 'head', out)).toBe(out);
@@ -124,7 +131,7 @@ describe('Live2DManager.getPoint', () => {
     const composite = Object.create(Live2DCompositeModel.prototype);
     composite.mainModel = mainModel;
     composite.subModels = [headModel];
-    (manager as any).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
+    live2DStageState(manager).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
 
     expect(manager.getPoint('soyo', 'head')).toEqual({
       x: (300 + 200 * 0.5) / 1920,
@@ -139,7 +146,7 @@ describe('Live2DManager.getPoint', () => {
   it('falls back to transformation proxies when model bounds are invalid and returns null for an unknown character', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();
-    (manager as any).characters = new Map([[
+    live2DStageState(manager).characters = new Map([[
       'soyo',
       {
         id: 'soyo',
@@ -189,7 +196,7 @@ describe('Live2DManager.getPoint', () => {
       { internalModel: { focusController: subFocusB } },
     ];
 
-    (manager as any).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
+    live2DStageState(manager).characters = new Map([['soyo', { id: 'soyo', model: composite }]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 0);
 
@@ -232,10 +239,10 @@ describe('Live2DManager.getPoint', () => {
       filterWarmupFrames: 6,
     } as any;
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (container as any)._alphaFilter = alphaFilter;
     container.filters = [alphaFilter];
-    vi.spyOn(manager, 'getContainer').mockReturnValue(container);
+    live2DStageState(manager).containers.set('soyo', container);
 
     manager.applyProxyTransform('soyo', {
       x: 960,
@@ -288,11 +295,11 @@ describe('Live2DManager.getPoint', () => {
       baseHeight: 1600,
       baseWidth: 700,
     } as any;
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['main', { ...firstEntry, id: 'main' }],
       ['variant', { ...secondEntry, id: 'variant' }],
     ]);
-    (manager as any).containers = new Map([
+    live2DStageState(manager).containers = new Map([
       ['main', firstContainer],
       ['variant', secondContainer],
     ]);
@@ -381,7 +388,7 @@ describe('Live2DManager.getPoint', () => {
       params[0] = 0;
     });
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: hardReset,
@@ -417,7 +424,7 @@ describe('Live2DManager.getPoint', () => {
     } as any;
     const hardReset = vi.fn(async () => {});
 
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: hardReset,
@@ -438,7 +445,7 @@ describe('Live2DManager.getPoint', () => {
     const syncInputParameters = vi.fn();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         setInjectedParameter,
         syncInputParameters,
       }),
@@ -458,7 +465,7 @@ describe('Live2DManager.getPoint', () => {
       motionEpoch: 0,
     } as any;
 
-    (manager as any).characters = new Map([['rana', entry]]);
+    live2DStageState(manager).characters = new Map([['rana', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: vi.fn(async () => {}),
@@ -481,15 +488,16 @@ describe('Live2DManager.getPoint', () => {
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
       runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
-        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
-        : mockAdapter({ getControls: () => cubism2Controls })
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => cubism5Controls })
+        : mockAdapter({ createTestControls: () => cubism2Controls })
     ) as any);
 
     let cubism2ClockMs = 1_000;
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'getClock').mockReturnValue({
+    const sharedClock = {
       getUserTimeMSec: () => cubism2ClockMs,
       setUserTimeMSec: (value: number) => { cubism2ClockMs = value; },
-    });
+    };
+    registerSharedRuntimeClockProvider(() => sharedClock);
 
     const createEntry = (id: string, adapterId: string, runtimeFamily: string) => ({
       id,
@@ -501,7 +509,7 @@ describe('Live2DManager.getPoint', () => {
     });
     const cubism2Model = createEntry('soyo', 'pixi-live2d-display-cubism2', 'cubism2');
     const cubism5Model = createEntry('rana', 'untitled-pixi-live2d-engine-cubism', 'cubism3-plus');
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['soyo', cubism2Model],
       ['rana', cubism5Model],
     ]);
@@ -523,10 +531,10 @@ describe('Live2DManager.getPoint', () => {
     const manager = new Live2DManager();
     const controls = mockControls();
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'untitled-pixi-live2d-engine-cubism', getControls: () => controls,
+      id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => controls,
     }));
     const model = { internalModel: { coreModel: {} } };
-    (manager as any).characters = new Map([['haru', {
+    live2DStageState(manager).characters = new Map([['haru', {
       id: 'haru', model,
       runtime: { adapterId: 'untitled-pixi-live2d-engine-cubism', runtimeFamily: 'cubism3-plus', supported: true },
       injectedParams: { ParamMouthOpenY: 0.8 }, config: {}, motionEpoch: 0,
@@ -545,9 +553,8 @@ describe('Live2DManager.getPoint', () => {
     expect(controls.advanceFrame).toHaveBeenCalledWith(model, 16);
   });
 
-  it('skips ordinary ticker updates while the global UtSystem lock is active but allows force updates', async () => {
+  it('defers ordinary and forced updates while the global UtSystem lock is active', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
-    const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');
     const manager = new Live2DManager();
     const model = {
       update: vi.fn(),
@@ -565,28 +572,27 @@ describe('Live2DManager.getPoint', () => {
       config: {},
       motionEpoch: 0,
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion: vi.fn(),
       _hardReset: vi.fn(async () => {}),
     };
 
-    await acquireUtSystemLock();
+    await acquireSharedRuntimeClockLock();
     try {
       await manager.updateAll(1);
       expect(model.update).not.toHaveBeenCalled();
 
       await manager.updateAll(16, true, 1000);
-      expect(model.update).toHaveBeenCalledWith(16);
+      expect(model.update).not.toHaveBeenCalled();
     } finally {
-      releaseUtSystemLock();
+      releaseSharedRuntimeClockLock();
     }
   });
 
   it('keeps the official Cubism Web model updating while Cubism 2 owns the global clock lock', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const runtimeAdapter = await import('../engine/Live2DRuntimeAdapter');
-    const { acquireUtSystemLock, releaseUtSystemLock } = await import('../engine/Live2DConfig');
     const manager = new Live2DManager();
 
     const cubism2AdvanceFrame = vi.fn();
@@ -595,8 +601,8 @@ describe('Live2DManager.getPoint', () => {
     const cubism5Controls = mockControls({ advanceFrame: cubism5AdvanceFrame });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockImplementation((runtime) => (
       runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
-        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', getControls: () => cubism5Controls })
-        : mockAdapter({ getControls: () => cubism2Controls })
+        ? mockAdapter({ id: 'untitled-pixi-live2d-engine-cubism', createTestControls: () => cubism5Controls })
+        : mockAdapter({ createTestControls: () => cubism2Controls })
     ) as any);
 
     const createEntry = (id: string, adapterId: string, runtimeFamily: string) => ({
@@ -617,7 +623,7 @@ describe('Live2DManager.getPoint', () => {
       skipHardReset: false,
       reqEpoch: 1,
     };
-    (manager as any).characters = new Map([
+    live2DStageState(manager).characters = new Map([
       ['soyo', cubism2Model],
       ['rana', cubism5Model],
     ]);
@@ -627,11 +633,11 @@ describe('Live2DManager.getPoint', () => {
       _hardReset: vi.fn(async () => {}),
     };
 
-    await acquireUtSystemLock();
+    await acquireSharedRuntimeClockLock();
     try {
       await manager.updateAll(16);
     } finally {
-      releaseUtSystemLock();
+      releaseSharedRuntimeClockLock();
     }
 
     expect(cubism2AdvanceFrame).not.toHaveBeenCalled();
@@ -663,7 +669,7 @@ describe('Live2DManager.getPoint', () => {
       _pendingPlayMotion: { key: 'cry02', priority: 3, offset: 0, sceneTime: 10, skipHardReset: false, reqEpoch: 1 },
     } as any;
     const dispatchMotion = vi.fn(async () => {});
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
     (manager as any).motionController = {
       dispatchMotion,
       _hardReset: vi.fn(async () => {}),
@@ -690,14 +696,14 @@ describe('Live2DManager.getPoint', () => {
     }];
     const adapterSpy = vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getParameterValues: () => [{ index: 2, name: 'PARAM_FALLBACK', value: 0.25 }],
         getParameterMetadata: () => metadata,
       }),
     }) as any);
 
     try {
-      (manager as any).characters = new Map([['rana', {
+      live2DStageState(manager).characters = new Map([['rana', {
         id: 'rana',
         model,
         runtime: {
@@ -748,7 +754,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'soyo',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 1, { fromX: 0, fromY: 0, elapsed: 0.5 });
 
@@ -786,7 +792,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'soyo',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
 
     manager.lookAt('soyo', 0.25, -0.4, 0);
 
@@ -815,7 +821,7 @@ describe('Live2DManager.getPoint', () => {
       id: 'self',
       model: { internalModel: { focusController: fc } },
     } as any;
-    (manager as any).characters = new Map([['self', entry]]);
+    live2DStageState(manager).characters = new Map([['self', entry]]);
 
     (manager as any).syncLookAtFollows(
       new Map([['self', { lookAt: { target: 'target', focus: [1, 0] } }]]),

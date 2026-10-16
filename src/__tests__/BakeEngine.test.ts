@@ -7,7 +7,8 @@ import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
 import { captureModelSnapshot } from '../engine/Live2DConfig';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
-import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
+import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import { createV8GuardRenderer } from './helpers/v8GuardRendererStub';
 
 describe('BakeEngine runtime routing', () => {
@@ -124,7 +125,55 @@ describe('BakeEngine runtime routing', () => {
     };
   }
 
-  it('routes single .model3.json bake loads through the official adapter', async () => {
+  it.each([
+    { seeded: false, simultaneous: false }, { seeded: true, simultaneous: false },
+    { seeded: false, simultaneous: true }, { seeded: true, simultaneous: true },
+  ])('restores the authored predecessor expression when baking (seeded: $seeded, simultaneous: $simultaneous)', async ({ seeded, simultaneous }) => {
+    const modelPath = 'figure/rana/rana.model3.json';
+    const snapshot = { params: new Float32Array([0]), opacities: new Float32Array([1]) };
+    const restoreExpression = vi.fn(async () => {});
+    const controls = mockControls({
+      captureSnapshot: () => snapshot,
+      captureIdleSnapshot: () => snapshot,
+      setExpressionForSeek: restoreExpression,
+    });
+    vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
+      runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true,
+    });
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+      id: 'untitled-pixi-live2d-engine-cubism',
+      createModel: async () => Object.assign(new PIXI.Container(), {
+        anchor: new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+      }),
+      createTestControls: () => controls,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ FileReferences: { Moc: 'rana.moc3' } }) })));
+    const base = createBasePreparedScene(modelPath);
+    const expressions = simultaneous ? ['first', 'intermediate', 'second'] : ['first', 'second'];
+    const scene: PreparedCompiledScene = {
+      ...base, durationSeconds: 2.25,
+      actions: [
+        { ...base.actions[0], params: { ...base.actions[0].params, duration: 2.25 } },
+        ...expressions.map((key, index) => ({
+          id: `expression-${key}`, time: index === 0 ? 0 : 1, action: 'setExpression' as const,
+          params: { id: 'rana', expression: key },
+          source: { statementId: `expression-${key}`, outputKey: 'primary' },
+        })),
+      ],
+    };
+    const engine = new BakeEngine(createApp());
+    try {
+      await engine.bakePreparedRange(scene, new Map([[modelPath, modelPath]]), 1, seeded ? 1.25 : 0, 2.25, 0.25,
+        seeded ? { time: 1.25, models: new Map([['rana', snapshot]]) } : undefined, true);
+      expect(restoreExpression).toHaveBeenCalledWith(expect.anything(), 'second', seeded ? 0.25 : 0,
+        'first', expect.any(Function), undefined);
+    } finally {
+      engine.destroy();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('routes prepared bake loads through the adapter and preserves a seeded pose on the first resumed frame', async () => {
     const officialCreateModel = vi.fn(async () => {
       const model = new PIXI.Container() as any;
       model.visible = true;
@@ -159,23 +208,21 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    const controls = mockControls({
+      getCoreModel: (model: any) => model.internalModel.coreModel,
+      captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
+    });
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
-        getCoreModel: (model: any) => model.internalModel.coreModel,
-        captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
-      }),
-    } as any);
+      createTestControls: () => controls,
+    }));
 
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
@@ -187,14 +234,29 @@ describe('BakeEngine runtime routing', () => {
     })) as any);
 
     const engine = new BakeEngine(createApp());
+    const sourceScene = createBasePreparedScene('figure/rana/rana.model3.json');
+    const resolvedPaths = new Map([['figure/rana/rana.model3.json', 'D:/mock/demo/figure/rana/rana.model3.json']]);
+    const seedPose = { params: new Float32Array([0.75]), opacities: new Float32Array([0.5]) };
+    const addCharacter = sourceScene.actions[0];
+    const resumedScene: PreparedCompiledScene = {
+      ...sourceScene,
+      durationSeconds: 1.1,
+      actions: [
+        {
+          ...addCharacter,
+          params: { ...addCharacter.params, duration: 1.1 },
+        },
+      ],
+    };
+    vi.mocked(controls.applySnapshot).mockClear();
     const result = await engine.bakePreparedRange(
-      createBasePreparedScene('figure/rana/rana.model3.json'),
-      new Map([['figure/rana/rana.model3.json', 'D:/mock/demo/figure/rana/rana.model3.json']]),
+      resumedScene,
+      resolvedPaths,
       1,
-      0,
-      0,
+      1,
+      1,
       0.1,
-      undefined,
+      { time: 1, models: new Map([['rana', seedPose]]) },
       true,
     );
 
@@ -206,8 +268,134 @@ describe('BakeEngine runtime routing', () => {
         autoUpdate: false,
       }),
     );
+    expect(controls.applySnapshot).toHaveBeenCalledTimes(1);
+    expect(controls.applySnapshot).toHaveBeenCalledWith(expect.anything(), seedPose);
     expect(result.snapshotHistory.length).toBeGreaterThanOrEqual(1);
   });
+
+  it.each(['cancel', 'throw'] as const)(
+    'discards all batch borrows after a later model frame %s and reloads them for the next bake',
+    async (failureMode) => {
+      const modelPath = 'figure/rana/rana.model3.json';
+      const createModel = vi.fn(async () => {
+        const params = new Float32Array([0.1]);
+        const opacities = new Float32Array([1]);
+        const model = new PIXI.Container() as PIXI.Container & {
+          anchor: PIXI.ObservablePoint;
+          internalModel: {
+            coreModel: {
+              getParameterValues: () => Float32Array;
+              getPartOpacities: () => Float32Array;
+            };
+            parameterValues: Float32Array;
+            partOpacities: Float32Array;
+            settings: { motions: Record<string, never>; expressions: Record<string, never> };
+            motionManager: {
+              stopAllMotions: ReturnType<typeof vi.fn>;
+              state: { currentGroup?: string; reservedGroup?: string; queue: unknown[] };
+            };
+          };
+          update: ReturnType<typeof vi.fn>;
+          render: ReturnType<typeof vi.fn>;
+          startMotion: ReturnType<typeof vi.fn>;
+        };
+        model.anchor = new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0);
+        model.internalModel = {
+          coreModel: {
+            getParameterValues: () => params,
+            getPartOpacities: () => opacities,
+          },
+          parameterValues: params,
+          partOpacities: opacities,
+          settings: { motions: {}, expressions: {} },
+          motionManager: {
+            stopAllMotions: vi.fn(),
+            state: { currentGroup: undefined, reservedGroup: undefined, queue: [] },
+          },
+        };
+        model.update = vi.fn();
+        model.render = vi.fn();
+        model.startMotion = vi.fn(async () => true);
+        return model;
+      });
+      let engine!: BakeEngine;
+      let firstSimulationFrameSubmitted = false;
+      let failureInjected = false;
+      const framesByLabel = new Map<string, number>();
+      const controls = mockControls({
+        getCoreModel: model => model.internalModel.coreModel,
+        captureSnapshot: (id, model) => captureModelSnapshot(id, model),
+        stepBakeFrame: vi.fn((_model, _deltaMs, _renderer, label) => {
+          if (!label) return;
+          const frameNumber = (framesByLabel.get(label) ?? 0) + 1;
+          framesByLabel.set(label, frameNumber);
+          // Initialization and warmup account for the first six calls for
+          // each model. Fail the second model's simulation frame, after the
+          // first model's seventh call has already submitted successfully.
+          if (label === 'rana' && frameNumber === 7) firstSimulationFrameSubmitted = true;
+          if (label !== 'mira' || frameNumber !== 7) return;
+          expect(firstSimulationFrameSubmitted).toBe(true);
+          failureInjected = true;
+          if (failureMode === 'cancel') engine.cancel();
+          else throw new Error('later model frame failed');
+        }),
+      });
+
+      vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
+        runtimeFamily: 'cubism3-plus',
+        adapterId: 'untitled-pixi-live2d-engine-cubism',
+        supported: true,
+      });
+      vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+        id: 'untitled-pixi-live2d-engine-cubism',
+        supported: true,
+        init: vi.fn(async () => {}),
+        isReady: vi.fn(() => true),
+        getUnsupportedMessage: vi.fn(() => null),
+        createModel,
+        createFallbackModel: () => null,
+        disposeBakeRenderTexture: () => {},
+        createTestControls: () => controls,
+      }));
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ FileReferences: { Moc: 'rana.moc3' } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )));
+
+      const baseScene = createBasePreparedScene(modelPath);
+      const firstAction = baseScene.actions[0];
+      const scene: PreparedCompiledScene = {
+        ...baseScene,
+        meta: {
+          ...baseScene.meta,
+          characters: [
+            { id: 'rana', name: 'Rana', model: modelPath },
+            { id: 'mira', name: 'Mira', model: modelPath },
+          ],
+        },
+        actions: [
+          firstAction,
+          { ...firstAction, id: 'compiled:add-character:mira', params: { ...firstAction.params, id: 'mira' } },
+        ],
+      };
+      const resolvedPaths = new Map([[modelPath, `D:/mock/demo/${modelPath}`]]);
+      engine = new BakeEngine(createApp());
+
+      const firstBake = engine.bakePreparedRange(scene, resolvedPaths, 1, 0, 0, 0.1, undefined, true);
+      if (failureMode === 'cancel') {
+        await expect(firstBake).resolves.toMatchObject({ snapshotHistory: [] });
+      } else {
+        await expect(firstBake).rejects.toThrow('later model frame failed');
+      }
+      expect(failureInjected).toBe(true);
+      expect(createModel).toHaveBeenCalledTimes(2);
+
+      const recovery = await engine.bakePreparedRange(scene, resolvedPaths, 2, 0, 0, 0.1, undefined, true);
+
+      expect(recovery.snapshotHistory.length).toBeGreaterThan(0);
+      expect(createModel).toHaveBeenCalledTimes(4);
+    },
+  );
 
   it('resolves prepared model runtime URIs from source-keyed bake path maps', async () => {
     const officialCreateModel = vi.fn(async () => {
@@ -243,23 +431,20 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getCoreModel: (model: any) => model.internalModel.coreModel,
         captureSnapshot: (id: string, model: any) => captureModelSnapshot(id, model),
       }),
-    } as any);
+    }));
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -320,20 +505,17 @@ describe('BakeEngine runtime routing', () => {
 
   it('keeps composed cubism3-plus bake paths rejected for now', async () => {
     const officialCreateModel = vi.fn();
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: officialCreateModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls(),
-    } as any);
+      createTestControls: () => mockControls(),
+    }));
 
     const wmdlRegistry = {
       get: (key: string) => key.endsWith('.wmdl')
@@ -421,20 +603,17 @@ describe('BakeEngine runtime routing', () => {
       adapterId: 'pixi-live2d-display-cubism2',
       supported: true,
     });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'pixi-live2d-display-cubism2',
       supported: true,
       init: vi.fn(async () => {}),
       isReady: vi.fn(() => true),
-      getModelClass: vi.fn(() => null),
-      getConfig: vi.fn(() => null),
       getUnsupportedMessage: vi.fn(() => null),
       createModel: createRuntimeModel,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({ renderForBake, installBakeRenderGuards, prepareModel }),
-    } as any);
+      createTestControls: () => mockControls({ renderForBake, installBakeRenderGuards, prepareModel }),
+    }));
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
 
     const wmdlRegistry = {
@@ -447,12 +626,10 @@ describe('BakeEngine runtime routing', () => {
     } as any;
 
     const engine = new BakeEngine(createApp(), wmdlRegistry);
-    (engine as any).live2dReady = true;
-
-    await (engine as any).loadModel(
-      'rana',
-      'D:/mock/demo/figure/rana/rana.wmdl',
-      'figure/rana/rana.wmdl',
+    await engine.bakePreparedRange(
+      createBasePreparedScene('figure/rana/rana.wmdl'),
+      new Map([['figure/rana/rana.wmdl', 'D:/mock/demo/figure/rana/rana.wmdl']]),
+      1, 0, 0, 0.1, undefined, true,
     );
 
     expect(createRuntimeModel).toHaveBeenCalledTimes(2);
@@ -469,60 +646,6 @@ describe('BakeEngine runtime routing', () => {
         injectedParamsSource: expect.objectContaining({ id: 'rana' }),
       }),
     );
-  });
-
-  it('soft-detaches Cubism 2 bake models instead of destroying shared runtime state', () => {
-    const engine = new BakeEngine(createApp());
-    const destroy = vi.fn();
-    const stopAllMotions = vi.fn();
-    const model = new PIXI.Container() as any;
-    model.visible = true;
-    model.renderable = true;
-    model.alpha = 1;
-    model.destroy = destroy;
-    model.update = vi.fn();
-    model.render = vi.fn();
-
-    // The teardown decision (soft-detach vs destroy) is delegated to the
-    // runtime adapter; BakeEngine only picks the policy from its own
-    // lifecycle rules.
-    const disposeModel = vi.fn((target: any, options: any) => {
-      if (options.mode === 'soft-detach') {
-        target.visible = false;
-        target.renderable = false;
-        target.alpha = 0;
-        target.stopAllMotions?.();
-      }
-    });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      getControls: () => mockControls({ disposeModel, stopAllMotions }),
-    } as any);
-
-    (engine as any).models.set('soyo', {
-      id: 'soyo',
-      model,
-      modelPath: 'D:/mock/demo/figure/soyo/model.json',
-      modelKey: 'figure/soyo/model.json',
-      runtime: {
-        runtimeFamily: 'cubism2',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      adapterId: 'pixi-live2d-display-cubism2',
-      motionEpoch: 0,
-      idleSnapshot: {
-        params: new Float32Array(),
-        opacities: new Float32Array(),
-      },
-    });
-
-    (engine as any).removeModel('soyo');
-
-    expect(disposeModel).toHaveBeenCalledWith(model, { mode: 'soft-detach', detach: true });
-    expect(destroy).not.toHaveBeenCalled();
-    expect(model.visible).toBe(false);
-    expect(model.renderable).toBe(false);
-    expect(model.alpha).toBe(0);
   });
 
   it('invalidates the Pixi program cache on both sides of the Cubism 2 bake draw', () => {
@@ -617,7 +740,8 @@ describe('BakeEngine runtime routing', () => {
       renderLive2D: vi.fn(),
     };
 
-    runtimeAdapter.cubism2Live2DAdapter.getControls().stepBakeFrame(model, 16, renderer, 'offscreen-test', false);
+    new Cubism2PixiLive2DModelControls({ bakeCore: new Cubism2BakeRenderCore() })
+      .stepBakeFrame(model, 16, renderer, 'offscreen-test', false);
 
     expect(createRenderTexture).toHaveBeenCalledWith({ width: 1920, height: 1080 });
     expect(renderer.render).toHaveBeenCalledWith(model, {
@@ -647,7 +771,7 @@ describe('BakeEngine runtime routing', () => {
       renderLive2D: vi.fn(),
     };
 
-    runtimeAdapter.cubism2Live2DAdapter.getControls().stepBakeFrame(model, 16, renderer, 'cubism2-offscreen-test', false);
+    new Cubism2PixiLive2DModelControls().stepBakeFrame(model, 16, renderer, 'cubism2-offscreen-test', false);
 
     expect(internalUpdate).toHaveBeenCalledWith(16, 128);
     expect(model.deltaTime).toBe(0);
@@ -655,25 +779,10 @@ describe('BakeEngine runtime routing', () => {
     expect(model.renderLive2D).not.toHaveBeenCalled();
   });
 
-  it('applies dialogue mouth parameters through runtime controls during bake', () => {
-    const setInjectedParameter = vi.fn();
-    const syncInputParameters = vi.fn();
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
-      getControls: () => ({
-        setInjectedParameter,
-        syncInputParameters,
-      }),
-    } as any);
-
+  it('records dialogue mouth parameters in the live injected-parameter source', () => {
     const engine = new BakeEngine(createApp());
     const entry = {
       id: 'rana',
-      runtime: {
-        runtimeFamily: 'cubism3-plus',
-        adapterId: 'untitled-pixi-live2d-engine-cubism',
-        supported: true,
-      },
-      model: {},
       injectedParams: {},
     };
 
@@ -684,9 +793,7 @@ describe('BakeEngine runtime routing', () => {
       1.25,
     );
 
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_MOUTH_OPEN_Y', 1);
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'ParamMouthOpenY', 1);
-    expect(syncInputParameters).toHaveBeenCalledTimes(2);
+    expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 1, ParamMouthOpenY: 1 });
 
     (engine as any).applyDialogueInjectedParams(
       entry,
@@ -695,143 +802,6 @@ describe('BakeEngine runtime routing', () => {
       3,
     );
 
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'PARAM_MOUTH_OPEN_Y', 0);
-    expect(setInjectedParameter).toHaveBeenCalledWith(entry.model, 'ParamMouthOpenY', 0);
-  });
-});
-
-describe('BakeEngine model lifecycle race', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  function createApp(): any {
-    return { renderer: {} };
-  }
-
-  function makeLifecycleEngine(): BakeEngine {
-    const engine = new BakeEngine(createApp());
-    vi.spyOn(engine as any, 'resolveBakeRuntime').mockResolvedValue({
-      supported: true,
-      runtime: {
-        runtimeFamily: 'cubism2',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      assetUrl: 'asset://localhost/figures/hero/casual-2023/model.json',
-    });
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'init').mockResolvedValue(undefined);
-    return engine;
-  }
-
-  function deferredCreateModel() {
-    const state: { resolveCreate?: (model: any) => void } = {};
-    const createModel = vi.fn(
-      () => new Promise<any>((resolve) => { state.resolveCreate = resolve; }),
-    );
-    vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'createModel').mockImplementation(createModel);
-    return {
-      createModel,
-      // Property access stays live through the mutable state object.
-      resolveCreate: (model: any) => state.resolveCreate?.(model),
-    };
-  }
-
-  it('drops a superseded in-flight loadModel instead of publishing the entry (costume-swap race)', async () => {
-    const engine = makeLifecycleEngine();
-    const { createModel, resolveCreate } = deferredCreateModel();
-
-    const loadPromise = (engine as any).loadModel(
-      'hero',
-      '/figures/hero/casual-2023/model.json',
-      'hero/casual-2023',
-    );
-    await vi.waitFor(() => expect(createModel).toHaveBeenCalled());
-
-    // Character removed while the load is still in flight (costume swap /
-    // scene reload). No entry existed yet, so removeModel must still
-    // invalidate the in-flight load.
-    (engine as any).removeModel('hero');
-
-    const superseded = {
-      parent: null,
-      visible: true,
-      renderable: true,
-      alpha: 1,
-      stopAllMotions: vi.fn(),
-      internalModel: { coreModel: {}, motionManager: { stopAllMotions: vi.fn() } },
-    };
-    resolveCreate(superseded);
-    await loadPromise;
-
-    expect((engine as any).models.has('hero')).toBe(false);
-    expect(superseded.visible).toBe(false);
-    expect(superseded.renderable).toBe(false);
-    expect(superseded.alpha).toBe(0);
-  });
-
-  it('publishes the entry when no removal raced the load', async () => {
-    const engine = makeLifecycleEngine();
-    const { createModel, resolveCreate } = deferredCreateModel();
-
-    const loadPromise = (engine as any).loadModel(
-      'hero',
-      '/figures/hero/casual-2023/model.json',
-      'hero/casual-2023',
-    );
-    await vi.waitFor(() => expect(createModel).toHaveBeenCalled());
-
-    const model = new PIXI.Container() as any;
-    model.visible = false;
-    model.alpha = 0;
-    model.update = vi.fn();
-    model.render = vi.fn();
-    model.stopAllMotions = vi.fn();
-    model.internalModel = {
-      coreModel: {},
-      motionManager: { stopAllMotions: vi.fn() },
-    };
-    resolveCreate(model);
-    await loadPromise;
-
-    expect((engine as any).models.has('hero')).toBe(true);
-    expect(model.visible).toBe(true);
-  });
-
-  it('removeModel soft-detaches Cubism 2 models even when classification degraded to unknown', () => {
-    const engine = makeLifecycleEngine();
-    const destroy = vi.fn();
-    const stopAllMotions = vi.fn();
-    const entry = {
-      id: 'hero',
-      model: {
-        parent: null,
-        visible: true,
-        renderable: true,
-        alpha: 1,
-        destroy,
-        stopAllMotions,
-        update: vi.fn(),
-      },
-      modelPath: '/figures/hero/casual-2023/model.json',
-      modelKey: 'hero/casual-2023',
-      runtime: {
-        runtimeFamily: 'unknown',
-        adapterId: 'pixi-live2d-display-cubism2',
-        supported: true,
-      },
-      adapterId: 'pixi-live2d-display-cubism2',
-      expressionKey: null,
-      injectedParams: {},
-      idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },
-    };
-    (engine as any).models.set('hero', entry);
-
-    (engine as any).removeModel('hero');
-
-    expect((engine as any).models.has('hero')).toBe(false);
-    expect(destroy).not.toHaveBeenCalled();
-    expect(entry.model.visible).toBe(false);
-    expect(stopAllMotions).toHaveBeenCalled();
+    expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 0, ParamMouthOpenY: 0 });
   });
 });

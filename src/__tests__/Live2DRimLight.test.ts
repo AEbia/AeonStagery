@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as PIXI from 'pixi.js';
@@ -30,8 +31,8 @@ describe('Live2DManager rim light', () => {
       injectedParams: {},
     };
 
-    (manager as any).characters = new Map([['soyo', entry]]);
-    (manager as any).containers = new Map([['soyo', container]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).containers = new Map([['soyo', container]]);
 
     manager.setRimLight('soyo', '#00aaff', 0.8, 14, 30, 3, 0);
 
@@ -60,8 +61,8 @@ describe('Live2DManager rim light', () => {
       injectedParams: {},
     };
 
-    (manager as any).characters = new Map([['soyo', entry]]);
-    (manager as any).containers = new Map([['soyo', container]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).containers = new Map([['soyo', container]]);
 
     manager.setRimLight('soyo', '#00aaff', 0.8, 14, 30, 3, 0);
     const filter = container.filters?.[0] as RimLightFilter;
@@ -93,8 +94,8 @@ describe('Live2DManager rim light', () => {
       injectedParams: {},
     };
 
-    (manager as any).characters = new Map([['soyo', entry]]);
-    (manager as any).containers = new Map([['soyo', container]]);
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
+    live2DStageState(manager).containers = new Map([['soyo', container]]);
 
     manager.setRimLight('soyo', '#00aaff', 1, 14, 30, 3, 2);
     manager.reconcileRimLights(0, {
@@ -122,12 +123,12 @@ describe('Live2DManager rim light', () => {
       injectedParams: {},
     };
 
-    (manager as any).characters = new Map();
-    (manager as any).containers = new Map([['soyo', container]]);
+    live2DStageState(manager).characters = new Map();
+    live2DStageState(manager).containers = new Map([['soyo', container]]);
 
     manager.setRimLight('soyo', '#00aaff', 0.8, 14, 30, 3, 0);
-    (manager as any).characters.set('soyo', entry);
-    (manager as any).applyPendingCharacterVisualState('soyo');
+    live2DStageState(manager).characters.set('soyo', entry);
+    Reflect.get(manager, 'rimLights').applyPending('soyo');
 
     const filter = container.filters?.[0] as RimLightFilter;
     expect(filter).toBeInstanceOf(RimLightFilter);
@@ -151,8 +152,8 @@ describe('Live2DManager rim light', () => {
       injectedParams: {},
     };
 
-    (manager as any).characters = new Map();
-    (manager as any).containers = new Map([['soyo', container]]);
+    live2DStageState(manager).characters = new Map();
+    live2DStageState(manager).containers = new Map([['soyo', container]]);
     manager.reconcileRimLights(1, {
       sceneId: 'rim-light-load',
       meta: { title: 'Rim light load' },
@@ -171,8 +172,8 @@ describe('Live2DManager rim light', () => {
       }],
     } as any);
 
-    (manager as any).characters.set('soyo', entry);
-    (manager as any).applyPendingCharacterVisualState('soyo');
+    live2DStageState(manager).characters.set('soyo', entry);
+    Reflect.get(manager, 'rimLights').applyPending('soyo');
 
     const filter = container.filters?.[0] as RimLightFilter;
     expect(filter).toBeInstanceOf(RimLightFilter);

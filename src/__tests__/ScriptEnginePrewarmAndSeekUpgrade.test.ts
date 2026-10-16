@@ -35,9 +35,7 @@ describe('ScriptEngine.prewarmModels loaded-model skip', () => {
         { _id: 'a2', action: 'addCharacter', time: 1, params: { id: 'char2', model: 'figure/new.json' } },
       ],
     };
-    const getAll = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([
-      ['char1', { modelPath: 'asset://localhost/figure/loaded.json', modelUrl: 'asset://localhost/figure/loaded.json', model: {} } as any],
-    ]));
+    const matches = vi.spyOn(live2DManager, 'matchesLoadedModel').mockImplementation(id => id === 'char1');
     const preload = vi.spyOn(live2DManager, 'preloadModel').mockResolvedValue(undefined);
 
     try {
@@ -46,7 +44,7 @@ describe('ScriptEngine.prewarmModels loaded-model skip', () => {
       expect(preload).toHaveBeenCalledTimes(1);
       expect(preload).toHaveBeenCalledWith('char2', 'asset://localhost/figure/new.json');
     } finally {
-      getAll.mockRestore();
+      matches.mockRestore();
       preload.mockRestore();
     }
   });
@@ -110,7 +108,8 @@ describe('ScriptEngine seek auto-upgrade on model path change', () => {
     const hasChar = vi.spyOn(live2DManager, 'hasCharacter')
       .mockImplementation((id: string) => !removed.has(id));
     const listChars = vi.spyOn(live2DManager, 'listCharacters').mockReturnValue(['mychar']);
-    const getAll = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([['mychar', entry]]));
+    const getAll = vi.spyOn(live2DManager, 'getCharacterInfo').mockReturnValue(entry);
+    vi.spyOn(live2DManager, 'matchesLoadedModel').mockImplementation((_id, path) => path === entry.modelPath);
     const addChar = vi.spyOn(live2DManager, 'addCharacter').mockResolvedValue(undefined);
     const removeChar = vi.spyOn(live2DManager, 'removeCharacter')
       .mockImplementation((id: string) => { removed.add(id); });
@@ -144,7 +143,8 @@ describe('ScriptEngine seek auto-upgrade on model path change', () => {
     } as any;
     const hasChar = vi.spyOn(live2DManager, 'hasCharacter').mockReturnValue(true);
     const listChars = vi.spyOn(live2DManager, 'listCharacters').mockReturnValue(['mychar']);
-    const getAll = vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map([['mychar', entry]]));
+    const getAll = vi.spyOn(live2DManager, 'getCharacterInfo').mockReturnValue(entry);
+    vi.spyOn(live2DManager, 'matchesLoadedModel').mockImplementation((_id, path) => path === entry.modelPath);
     const addChar = vi.spyOn(live2DManager, 'addCharacter').mockResolvedValue(undefined);
     const removeChar = vi.spyOn(live2DManager, 'removeCharacter').mockImplementation(() => {});
     vi.spyOn(engine as any, 'syncAllStates').mockResolvedValue(undefined);

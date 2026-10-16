@@ -111,6 +111,83 @@ describe('ProjectWorkspaceService', () => {
     expect(opened.project.metadata.templates).not.toHaveProperty('dialogueTemplate');
   });
 
+  it('clears disabled WebGAL subtitle defaults and keeps all templates disabled after reopening', async () => {
+    const subtitlePackage = createLoadedTemplatePackage({
+      ...SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest,
+      template: { ...SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.template, id: 'webgal.subtitle', name: 'WebGAL Subtitle' },
+      defaults: { dialogueStyleId: 'pink-nameplate' },
+    }, { scope: 'user', packageRoot: '/library/templates/webgal-subtitle' });
+    projectResources = new ProjectResourceService(fileAccess as unknown as IFileAccess, new ProjectPathResolver(null), () => [], () => session.getCurrentProject());
+    service = new ProjectWorkspaceService(fileAccess as unknown as IFileAccess, projectResources, session, setProjectRoot, () => [subtitlePackage]);
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo', {
+      templates: { enabledTemplateIds: ['webgal.subtitle'], defaults: { dialogueStyleId: 'pink-nameplate' } },
+    });
+    if (!created.success) throw new Error(created.error);
+    expect(created.project.metadata.templates?.dialoguePresentation?.styleId).toBe('pink-nameplate');
+    const disabled = await service.updateTemplateConfiguration({ ...created.project.metadata.templates!, enabledTemplateIds: [] });
+    if (!disabled.success) throw new Error(disabled.error);
+    expect(disabled.project.metadata.templates?.enabledTemplateIds).toEqual([]);
+    expect(disabled.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+    expect(disabled.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(disabled.project.metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.enabledTemplateIds).toEqual([]);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+  });
+
+  it('falls back to the remaining template when the selected WebGAL subtitle package is unchecked', async () => {
+    const imageStyle = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'pink-nameplate')!;
+    const subtitlePackage = createLoadedTemplatePackage({
+      manifestSchemaVersion: 2,
+      template: { id: 'webgal.subtitle', name: 'WebGAL Subtitle', version: '1.0.0', compatibility: { sceneSchemaVersion: 5 } },
+      dialogueStyles: [{ ...imageStyle, id: 'webgal.subtitle-style' }],
+      defaults: { dialogueStyleId: 'webgal.subtitle-style' },
+    }, { scope: 'user', packageRoot: '/library/templates/webgal-subtitle' });
+    projectResources = new ProjectResourceService(fileAccess as unknown as IFileAccess, new ProjectPathResolver(null), () => [], () => session.getCurrentProject());
+    service = new ProjectWorkspaceService(fileAccess as unknown as IFileAccess, projectResources, session, setProjectRoot, () => [SEMANTIC_BUILTIN_TEMPLATE_PACKAGE, subtitlePackage]);
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo', {
+      templates: { enabledTemplateIds: ['aeonstagery.default', 'webgal.subtitle'], defaults: { dialogueStyleId: 'webgal.subtitle-style' } },
+    });
+    if (!created.success) throw new Error(created.error);
+    expect(created.project.metadata.templates?.dialoguePresentation?.styleId).toBe('webgal.subtitle-style');
+    const disabled = await service.updateTemplateConfiguration({ ...created.project.metadata.templates!, enabledTemplateIds: ['aeonstagery.default'] });
+    if (!disabled.success) throw new Error(disabled.error);
+    expect(disabled.project.metadata.templates?.enabledTemplateIds).toEqual(['aeonstagery.default']);
+    expect(disabled.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+    expect(disabled.project.metadata.templates?.dialoguePresentation?.styleId).toBe('immersive-subtitle');
+    expect(disabled.project.metadata.templates?.dialogueTemplate).toBeUndefined();
+  });
+
+  it('preserves project-owned subtitle snapshots while an enabled package is temporarily undiscovered', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const presentation = { renderer: 'image-dialogue-v1', styleId: 'webgal.subtitle', textbox: { image: 'images/subtitle.png' }, text: {} };
+    const metadata = { ...created.project.metadata, templates: { enabledTemplateIds: ['webgal.package'], defaults: { dialogueStyleId: 'webgal.subtitle' }, dialoguePresentation: presentation } };
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toEqual(presentation);
+  });
+
+  it('removes a stale subtitle snapshot on opening a project with no enabled templates', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const metadata = {
+      ...created.project.metadata,
+      templates: {
+        enabledTemplateIds: [],
+        defaults: { dialogueStyleId: 'webgal.subtitle' },
+        dialoguePresentation: { renderer: 'image-dialogue-v1', styleId: 'webgal.subtitle', textbox: { image: 'images/subtitle.png' }, text: {} },
+      },
+    };
+    fileAccess.readFile.mockResolvedValue({ path: 'D:/projects/demo/project.json', data: JSON.stringify(metadata) });
+    const opened = await service.openProjectAt('D:/projects/demo/project.json');
+    if (!opened.success) throw new Error(opened.error);
+    expect(opened.project.metadata.templates?.dialoguePresentation).toBeUndefined();
+    expect(opened.project.metadata.templates?.defaults?.dialogueStyleId).toBeUndefined();
+  });
+
   it('creates a project and default scene file without loading the scene', async () => {
     const result = await service.createProjectAt('D:/projects/demo', 'Demo');
 
@@ -137,6 +214,71 @@ describe('ProjectWorkspaceService', () => {
       );
       expect(setProjectRoot).toHaveBeenCalledWith('D:/projects/demo');
     }
+  });
+
+  it('persists the trimmed project name and notifies the active session without changing its root', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    vi.clearAllMocks();
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, '  新项目  ');
+
+    expect(result.success).toBe(true);
+    expect(service.getCurrentProject()?.metadata.name).toBe('新项目');
+    expect(service.getCurrentProject()?.metadata.projectId).toBe(created.project.metadata.projectId);
+    expect(service.getCurrentProject()?.metadata.scenes).toEqual(created.project.metadata.scenes);
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"name": "新项目"'));
+    expect(listener).toHaveBeenCalledOnce();
+    expect(setProjectRoot).not.toHaveBeenCalled();
+    expect(fileAccess.readFile).not.toHaveBeenCalledWith(created.project.projectFilePath);
+    unsubscribe();
+  });
+
+  it('renames an unopened project while retaining unknown metadata and the current workspace', async () => {
+    const created = await service.createProjectAt('D:/projects/recent', 'Recent');
+    if (!created.success) throw new Error(created.error);
+    const recentMetadata = { ...created.project.metadata, futureSettings: { enabled: true } };
+    const active = await service.createProjectAt('D:/projects/active', 'Active');
+    if (!active.success) throw new Error(active.error);
+    fileAccess.readFile.mockResolvedValue({ path: created.project.projectFilePath, data: JSON.stringify(recentMetadata) });
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    vi.clearAllMocks();
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, 'Renamed');
+
+    expect(result.success).toBe(true);
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"name": "Renamed"'));
+    expect(fileAccess.writeFile).toHaveBeenCalledWith(created.project.projectFilePath, expect.stringContaining('"futureSettings"'));
+    expect(service.getCurrentProject()).toBe(active.project);
+    expect(setProjectRoot).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('rejects empty names without reading or writing project files', async () => {
+    const result = await service.renameProjectAt('D:/projects/demo/project.json', '   ');
+
+    expect(result).toEqual({ success: false, error: '项目名称不能为空' });
+    expect(fileAccess.readFile).not.toHaveBeenCalled();
+    expect(fileAccess.writeFile).not.toHaveBeenCalled();
+  });
+
+  it('reports write failures without announcing a renamed active project', async () => {
+    const created = await service.createProjectAt('D:/projects/demo', 'Demo');
+    if (!created.success) throw new Error(created.error);
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    fileAccess.writeFile.mockRejectedValueOnce(new Error('磁盘只读'));
+
+    const result = await service.renameProjectAt(created.project.projectFilePath, 'Renamed');
+
+    expect(result).toEqual({ success: false, error: '磁盘只读' });
+    expect(service.getCurrentProject()?.metadata.name).toBe('Demo');
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
   });
 
   it('enables every available template when creating a project without a template selection', async () => {

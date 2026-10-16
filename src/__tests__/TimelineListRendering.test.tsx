@@ -10,6 +10,7 @@ const state = vi.hoisted(() => {
   const store = {
     version: 1, document: null as any, compiled: null as any,
     subscribe: () => () => {},
+    getCurrentSceneDocumentView() { return this.document; },
     getCurrentSceneDocumentSnapshot() { return this.document; },
     getCompiledSceneSnapshot() { return this.compiled; },
   };

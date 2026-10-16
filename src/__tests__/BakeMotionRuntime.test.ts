@@ -7,6 +7,10 @@ import {
   type BakeMotionRuntimeHost,
 } from '../engine/BakeMotionRuntime';
 import type { CachedResourceMotion, MotionCurveCacheKey } from '../engine/live2d/motionCurveCache';
+import type { CharacterMotionOutput } from '../api/types/semantic-scene';
+import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import { submitLive2DBakeFrameBatch } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { createCubismModelFixture } from './helpers/cubismModelFixture';
 
 function cachedMotion(): CachedResourceMotion {
   return {
@@ -43,11 +47,8 @@ function makeCache() {
 function makeHost(overrides: Partial<BakeMotionRuntimeHost> = {}): BakeMotionRuntimeHost {
   return {
     fps: 30,
-    getSamplingTargets: vi.fn(() => []),
     preloadMotion: vi.fn(async () => {}),
     getBaseValues: vi.fn(() => ({})),
-    stopNativeMotion: vi.fn(),
-    getModel: vi.fn(() => undefined),
     ...overrides,
   };
 }
@@ -123,6 +124,40 @@ describe('BakeMotionRuntime.prepare', () => {
 });
 
 describe('BakeMotionRuntime.applyIntent', () => {
+  it('composes custom curves with expressions, blink and live mouth input in the Bake frame', async () => {
+    const { model, internal, core } = createCubismModelFixture();
+    internal.on('expressionUpdate', () => core.setParameterValueByIndex(4, core.getParameterValueByIndex(4) + 5));
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('haru', model);
+    const injectedParams: Record<string, number> = { ParamMouthOpenY: 0.8 };
+    handle.bindRuntimeSource({ mode: 'bake', injectedParamsSource: { injectedParams }, isCurrent: () => true });
+    const runtime = new BakeMotionRuntime({
+      fps: 30, preloadMotion: async () => {}, getBaseValues: () => ({}),
+      installCustomMotionStage: (_id, input) => handle.customMotion.installStage(input),
+    });
+    const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
+      kind: 'custom', durationSeconds: 1, fadeInSeconds: 0, derivedFrom: { key: 'wink' },
+      tracks: ['ParamAngleX', 'ParamEyeLOpen', 'ParamMouthOpenY'].map((parameterId, index) => ({
+        parameterId, keyframes: [{ time: 0, value: [10, 0.4, 0.2][index] }, { time: 1, value: [10, 0.4, 0.2][index] }],
+      })),
+    };
+    try {
+      runtime.applyIntent({ charId: 'haru', intent: { output: motion, time: 0 }, simTime: 0.75,
+        injectedParams, channelProtected: new Set(['ParamMouthOpenY']) });
+      handle.blink.set(true, 1000, 0.75, 0);
+      await submitLive2DBakeFrameBatch({ operations: [{ handle, isCurrent: () => true, sceneTimeSeconds: 0.75 }],
+        deltaMs: 1000 / 30, isCurrent: () => true });
+      const values = new Map(handle.parameters.getParameterValues()?.map((parameter) => [parameter.name, parameter.value]));
+      expect(values.get('ParamAngleX')).toBeCloseTo(15);
+      expect(values.get('ParamEyeLOpen')).toBeCloseTo(0.4);
+      expect(values.get('ParamEyeROpen')).toBeCloseTo(0.5);
+      expect(values.get('ParamMouthOpenY')).toBeCloseTo(0.8);
+      runtime.applyIntent({ charId: 'haru', intent: null, simTime: 0.75, injectedParams });
+      expect(injectedParams.ParamMouthOpenY).toBeCloseTo(0.8);
+    } finally {
+      handle.dispose({ mode: 'destroy' });
+    }
+  });
+
   it('evaluates an authored custom motion through the curve driver without consulting the cache', () => {
     const { cache } = makeCache();
     const host = makeHost({ getBaseValues: vi.fn(() => ({ PARAM_ANGLE_X: 0 })) });
@@ -174,20 +209,7 @@ describe('BakeMotionRuntime.applyIntent', () => {
 
   it('routes a cache-miss resource motion through the native driver and does not restart on monotonic advance', async () => {
     const { cache } = makeCache();
-    const motionManager = { startMotion: vi.fn(async () => true) };
-    const model: any = {
-      update: vi.fn(),
-      internalModel: {
-        motionManager,
-        physics: null,
-        settings: { motions: { sad: [{}], wave: [{}] } },
-      },
-    };
-    const host = makeHost({
-      getModel: () => ({ model, internalModel: model.internalModel, motionManager, runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2' } as any),
-      stopNativeMotion: vi.fn(),
-    });
-    const runtime = new BakeMotionRuntime(host, cache as any);
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
     await runtime.prepare([
       { charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2', modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad' },
     ]);
@@ -204,10 +226,15 @@ describe('BakeMotionRuntime.applyIntent', () => {
     expect(first.driver).toBe('native');
     expect(first.nativeStartRequested).toBe(true);
 
-    const clock = { getUserTimeMSec: () => 1000, setUserTimeMSec: vi.fn() };
-    const adv = await runtime.advanceNative({ charId: 'soyo', utSystem: clock as any });
-    expect(adv.executed).toBe(true);
-    expect(motionManager.startMotion).toHaveBeenCalledTimes(1);
+    const pending = runtime.pendingNativeStart('soyo');
+    expect(pending).toEqual({
+      charId: 'soyo', motionKey: 'sad', priority: 4, offsetSeconds: 0,
+      sceneTimeSeconds: 10, fadeInSeconds: undefined,
+    });
+    const completion = runtime.completeNativeStart('soyo', { status: 'started', offsetReplayMs: 12 });
+    expect(completion.status).toBe('started');
+    expect(runtime.pendingNativeStart('soyo')).toBeUndefined();
+    expect(completion.offsetReplayMs).toBe(12);
 
     const next = runtime.applyIntent({
       charId: 'soyo',
@@ -217,18 +244,49 @@ describe('BakeMotionRuntime.applyIntent', () => {
     });
     expect(next.driver).toBe('native');
     expect(next.nativeStartRequested).toBe(false);
-    const advAgain = await runtime.advanceNative({ charId: 'soyo', utSystem: clock as any });
-    expect(advAgain.executed).toBe(false);
-    expect(motionManager.startMotion).toHaveBeenCalledTimes(1);
+    expect(runtime.pendingNativeStart('soyo')).toBeUndefined();
   });
 
-  it('passes the authored fade-in to the official native bake motion', async () => {
+  it('clears a cancelled native transition without recording a successful start', async () => {
     const { cache } = makeCache();
-    const model = { startMotion: vi.fn(async () => true) };
-    const host = makeHost({
-      getModel: () => ({ model, runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism' }),
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
+    await runtime.prepare([{
+      charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2',
+      modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad',
+    }]);
+    const intent = { output: { kind: 'resource', key: 'sad' } as any, priority: 3, time: 0 };
+    runtime.applyIntent({ charId: 'soyo', intent, simTime: 0, injectedParams: {} });
+
+    const completion = runtime.completeNativeStart('soyo', { status: 'cancelled', offsetReplayMs: 12 });
+
+    expect(completion).toEqual({ status: 'cancelled', offsetReplayMs: 0 });
+    expect(runtime.pendingNativeStart('soyo')).toBeUndefined();
+    expect(runtime.report().nativeStarts).toBe(0);
+    expect(runtime.applyIntent({ charId: 'soyo', intent, simTime: 0, injectedParams: {} }).nativeStartRequested).toBe(true);
+  });
+
+  it('clears a missing native transition without recording a successful start', async () => {
+    const { cache } = makeCache();
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
+    await runtime.prepare([{
+      charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2',
+      modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad',
+    }]);
+    runtime.applyIntent({
+      charId: 'soyo', intent: { output: { kind: 'resource', key: 'sad' } as any, priority: 3, time: 0 },
+      simTime: 0, injectedParams: {},
     });
-    const runtime = new BakeMotionRuntime(host, cache as any);
+
+    const completion = runtime.completeNativeStart('soyo', { status: 'missing', offsetReplayMs: 0 });
+
+    expect(completion.status).toBe('missing');
+    expect(runtime.pendingNativeStart('soyo')).toBeUndefined();
+    expect(runtime.report().nativeStarts).toBe(0);
+  });
+
+  it('preserves authored fade-in and offset in the native transition intent', async () => {
+    const { cache } = makeCache();
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
     await runtime.prepare([{
       charId: 'soyo', adapterId: 'untitled-pixi-live2d-engine-cubism',
       modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad',
@@ -240,25 +298,14 @@ describe('BakeMotionRuntime.applyIntent', () => {
       simTime: 1.25,
       injectedParams: {},
     });
-    await runtime.advanceNative({ charId: 'soyo', utSystem: null });
-
-    expect(model.startMotion).toHaveBeenCalledWith('sad', 0, 3, 0.25, 0.5);
+    expect(runtime.pendingNativeStart('soyo')).toMatchObject({
+      motionKey: 'sad', priority: 3, offsetSeconds: 0.25, fadeInSeconds: 0.5,
+    });
   });
 
   it('starts a new native segment when key, start time or priority changes', async () => {
     const { cache } = makeCache();
-    const motionManager = { startMotion: vi.fn(async () => true) };
-    const model: any = {
-      update: vi.fn(),
-      internalModel: {
-        motionManager,
-        physics: null,
-        settings: { motions: { sad: [{}], wave: [{}] } },
-      },
-    };
-    const host = makeHost({
-      getModel: () => ({ model, internalModel: model.internalModel, motionManager, runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2' } as any),
-    });
+    const host = makeHost();
     // Both keys miss in this fake cache: 'sad' and 'wave' -> null/miss.
     (cache.ensure as any).mockImplementation(async (key: any) => key.motionKey === 'sad' ? null : null);
     (cache.missReason as any).mockImplementation(() => 'not-cached');
@@ -276,8 +323,9 @@ describe('BakeMotionRuntime.applyIntent', () => {
       simTime: 10,
       injectedParams,
     });
-    const clock = { getUserTimeMSec: () => 1000, setUserTimeMSec: vi.fn() };
-    await runtime.advanceNative({ charId: 'soyo', utSystem: clock as any });
+    const firstStart = runtime.pendingNativeStart('soyo');
+    expect(firstStart?.motionKey).toBe('sad');
+    runtime.completeNativeStart('soyo', { status: 'started', offsetReplayMs: 0 });
 
     const changed = runtime.applyIntent({
       charId: 'soyo',
@@ -287,16 +335,16 @@ describe('BakeMotionRuntime.applyIntent', () => {
     });
     expect(changed.nativeStartRequested).toBe(true);
 
-    await runtime.advanceNative({ charId: 'soyo', utSystem: clock as any });
+    const changedStart = runtime.pendingNativeStart('soyo');
+    expect(changedStart?.motionKey).toBe('wave');
+    runtime.completeNativeStart('soyo', { status: 'started', offsetReplayMs: 0 });
     // First advance starts sad; second advance starts the changed wave segment.
     expect(runtime.report().nativeStarts).toBe(2);
-    expect(motionManager.startMotion).toHaveBeenCalledTimes(2);
   });
 
   it('explicitly clears driver control when state.motion becomes null', async () => {
     const { cache } = makeCache();
-    const stopNativeMotion = vi.fn();
-    const host = makeHost({ stopNativeMotion });
+    const host = makeHost();
     const runtime = new BakeMotionRuntime(host, cache as any);
     const motion = {
       kind: 'custom',
@@ -322,27 +370,41 @@ describe('BakeMotionRuntime.applyIntent', () => {
     });
 
     expect(cleared.driver).toBe('none');
+    expect(cleared.nativeStopRequested).toBe(false);
     expect(injectedParams.PARAM_ANGLE_X).toBeUndefined();
-    expect(stopNativeMotion).not.toHaveBeenCalled();
+    expect(runtime.hasPendingNativeStop('soyo')).toBe(false);
+  });
+
+  it('defers stopping a native driver until the runtime-owned frame batch', async () => {
+    const { cache } = makeCache();
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
+    await runtime.prepare([{
+      charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2',
+      modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad',
+    }]);
+    runtime.applyIntent({
+      charId: 'soyo', intent: { output: { kind: 'resource', key: 'sad' } as any, priority: 3, time: 0 },
+      simTime: 0, injectedParams: {},
+    });
+    runtime.completeNativeStart('soyo', { status: 'started', offsetReplayMs: 0 });
+
+    const changed = runtime.applyIntent({
+      charId: 'soyo',
+      intent: { output: { kind: 'custom', durationSeconds: 1, tracks: [] } as any, priority: 3, time: 1 },
+      simTime: 1, injectedParams: {},
+    });
+
+    expect(changed.nativeStopRequested).toBe(true);
+    expect(runtime.hasPendingNativeStop('soyo')).toBe(true);
+    runtime.completeNativeStop('soyo');
+    expect(runtime.hasPendingNativeStop('soyo')).toBe(false);
   });
 });
 
 describe('BakeMotionRuntime mixed observability', () => {
   it('reports cacheHitFrames, cacheMissFrames, nativeStarts and offsetReplayMs in one bake', async () => {
     const { cache } = makeCache();
-    const motionManager = { startMotion: vi.fn(async () => true) };
-    const model: any = {
-      update: vi.fn(),
-      internalModel: {
-        motionManager,
-        physics: null,
-        settings: { motions: { sad: [{}], wave: [{}] } },
-      },
-    };
-    const host = makeHost({
-      getModel: () => ({ model, internalModel: model.internalModel, motionManager, runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2' } as any),
-    });
-    const runtime = new BakeMotionRuntime(host, cache as any);
+    const runtime = new BakeMotionRuntime(makeHost(), cache as any);
     await runtime.prepare([
       { charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2', modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'wave' },
       { charId: 'soyo', adapterId: 'pixi-live2d-display-cubism2', modelRuntimePath: 'asset://m/char.model3.json', motionKey: 'sad' },
@@ -361,10 +423,7 @@ describe('BakeMotionRuntime mixed observability', () => {
       simTime: 2.25,
       injectedParams,
     });
-    await runtime.advanceNative({
-      charId: 'soyo',
-      utSystem: { getUserTimeMSec: () => 100000, setUserTimeMSec: vi.fn() } as any,
-    });
+    runtime.completeNativeStart('soyo', { status: 'started', offsetReplayMs: 50 });
 
     const report = runtime.report();
     expect(report.cacheHitFrames).toBe(1);

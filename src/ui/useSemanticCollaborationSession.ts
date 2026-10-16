@@ -34,9 +34,9 @@ import { CollaborativeAssetUploader } from '../services/collaboration/Collaborat
 import { CollaborativeAssetDownloader } from '../services/collaboration/CollaborativeAssetDownloader';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import {
-  CollaborationClientCustomMotionEditLeaseGate,
-  type CustomMotionEditLeaseGate,
-} from '../services/timeline-authoring/CustomMotionEditLeaseGate';
+  CollaborationClientCustomMotionEditAuthority,
+  InMemoryCustomMotionEditAuthority,
+} from '../services/timeline-authoring/CustomMotionEditAuthority';
 import { CollaborativeDocumentLayerV3 } from '../services/collaboration/CollaborativeDocumentLayerV3';
 import { CollaborativeSessionOrchestratorV3 } from '../services/collaboration/CollaborativeSessionOrchestratorV3';
 import {
@@ -104,7 +104,7 @@ export interface SemanticCollaborationSessionController {
   joinExistingRoom: (options?: CollaborationStartOptions) => Promise<boolean>;
   retryConnection: () => void;
   refreshCollaborativeResources: () => Promise<void>;
-  disconnect: () => void;
+  disconnect: () => Promise<void>;
   completeResourceAgreement: (confirmed: boolean) => void;
   completeServerSceneAgreement: (confirmed: boolean) => void;
   cancelResourceTransfer: () => void;
@@ -254,7 +254,6 @@ export function useSemanticCollaborationSession({
   onSelfChange,
   onPeersChange,
   onPresencePublisherChange,
-  onLeaseGateChange,
   collaborationServerStatus,
 }: {
   contextValue: BootstrapContext;
@@ -265,7 +264,6 @@ export function useSemanticCollaborationSession({
   onSelfChange: (self: CollaborationIdentity | null) => void;
   onPeersChange: (peers: CollaborationPresencePeerV2[]) => void;
   onPresencePublisherChange?: (publisher: ((patch?: Partial<CollaborationPresencePatchV2>) => void) | null) => void;
-  onLeaseGateChange?: (gate: CustomMotionEditLeaseGate | null) => void;
   collaborationServerStatus?: CollaborationServerStatus | null;
 }): SemanticCollaborationSessionController {
   const [endpoint, setEndpoint] = useState(() => readStoredInput('aeonstagery.collaboration.endpoint', '127.0.0.1:12345'));
@@ -280,7 +278,9 @@ export function useSemanticCollaborationSession({
   const { selectedActionIds } = useEditorSelection();
   const layerRef = useRef<CollaborativeDocumentLayerV3 | null>(null);
   const clientRef = useRef<CollaborationClientV3 | null>(null);
-  const leaseGateRef = useRef<CollaborationClientCustomMotionEditLeaseGate | null>(null);
+  const sessionGenerationRef = useRef(0);
+  const cleanupRef = useRef<Promise<void>>(Promise.resolve());
+  const mountedRef = useRef(true);
   const gateRef = useRef<CollaborativeAssetReadinessGate | null>(null);
   const resourceAgreementRef = useRef<CollaborativeResourceAgreementAdapter | null>(null);
   const serverSceneAgreementRef = useRef<CollaborativeServerSceneAgreementAdapterV3 | null>(null);
@@ -338,16 +338,19 @@ export function useSemanticCollaborationSession({
     }
   }, []);
 
-  const disconnect = useCallback(() => {
+  // Detach synchronously so late callbacks and asynchronous cleanup only affect
+  // the old connection. Entered authoring writes retain their transport until release.
+  const stopSession = useCallback((): Promise<void> => {
+    sessionGenerationRef.current += 1;
+    const client = clientRef.current;
+    const layer = layerRef.current;
+    const closing = contextValue.services.customMotionEditing.closeActive('authority-changed');
+    const cancelling = contextValue.services.customMotionConversion.cancel();
     gateRef.current?.cancelActiveTransfer();
-    leaseGateRef.current?.dispose();
-    leaseGateRef.current = null;
-    onLeaseGateChange?.(null);
     resourceAgreementRef.current?.cancelPending();
     serverSceneAgreementRef.current?.reset();
     unsubscribePresenceRef.current?.();
     unsubscribePresenceRef.current = null;
-    layerRef.current?.dispose();
     clientRef.current = null;
     layerRef.current = null;
     gateRef.current = null;
@@ -356,6 +359,26 @@ export function useSemanticCollaborationSession({
     peersV2Ref.current = [];
     selfRef.current = null;
     remoteTargetScenePathRef.current = undefined;
+    const cleanup = cleanupRef.current.then(async () => {
+      // Wait for both tasks even if one reports a cleanup failure.
+      await Promise.allSettled([closing, cancelling]);
+      try {
+        // A real layer owns its client; disposing the client also covers starts
+        // that have not returned a layer yet. Both disposal operations are idempotent.
+        layer?.dispose();
+      } finally {
+        client?.dispose();
+      }
+      // Only restore singleplayer authorization after the collaborative publisher
+      // and transport have stopped, so local authority cannot publish into the room.
+      await contextValue.services.customMotionEditing.replaceAuthority(new InMemoryCustomMotionEditAuthority());
+    });
+    cleanupRef.current = cleanup.catch(() => {});
+    return cleanup;
+  }, [contextValue]);
+
+  const disconnect = useCallback((): Promise<void> => {
+    const cleanup = stopSession();
     setResourceAgreement(null);
     setLastResourceAgreementProposal(null);
     setServerSceneAgreement(null);
@@ -366,7 +389,8 @@ export function useSemanticCollaborationSession({
     onPeersChange([]);
     onPresencePublisherChange?.(null);
     onStatusChange('disconnected');
-  }, [onLeaseGateChange, onPeersChange, onPresencePublisherChange, onSelfChange, onStatusChange]);
+    return cleanup;
+  }, [onPeersChange, onPresencePublisherChange, onSelfChange, onStatusChange, stopSession]);
 
   const publishPresence = useCallback((patch: Partial<CollaborationPresencePatchV2> = {}) => {
     if (status !== 'connected') return;
@@ -449,7 +473,11 @@ export function useSemanticCollaborationSession({
       return false;
     }
 
-    disconnect();
+    const cleanup = disconnect();
+    const generation = sessionGenerationRef.current;
+    await cleanup;
+    if (!mountedRef.current || generation !== sessionGenerationRef.current) return false;
+    const isCurrentSession = () => mountedRef.current && generation === sessionGenerationRef.current;
     onStatusChange('connecting');
     const self = {
       clientId: createClientId(),
@@ -468,79 +496,7 @@ export function useSemanticCollaborationSession({
     const skipServerSceneAgreement = Boolean(options.skipServerSceneAgreement || isServerHost);
 
     const client = new CollaborationClientV3({ endpoint: cleanEndpoint, identity: self });
-    const leaseClient = client as unknown as {
-      subscribeLease?: unknown;
-      acquireLease?: unknown;
-      renewLease?: unknown;
-      releaseLease?: unknown;
-    };
-    const leaseGate = typeof leaseClient.subscribeLease === 'function'
-      && typeof leaseClient.acquireLease === 'function'
-      && typeof leaseClient.renewLease === 'function'
-      && typeof leaseClient.releaseLease === 'function'
-      ? new CollaborationClientCustomMotionEditLeaseGate(client)
-      : null;
-    leaseGateRef.current = leaseGate;
-    onLeaseGateChange?.(leaseGate);
-    const resourceAgreement = new CollaborativeResourceAgreementAdapter({
-      show: (request) => {
-        if (!skipServerSceneAgreement) setResourceAgreement(request);
-      },
-      clear: () => setResourceAgreement(null),
-    });
-    resourceAgreementRef.current = resourceAgreement;
-    const serverSceneAgreement = new CollaborativeServerSceneAgreementAdapterV3({
-      presenter: {
-        show: (request) => {
-          if (!skipServerSceneAgreement) setServerSceneAgreement(request);
-        },
-        clear: () => setServerSceneAgreement(null),
-      },
-      safetyPaths: new CollaborativeServerSceneSafetyPathAdapterV3({
-        fileAccess,
-        projectResources,
-        targetSceneRelativePath: getDefaultSceneRelativePath(project),
-      }),
-      getLocalDocument: () => {
-        const snap = contextValue.stores.document.getCurrentSceneDocumentSnapshot();
-        return (snap && snap.schemaVersion === 5) ? snap as SceneDocumentV5 : null;
-      },
-      onAcceptedTargetScenePath: (path) => {
-        remoteTargetScenePathRef.current = path;
-      },
-    });
-    serverSceneAgreementRef.current = serverSceneAgreement;
-    const manifestBuilder = new CollaborativeAssetManifestBuilder({ fileAccess, projectResources });
-    const gate = new CollaborativeAssetReadinessGate({
-      fileAccess,
-      projectResources,
-      sceneProjectizer: contextValue.services.sceneAssets,
-      manifestBuilder,
-      manifestReuseChecker: {
-        hasUnchangedReferences: () => false,
-        hasUnchangedSceneDocumentV5References: (document, previousManifest) => (
-          hasUnchangedCollaborativeSceneDocumentV5AssetReferences(document, previousManifest, { fileAccess, projectResources })
-        ),
-      },
-      uploader: new CollaborativeAssetUploader({ fileAccess, projectResources, client }),
-      downloader: new CollaborativeAssetDownloader({ fileAccess, projectResources, client }),
-      confirmAgreement: async (request) => {
-        // The host owns the server scene, so its asset agreement is accepted
-        // without a dialog; the gate discards the confirmation result.
-        if (skipServerSceneAgreement) return;
-        return resourceAgreement.request(request);
-      },
-      onHandshake: (event) => showAssetHandshake(event.manifest, event.status, event.direction, event.error, event.proposal, event.transfer),
-    });
-    gateRef.current = gate;
     clientRef.current = client;
-    unsubscribePresenceRef.current = client.subscribePresence((message) => {
-      peersV2Ref.current = reducePresenceMessage(peersV2Ref.current, message, self.clientId);
-      onPeersChange(peersV2Ref.current);
-    });
-    const orchestrator = new CollaborativeSessionOrchestratorV3(admissionGate);
-    const collaborationProjectId = project.metadata.projectId;
-    const roomId = `${collaborationProjectId}:main`;
     let starting = true;
     let announcedReady = false;
     const startup: { status: CollaborationConnectionStatus; failure?: { error: unknown } } = { status: 'connecting' };
@@ -550,7 +506,77 @@ export function useSemanticCollaborationSession({
       showToast(mode === 'host' ? '已开始主持协作房间' : '已加入协作房间', 'success');
     };
     try {
-      const layer = await orchestrator.start({
+      // Collaboration must always use server authorization; an incomplete client
+      // cannot silently fall back to the singleplayer authority.
+      if (typeof client.subscribeLease !== 'function' || typeof client.acquireLease !== 'function'
+        || typeof client.renewLease !== 'function' || typeof client.releaseLease !== 'function') {
+        await stopSession();
+        if (mountedRef.current && sessionGenerationRef.current === generation + 1) {
+          setLastError('协作客户端缺少自定义动作租约能力');
+          onSelfChange(null);
+          onStatusChange('error');
+        }
+        return false;
+      }
+      const authority = new CollaborationClientCustomMotionEditAuthority(client);
+      await contextValue.services.customMotionEditing.replaceAuthority(authority);
+      if (!isCurrentSession()) return false;
+      const resourceAgreement = new CollaborativeResourceAgreementAdapter({
+        show: (request) => { if (isCurrentSession() && !skipServerSceneAgreement) setResourceAgreement(request); },
+        clear: () => { if (isCurrentSession()) setResourceAgreement(null); },
+      });
+      resourceAgreementRef.current = resourceAgreement;
+      const serverSceneAgreement = new CollaborativeServerSceneAgreementAdapterV3({
+        presenter: {
+          show: (request) => { if (isCurrentSession() && !skipServerSceneAgreement) setServerSceneAgreement(request); },
+          clear: () => { if (isCurrentSession()) setServerSceneAgreement(null); },
+        },
+        safetyPaths: new CollaborativeServerSceneSafetyPathAdapterV3({
+          fileAccess,
+          projectResources,
+          targetSceneRelativePath: getDefaultSceneRelativePath(project),
+        }),
+        getLocalDocument: () => {
+          const snap = contextValue.stores.document.getCurrentSceneDocumentSnapshot();
+          return (snap && snap.schemaVersion === 5) ? snap as SceneDocumentV5 : null;
+        },
+        onAcceptedTargetScenePath: (path) => {
+          if (isCurrentSession()) remoteTargetScenePathRef.current = path;
+        },
+      });
+      serverSceneAgreementRef.current = serverSceneAgreement;
+      const manifestBuilder = new CollaborativeAssetManifestBuilder({ fileAccess, projectResources });
+      const gate = new CollaborativeAssetReadinessGate({
+        fileAccess,
+        projectResources,
+        sceneProjectizer: contextValue.services.sceneAssets,
+        manifestBuilder,
+        manifestReuseChecker: {
+          hasUnchangedReferences: () => false,
+          hasUnchangedSceneDocumentV5References: (document, previousManifest) => (
+            hasUnchangedCollaborativeSceneDocumentV5AssetReferences(document, previousManifest, { fileAccess, projectResources })
+          ),
+        },
+        uploader: new CollaborativeAssetUploader({ fileAccess, projectResources, client }),
+        downloader: new CollaborativeAssetDownloader({ fileAccess, projectResources, client }),
+        confirmAgreement: async (request) => {
+          if (skipServerSceneAgreement) return;
+          return resourceAgreement.request(request);
+        },
+        onHandshake: (event) => {
+          if (isCurrentSession()) showAssetHandshake(event.manifest, event.status, event.direction, event.error, event.proposal, event.transfer);
+        },
+      });
+      gateRef.current = gate;
+      unsubscribePresenceRef.current = client.subscribePresence((message) => {
+        if (!isCurrentSession()) return;
+        peersV2Ref.current = reducePresenceMessage(peersV2Ref.current, message, self.clientId);
+        onPeersChange(peersV2Ref.current);
+      });
+      const orchestrator = new CollaborativeSessionOrchestratorV3(admissionGate);
+      const collaborationProjectId = project.metadata.projectId;
+      const roomId = `${collaborationProjectId}:main`;
+      const startPromise = orchestrator.start({
         endpoint: normalizeCollaborationEndpoint(cleanEndpoint),
         identity: self,
         client,
@@ -559,6 +585,13 @@ export function useSemanticCollaborationSession({
         collaborationProjectId,
         roomId,
         allowSeed: mode !== 'join-existing',
+        beforeDispose: async () => {
+          if (!isCurrentSession()) { await cleanupRef.current; return; }
+          await Promise.allSettled([
+            contextValue.services.customMotionEditing.closeActive('authority-changed'),
+            contextValue.services.customMotionConversion.cancel(),
+          ]);
+        },
         prepareSeedState: async (document) => {
           const result = await gate.prepareLocalPublishV5({
             document,
@@ -582,6 +615,7 @@ export function useSemanticCollaborationSession({
           return { document: result.document, assets: result.assets };
         },
         beforeApplyState: async (state, applyOptions) => {
+          if (!isCurrentSession()) throw new Error('协作连接已关闭');
           let acceptedJoinProposal: CollaborationAssetAgreementProposal | undefined;
           if (applyOptions.requireServerSceneAgreement && !serverSceneAgreement.hasAcceptedServerScene) {
             acceptedJoinProposal = await gate.buildAgreementProposal(
@@ -607,9 +641,11 @@ export function useSemanticCollaborationSession({
               acceptedProposal: acceptedJoinProposal,
             });
           }
+          if (!isCurrentSession()) throw new Error('协作连接已关闭');
         },
-        getApplyScenePath: () => remoteTargetScenePathRef.current,
+        getApplyScenePath: () => isCurrentSession() ? remoteTargetScenePathRef.current : undefined,
         afterApplyState: async (_state, document, path) => {
+          if (!isCurrentSession()) return;
           const targetPath = path ?? remoteTargetScenePathRef.current;
           if (!targetPath) return;
           try {
@@ -632,6 +668,11 @@ export function useSemanticCollaborationSession({
           }
         },
         onStatusChange: (nextStatus) => {
+          if (!isCurrentSession()) return;
+          if (nextStatus !== 'connected') {
+            void contextValue.services.customMotionEditing.closeActive('authority-changed');
+            void contextValue.services.customMotionConversion.cancel();
+          }
           startup.status = nextStatus;
           onStatusChange(nextStatus);
           if (nextStatus === 'connected') {
@@ -639,9 +680,16 @@ export function useSemanticCollaborationSession({
             if (!starting) announceReady();
           }
         },
-        onSynchronizedState: () => contextValue.stores.editor._setSaveStatus('idle'),
-        onInitialDocumentApplied: () => contextValue.services.semanticAuthoring.clearHistory(),
+        onSynchronizedState: () => {
+          if (isCurrentSession()) contextValue.stores.editor._setSaveStatus('idle');
+        },
+        onInitialDocumentApplied: () => {
+          if (isCurrentSession()) contextValue.services.semanticAuthoring.clearHistory();
+        },
         onError: (error) => {
+          if (!isCurrentSession()) return;
+          void contextValue.services.customMotionEditing.closeActive('authority-changed');
+          void contextValue.services.customMotionConversion.cancel();
           const message = formatError(error);
           setLastError(message);
           // Startup errors also reach the catch below. Report that operation once.
@@ -654,6 +702,17 @@ export function useSemanticCollaborationSession({
           showToast(`${refreshing ? '协作资源校验失败' : '协作同步失败'}：${message}`, 'error');
         },
       });
+      // The orchestrator creates its layer before its first await. Capture it
+      // during connection, so disconnect can stop its publisher before restoring
+      // singleplayer authority even when the handshake has not finished.
+      const pendingLayer = orchestrator.activeLayer;
+      layerRef.current = pendingLayer ?? null;
+      const layer = await startPromise;
+      if (!isCurrentSession()) {
+        await cleanupRef.current;
+        if (layer !== pendingLayer) layer.dispose();
+        return false;
+      }
       layerRef.current = layer;
       starting = false;
       const normalizedEndpoint = normalizeCollaborationEndpoint(cleanEndpoint);
@@ -673,21 +732,12 @@ export function useSemanticCollaborationSession({
       }
       return true;
     } catch (error) {
+      if (!isCurrentSession()) return false;
       const message = formatError(error);
+      await stopSession();
+      // A newer connection may start while the old failure is draining.
+      if (!mountedRef.current || sessionGenerationRef.current !== generation + 1) return false;
       setLastError(message);
-      unsubscribePresenceRef.current?.();
-      unsubscribePresenceRef.current = null;
-      client.dispose();
-      leaseGate?.dispose();
-      leaseGateRef.current = null;
-      onLeaseGateChange?.(null);
-      clientRef.current = null;
-      layerRef.current = null;
-      gateRef.current = null;
-      resourceAgreementRef.current = null;
-      serverSceneAgreementRef.current?.reset();
-      serverSceneAgreementRef.current = null;
-      remoteTargetScenePathRef.current = undefined;
       setServerSceneAgreement(null);
       onSelfChange(null);
       onPeersChange([]);
@@ -695,7 +745,7 @@ export function useSemanticCollaborationSession({
       showToast(`连接协作房间失败：${message}`, 'error');
       return false;
     }
-  }, [collaborationServerStatus, contextValue, currentProject, disconnect, displayName, endpoint, onLeaseGateChange, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake]);
+  }, [collaborationServerStatus, contextValue, currentProject, disconnect, displayName, endpoint, onPeersChange, onSelfChange, onStatusChange, showAssetHandshake, stopSession]);
 
   const refreshCollaborativeResources = useCallback(async () => {
     if (!layerRef.current || status !== 'connected' || resourceRefreshRef.current) return;
@@ -741,13 +791,13 @@ export function useSemanticCollaborationSession({
     void client.reconnectRealtime();
   }, []);
 
-  useEffect(() => () => {
-    unsubscribePresenceRef.current?.();
-    unsubscribePresenceRef.current = null;
-    layerRef.current?.dispose();
-    clientRef.current?.dispose();
-    leaseGateRef.current?.dispose();
-  }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      void stopSession().catch(() => {});
+    };
+  }, [stopSession]);
 
   return {
     endpoint,

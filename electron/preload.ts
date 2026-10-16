@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
     inspectWebgalScss: () => ipcRenderer.invoke('templates:inspectWebGalScss'),
     installWebgalScss: (request: WebGalScssImportInstallRequest) =>
       ipcRenderer.invoke('templates:installWebGalScss', request),
+    deletePackage: (request: import('../src/api/types/template-package-import').TemplatePackageDeleteRequest) => ipcRenderer.invoke('templates:deletePackage', request),
   },
 
   // ─── Live2D Runtime Availability ───────────────────────
@@ -274,6 +275,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('ffmpeg:pushEncodedChunk', chunkData),
     endStreamExport: () =>
       ipcRenderer.invoke('ffmpeg:endStreamExport'),
+    cancelExport: () => ipcRenderer.invoke('ffmpeg:cancelExport'),
     onLog: (callback: (msg: string) => void) => {
       const listener = (_event: any, msg: string) => callback(msg);
       ipcRenderer.on('ffmpeg:log', listener);

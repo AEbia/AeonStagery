@@ -409,7 +409,7 @@ describe('Live2DMotionController composite motion fallback', () => {
     expect(entry.pendingSeekBoundaryDuration).toBe(0.5);
   });
 
-  it('re-evaluates the current Cubism2 motion when dragging farther into the same motion', async () => {
+  it('re-evaluates the current Cubism2 motion during reconstruction when skipHardReset is false', async () => {
     let ut = 1000;
     (globalThis as any).window = {
       UtSystem: {
@@ -433,7 +433,6 @@ describe('Live2DMotionController composite motion fallback', () => {
       model: main.model,
       motionEpoch: 1,
       motionStartTime: 10,
-      motionStartUtTime: 900,
       lastOffset: 0.003,
       pendingSeekBoundarySnapshot: {
         params: new Float32Array([1, 2, 3]),
@@ -454,7 +453,7 @@ describe('Live2DMotionController composite motion fallback', () => {
       () => ({ isReconstructing: true }),
     );
 
-    await controller._executePlayMotion('soyo', 'angry03', 3, 0.1, 10.1, true, 1);
+    await controller._executePlayMotion('soyo', 'angry03', 3, 0.1, 10.1, false, 1);
 
     expect(main.mm.startMotion).not.toHaveBeenCalled();
     expect(main.model.internalModel.update).toBeUndefined();
@@ -492,7 +491,6 @@ describe('Live2DMotionController composite motion fallback', () => {
       model: main.model,
       motionEpoch: 1,
       motionStartTime: 10,
-      motionStartUtTime: 900,
       lastOffset: 0.3,
       lastSnapshot: {
         params: new Float32Array([2, 3, 4]),
@@ -880,7 +878,13 @@ describe('Live2DMotionController composite motion fallback', () => {
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({ preloadMotion }),
+      createTestControls: () => mockControls({
+        preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
+      }),
     }) as any);
 
     const controller = new Live2DMotionController(
@@ -930,11 +934,15 @@ describe('Live2DMotionController composite motion fallback', () => {
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getAvailableMotions: () => ['next'],
         preloadMotion,
         captureSnapshot,
         applySnapshot,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
 
@@ -980,9 +988,13 @@ describe('Live2DMotionController composite motion fallback', () => {
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
 
@@ -1072,9 +1084,13 @@ describe('Live2DMotionController composite motion fallback', () => {
     };
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      getControls: () => mockControls({
+      createTestControls: () => mockControls({
         getAvailableMotions: () => ['wave'],
         preloadMotion,
+        startMotion: async (targetModel, motionKey, priority, offsetSeconds) => ({
+          ok: await targetModel.startMotion(motionKey, 0, priority, offsetSeconds),
+          offsetReplayMs: 0,
+        }),
       }),
     }) as any);
     const characters = new Map<string, any>([['rana', oldEntry]]);
@@ -1133,10 +1149,8 @@ describe('Live2DMotionController composite motion fallback', () => {
       motionStartTime: 3,
       lastOffset: 1,
     };
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(runtimeAdapter.cubismPixiLive2DAdapter as any);
-    const officialControls = runtimeAdapter.cubismPixiLive2DAdapter.getControls();
-    const clearMotionState = vi.spyOn(officialControls, 'clearMotionState');
-    const applySnapshot = vi.spyOn(officialControls, 'applySnapshot');
+    entry.runtimeHandle = runtimeAdapter.cubismPixiLive2DAdapter.createModelHandle('rana', model, entry.runtime);
+    const resetToIdle = vi.spyOn(entry.runtimeHandle.lifecycle, 'resetToIdle');
 
     const controller = new Live2DMotionController(
       new Map([['rana', entry]]),
@@ -1153,8 +1167,10 @@ describe('Live2DMotionController composite motion fallback', () => {
     await controller._hardReset('rana', model);
 
     expect(model.stopAllMotions).toHaveBeenCalled();
-    expect(clearMotionState).toHaveBeenCalledWith(model);
-    expect(applySnapshot).toHaveBeenCalledWith(model, entry.idleSnapshot);
+    expect(resetToIdle).toHaveBeenCalledWith(expect.objectContaining({
+      keepFocus: false,
+      idleSnapshot: entry.idleSnapshot,
+    }), expect.any(Function));
     expect(entry.motionStartTime).toBeUndefined();
     expect(entry.lastOffset).toBeUndefined();
     expect(entry.lastSnapshot).toBeUndefined();

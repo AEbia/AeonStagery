@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { TemplatePackageSummary } from '../../services/template-package';
 import {
   DEFAULT_PROJECT_TEMPLATE_CONFIGURATION,
@@ -18,6 +18,7 @@ interface TemplateProjectConfigDialogProps {
   isOpen: boolean;
   templatePackages: TemplatePackageSummary[];
   value?: ProjectTemplateConfiguration;
+  onDeletePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   onClose: () => void;
   onSave: (templates: ProjectTemplateConfiguration, options?: { importCharacters?: boolean }) => void | Promise<void>;
 }
@@ -37,6 +38,7 @@ export const TemplateProjectConfigDialog = ({
   templatePackages,
   value,
   onClose,
+  onDeletePackage,
   onSave,
 }: TemplateProjectConfigDialogProps) => {
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>(
@@ -52,36 +54,32 @@ export const TemplateProjectConfigDialog = ({
     () => ({ ...(value?.defaults ?? {}) }),
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const dialogRef = useModalDialog(onClose, isOpen && !embedded);
+
+  const packagesRef = useRef(templatePackages);
+  packagesRef.current = templatePackages;
 
   useEffect(() => {
     if (!isOpen) return;
     setSelectedTemplateIds(canonicalizeTemplateIds(
       value?.enabledTemplateIds ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION.enabledTemplateIds,
-      templatePackages,
+      packagesRef.current,
     ));
     setSelectedCharacterPresetIds(value?.selectedCharacterPresetIds ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION.selectedCharacterPresetIds ?? []);
     setCharacterVariantImportMode(
       value?.characterVariantImportMode ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION.characterVariantImportMode ?? 'primary-only',
     );
     setDefaultOverrides({ ...(value?.defaults ?? {}) });
-  }, [isOpen, templatePackages, value]);
+  }, [isOpen, value]);
 
   useEffect(() => {
     const availableIds = new Set(templatePackages.map((templatePackage) => templatePackage.id));
     setSelectedTemplateIds((current) => {
-      const filtered = current.filter((id) => availableIds.has(id));
-      if (filtered.length > 0) {
-        if (filtered.length === current.length && filtered.every((id, index) => id === current[index])) {
-          return current;
-        }
-        return filtered;
-      }
-      const defaults = DEFAULT_PROJECT_TEMPLATE_CONFIGURATION.enabledTemplateIds;
-      if (current.length === defaults.length && current.every((id, index) => id === defaults[index])) {
-        return current;
-      }
-      return defaults;
+      const filtered = canonicalizeTemplateIds(current, templatePackages).filter((id) => availableIds.has(id));
+      return filtered.length === current.length && filtered.every((id, index) => id === current[index])
+        ? current
+        : filtered;
     });
   }, [templatePackages]);
 
@@ -100,8 +98,7 @@ export const TemplateProjectConfigDialog = ({
   const toggleTemplate = (templateId: string) => {
     setSelectedTemplateIds((current) => {
       if (current.includes(templateId)) {
-        const next = current.filter((id) => id !== templateId);
-        return next.length > 0 ? next : current;
+        return current.filter((id) => id !== templateId);
       }
       const availableOrder = templatePackages.map((templatePackage) => templatePackage.id);
       return [...current, templateId].sort((left, right) =>
@@ -132,6 +129,7 @@ export const TemplateProjectConfigDialog = ({
   const handleSave = async (options: { importCharacters?: boolean } = {}) => {
     if (isSaving) return;
     setIsSaving(true);
+    setSaveError('');
     try {
       await onSave({
         enabledTemplateIds: selectedTemplateIds,
@@ -139,6 +137,8 @@ export const TemplateProjectConfigDialog = ({
         selectedCharacterPresetIds,
         characterVariantImportMode,
       }, options);
+    } catch (error) {
+      setSaveError(`模板配置保存失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSaving(false);
     }
@@ -161,6 +161,7 @@ export const TemplateProjectConfigDialog = ({
             selectedIds={selectedTemplateIds}
             onToggle={toggleTemplate}
             onMove={moveTemplate}
+            onDeletePackage={onDeletePackage}
           />
           <TemplateCapabilityConfig
             characterPresets={availableCharacterPresets}
@@ -171,6 +172,7 @@ export const TemplateProjectConfigDialog = ({
           />
         </div>
 
+        {saveError && <div role="alert" style={{ color: 'var(--error)' }}>{saveError}</div>}
         <footer style={embedded ? { display: "flex", flexDirection: "column", gap: 12 } : footerStyle}>
           <div style={hintTextStyle}>
             {characterVariantImportMode === 'all'

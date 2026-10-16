@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BootstrapContext } from '../../engine/Bootstrapper';
 import type { ProjectWorkflowResult } from '../../api/interfaces/IProjectOpenWorkflow';
 import type { ProjectState, ProjectTemplateConfiguration } from '../../api/types/project';
 import type { WebGalImportInput } from '../../services/import/webgal';
-import type { TemplatePackageSummary } from '../../services/template-package';
+import { createTemplatePackageView, templateMetadataMatchesId, type TemplatePackageSummary } from '../../services/template-package';
 import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import { eventBus } from '../../api/events';
 import {
   createExternalLibraryMount,
   hasExternalLibraryMountPath,
   rebindExternalLibraryMount,
+  renameRecentProject,
   useSettings,
 } from '../SettingsStore';
 import { showToast } from '../Toast';
@@ -17,6 +18,21 @@ import { showToast } from '../Toast';
 /** Coordinates project workflows, template edits, and external library settings. */
 export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoadedScene: boolean) {
   const { settings, setSetting } = useSettings();
+  const pendingProjectOperationsRef = useRef(new Set<Promise<unknown>>());
+  const trackProjectOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const operationPromise = Promise.resolve().then(operation);
+    let trackedOperation: Promise<T>;
+    trackedOperation = operationPromise.finally(() => {
+      pendingProjectOperationsRef.current.delete(trackedOperation);
+    });
+    pendingProjectOperationsRef.current.add(trackedOperation);
+    return trackedOperation;
+  }, []);
+  const waitForPendingProjectOperations = useCallback(async (): Promise<void> => {
+    while (pendingProjectOperationsRef.current.size > 0) {
+      await Promise.allSettled([...pendingProjectOperationsRef.current]);
+    }
+  }, []);
   const [isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked] = useState(false);
   const [currentProject, setCurrentProject] = useState<ProjectState | null>(() => contextValue.services.projectWorkspace.getCurrentProject());
   const [templatePackages, setTemplatePackages] = useState<TemplatePackageSummary[]>(
@@ -125,16 +141,18 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
 
   const handleRegenerateWebGalScene = useCallback(async (speed: number) => {
-    const result = await contextValue.services.projectOpenWorkflow.regenerateWebGalSceneAndReload({ speed });
-    if (result.success) {
-      showToast('已重新生成 WebGAL 场景', 'success');
-      if (result.webgalReport && result.webgalReport.unsupportedCommands.length > 0) {
-        showToast(`重新生成中 ${result.webgalReport.unsupportedCommands.length} 条指令未识别（已跳过）`, 'warning');
+    await trackProjectOperation(async () => {
+      const result = await contextValue.services.projectOpenWorkflow.regenerateWebGalSceneAndReload({ speed });
+      if (result.success) {
+        showToast('已重新生成 WebGAL 场景', 'success');
+        if (result.webgalReport && result.webgalReport.unsupportedCommands.length > 0) {
+          showToast(`重新生成中 ${result.webgalReport.unsupportedCommands.length} 条指令未识别（已跳过）`, 'warning');
+        }
+      } else {
+        showToast(`重新生成失败：${result.error ?? '未知错误'}`, 'error');
       }
-    } else {
-      showToast(`重新生成失败：${result.error ?? '未知错误'}`, 'error');
-    }
-  }, [contextValue.services.projectOpenWorkflow]);
+    });
+  }, [contextValue.services.projectOpenWorkflow, trackProjectOperation]);
 
   const handleRegisterWebGalAssetSource = useCallback(async () => {
     const result = await window.aeonStageryAPI.dialog.showOpen({
@@ -168,8 +186,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     await contextValue.services.templatePackages.refresh();
     const result = await contextValue.services.projectWorkspace.updateTemplateConfiguration(templates);
     if (!result.success) {
-      showToast(result.error, 'error');
-      return;
+      throw new Error(result.error);
     }
 
     const nextTemplates = result.project.metadata.templates;
@@ -283,6 +300,13 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     showProjectWorkflowResult(workflowResult, 'recent');
   }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
 
+  const handleRenameProject = useCallback(async (projectFilePath: string, name: string) => {
+    const result = await contextValue.services.projectWorkspace.renameProjectAt(projectFilePath, name);
+    if (!result.success) throw new Error(result.error);
+    renameRecentProject(projectFilePath, result.project.metadata.name);
+    showToast(`项目已重命名为：${result.project.metadata.name}`, 'success');
+  }, [contextValue.services.projectWorkspace]);
+
   const handleImportTemplatePackage = useCallback(async () => {
     const templateImporter = window.aeonStageryAPI.templates;
     if (!templateImporter) {
@@ -300,6 +324,44 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
       'success',
     );
   }, [contextValue.services.templatePackages]);
+
+  const handleDeleteTemplatePackage = useCallback(async (templatePackage: TemplatePackageSummary) => {
+    const manager = window.aeonStageryAPI.templates;
+    if (!manager?.deletePackage) throw new Error('当前桌面版本不支持删除模板包，请更新应用');
+    if (templatePackage.scope === 'builtin' || !templatePackage.packageRoot) {
+      throw new Error('不能删除内置模板包');
+    }
+    const result = await manager.deletePackage({ id: templatePackage.id, packageRoot: templatePackage.packageRoot });
+    if (!result.success) {
+      if (result.canceled) return;
+      throw new Error(result.error ?? '请检查目录权限后重试');
+    }
+    const project = contextValue.services.projectWorkspace.getCurrentProject();
+    if (project?.metadata.templates) {
+      const removedIds = new Set([templatePackage.id, ...(templatePackage.aliases ?? [])]);
+      const templates = project.metadata.templates;
+      const remainingPackages = contextValue.services.templatePackages.getPackages().filter((pkg) => pkg.source.packageRoot !== templatePackage.packageRoot);
+      const enabledTemplateIds = templates.enabledTemplateIds.filter((id) => (
+        !removedIds.has(id)
+        || remainingPackages.some((pkg) => templateMetadataMatchesId(pkg.manifest.template, id))
+      ));
+      const view = createTemplatePackageView([...remainingPackages], { enabledTemplateIds });
+      const defaults = { ...templates.defaults };
+      if (templatePackage.dialogueStyles?.some((style) => style.id === defaults.dialogueStyleId)
+        && !view.dialogueStyles.some((style) => style.id === defaults.dialogueStyleId)) {
+        delete defaults.dialogueStyleId;
+      }
+      await handleSaveTemplateConfiguration({
+        ...templates,
+        enabledTemplateIds,
+        defaults: Object.keys(defaults).length ? defaults : undefined,
+        selectedCharacterPresetIds: templates.selectedCharacterPresetIds?.filter((id) => view.characterPresets.some((preset) => preset.id === id)),
+      });
+    } else {
+      await contextValue.services.templatePackages.refresh();
+    }
+    showToast(`已删除模板包：${templatePackage.name}`, 'success');
+  }, [contextValue.services.projectWorkspace, contextValue.services.templatePackages, handleSaveTemplateConfiguration]);
 
   const handleChooseExternalLibrary = useCallback(async () => {
     const result = await window.aeonStageryAPI.dialog.showOpen({
@@ -357,9 +419,10 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   return {
     currentProject, templatePackages, templatePackageRevision,
     isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult,
-    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject,
+    waitForPendingProjectOperations,
+    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
-    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
+    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage, handleDeleteTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   };

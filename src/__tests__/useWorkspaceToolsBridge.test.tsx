@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
@@ -66,6 +67,22 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('useWorkspaceToolsBridge', () => {
+  it('routes legacy index parameter commands through the character behavior', async () => {
+    const { context, send } = setup();
+    await send({ type: 'set-character-parameter', charId: 'hero', parameterIndex: 3, value: 0.8 });
+    expect(context.adapters.character.editParameters).toHaveBeenCalledWith('hero', [{ index: 3, value: 0.8 }]);
+  });
+
+  it('reloads from detached character information before restoring the playhead', async () => {
+    const { context, send } = setup();
+    context.adapters.character.getCharacterInfo.mockReturnValue(characterInfoFixture({
+      id: 'hero', modelPath: 'hero.model.json', config: { scale: 1.3 },
+    }));
+    context.adapters.playback.getCurrentTime.mockReturnValue(8);
+    await send({ type: 'reload-character', charId: 'hero' });
+    expect(context.adapters.character.add).toHaveBeenCalledWith('hero', 'hero.model.json', { scale: 1.3 });
+    expect(context.adapters.playback.seek).toHaveBeenCalledWith(8, true);
+  });
   it('resumes snapshot and runtime publishing for an already open detached window', async () => {
     const { bridge, rerender } = setup(true);
     await waitFor(() => expect(bridge.publishSnapshot).toHaveBeenCalled());

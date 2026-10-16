@@ -56,6 +56,12 @@ function makeContext(status = 'offline') {
         version: 1,
         filePath: '',
         subscribe,
+        getCurrentSceneDocumentView: () => ({
+          schemaVersion: 4,
+          sceneId: sceneData.sceneId,
+          meta: sceneData.meta,
+          statements: [],
+        }),
         getCurrentSceneDocumentSnapshot: () => ({
           schemaVersion: 4,
           sceneId: sceneData.sceneId,
@@ -135,6 +141,7 @@ describe('TimelineEditor collaboration offline copy', () => {
         { id: 'exit-a', time: 5, type: 'characterPresence', params: { mode: 'exit', id: 'A' } },
       ],
     } as any);
+    context.stores.document.getCurrentSceneDocumentView = context.stores.document.getCurrentSceneDocumentSnapshot;
     context.stores.document.getCompiledSceneSnapshot = () => ({
       sourceSchemaVersion: 2,
       sceneId: 'scene-1',

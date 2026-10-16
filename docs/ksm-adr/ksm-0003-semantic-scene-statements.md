@@ -67,7 +67,7 @@ authoring 在 document 中首次使用某个 construct 时选择当前 semantic 
 
 本节记录 2026-08-13 的 scene schema v4 切换与 v3 加载时迁移决策。canonical statement family 表（§4 的 14 个 family）保持不变；`live2dParameterClip` 从未获许可进入该表，它只存在于 feature branch，现已连同其 `applyLive2DParameterClip` runtime action 一起删除（设计该 Clip 的 ADR-0027 标记为 superseded）。
 
-- `SCENE_SCHEMA_VERSION` 现为 `4`。`characterPerformance` 的 Motion 来源改为判别联合 `{ kind: 'resource' | 'custom' }`；`characterPerformance.params` 顶层不再有 `durationSeconds`、`loop` 或 `priority`。普通资源 Motion 对 scene end 的贡献为 `0`，自定义 Motion 贡献其 `durationSeconds`。
+- v4 引入了 `characterPerformance` 的 Motion 判别联合 `{ kind: 'resource' | 'custom' }`；`characterPerformance.params` 顶层不再有 `durationSeconds`、`loop` 或 `priority`。当前 v5 的两种 Motion 均由 `motion.durationSeconds` 贡献 scene end；资源 Motion 的可选时长在编译前通过统一 source preparation 物化，具体解析与降级规则见 [ADR-0029](../adr/0029-live2d-custom-motion-keyframe-authoring.md)。
 - v4 codec 是严格 codec，对旧形状不宽容、不规范化。加载 `schemaVersion === 3` 的文档时，`SceneDocumentCodec.parseAndValidateWithWarnings` 先执行显式且确定性的 `SceneV3ToV4Migration`，再把迁移结果交给严格 v4 校验：
   - 裸字符串 motion 与无 `kind` 的 `{ key, fadeInSeconds? }` 改写为 `{ kind: 'resource', ... }`；
   - `characterPerformance` 顶层 `durationSeconds` 在它（或自定义 Motion 的时长、或被移除 Clip 的时长）决定旧场景结尾时并入 `meta.durationSeconds`，并入只增不减；
@@ -177,7 +177,7 @@ source、compiled 与 prepared 三者不共享 statement/action 数组，也不�
 
 `wait` 不再是 statement。`meta.durationSeconds` 若存在，表示显式 scene 结束时间，必须大于等于所有 root/companion 的计算结束时间；若缺省，则由最后一个 statement/companion 的结束时间派生。这样可以表达尾部留白，又不需要伪装成 runtime action。
 
-每个 statement variant 必须在 definition 中提供纯 `temporalExtent(params)`，返回该 statement 对 scene end 的有限 duration contribution。它描述 transition/envelope/可见或可听内容时长，不描述 latching state 的存活期：follow、BGM、lighting preset 等状态可以持续到后续 statement，但不能让 scene end 变成 Infinity。任何会影响 scene end 的 motion、SFX、voice 或 animation 资源时长都必须在 authoring/import 时 materialize 为 source 中的显式 duration；compiler 不通过文件探测猜时长。
+每个 statement variant 必须在 definition 中提供纯 `temporalExtent(params)`，返回该 statement 对 scene end 的有限 duration contribution。它描述 transition/envelope/可见或可听内容时长，不描述 latching state 的存活期：follow、BGM、lighting preset 等状态可以持续到后续 statement，但不能让 scene end 变成 Infinity。任何会影响 scene end 的 motion、SFX、voice 或 animation 资源时长都必须在 authoring/import 或统一 source preparation 时 materialize 为 source 中的显式 duration；compiler 不通过文件探测猜时长。
 
 ### 3. Compilation Is One-Way And Deterministic
 

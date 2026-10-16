@@ -1,11 +1,9 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import type { BootstrapContext } from '../../engine/Bootstrapper';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import { eventBus } from '../../api/events';
 import { isCollaborationUndoDisabled } from '../context/AppContext';
-import { useSettings } from '../SettingsStore';
 import { useKeyboardShortcuts } from './useKeyboardShortcuts';
-import { formatShortcutBinding, getEffectiveShortcutBindings } from '../shortcuts/shortcutUtils';
 import { showToast } from '../Toast';
 import type { useEditorState } from '../store/storeHooks';
 
@@ -23,27 +21,22 @@ export function useAppShortcuts({
   handleOpenProject: () => Promise<void>;
   setShowExport: (open: boolean) => void;
 }) {
-  const { settings } = useSettings();
-  const saveShortcutTitle = useMemo(() => {
-    const [binding] = getEffectiveShortcutBindings(settings.keyboardShortcuts, 'app.save');
-    const suffix = binding ? ` (${formatShortcutBinding(binding)})` : '';
-    return `保存场景${suffix}`;
-  }, [settings.keyboardShortcuts]);
-
   const handlePlayPause = useCallback(() => {
+    if (showProjectHome || !hasLoadedScene) return;
     const playback = contextValue.adapters.playback;
     if (contextValue.stores.playback.playing) {
       playback.pause();
     } else {
       playback.play();
     }
-  }, [contextValue]);
+  }, [contextValue, hasLoadedScene, showProjectHome]);
 
   const handleFrameStep = useCallback((dir: 1 | -1) => {
+    if (showProjectHome || !hasLoadedScene) return;
     const playback = contextValue.adapters.playback;
     const t = playback.getCurrentTime();
     playback.seek(Math.max(0, t + dir * (1 / 60)));
-  }, [contextValue]);
+  }, [contextValue, hasLoadedScene, showProjectHome]);
 
   const handleUndo = useCallback(() => {
     if (isCollaborationUndoDisabled(collaborationStatus)) {
@@ -61,20 +54,24 @@ export function useAppShortcuts({
     void contextValue.services.semanticAuthoring.redo();
   }, [collaborationStatus, contextValue]);
 
+  const handleShortcutSave = async () => {
+    if (!hasLoadedScene) return;
+    const result = await handleSave();
+    if (result?.success) {
+      showToast('剧本保存成功！', 'success');
+    }
+  };
+
   useKeyboardShortcuts({
     initialized,
     onPlayPause: handlePlayPause,
     onStageReset: handleStageReset,
     onFrameStep: handleFrameStep,
-    onSave: () => { if (hasLoadedScene) void handleSave(); },
+    onSave: () => { void handleShortcutSave(); },
     onOpenProject: () => { void handleOpenProject(); },
     onExport: () => { if (!showProjectHome) setShowExport(true); },
     onOpenShortcutSettings: () => { void eventBus.emit('ui:openSettings', { tab: 'shortcuts' }); },
     onUndo: handleUndo,
     onRedo: handleRedo,
   });
-
-  return {
-    saveShortcutTitle,
-  };
 }

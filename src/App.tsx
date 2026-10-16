@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { eventBus } from './api/events';
+import { getLogger } from './engine/Logger';
 import { registerSceneSummaryProvider } from './services/crash/CrashReporter';
 import { buildRedactedSceneSummary } from './services/crash/sceneSummary';
 import {
   IconAgent,
   IconAiProse,
+  IconArrowLeft,
   IconBell,
   IconCrosshair,
   IconFilm,
@@ -12,8 +14,8 @@ import {
   IconInfo,
   IconMaximize,
   IconMoon,
+  IconPencil,
   IconRefresh,
-  IconSave,
   IconSettings,
   IconSun,
   IconTarget,
@@ -39,7 +41,9 @@ import { AppProvider, useTimelineAdapter } from './ui/context/AppContext';
 import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
+import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
+import { TemplatePackageSelector } from './ui/templates/TemplateCapabilityConfig';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
 import { TemplatePerformanceProfileEditor } from './ui/templates/TemplatePerformanceProfileEditor';
 import { WebGalRegenerateDialog } from './ui/WebGalRegenerateDialog';
@@ -51,6 +55,7 @@ import { useAppDialogs } from './ui/hooks/useAppDialogs';
 import { useAppInitialization } from './ui/hooks/useAppInitialization';
 import { useAppLayout } from './ui/hooks/useAppLayout';
 import { useAppProjectWorkspace } from './ui/hooks/useAppProjectWorkspace';
+import { useAppProjectClose } from './ui/hooks/useAppProjectClose';
 import { useAppShortcuts } from './ui/hooks/useAppShortcuts';
 import { useWorkspaceToolsBridge } from './ui/hooks/useWorkspaceToolsBridge';
 
@@ -69,6 +74,19 @@ const VoiceWorkbench = React.lazy(() => import('./ui/voice/VoiceWorkbench').then
 
 export default function App() {
   const contextValue = useMemo(() => bootstrap(), []);
+  const bootstrapLifecycleRef = useRef(0);
+  useEffect(() => {
+    const generation = ++bootstrapLifecycleRef.current;
+    return () => {
+      // StrictMode effect replay keeps this bootstrap alive; actual unmount
+      // disposes after child cleanup has started.
+      queueMicrotask(() => {
+        if (bootstrapLifecycleRef.current === generation) {
+          void contextValue.dispose().catch((error) => getLogger('App').error('Application disposal failed', error));
+        }
+      });
+    };
+  }, [contextValue]);
   const { collaboration, sessionBindings } = useAppCollaborationState();
   return (
     <AppProvider
@@ -110,18 +128,33 @@ function AppContent({ contextValue, sessionBindings }: {
   const project = useAppProjectWorkspace(contextValue, hasLoadedScene);
   const {
     currentProject, templatePackages, templatePackageRevision, isCollaborationJoinHomeLocked,
-    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject,
+    handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
-    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage,
+    handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage, handleDeleteTemplatePackage,
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
+  const [renameTarget, setRenameTarget] = useState<{ name: string; projectFilePath: string } | null>(null);
   const {
     collaborationController, collaborationServerStatus, effectiveServerCredentials,
     shouldShowCollaborationPanel, handleHostNewCollaboration, handleHostExistingCollaboration,
     handleJoinCollaboration, handleStopCollaborationServer,
   } = useAppCollaborationRoom(contextValue, sessionBindings, project);
   const { status: collaborationStatus, peers: collaborationPeers } = sessionBindings;
+  const { handleCloseProject, isClosingProject } = useAppProjectClose(
+    contextValue,
+    collaborationController.disconnect,
+    project.waitForPendingProjectOperations,
+  );
+  const handleReturnHome = useCallback(async () => {
+    if (!await handleCloseProject()) return;
+    project.setIsCollaborationJoinHomeLocked(false);
+    setShowAIWorkbench(false);
+    setShowVoiceWorkbench(false);
+    setShowExport(false);
+    setShowWebGalRegenerate(false);
+    setRenameTarget(null);
+  }, [handleCloseProject, project.setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
   const layout = useAppLayout(hasLoadedScene);
   const {
     contextTab, sidePanelView, isTracksMode, leftPanelWidth, sidePanelWidth,
@@ -140,8 +173,8 @@ function AppContent({ contextValue, sessionBindings }: {
     viewport, handleStageMouseDown, handleStageReset, handleResetZoom,
     handleRecenter, handleZoomIn, handleZoomOut, isPanning,
   } = useViewport(stageRef, !showProjectHome);
-  const { saveShortcutTitle } = useAppShortcuts({
-    contextValue, collaborationStatus, initialized, hasLoadedScene, showProjectHome,
+  useAppShortcuts({
+    contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
   });
   const validationBanner = useMemo(() => {
@@ -169,6 +202,8 @@ function AppContent({ contextValue, sessionBindings }: {
   return (
     <div
       className="app-container"
+      ref={(element) => { element?.toggleAttribute('inert', isClosingProject); }}
+      aria-busy={isClosingProject}
       data-timeline-layout={navigatorPriorityActive ? 'list' : 'tracks'}
       style={{
         '--workbench-timeline-extension': `${timelineHeight + 4}px`,
@@ -177,25 +212,37 @@ function AppContent({ contextValue, sessionBindings }: {
     >
       <div className="top-bar">
         <div className="top-bar__title">
-          <img src="./icon.png" alt="AeonStagery" className="top-bar__logo" width={22} height={22} />
-          <span className="top-bar__brand">AeonStagery</span>
-          {currentProject && (
-            <span className="top-bar__project-name" title={currentProject.rootPath}>
-              {currentProject.metadata.name}
+          <button
+            type="button"
+            className={`top-bar__brand-control${currentProject && !isCollaborationJoinHomeLocked ? ' top-bar__brand-control--return' : ''}`}
+            onClick={() => void handleReturnHome()}
+            disabled={!initialized || !currentProject || isCollaborationJoinHomeLocked || isClosingProject}
+            title={currentProject ? '保存并关闭当前项目，返回项目主页' : 'AeonStagery'}
+            aria-label={currentProject ? '关闭项目并返回主页' : 'AeonStagery'}
+          >
+            <img src="./icon.png" alt="" className="top-bar__logo top-bar__brand-identity" width={22} height={22} />
+            <IconArrowLeft className="top-bar__brand-return top-bar__brand-return-icon" width={22} height={22} aria-hidden="true" />
+            <span className="top-bar__brand top-bar__brand-identity" aria-hidden="true">AeonStagery</span>
+            <span className="top-bar__brand top-bar__brand-return" aria-hidden="true">
+              {isClosingProject ? '正在关闭…' : '返回主页'}
             </span>
+          </button>
+          {currentProject && (
+            <button
+              type="button"
+              className="top-bar__project-name"
+              title={`重命名项目 · ${currentProject.rootPath}`}
+              aria-label={`重命名项目：${currentProject.metadata.name}`}
+              onClick={() => setRenameTarget({ name: currentProject.metadata.name, projectFilePath: currentProject.projectFilePath })}
+            >
+              <span>{currentProject.metadata.name}</span>
+              <IconPencil width={12} height={12} />
+            </button>
           )}
           <button
             className="btn btn--icon top-bar__project-action"
-            onClick={() => void handleSave()}
-            disabled={!hasLoadedScene}
-            title={saveShortcutTitle}
-            aria-label="保存场景"
-          >
-            <IconSave width={15} height={15} />
-          </button>
-          <button
-            className="btn btn--icon top-bar__project-action"
             onClick={() => void handleOpenProject()}
+            disabled={isClosingProject}
             title="打开项目 (Ctrl+O)"
             aria-label="打开项目"
           >
@@ -451,7 +498,8 @@ function AppContent({ contextValue, sessionBindings }: {
                     </button>
                     <button
                       className="btn"
-                      onClick={() => contextValue.services.projectWorkspace.closeProject()}
+                      onClick={() => void handleReturnHome()}
+                      disabled={isClosingProject}
                       style={{ ...stageLoadButtonStyle, background: 'rgba(255,255,255,0.1)', color: '#e2e8f0' }}
                     >
                       返回项目主页
@@ -462,7 +510,7 @@ function AppContent({ contextValue, sessionBindings }: {
 
               {initialized && <React.Suspense fallback={null}><BakeProgressOverlay /></React.Suspense>}
             </div>
-            <React.Suspense fallback={null}><PlaybackControls /></React.Suspense>
+            {!showProjectHome && <React.Suspense fallback={null}><PlaybackControls /></React.Suspense>}
           </div>
         </ErrorBoundary>
 
@@ -616,9 +664,13 @@ function AppContent({ contextValue, sessionBindings }: {
                     value={currentProject.metadata.templates}
                     onClose={handleCloseSettings}
                     onSave={handleSaveTemplateConfiguration}
+                    onDeletePackage={handleDeleteTemplatePackage}
                   />
                 ) : (
-                  <p className="settings-template-panel__empty">未打开项目。AI 表演模板可独立编辑；项目模板启用顺序与角色导入会在打开项目后显示。</p>
+                  <>
+                    <p className="settings-template-panel__empty">未打开项目。AI 表演模板可独立编辑；项目模板启用顺序与角色导入会在打开项目后显示。</p>
+                    <TemplatePackageSelector packages={templatePackages} onDeletePackage={handleDeleteTemplatePackage} />
+                  </>
                 )}
                 <TemplatePerformanceProfileEditor
                   service={contextValue.services.templatePerformanceProfiles}
@@ -685,7 +737,9 @@ function AppContent({ contextValue, sessionBindings }: {
             onBrowseCollaborationDirectory={handleBrowseCollaborationDirectory}
             onOpenProject={handleOpenProject}
             onImportTemplatePackage={handleImportTemplatePackage}
+            onDeleteTemplatePackage={handleDeleteTemplatePackage}
             onOpenRecentProject={handleOpenRecentProject}
+            onRenameRecentProject={setRenameTarget}
             onRemoveRecentProject={removeRecentProject}
             onHostNewCollaboration={handleHostNewCollaboration}
             onHostExistingCollaboration={handleHostExistingCollaboration}
@@ -699,6 +753,15 @@ function AppContent({ contextValue, sessionBindings }: {
           />
         ) : null}
       </FirstLessonController>
+
+      {renameTarget && (
+        <ProjectRenameDialog
+          key={renameTarget.projectFilePath}
+          name={renameTarget.name}
+          onSave={(name) => handleRenameProject(renameTarget.projectFilePath, name)}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
 
       <ToastContainer />
     </div>

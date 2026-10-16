@@ -45,6 +45,7 @@ describe('ProjectOpenWorkflow', () => {
       subscribe: vi.fn(),
       createProjectAt: vi.fn(),
       openProjectAt: vi.fn(),
+      renameProjectAt: vi.fn(),
       prepareCollaborationProjectAt: vi.fn(),
       updateTemplateConfiguration: vi.fn(),
       updateVoiceGenerationConfiguration: vi.fn(),

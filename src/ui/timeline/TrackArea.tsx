@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useRef, useMemo, useCallback, useEffect, useState } from 'react';
 import { eventBus } from '../../api/events';
 import { Ruler } from './Ruler';
 import {
@@ -24,7 +24,7 @@ import {
   useCollaborationPresencePublisher,
   useCharacterAdapter,
 } from '../context/AppContext';
-import { useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
+import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
 
 import { computePresentationFootprintLanes } from './laneUtils';
 import { resolveLifecyclePairRelationshipLaneIndices } from './lifecyclePairRelationshipGeometry';
@@ -48,21 +48,11 @@ import { BlockContextMenu } from './BlockContextMenu';
 import { MarkerPrompt } from './MarkerPrompt';
 import { CustomMotionConversionDialog, type CustomMotionConversionDialogState } from './CustomMotionConversionDialog';
 import { CustomMotionEditor } from './CustomMotionEditor';
-import type { CustomMotionKeyframeEdit } from '../../services/timeline-authoring/customMotionKeyframeEdits';
-import {
-  CustomMotionAuthoring,
-  describeCustomMotionAuthoringError,
-} from './CustomMotionAuthoring';
-import {
-  locatorToLeaseTarget,
-  type CustomMotionLeaseState,
-} from '../../services/timeline-authoring/CustomMotionEditLeaseGate';
 import { showToast } from '../Toast';
 import {
   estimateCustomMotionKeyframes,
   type CustomMotionDensity,
 } from '../../engine/live2d/customMotionConversion';
-import { resolveCubism2MotionMeta } from '../../engine/live2d/cubism2MotionSampler';
 import {
   buildSummarySegmentsFromBuckets,
   buildTimeBucketIndex,
@@ -113,7 +103,7 @@ import {
   getLifecycleBoundaryFootprintRange,
   getLifecycleBoundaryPresentationMetrics,
 } from './lifecycleBoundaryPresentation';
-import type { CharacterMotionOutput, SceneStatement } from '../../api/types/semantic-scene';
+import type { SceneStatement } from '../../api/types/semantic-scene';
 import {
   buildSemanticStatementLibraryInsert,
   submitSemanticStatementLibraryInsert,
@@ -173,25 +163,15 @@ export const TrackArea = React.memo(({
   const selectAfterCommit = useCallback((ids: Record<string, boolean>) => onSelect(Object.keys(ids), false), [onSelect]);
   const commands = useSemanticTimelineCommands(selectAfterCommit);
   const editorStore = useEditorStore();
-  const writableEditorStore = useApp().stores.editor;
   const playbackAdapter = usePlaybackAdapter();
   const semanticAuthoring = useSemanticAuthoringService();
-  const customMotionEditLeaseGate = useApp().collaboration?.customMotionEditLeaseGate ?? undefined;
+  const { customMotionEditing, customMotionConversion } = useApp().services ?? {};
   const characterAdapter = useCharacterAdapter();
   const collaborationStatus = useCollaborationStatus();
   const [conversionDialog, setConversionDialog] = useState<CustomMotionConversionDialogState | null>(null);
   const [isConverting, setIsConverting] = useState(false);
-  const conversionLocatorRef = useRef<{ kind: 'statement' | 'companion'; statementId: string; companionId?: string } | null>(null);
-  const customMotionAuthoring = React.useMemo(() => {
-    if (!semanticAuthoring) return null;
-    return new CustomMotionAuthoring({
-      authoring: semanticAuthoring,
-      samplerTargets: (characterId) => characterAdapter.getCubism2SamplerTargets?.(characterId) ?? [],
-      leaseGate: customMotionEditLeaseGate,
-      origin: 'block-context-menu',
-    });
-  }, [semanticAuthoring, characterAdapter, customMotionEditLeaseGate]);
-  const expandedCustomMotionActionId = useCustomMotionEditorActionId();
+  const conversionTargetRef = useRef<{ actionId: string } | null>(null);
+  const customMotionSnapshot = useCustomMotionEditingSnapshot();
   const templateCatalog = useTemplatePackageCatalog();
   const templatePackageSnapshot = React.useSyncExternalStore(
     templateCatalog ? (listener) => templateCatalog.subscribe(listener) : () => () => {},
@@ -335,67 +315,11 @@ export const TrackArea = React.memo(({
     return map;
   }, [tracks]);
 
-  // 关键帧编辑器展开带目标：仅当该动作仍存在且仍为自定义动作时才展开
-  const customMotionEditorTarget = useMemo(() => {
-    if (!expandedCustomMotionActionId) return null;
-    const action = actionById.get(expandedCustomMotionActionId);
-    const trackId = actionTrackMap.get(expandedCustomMotionActionId);
-    if (!action || !trackId) return null;
-    const motion = (action.params as Record<string, unknown> | undefined)?.motion;
-    if (!motion || typeof motion !== 'object' || (motion as { kind?: unknown }).kind !== 'custom') return null;
-    return {
-      trackId,
-      actionId: expandedCustomMotionActionId,
-      sceneId: sceneData.sceneId,
-      blockTime: transientStates[expandedCustomMotionActionId]?.time ?? action.time ?? 0,
-      characterId: String((action.params as Record<string, unknown> | undefined)?.target ?? ''),
-      motion: motion as Extract<CharacterMotionOutput, { kind: 'custom' }>,
-    };
-  }, [actionById, actionTrackMap, expandedCustomMotionActionId, transientStates, sceneData.sceneId]);
-
-  const customMotionEditorLocator = useMemo(() => (
-    customMotionEditorTarget
-      ? locatorForCompiledTimelineAction(documentStore, customMotionEditorTarget.actionId)
-      : null
-  ), [customMotionEditorTarget, documentStore]);
-  const customMotionLeaseTarget = useMemo(
-    () => customMotionEditorLocator ? locatorToLeaseTarget(customMotionEditorLocator) : null,
-    [customMotionEditorLocator],
-  );
-  const getCustomMotionLeaseState = useCallback((): CustomMotionLeaseState => (
-    customMotionLeaseTarget && customMotionEditLeaseGate?.getState
-      ? customMotionEditLeaseGate.getState(customMotionLeaseTarget)
-      : 'unavailable'
-  ), [customMotionEditLeaseGate, customMotionLeaseTarget]);
-  // useSyncExternalStore 以普通函数回调方式调用 subscribe，类方法直接传递会
-  // 丢失 this 绑定（this.listeners 未定义而崩溃）；用闭包显式绑定并保持引用稳定。
-  const customMotionLeaseSubscribe = useCallback(
-    (listener: () => void) => customMotionEditLeaseGate?.subscribe?.(listener) ?? (() => {}),
-    [customMotionEditLeaseGate],
-  );
-  const customMotionLeaseState = useSyncExternalStore<CustomMotionLeaseState>(
-    customMotionLeaseSubscribe,
-    getCustomMotionLeaseState,
-    () => 'unavailable' as const,
-  );
-
-  // 目标动作被删除或不再是自定义动作时，自动收起展开带
-  useEffect(() => {
-    if (expandedCustomMotionActionId && !customMotionEditorTarget) {
-      writableEditorStore.setCustomMotionEditorActionId(null);
-    }
-  }, [expandedCustomMotionActionId, customMotionEditorTarget, writableEditorStore]);
-
-  const handleCustomMotionEditorCommit = useCallback(async (edits: readonly CustomMotionKeyframeEdit[], expectedMotion?: Extract<CharacterMotionOutput, { kind: 'custom' }>) => {
-    if (!customMotionAuthoring || !customMotionEditorTarget) throw new Error('自定义动作已关闭');
-    const locator = locatorForCompiledTimelineAction(documentStore, customMotionEditorTarget.actionId);
-    if (!locator) throw new Error('自定义动作已不存在');
-    try {
-      await customMotionAuthoring.commitEdits(locator, edits, undefined, expectedMotion, customMotionEditorTarget.sceneId, sceneData.meta.fps ?? 60);
-    } catch (error) {
-      throw new Error(describeCustomMotionAuthoringError(error));
-    }
-  }, [customMotionAuthoring, customMotionEditorTarget, documentStore, sceneData.meta.fps]);
+  // Session resolution and lifetime belong to the application service; the track
+  // area only places its active snapshot beneath the corresponding track.
+  const customMotionEditorTarget = customMotionSnapshot.state !== 'closed' && customMotionSnapshot.target
+    ? { ...customMotionSnapshot.target, trackId: actionTrackMap.get(customMotionSnapshot.target.actionId) }
+    : null;
 
   const selectedTrackIds = useMemo(() => {
     const ids = new Set<string>();
@@ -947,9 +871,6 @@ export const TrackArea = React.memo(({
         : '';
     if (!semanticItem || !motionKey) return [];
     const charId = typeof params.target === 'string' ? params.target : '';
-    const locator = semanticItem.locator.kind === 'companion'
-      ? { kind: 'companion' as const, statementId: semanticItem.statementId, companionId: semanticItem.companionId! }
-      : { kind: 'statement' as const, statementId: semanticItem.statementId };
     const isCustom = kind === 'custom';
     const customDuration = isCustom && typeof (motion as { durationSeconds?: unknown }).durationSeconds === 'number'
       ? (motion as { durationSeconds: number }).durationSeconds
@@ -967,12 +888,13 @@ export const TrackArea = React.memo(({
       return [{
         label: '转为自定义动作…',
         run: () => {
-          conversionLocatorRef.current = locator;
+          conversionTargetRef.current = { actionId: id };
           setConversionDialog({ mode: 'convert', targetId: charId, motionKey, durationSeconds });
           if (charId && motionKey && adapterDuration <= 0) {
-            const targets = characterAdapter.getCubism2SamplerTargets?.(charId) ?? [];
-            if (targets.length > 0) {
-              void resolveCubism2MotionMeta(targets[0], motionKey).then((meta) => {
+            if (characterAdapter.sampleMotion) {
+              void characterAdapter.sampleMotion(charId, motionKey, { fps: 60, zeroSourceFades: true }).then((sampled) => {
+                const meta = sampled.metadata;
+                if (!meta) return;
                 if (meta.durationSeconds > 0) {
                   setConversionDialog((prev) => (
                     prev && prev.motionKey === motionKey && prev.targetId === charId
@@ -993,36 +915,33 @@ export const TrackArea = React.memo(({
           run: () => {
             onSelect(id, false);
             // 与检查器按钮一致：真正在轨道区展开关键帧编辑器，而不是只提示。
-            writableEditorStore.setCustomMotionEditorActionId(id);
+            customMotionEditing?.open({ actionId: id });
           },
         },
         {
           label: '重新转换（重选密度）…',
           run: () => {
-            conversionLocatorRef.current = locator;
+            conversionTargetRef.current = { actionId: id };
             setConversionDialog({ mode: 'regenerate', targetId: charId, motionKey, durationSeconds });
           },
         },
       ];
     }
     return [];
-  }, [actionById, semanticTimelineItemById, onSelect, writableEditorStore, characterAdapter]);
+  }, [actionById, semanticTimelineItemById, onSelect, customMotionEditing, characterAdapter]);
 
-  const sceneFps = documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
+  const sceneFps = semanticSnapshot.document?.meta?.fps ?? 60;
   const estimateKeyframesForDensity = React.useCallback((density: CustomMotionDensity): number => {
     if (!conversionDialog) return 0;
     return estimateCustomMotionKeyframes(conversionDialog.durationSeconds, density, sceneFps);
   }, [conversionDialog, sceneFps]);
 
   const handleConvertConfirm = async (density: CustomMotionDensity) => {
-    const locator = conversionLocatorRef.current;
-    if (!customMotionAuthoring || !locator || !conversionDialog) return;
+    const target = conversionTargetRef.current;
+    if (!customMotionConversion || !target || !conversionDialog) return;
     setIsConverting(true);
     try {
-      const locatorArg = locator.companionId !== undefined
-        ? { kind: 'companion' as const, statementId: locator.statementId, companionId: locator.companionId }
-        : { kind: 'statement' as const, statementId: locator.statementId };
-      const receipt = await customMotionAuthoring.convert(locatorArg, density);
+      const receipt = await customMotionConversion.convert(target, density);
       showToast(
         conversionDialog.mode === 'regenerate'
           ? `已从源动作重新生成（${receipt.motion.tracks.length} 条轨道）`
@@ -1030,9 +949,9 @@ export const TrackArea = React.memo(({
         'success',
       );
       setConversionDialog(null);
-      conversionLocatorRef.current = null;
+      conversionTargetRef.current = null;
     } catch (error) {
-      showToast(describeCustomMotionAuthoringError(error), 'error');
+      showToast(error instanceof Error ? error.message : '自定义动作转换失败', 'error');
     } finally {
       setIsConverting(false);
     }
@@ -1585,18 +1504,13 @@ export const TrackArea = React.memo(({
                 gutterWidth={100}
                 minContentWidth={maxTime * pps}
                 viewportWidth={containerWidth}
-                fps={sceneData.meta.fps ?? 60}
                 scrollContainer={areaRef.current?.closest<HTMLElement>('.timeline-editor-scroll-container')}
                 parameterMetadata={characterAdapter.getParameterMetadata?.(customMotionEditorTarget.characterId)}
-                motion={customMotionEditorTarget.motion}
-                blockTime={customMotionEditorTarget.blockTime}
+                snapshot={customMotionSnapshot}
                 pixelsPerSecond={pps}
                 playheadTime={playheadTimeRef.current}
-                onCommit={handleCustomMotionEditorCommit}
-                leaseState={customMotionLeaseState}
-                busy={customMotionLeaseState === 'pending' || customMotionLeaseState === 'denied'}
                 onSeek={(sceneTime) => onSeek(sceneTime, true)}
-                onClose={() => writableEditorStore.setCustomMotionEditorActionId(null)}
+                onClose={() => { void customMotionSnapshot.session?.close('closed'); }}
               />
             )}
             </React.Fragment>
@@ -1633,7 +1547,7 @@ export const TrackArea = React.memo(({
         estimateKeyframes={estimateKeyframesForDensity}
         busy={isConverting}
         onConfirm={(density) => { void handleConvertConfirm(density); }}
-        onCancel={() => { if (!isConverting) { setConversionDialog(null); conversionLocatorRef.current = null; } }}
+        onCancel={() => { if (!isConverting) { setConversionDialog(null); conversionTargetRef.current = null; } }}
       />
 
       <TrackSummaryTooltip payload={summaryTooltip} />

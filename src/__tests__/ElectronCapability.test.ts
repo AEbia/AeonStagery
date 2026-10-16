@@ -75,6 +75,7 @@ function createCapability(): ElectronCapability {
       clearPreviousSessions: vi.fn(async () => ({ success: true, clearedCount: 0, skippedActiveCount: 0 })),
     },
     export: {
+      cancelExport: vi.fn().mockResolvedValue({ success: true }),
       saveVideo: vi.fn(async () => ({ success: true })),
       convert: vi.fn(async () => ({ success: true })),
       getTempDir: vi.fn(async () => 'D:/temp'),

@@ -8,10 +8,11 @@ import type { SceneMeta } from '../api/types/scene-common';
 const mocks = vi.hoisted(() => ({
   applyCharacterCommand: vi.fn(() => Promise.resolve()),
   characterAdapter: {
-    getCoreModel: vi.fn(),
-    getModel: vi.fn(),
+    inspectParameters: vi.fn(() => null),
+    editParameters: vi.fn(),
+    getDisplayObject: vi.fn(),
     hasCharacter: vi.fn(() => false),
-    getAllCharacters: vi.fn(() => new Map()),
+    getCharacterInfo: vi.fn(() => null),
     remove: vi.fn(),
     add: vi.fn(),
   },

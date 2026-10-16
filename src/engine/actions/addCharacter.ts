@@ -51,7 +51,7 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
 
   at(async () => {
     const nextModelPath = resolvePathAsync ? await resolvePathAsync(params.model) : resolvePath(params.model);
-    const currentEntry = live2DManager.getAllCharacters().get(params.id);
+    const currentEntry = live2DManager.getCharacterInfo(params.id);
     if (currentEntry) {
       if (currentEntry.modelPath !== nextModelPath) {
         live2DManager.removeCharacter(params.id);

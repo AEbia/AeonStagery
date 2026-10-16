@@ -34,6 +34,10 @@ export type WebGalRegenerateResult =
   | { success: true; scenePath: string; webgalReport: WebGalImportReport }
   | { success: false; error: string };
 
+export type RenameProjectResult =
+  | { success: true; project: ProjectState }
+  | { success: false; error: string };
+
 export interface CreateProjectOptions {
   templates?: ProjectTemplateConfiguration;
   webgal?: WebGalImportInput;
@@ -64,6 +68,30 @@ export class ProjectWorkspaceService {
 
   subscribe(listener: () => void): () => void {
     return this.session.subscribe(listener);
+  }
+
+  async renameProjectAt(projectFilePath: string, name: string): Promise<RenameProjectResult> {
+    const trimmedName = name.trim();
+    if (!trimmedName) return { success: false, error: '项目名称不能为空' };
+
+    try {
+      const currentProject = this.session.getCurrentProject();
+      const isSamePath = (path: string) => path.replace(/\\/g, '/') === projectFilePath.replace(/\\/g, '/');
+      const target = currentProject && isSamePath(currentProject.projectFilePath)
+        ? currentProject
+        : await this.projectResources.loadProject(projectFilePath);
+      const project = target.metadata.name === trimmedName
+        ? target
+        : await this.projectResources.saveProjectMetadata(target, { ...target.metadata, name: trimmedName });
+
+      // Renaming a recent project must not open it or change the workspace root.
+      if (this.session.getCurrentProject() === target) {
+        this.session.setCurrentProject(project);
+      }
+      return { success: true, project };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async createProjectAt(
@@ -266,12 +294,17 @@ export class ProjectWorkspaceService {
       // snapshot. Restore it before authoring reads the project defaults.
       const templates = project.metadata.templates;
       if (templates) {
-        const view = createTemplatePackageView(this.getTemplatePackages(), { enabledTemplateIds: templates.enabledTemplateIds });
+        const packages = this.getTemplatePackages();
+        const view = createTemplatePackageView(packages, { enabledTemplateIds: templates.enabledTemplateIds });
         const styleId = templates.defaults?.dialogueStyleId ?? view.defaults.dialogueStyleId;
         const style = view.dialogueStyles.find((candidate) => candidate.id === styleId);
+        const snapshotIsDisabled = !!templates.dialoguePresentation
+          && (templates.enabledTemplateIds.length === 0
+            || packages.some((pkg) => pkg.manifest.dialogueStyles?.some((candidate) => candidate.id === templates.dialoguePresentation?.styleId)));
         const needsSnapshot = style?.renderer === 'image-dialogue-v1'
           ? !templates.dialoguePresentation || templates.dialoguePresentation.styleId !== styleId
-          : style && (templates.dialoguePresentation || templates.dialogueTemplate !== style.renderer);
+          : (style && (templates.dialoguePresentation || templates.dialogueTemplate !== style.renderer))
+            || (!style && snapshotIsDisabled);
         if (needsSnapshot) {
           project = { ...project, metadata: { ...project.metadata, templates: await this.materializeDialoguePresentation(templates) } };
           this.session.setCurrentProject(project);
@@ -487,13 +520,32 @@ export class ProjectWorkspaceService {
   ): Promise<ProjectTemplateConfiguration> {
     const packages = this.getTemplatePackages();
     const view = createTemplatePackageView(packages, { enabledTemplateIds: templates.enabledTemplateIds });
-    const styleId = templates.defaults?.dialogueStyleId ?? view.defaults.dialogueStyleId;
+    const defaults = { ...templates.defaults };
+    const overrideId = defaults.dialogueStyleId;
+    const builtinRenderers = ['glass', 'minimal', 'classic'] as const;
+    const isBuiltinRenderer = (id?: string): id is typeof builtinRenderers[number] => (
+      builtinRenderers.some((renderer) => renderer === id)
+    );
+    const overrideProvidedByPackage = packages.some((pkg) => pkg.manifest.dialogueStyles?.some((style) => style.id === overrideId));
+    if (overrideId && !isBuiltinRenderer(overrideId)
+      && (overrideProvidedByPackage || templates.enabledTemplateIds.length === 0)
+      && !view.dialogueStyles.some((style) => style.id === overrideId)) {
+      delete defaults.dialogueStyleId;
+    }
+    const normalizedTemplates = {
+      ...templates,
+      defaults: Object.keys(defaults).length > 0 ? defaults : undefined,
+      selectedCharacterPresetIds: templates.selectedCharacterPresetIds?.filter((id) => (
+        view.characterPresets.some((preset) => preset.id === id)
+        || (templates.enabledTemplateIds.length > 0 && !packages.some((pkg) => pkg.manifest.characterPresets?.some((preset) => preset.id === id)))
+      )),
+    };
+    const styleId = defaults.dialogueStyleId ?? view.defaults.dialogueStyleId;
     const style = styleId ? view.dialogueStyles.find((candidate) => candidate.id === styleId) : undefined;
     if (!style || style.renderer !== 'image-dialogue-v1' || !style.params) {
-      const { dialoguePresentation: _previous, dialogueTemplate: _template, ...rest } = templates;
-      const builtinRenderer = style && ['glass', 'minimal', 'classic'].includes(style.renderer)
-        ? style.renderer as 'glass' | 'minimal' | 'classic'
-        : undefined;
+      const { dialoguePresentation: _previous, dialogueTemplate: _template, ...rest } = normalizedTemplates;
+      const builtinRenderer = isBuiltinRenderer(style?.renderer) ? style.renderer
+        : isBuiltinRenderer(styleId) ? styleId : undefined;
       return { ...rest, ...(builtinRenderer ? { dialogueTemplate: builtinRenderer } : {}) };
     }
 
@@ -532,7 +584,7 @@ export class ProjectWorkspaceService {
     if (presentation.speaker?.fontFile) {
       presentation.speaker.fontFile = await materialize(presentation.speaker.fontFile, 'font');
     }
-    const { dialogueTemplate: _builtIn, ...rest } = templates;
+    const { dialogueTemplate: _builtIn, ...rest } = normalizedTemplates;
     return { ...rest, dialoguePresentation: presentation };
   }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore, usePlaybackAdapter } from '../context/AppContext';
-import { useValidationIssues, useCustomMotionEditorActionId } from '../store/storeHooks';
+import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
 
@@ -138,8 +138,8 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
   } = useInspectorOptions({ sceneData, action, timelineActions, semanticDocument, semanticItem });
   const sceneFps = semanticDocument?.meta?.fps ?? documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
   const {
-    customMotionAuthoring,
-    customMotionLocator,
+    customMotionConversion,
+    customMotionTarget,
     conversionDialog,
     setConversionDialog,
     isConverting,
@@ -155,8 +155,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     setIsAutoMatchingVisual(false);
   }, [actionId]);
 
-  // 关键帧编辑器改在下方轨道区展开，这里只记录开关（共享状态，轨道区据此渲染展开带）
-  const expandedCustomMotionActionId = useCustomMotionEditorActionId();
+  const customMotionSnapshot = useCustomMotionEditingSnapshot();
 
   if (!action) return null;
   const presenceLocator = actionId ? locatorForCompiledTimelineAction(documentStore, actionId) : null;
@@ -258,8 +257,8 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
   const isResourceMotion = actionType === 'playMotion' && action.semanticType === 'characterPerformance' && !customMotionValue;
 
   const { openConversionDialog, handleConvertConfirm } = createCustomMotionConversion({
-    action, actionId, actionParams, editorStore,
-    customMotionAuthoring, customMotionLocator, conversionDialog, setConversionDialog, setIsConverting,
+    action, actionParams,
+    customMotionConversion, customMotionTarget, conversionDialog, setConversionDialog, setIsConverting,
     characterAdapter,
   });
 
@@ -395,9 +394,16 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
         )}
 
         <CustomMotionPanel
-          customMotionValue={customMotionValue} actionId={actionId}
-          expandedCustomMotionActionId={expandedCustomMotionActionId}
-          editorStore={editorStore} openConversionDialog={openConversionDialog}
+          customMotionValue={customMotionValue}
+          editorOpen={customMotionSnapshot.target?.actionId === actionId && customMotionSnapshot.state !== 'closed'}
+          onToggleEditor={() => {
+            if (customMotionSnapshot.target?.actionId === actionId && customMotionSnapshot.state !== 'closed') {
+              void customMotionSnapshot.session?.close('closed');
+            } else if (customMotionTarget) {
+              appContext.services?.customMotionEditing?.open(customMotionTarget);
+            }
+          }}
+          openConversionDialog={openConversionDialog}
         />
         <div className="inspector-grid inspector-source-fields">
           <SemanticSourcePanel
@@ -409,7 +415,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
             rimLightTargetOptions={rimLightTargetOptions} characterVisualTargetOptions={characterVisualTargetOptions}
             filterTemplateOptions={filterTemplateOptions} activeFilterTemplateOptions={activeFilterTemplateOptions}
             semanticInspectorFields={semanticInspectorFields} isResourceMotion={isResourceMotion}
-            customMotionAuthoring={customMotionAuthoring} characterAdapter={characterAdapter}
+            customMotionConversion={customMotionConversion} characterAdapter={characterAdapter}
             openConversionDialog={openConversionDialog} updateParam={updateParam}
             replaceSourceParams={replaceSourceParams} updateSemanticSourceParam={updateSemanticSourceParam}
             renderParam={renderParam}

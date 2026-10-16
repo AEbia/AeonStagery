@@ -1,4 +1,5 @@
 import type { ICaptureBackend, BackendInit, BackendFrame } from './ICaptureBackend';
+import { ExportWriteQueue } from './ExportWriteQueue';
 
 interface ElectronExportAPI {
   startStreamExport(outputPath: string, options: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
@@ -8,7 +9,7 @@ interface ElectronExportAPI {
 
 export class RawPixelsBackend implements ICaptureBackend {
   private electronAPI: ElectronExportAPI;
-  private pushQueue: Promise<unknown>[] = [];
+  private pushQueue = new ExportWriteQueue(32 * 1024 * 1024, 4);
   private streamStarted = false;
   private streamFinished = false;
 
@@ -28,7 +29,7 @@ export class RawPixelsBackend implements ICaptureBackend {
       ...(config.transparent === true ? { transparent: true } : {}),
     });
     assertExportSuccess(result, 'FFmpeg stream start');
-    this.pushQueue = [];
+    this.pushQueue = new ExportWriteQueue(32 * 1024 * 1024, 4);
     this.streamStarted = true;
     this.streamFinished = false;
   }
@@ -37,15 +38,12 @@ export class RawPixelsBackend implements ICaptureBackend {
     try {
       if (!frame.pixels) throw new Error('RawPixelsBackend requires pixel data');
 
-      const p = this.electronAPI.pushFrame(frame.pixels).then((result) => {
+      const pixels = frame.pixels;
+      await this.pushQueue.ready(pixels.byteLength);
+      this.pushQueue.enqueue(pixels.byteLength, async () => {
+        const result = await this.electronAPI.pushFrame(pixels);
         assertExportSuccess(result, 'FFmpeg frame push');
       });
-      this.pushQueue.push(p);
-
-      // Backpressure: drain completed pushes periodically
-      if (this.pushQueue.length > 5) {
-        await Promise.all(this.pushQueue.splice(0, 3));
-      }
     } catch (error) {
       await this.abort();
       throw error;
@@ -54,7 +52,7 @@ export class RawPixelsBackend implements ICaptureBackend {
 
   async finish(): Promise<void> {
     try {
-      await Promise.all(this.pushQueue);
+      await this.pushQueue.drain();
       const result = await this.electronAPI.endStreamExport();
       this.streamFinished = true;
       assertExportSuccess(result, 'FFmpeg stream finish');
@@ -64,20 +62,16 @@ export class RawPixelsBackend implements ICaptureBackend {
     }
   }
 
-  async abort(): Promise<void> {
+  async abort(cancelled = false): Promise<void> {
     if (!this.streamStarted || this.streamFinished) return;
     this.streamFinished = true;
-    const pendingPushes = this.pushQueue;
-    this.pushQueue = [];
+    this.pushQueue.abort();
     try {
-      await this.electronAPI.endStreamExport();
+      // User cancellation is terminated by ExportAdapter's cancelExport IPC.
+      if (!cancelled) await this.electronAPI.endStreamExport();
     } catch {
       // Preserve the original capture failure while still attempting cleanup.
     }
-    // Capture cleanup may run before a queued IPC write has settled. Attach a
-    // rejection handler so that cleanup itself cannot create an unhandled
-    // stream-write rejection.
-    void Promise.allSettled(pendingPushes);
   }
 }
 

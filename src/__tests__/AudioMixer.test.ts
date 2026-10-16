@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AudioMixer } from '../engine/export/AudioMixer';
+import { AudioMixer, AudioResourceCache } from '../engine/export/AudioMixer';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
+import type { ProjectResourceService } from '../services/io/ProjectResourceService';
 
 function createMockElectronFs() {
   return {
     exists: vi.fn().mockResolvedValue(true),
     readFile: vi.fn().mockResolvedValue({ success: true, data: new ArrayBuffer(8) }),
     writeFile: vi.fn().mockResolvedValue({ success: true }),
+    copyFile: vi.fn().mockResolvedValue({ success: true }),
   };
 }
 
@@ -36,6 +38,48 @@ describe('AudioMixer', () => {
     fs = createMockElectronFs();
     exp = createMockElectronExport();
     mixer = new AudioMixer(fs as any, exp as any);
+  });
+
+  it('shares resource checks within an export and refreshes them for the next export', async () => {
+    const projectResources = {
+      getCurrentProject: vi.fn(() => ({ id: 'project' })),
+      resolveForRead: vi.fn(async () => '/project/same.wav'),
+    };
+    mixer = new AudioMixer(fs, exp, projectResources as unknown as ProjectResourceService);
+    const scene = createPreparedScene([0, 2].map((time) => ({
+      id: `line-${time}`, action: 'dialogue', time,
+      params: { voice: 'same.wav', duration: 1 },
+      source: { statementId: `line-${time}`, outputKey: 'primary' },
+    })));
+    const cache = new AudioResourceCache();
+    const first = await mixer.collectPreparedSources(scene, 0, '/project', cache);
+    const mouthSources = await mixer.collectPreparedSources(scene, 0, '/project', cache);
+    expect(first.map((source) => source.delayMs)).toEqual([0, 2000]);
+    expect(mouthSources).toEqual(first);
+    expect(fs.exists).toHaveBeenCalledTimes(1);
+    expect(projectResources.resolveForRead).toHaveBeenCalledTimes(1);
+    fs.exists.mockResolvedValue(false);
+    expect(await mixer.collectPreparedSources(scene, 0, '/project')).toEqual([]);
+    expect(fs.exists).toHaveBeenCalledTimes(2);
+    expect(projectResources.resolveForRead).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips expired audio before resolving or checking the file', async () => {
+    const scene = createPreparedScene([{
+      id: 'old', action: 'dialogue', time: 0,
+      params: { voice: 'old.wav', duration: 1 },
+      source: { statementId: 'old', outputKey: 'primary' },
+    }]);
+    expect(await mixer.collectPreparedSources(scene, 2)).toEqual([]);
+    expect(fs.exists).not.toHaveBeenCalled();
+  });
+
+  it('returns the main-process copy failure without reading video contents', async () => {
+    fs.copyFile.mockResolvedValueOnce({ success: false, error: 'disk full' });
+    expect(await mixer.mix('/tmp/video', '/output/video', [], {
+      fps: 60, codec: 'libx264', width: 1, height: 1, totalFrames: 1, bitrateMbps: 12,
+    }, false)).toEqual({ success: false, error: 'disk full' });
+    expect(fs.readFile).not.toHaveBeenCalled();
   });
 
   it('collectSources returns empty array when sceneData is null', async () => {
@@ -472,8 +516,9 @@ describe('AudioMixer', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(fs.readFile).toHaveBeenCalledWith('/tmp/vid.mp4');
-    expect(fs.writeFile).toHaveBeenCalledWith('/out/final.mp4', expect.any(ArrayBuffer));
+    expect(fs.copyFile).toHaveBeenCalledWith('/tmp/vid.mp4', '/out/final.mp4');
+    expect(fs.readFile).not.toHaveBeenCalled();
+    expect(fs.writeFile).not.toHaveBeenCalled();
   });
 
   it('collectSources keeps repeated dialogue voice files as separate timed sources', async () => {

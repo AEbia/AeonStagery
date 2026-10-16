@@ -1,3 +1,4 @@
+import { live2DStageState } from './helpers/live2DStageState';
 // @vitest-environment jsdom
 /**
  * Regression: transparent → opaque fade must swap the container's AlphaFilter
@@ -36,7 +37,7 @@ describe('Live2DManager.applyProxyTransform alpha-filter swap (Pixi v8 frozen fi
 
     const container = new PIXI.Container();
     // Seed the container so getContainer() never touches stageManager.
-    (manager as any).containers.set('char-a', container);
+    live2DStageState(manager).containers.set('char-a', container);
     return { manager, container };
   }
 

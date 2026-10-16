@@ -48,30 +48,24 @@ function createVariantModelCommand(
 const CharParamSliders: React.FC<{ charId: string }> = ({ charId }) => {
   const characterAdapter = useCharacterAdapter();
   const playbackStore = usePlaybackStore();
-  const core = characterAdapter.getCoreModel(charId);
-  const model = characterAdapter.getModel(charId);
-  if (!core || !model) return null;
-
-  const values = core.getParameterValues?.() || core.paramValues || [];
-  const settings = model.internalModel?.settings;
+  const parameters = characterAdapter.inspectParameters(charId);
+  if (!parameters) return null;
 
   return (
     <div className="character-directory__parameters">
-      {Array.from({ length: Math.min(values.length, 20) }, (_, index) => {
-        const name = settings?.parameters?.[index]?.name || `Param_${index}`;
-        const value = values[index] as number;
+      {parameters.slice(0, 20).map(parameter => {
         return (
-          <label className="character-directory__parameter" key={index}>
-            <span>{name}</span>
+          <label className="character-directory__parameter" key={parameter.id}>
+            <span>{parameter.label}</span>
             <input
               type="range"
               min={0}
               max={1}
               step={0.01}
-              value={value}
+              value={parameter.value}
               disabled={playbackStore.playing}
               onChange={(event) => {
-                characterAdapter.getCoreModel(charId)?.setParamFloat(index, Number(event.target.value));
+                characterAdapter.editParameters(charId, [{ id: parameter.id, value: Number(event.target.value) }]);
               }}
             />
           </label>
@@ -452,10 +446,10 @@ export const CharacterDirectoryPanel: React.FC<CharacterDirectoryPanelProps> = (
                   className="btn btn--sm"
                   disabled={playbackStore.playing}
                   onClick={async () => {
-                    const entry = characterAdapter.getAllCharacters().get(selectedCharacter.id);
+                    const entry = characterAdapter.getCharacterInfo(selectedCharacter.id);
                     if (!entry) return;
                     const currentTime = playbackAdapter.getCurrentTime();
-                    characterAdapter.remove(selectedCharacter.id);
+                    await characterAdapter.remove(selectedCharacter.id);
                     await characterAdapter.add(selectedCharacter.id, entry.modelPath, entry.config);
                     await playbackAdapter.seek(currentTime);
                   }}

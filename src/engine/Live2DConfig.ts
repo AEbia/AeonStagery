@@ -11,47 +11,6 @@ import { readPartOpacities } from './live2d/runtime/Cubism2PartOpacity';
 export const STAGE_WIDTH = 1920;
 export const STAGE_HEIGHT = 1080;
 
-// Robust FIFO queue-based mutex protecting UtSystem.setUserTimeMSec() spoofing.
-// Only ONE character (across Live2DManager AND BakeEngine) may manipulate
-// the shared Cubism SDK clock at a time.
-interface MutexRequest {
-  resolve: () => void;
-}
-
-const lockQueue: MutexRequest[] = [];
-let isLocked = false;
-let criticalDepth = 0;
-
-export function acquireUtSystemLock(): Promise<void> {
-  if (!isLocked) {
-    isLocked = true;
-    criticalDepth++;
-    return Promise.resolve();
-  }
-  return new Promise<void>(resolve => {
-    lockQueue.push({
-      resolve: () => {
-        criticalDepth++;
-        resolve();
-      },
-    });
-  });
-}
-
-export function releaseUtSystemLock(): void {
-  criticalDepth = Math.max(0, criticalDepth - 1);
-  const next = lockQueue.shift();
-  if (next) {
-    next.resolve();
-  } else {
-    isLocked = false;
-  }
-}
-
-export function isUtSystemLockActive(): boolean {
-  return criticalDepth > 0;
-}
-
 /**
  * Standard Cubism 2 parameter names and their idle default values.
  * The Cubism 2 SDK (Live2DModelWebGL) does NOT have getParamCount()/getParamDefault(),
@@ -239,6 +198,8 @@ export interface CharacterEntry {
   runtime: Live2DRuntimeDescriptor;
   adapterId: Live2DAdapterId;
   runtimeHandle?: Live2DModelHandle;
+  /** Return exactly this borrowing to the resource module. */
+  releaseModel?: () => void;
   config: CharacterConfig;
   injectedParams: Record<string, number>;
   /**
@@ -260,9 +221,10 @@ export interface CharacterEntry {
   baseHeight: number;
   baseWidth?: number;
   breathTween?: gsap.core.Tween;
+  rimFilter?: import('./RimLightFilter').RimLightFilter;
+  rimProxy?: { alpha: number };
   motionStartTime?: number;
   motionEpoch: number;
-  motionStartUtTime?: number;
   pendingMotionGroup?: string;
   lastOffset?: number;
   _pendingPlayMotion?: {
@@ -288,7 +250,6 @@ export interface CharacterEntry {
   lastManualTimeMs?: number; // Track last manual update time to detect large seek jumps and prevent physics overflow
   filterWarmupFrames?: number; // Avoid Pixi filter offscreen rendering on freshly reconstructed Live2D models
   lifecycleGeneration?: number;
-  loadToken?: symbol;
   /** Inline custom motion currently owning the character's parameters. */
   customMotion?: CustomMotionRuntimeState;
   /** Handoff pose captured when the custom motion took over (fade-in source). */

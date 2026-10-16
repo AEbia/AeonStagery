@@ -501,6 +501,7 @@ html[data-perf="low"] .side-panel {
 
 @media (max-width: 960px) {
   .top-bar__title > span,
+  .top-bar__project-name,
   .top-bar__group--output .btn--sm svg {
     display: none;
   }
@@ -1483,6 +1484,7 @@ html[data-perf="low"] .side-panel {
 
 @media (max-width: 960px) {
   .top-bar__title > span,
+  .top-bar__project-name,
   .top-bar__group--output .btn--sm svg {
     display: none;
   }

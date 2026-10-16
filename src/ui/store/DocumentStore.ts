@@ -17,6 +17,7 @@ export interface ReadonlyDocumentStore {
   readonly filePath: string | null;
   readonly version: number;
   getCurrentSceneDocumentSnapshot(): CurrentSceneDocument | null;
+  getCurrentSceneDocumentView(): CurrentSceneDocument | null;
   getHistoricalSceneDocumentV4Snapshot(): HistoricalSceneDocumentV4 | null;
   getCompiledSceneSnapshot(): CompiledScene | null;
   getPreparedSceneSnapshot(): PreparedCompiledScene | null;
@@ -46,6 +47,11 @@ export class DocumentStore implements ReadonlyDocumentStore {
   }
 
   // ─── Public Read ─────────────────────────────────────────────────
+
+  /** Stable, frozen source for read-only subscribers; never clones dense tracks. */
+  getCurrentSceneDocumentView(): CurrentSceneDocument | null {
+    return this._currentSceneDocumentSnapshot;
+  }
 
   getCurrentSceneDocumentSnapshot(): CurrentSceneDocument | null {
     if (!this._currentSceneDocumentSnapshot) return null;
@@ -77,6 +83,9 @@ export class DocumentStore implements ReadonlyDocumentStore {
       this._currentSceneDocumentSnapshot,
       canonicalOrder,
     );
+    this._currentSceneDocumentSnapshot = withSceneDocumentCanonicalOrder(
+      this._currentSceneDocumentSnapshot, this._sceneDocumentCanonicalOrder,
+    );
     this._compiledSceneSnapshot = null;
     this._preparedSceneSnapshot = null;
     this._version++;
@@ -104,6 +113,9 @@ export class DocumentStore implements ReadonlyDocumentStore {
     this._sceneDocumentCanonicalOrder = deriveSceneDocumentCanonicalOrder(
       source,
       canonicalOrder ?? this._sceneDocumentCanonicalOrder ?? undefined,
+    );
+    this._currentSceneDocumentSnapshot = withSceneDocumentCanonicalOrder(
+      source, this._sceneDocumentCanonicalOrder,
     );
     this._compiledSceneSnapshot = bundle.compiled;
     this._preparedSceneSnapshot = bundle.prepared;
