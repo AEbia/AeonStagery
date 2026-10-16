@@ -338,6 +338,11 @@ export class SemanticAuthoringApplicationService {
     });
   }
 
+  /** Let edits already queued by blur or another surface settle before saving/closing. */
+  async waitForPendingEdits(): Promise<void> {
+    await this.mutationChain.catch(() => undefined);
+  }
+
   clearHistory(): void {
     this.undoStack.length = 0;
     this.redoStack.length = 0;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BootstrapContext } from '../../engine/Bootstrapper';
 import type { ProjectWorkflowResult } from '../../api/interfaces/IProjectOpenWorkflow';
 import type { ProjectState, ProjectTemplateConfiguration } from '../../api/types/project';
@@ -18,6 +18,21 @@ import { showToast } from '../Toast';
 /** Coordinates project workflows, template edits, and external library settings. */
 export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoadedScene: boolean) {
   const { settings, setSetting } = useSettings();
+  const pendingProjectOperationsRef = useRef(new Set<Promise<unknown>>());
+  const trackProjectOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const operationPromise = Promise.resolve().then(operation);
+    let trackedOperation: Promise<T>;
+    trackedOperation = operationPromise.finally(() => {
+      pendingProjectOperationsRef.current.delete(trackedOperation);
+    });
+    pendingProjectOperationsRef.current.add(trackedOperation);
+    return trackedOperation;
+  }, []);
+  const waitForPendingProjectOperations = useCallback(async (): Promise<void> => {
+    while (pendingProjectOperationsRef.current.size > 0) {
+      await Promise.allSettled([...pendingProjectOperationsRef.current]);
+    }
+  }, []);
   const [isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked] = useState(false);
   const [currentProject, setCurrentProject] = useState<ProjectState | null>(() => contextValue.services.projectWorkspace.getCurrentProject());
   const [templatePackages, setTemplatePackages] = useState<TemplatePackageSummary[]>(
@@ -126,16 +141,18 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
 
   const handleRegenerateWebGalScene = useCallback(async (speed: number) => {
-    const result = await contextValue.services.projectOpenWorkflow.regenerateWebGalSceneAndReload({ speed });
-    if (result.success) {
-      showToast('已重新生成 WebGAL 场景', 'success');
-      if (result.webgalReport && result.webgalReport.unsupportedCommands.length > 0) {
-        showToast(`重新生成中 ${result.webgalReport.unsupportedCommands.length} 条指令未识别（已跳过）`, 'warning');
+    await trackProjectOperation(async () => {
+      const result = await contextValue.services.projectOpenWorkflow.regenerateWebGalSceneAndReload({ speed });
+      if (result.success) {
+        showToast('已重新生成 WebGAL 场景', 'success');
+        if (result.webgalReport && result.webgalReport.unsupportedCommands.length > 0) {
+          showToast(`重新生成中 ${result.webgalReport.unsupportedCommands.length} 条指令未识别（已跳过）`, 'warning');
+        }
+      } else {
+        showToast(`重新生成失败：${result.error ?? '未知错误'}`, 'error');
       }
-    } else {
-      showToast(`重新生成失败：${result.error ?? '未知错误'}`, 'error');
-    }
-  }, [contextValue.services.projectOpenWorkflow]);
+    });
+  }, [contextValue.services.projectOpenWorkflow, trackProjectOperation]);
 
   const handleRegisterWebGalAssetSource = useCallback(async () => {
     const result = await window.aeonStageryAPI.dialog.showOpen({
@@ -402,6 +419,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   return {
     currentProject, templatePackages, templatePackageRevision,
     isCollaborationJoinHomeLocked, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult,
+    waitForPendingProjectOperations,
     handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
     handleRegenerateWebGalScene, handleRegisterWebGalAssetSource, handleSaveTemplateConfiguration,
     handleBrowseCreateLocation, handleBrowseCollaborationDirectory, handleImportTemplatePackage, handleDeleteTemplatePackage,
