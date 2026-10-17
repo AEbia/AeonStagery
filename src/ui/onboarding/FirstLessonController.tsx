@@ -1116,10 +1116,15 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   ]);
 
   useEffect(() => {
-    if (phase !== 'guiding' || !isPlaying || progress.hasStartedPreview) return;
+    if (
+      phase !== 'guiding'
+      || progressEvaluation.firstUnmetStep !== 'start-preview'
+      || !isPlaying
+      || progress.hasStartedPreview
+    ) return;
     const timer = window.setTimeout(() => setProgress(progressStore.markPreviewStarted()), 1000);
     return () => window.clearTimeout(timer);
-  }, [isPlaying, phase, progress.hasStartedPreview, progressStore]);
+  }, [isPlaying, phase, progress.hasStartedPreview, progressEvaluation.firstUnmetStep, progressStore]);
 
   useEffect(() => {
     if (phase !== 'guiding' || progressEvaluation.completed) return;

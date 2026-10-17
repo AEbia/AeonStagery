@@ -9,6 +9,7 @@ import { FirstLessonController, type FirstLessonControllerProps } from '../ui/on
 import { settingsManager } from '../ui/SettingsStore';
 import { useModalDialog } from '../ui/hooks/useModalDialog';
 import { checkFirstLessonLive2DModelReadiness, checkWebGalAssetSourceReadiness } from '../services/onboarding';
+import { FirstLessonProgressStore } from '../services/onboarding/FirstLessonProgress';
 
 vi.mock('../services/onboarding', async (importOriginal) => ({
   ...await importOriginal<typeof import('../services/onboarding')>(),
@@ -197,6 +198,27 @@ describe('FirstLessonController regressions', () => {
     expect(screen.getByText('按空格播放场景')).toBeTruthy();
     lesson.setPlaying(true);
     expect(screen.getByText('放入一张环境画面')).toBeTruthy();
+  });
+
+  it('continues to the background lesson when entrance playback lasts over one second', async () => {
+    const lesson = renderLesson(entranceDocument);
+    await openLayoutChooser();
+    fireEvent.click(screen.getByRole('button', { name: '使用此布局，继续教程' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    lesson.showCharacter();
+    lesson.setPlaying(true);
+    for (let tick = 0; tick < 8; tick += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    }
+
+    expect(screen.queryByText('教程已完成')).toBeNull();
+    expect(screen.getByText('放入一张环境画面')).toBeTruthy();
+    expect(new FirstLessonProgressStore(localStorage).load()).toMatchObject({
+      currentStep: 'insert-environment-background',
+      hasStartedPreview: false,
+      completed: false,
+    });
   });
 
   it('keeps model validation stable when unrelated scene statements change', async () => {

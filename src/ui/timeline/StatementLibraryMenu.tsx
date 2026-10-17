@@ -284,6 +284,9 @@ export const StatementLibraryMenu = memo(({
         onSelectAction={onSelectAction}
         autoFocusSearch={autoFocusSearch}
         hideDescriptions
+        // Keep cards and tutorial targets in place while asynchronous insertion finishes.
+        // The library remounts with the latest history when the menu opens again.
+        freezeRecentItems
         hiddenStatementBlockIds={HIDDEN_MENU_STATEMENT_BLOCK_IDS}
         availableLifecycleEndCommandIds={availableLifecycleEndCommandIds}
         availableStateSpanDependencyCommandIds={availableStateSpanDependencyCommandIds}
