@@ -801,7 +801,7 @@ function encodeStoredConversationMessage(
   }
 }
 
-function encodeStoredContentBlock(block: AiContentBlock): ProjectAgentStoredContentBlock {
+export function encodeStoredContentBlock(block: AiContentBlock): ProjectAgentStoredContentBlock {
   if (block.type === 'image') {
     return {
       type: 'image',
@@ -834,7 +834,7 @@ function decodeStoredConversationMessage(
   }
 }
 
-function decodeStoredContentBlock(block: ProjectAgentStoredContentBlock): AiContentBlock {
+export function decodeStoredContentBlock(block: ProjectAgentStoredContentBlock): AiContentBlock {
   if (block.type === 'image') {
     return {
       type: 'image',

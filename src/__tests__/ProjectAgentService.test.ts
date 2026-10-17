@@ -24,6 +24,7 @@ import {
 } from '../services/project-agent-service/ProjectAgentService';
 import { buildProjectAgentSystemPrompt } from '../services/project-agent-service/ProjectAgentSystemPrompt';
 import { encodeProjectAgentTargetIdentity } from '../services/project-agent-service/ProjectAgentTargetIdentity';
+import { completeAiConversationRequest } from '../../electron/aiConversationProvider';
 
 const SCENE_DOCUMENT_ID = 'scene-doc-7';
 const SCENE_ENTRY_ID = 'scene-entry-42';
@@ -256,6 +257,65 @@ function createHarness(
 }
 
 describe('ProjectAgentService (editor composition)', () => {
+  it.each(['truncated', 'stream_error', 'length'] as const)(
+    'accepts and executes later messages in the same conversation after a %s stream',
+    async (failure) => {
+      const sentPayloads: Record<string, unknown>[] = [];
+      let failing = true;
+      let requestNumber = 0;
+      const transport: AiConversationTransport = {
+        complete: (request, options) => completeAiConversationRequest(request, {
+          requestId: `stream-recovery-${++requestNumber}`,
+          signal: options?.signal,
+          onProgress: options?.onProgress,
+          fetchImpl: async (_url, init) => {
+            sentPayloads.push(JSON.parse(init.body as string) as Record<string, unknown>);
+            const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+            const body = failing
+              ? chunk({ choices: [{
+                  delta: { content: 'partial-marker', tool_calls: [{
+                    index: 0, id: 'unfinished-call',
+                    function: { name: 'readProjectOverview', arguments: '{}' },
+                  }] },
+                  finish_reason: failure === 'length' ? 'length' : null,
+                }] }) + (failure === 'stream_error' ? chunk({ error: { message: 'stream failed' } }) : '')
+              : chunk({ choices: [{ delta: { content: 'Recovered.' }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n';
+            return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+          },
+        }),
+      };
+      const harness = createHarness([], undefined, transport);
+      expect((await harness.service.start({ taskText: 'Inspect the scene' })).ok).toBe(true);
+      await harness.service.whenIdle();
+      expect(requestNumber).toBe(failure === 'length' ? 1 : 3);
+      expect(harness.service.getTaskSnapshot()?.getExecutionRoundState()).toBe('suspended');
+      expect(harness.service.getTaskSnapshot()?.isTerminal()).toBe(false);
+      expect(await harness.lease.getHolder()).toBeNull();
+
+      failing = false;
+      const sent = await harness.service.sendSupplement('Continue after the stream failure.', undefined, TASK_ID);
+      expect(sent).toEqual({ ok: true });
+      // The Agent window sends the saved supplement and then requests continue
+      // for a suspended conversation; exercise that same path here.
+      expect((await harness.service.continueTask()).ok).toBe(true);
+      await harness.service.whenIdle();
+      const recoveredPayload = sentPayloads.at(-1)!;
+      expect(JSON.stringify(recoveredPayload)).toContain('Continue after the stream failure.');
+      expect(JSON.stringify(recoveredPayload)).not.toContain('unfinished-call');
+      expect(JSON.stringify(recoveredPayload)).not.toContain('partial-marker');
+      expect(harness.service.getTaskSnapshot()?.peekPendingSupplements()).toHaveLength(0);
+      expect(harness.service.getTaskSnapshot()?.getExecutionRoundState()).toBe('idle');
+      expect(await harness.lease.getHolder()).toBeNull();
+
+      // A subsequent send also runs normally, proving the request queue and
+      // running-loop promise were released after both failure and recovery.
+      expect(await harness.service.sendSupplement('One more message.')).toEqual({ ok: true });
+      await harness.service.whenIdle();
+      expect(JSON.stringify(sentPayloads.at(-1))).toContain('One more message.');
+      expect(harness.service.getTaskSnapshot()?.getExecutionRoundState()).toBe('idle');
+    },
+  );
+
   it('settles a two-round conversation with a plain assistant reply (no terminal record)', async () => {
     const harness = createHarness([
       {
@@ -1240,10 +1300,7 @@ describe('ProjectAgentService (editor composition)', () => {
     expect(tools).not.toContain('readImage');
   });
 
-  it('carries a user-attached image on the first request and replaces it with a placeholder after delivery', async () => {
-    // The service harness transport captures the shared message array, which
-    // the coordinator sanitizes in place after the first delivery; assert the
-    // placeholder behavior on later rounds (bytes were delivered on round 1).
+  it('keeps a user-attached image across subsequent tool and model turns', async () => {
     const harness = createHarness([
       {
         message: assistantWithTools([
@@ -1278,11 +1335,74 @@ describe('ProjectAgentService (editor composition)', () => {
     expect(laterUser).toBeDefined();
     if (laterUser?.role === 'user') {
       const imageBlocks = laterUser.content.filter((block) => block.type === 'image');
-      expect(imageBlocks).toHaveLength(0);
-      expect(
-        laterUser.content.some((block) => block.type === 'text' && block.text.includes('已附加图片')),
-      ).toBe(true);
+      expect(imageBlocks).toEqual([{
+        type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto',
+      }]);
     }
+  });
+
+  it('starts a conversation with an image and no typed text', async () => {
+    const harness = createHarness([plainTextReply('seen')], {
+      admission: { resolve: async () => ({ ok: true, endpoint: 'https://provider.test', model: 'vision-model', imageInputSupported: true }) },
+    });
+    expect((await harness.service.start({ taskText: '', image: { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' } })).ok).toBe(true);
+    await harness.service.whenIdle();
+    expect(harness.requests[0]?.messages.flatMap((m) => m.content).some((b) => b.type === 'image')).toBe(true);
+  });
+
+  it('delivers an image sent during an in-flight request on the next model turn', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const firstEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const requests: AiConversationRequest[] = [];
+    const harness = createHarness([], {
+      admission: { resolve: async () => ({ ok: true, endpoint: 'https://provider.test', model: 'vision-model', imageInputSupported: true }) },
+    }, {
+      complete: async (request) => {
+        requests.push(request);
+        if (requests.length === 1) { entered(); await gate; }
+        return plainTextReply('ready');
+      },
+    });
+    await harness.service.start({ taskText: 'hello' });
+    await firstEntered;
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    expect((await harness.service.sendSupplement('', image)).ok).toBe(true);
+    release();
+    await harness.service.whenIdle();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.messages.flatMap((m) => m.content).some((b) => b.type === 'image')).toBe(false);
+    expect(requests[1]?.messages.flatMap((m) => m.content)).toContainEqual({ type: 'image', mimeType: image.mimeType, bytes: image.bytes, detail: 'auto' });
+  });
+
+  it('accepts image-only follow-ups in an existing conversation and rejects mismatched targets', async () => {
+    const harness = createHarness([plainTextReply('ready'), plainTextReply('image seen')], {
+      admission: { resolve: async () => ({ ok: true, endpoint: 'https://provider.test', model: 'vision-model', imageInputSupported: true }) },
+    });
+    expect((await harness.service.start({ taskText: 'hello' })).ok).toBe(true);
+    await harness.service.whenIdle();
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    expect((await harness.service.sendSupplement('', image, 'other-task')).ok).toBe(false);
+    expect((await harness.service.sendSupplement('', image)).ok).toBe(true);
+    await harness.service.whenIdle();
+    expect(harness.requests.at(-1)?.messages.flatMap((m) => m.content)).toContainEqual({ type: 'image', mimeType: 'image/png', bytes: image.bytes, detail: 'auto' });
+  });
+
+  it('rejects follow-up images without vision and pauses if the current history needs vision', async () => {
+    let vision = true;
+    const harness = createHarness([plainTextReply('seen')], {
+      admission: { resolve: async () => ({ ok: true, endpoint: 'https://provider.test', model: 'model', imageInputSupported: vision }) },
+    });
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    expect((await harness.service.start({ taskText: 'check', image })).ok).toBe(true);
+    await harness.service.whenIdle();
+    vision = false;
+    expect(await harness.service.sendSupplement('', image)).toMatchObject({ ok: false, error: expect.stringContaining('不支持图片输入') });
+    await harness.service.sendSupplement('look again');
+    await harness.service.whenIdle();
+    expect(harness.requests).toHaveLength(1);
+    expect(harness.statuses.at(-1)?.pauseReason).toBe('provider_configuration_required');
   });
 
   it('rejects a user-attached image when the model imageInput is not explicitly supported', async () => {

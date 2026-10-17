@@ -196,6 +196,22 @@ describe('ProjectAgentToolRegistry', () => {
     if (!vision.ok) expect(vision.error.code).toBe('vision_unavailable');
   });
 
+  it('exposes character capability queries only with a resolver and dispatches exact keys', async () => {
+    const registry = createRegistry();
+    expect(registry.has('searchCharacterCapabilities')).toBe(false);
+    registry.setPerformanceCatalogResolver({ resolve: async () => ({ ok: true, value: {
+      fingerprint: 'catalog', catalog: { version: 1, characters: [{ characterId: 'a', name: 'A',
+        motions: ['other/angry', 'a/idle'], expressions: ['smile'], fieldLevelDegrade: false }],
+      lookAtTargets: ['a'], reactionTargets: [], diagnostics: [] },
+    } }) });
+    expect(registry.listTools().find((tool) => tool.name === 'searchCharacterCapabilities')?.readOnly).toBe(true);
+    const result = await registry.call('searchCharacterCapabilities', { characterId: 'a', text: 'angry' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.entries).toEqual([{ kind: 'motion', key: 'other/angry' }]);
+    registry.setPerformanceCatalogResolver(undefined);
+    expect(registry.listTools().some((tool) => tool.name === 'searchCharacterCapabilities')).toBe(false);
+  });
+
   it('dispatches read then write through the shared task state', async () => {
     const registry = createRegistry(false);
     const read = await registry.call('readScene', { startLine: 1, lineCount: 20 });

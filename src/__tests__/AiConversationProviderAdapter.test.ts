@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  AiConversationMessage,
   AiConversationRequest,
   AiConversationResponse,
+  AiToolMessage,
 } from '../api/types/ai-conversation';
 import {
   aiConversationRequestMatchesConfiguredProvider,
@@ -86,6 +88,199 @@ function createSseResponse(blocks: readonly string[]): Response {
 }
 
 const REQUEST_ID = 'host-request-1';
+
+function expectClosedToolRounds(payload: Record<string, unknown>): void {
+  const messages = payload.messages as {
+    role: string;
+    tool_calls?: { id: string }[];
+    tool_call_id?: string;
+  }[];
+  const pending = new Set<string>();
+  for (const message of messages) {
+    if (message.role === 'tool') {
+      expect(pending.delete(message.tool_call_id ?? '')).toBe(true);
+    } else {
+      expect([...pending]).toEqual([]);
+      for (const call of message.tool_calls ?? []) {
+        expect(pending.has(call.id)).toBe(false);
+        pending.add(call.id);
+      }
+    }
+  }
+  expect([...pending]).toEqual([]);
+}
+
+function toolRound(ids: readonly string[]): AiConversationMessage[] {
+  return [{
+    role: 'assistant',
+    content: [],
+    toolCalls: ids.map((toolCallId) => ({
+      status: 'ready', toolCallId, name: 'readImage', arguments: {},
+    })),
+  }];
+}
+
+function textToolResult(toolCallId: string): AiToolMessage {
+  return { role: 'tool', toolCallId, name: 'readImage', content: [{ type: 'text', text: 'ok' }] };
+}
+
+describe('AI conversation provider protocol invariants', () => {
+  it.each([false, true])('closes image-only and mixed results with toolRoleImages=%s', (toolRoleImages) => {
+    const messages = toolRound(['image', 'mixed', 'text']);
+    const image = { type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1]), detail: 'low' } as const;
+    messages.push(
+      textToolResult('text'),
+      { ...textToolResult('mixed'), content: [image, { type: 'text', text: 'metadata' }, { type: 'json', value: { width: 123 } }] },
+      { ...textToolResult('image'), content: [image] },
+    );
+    const request = createRequest({ messages });
+    const payload = mapAiConversationRequestToProviderPayload(request, { toolRoleImages });
+    expectClosedToolRounds(payload);
+    const tools = (payload.messages as { role: string; tool_call_id?: string }[]).filter((m) => m.role === 'tool');
+    expect(tools.map((m) => m.tool_call_id)).toEqual(['image', 'mixed', 'text']);
+    expect(JSON.stringify(payload)).toContain('metadata');
+    expect(JSON.stringify(payload)).toContain('width');
+    expect(mapAiConversationRequestToProviderPayload(request, { toolRoleImages })).toEqual(payload);
+    expect(request.messages).toHaveLength(4);
+    if (!toolRoleImages) {
+      const projection = (payload.messages as { role: string; content: unknown }[]).at(-1);
+      expect(projection?.role).toBe('user');
+      const serialized = JSON.stringify(projection);
+      expect(serialized.indexOf('call image ')).toBeLessThan(serialized.indexOf('call mixed '));
+    }
+  });
+
+  it('preserves all-invalid corrections without emitting an empty assistant or orphan tool', () => {
+    const payload = mapAiConversationRequestToProviderPayload(createRequest({ messages: [
+      {
+        role: 'assistant', content: [], toolCalls: [{
+          status: 'invalid', toolCallId: 'bad', name: 'broken',
+          error: { code: 'invalid_tool_arguments', message: 'bad JSON' },
+        }],
+      },
+      { ...textToolResult('bad'), name: 'broken', content: [{ type: 'json', value: { code: 'invalid_arguments', message: 'bad JSON' } }] },
+    ] }));
+    expectClosedToolRounds(payload);
+    expect(payload.messages).toEqual([{
+      role: 'user', content: [
+        { type: 'text', text: 'Invalid tool call bad (broken):' },
+        { type: 'text', text: '{"code":"invalid_arguments","message":"bad JSON"}' },
+      ],
+    }]);
+  });
+
+  const userMessage: AiConversationMessage = { role: 'user', content: [{ type: 'text', text: 'next' }] };
+  it('closes successive image rounds before queued user and assistant messages', () => {
+    const imageResult: AiToolMessage = {
+      ...textToolResult('a'),
+      content: [{ type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1]), detail: 'low' }],
+    };
+    const payload = mapAiConversationRequestToProviderPayload(createRequest({ messages: [
+      ...toolRound(['a']), imageResult, userMessage,
+      ...toolRound(['b']), { ...imageResult, toolCallId: 'b' }, ...toolRound([]),
+    ] }));
+    expectClosedToolRounds(payload);
+    expect((payload.messages as { role: string }[]).map((m) => m.role))
+      .toEqual(['assistant', 'tool', 'user', 'user', 'assistant', 'tool', 'user', 'assistant']);
+  });
+
+  it.each<[string, AiConversationMessage[]]>([
+    ['missing result at end', toolRound(['a'])],
+    ['missing result before user', [...toolRound(['a']), userMessage]],
+    ['missing result before assistant', [...toolRound(['a']), ...toolRound([])]],
+    ['duplicate result', [...toolRound(['a']), textToolResult('a'), textToolResult('a')]],
+    ['orphan result', [textToolResult('a')]],
+    ['result after user boundary', [...toolRound(['a']), textToolResult('a'), userMessage, textToolResult('a')]],
+    ['duplicate call id', [...toolRound(['a', 'a']), textToolResult('a')]],
+    ['mismatched result id', [...toolRound(['a']), textToolResult('b')]],
+  ])('rejects %s before sending HTTP', async (_name, messages) => {
+    const { fetchImpl, mock } = createFakeFetch(() => ({ body: assistantChoice({ role: 'assistant', content: 'done' }) }));
+    await expect(completeAiConversationRequest(createRequest({ messages }), { requestId: REQUEST_ID, fetchImpl }))
+      .rejects.toMatchObject({ code: 'protocol', retryable: false });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['plain text', { content: 'unfinished' }],
+    ['a syntactically complete tool call', { tool_calls: [{ index: 0, id: 'a', function: { name: 'readImage', arguments: '{}' } }] }],
+  ])('rejects an unterminated stream with %s', async (_name, delta) => {
+    await expect(completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => createSseResponse([sseBlock({ choices: [{ delta, finish_reason: null }] })]),
+    })).rejects.toMatchObject({ code: 'transient', retryable: true });
+  });
+
+  it.each(['length', 'content_filter'])('rejects finish_reason=%s even with valid tool arguments and DONE', async (finishReason) => {
+    await expect(completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => createSseResponse([
+        sseBlock({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'readImage', arguments: '{}' } }] }, finish_reason: finishReason }] }),
+        'data: [DONE]\n\n',
+      ]),
+    })).rejects.toMatchObject({ code: 'protocol', retryable: false });
+  });
+
+  it.each(['length', 'content_filter'])('rejects non-streaming finish_reason=%s', async (finishReason) => {
+    const { fetchImpl } = createFakeFetch(() => ({ body: {
+      choices: [{ message: { role: 'assistant', content: 'partial' }, finish_reason: finishReason }],
+    } }));
+    await expect(completeAiConversationRequest(createRequest(), { requestId: REQUEST_ID, fetchImpl }))
+      .rejects.toMatchObject({ code: 'protocol', retryable: false });
+  });
+
+  it.each([
+    ['server_error', 'transient', true],
+    ['rate_limit_error', 'transient', true],
+    ['authentication_error', 'configuration', false],
+    ['invalid_request_error', 'configuration', false],
+  ])('rejects in-stream %s after partial output', async (type, code, retryable) => {
+    await expect(completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => createSseResponse([
+        sseBlock({ choices: [{ delta: { content: 'partial' } }] }),
+        sseBlock({ error: { message: 'upstream failed', type } }),
+      ]),
+    })).rejects.toMatchObject({ code, retryable, message: expect.stringContaining('upstream failed') });
+  });
+
+  it('stops consuming a stream at DONE even if the connection remains open', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          sseBlock({ choices: [{ delta: { content: 'done' } }] }) + 'data: [DONE]\n\n',
+        ));
+      },
+      cancel,
+    });
+    const response = await completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    });
+    expect(response.message.content).toEqual([{ type: 'text', text: 'done' }]);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(body.locked).toBe(false);
+  });
+
+  it('rejects malformed SSE JSON instead of silently dropping chunks', async () => {
+    await expect(completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => createSseResponse(['data: {broken\n\n', 'data: [DONE]\n\n']),
+    })).rejects.toMatchObject({ code: 'protocol' });
+  });
+
+  it('accepts an explicit finish reason without DONE and retains trailing usage', async () => {
+    const response = await completeAiConversationRequest(createRequest({ stream: true }), {
+      requestId: REQUEST_ID,
+      fetchImpl: async () => createSseResponse([
+        sseBlock({ choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }),
+        sseBlock({ choices: [], usage: { prompt_tokens: 2, completion_tokens: 1 } }),
+      ]),
+    });
+    expect(response.message.content).toEqual([{ type: 'text', text: 'done' }]);
+    expect(response.usage).toMatchObject({ inputTokens: 2, outputTokens: 1 });
+  });
+});
 
 describe('AI conversation provider adapter', () => {
   it('performs one non-streaming exchange and returns only the normalized assistant message', async () => {
@@ -537,7 +732,7 @@ describe('AI conversation provider adapter', () => {
     });
   });
 
-  it('drops invalid calls and their orphan results from history remapping', async () => {
+  it('projects invalid-call corrections after closing valid calls without replaying invalid calls', async () => {
     const { fetchImpl, mock } = createFakeFetch((_url, init) => {
       const body = parseSentBody(init);
       expect(body.messages).toEqual([
@@ -554,6 +749,13 @@ describe('AI conversation provider adapter', () => {
           role: 'tool',
           tool_call_id: 'good',
           content: '{"ok":true}',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Invalid tool call bad (broken):' },
+            { type: 'text', text: '{"code":"invalid_arguments","message":"nope"}' },
+          ],
         },
       ]);
       return { body: assistantChoice({ role: 'assistant', content: [] }) };
@@ -715,6 +917,7 @@ describe('AI conversation provider adapter', () => {
   it('projects image-bearing tool results as a deterministic multimodal user message', async () => {
     const { fetchImpl, mock } = createFakeFetch((_url, init) => {
       const body = parseSentBody(init);
+      expectClosedToolRounds(body);
       expect(body.messages).toEqual([
         {
           role: 'assistant',
@@ -725,7 +928,11 @@ describe('AI conversation provider adapter', () => {
             function: { name: 'readImage', arguments: '{"reference":"images/a.png"}' },
           }],
         },
-        // Protocol closure: the image-bearing tool result is NOT a tool message.
+        {
+          role: 'tool',
+          tool_call_id: 'call-1',
+          content: '{"ok":true,"data":{"reference":"images/a.png"}}',
+        },
         {
           role: 'user',
           content: [
@@ -776,6 +983,7 @@ describe('AI conversation provider adapter', () => {
   it('closes ALL text/JSON tool results in original order before the image projection', async () => {
     const { fetchImpl, mock } = createFakeFetch((_url, init) => {
       const body = parseSentBody(init);
+      expectClosedToolRounds(body);
       expect(body.messages).toEqual([
         {
           role: 'assistant',
@@ -790,6 +998,11 @@ describe('AI conversation provider adapter', () => {
           role: 'tool',
           tool_call_id: 'call-a',
           content: '{"ok":true,"lines":2}',
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call-b',
+          content: 'Tool result images are provided in the following user message.',
         },
         {
           role: 'tool',

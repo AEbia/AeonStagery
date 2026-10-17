@@ -4,6 +4,7 @@ import type { ProjectAgentReadPorts } from '../services/project-agent/ProjectAge
 import { ProjectAgentReadTools } from '../services/project-agent/ProjectAgentReadTools';
 import { ProjectAgentTaskState } from '../services/project-agent/ProjectAgentTaskState';
 import { ProjectAgentImageSessionCache } from '../services/project-agent/ProjectAgentImageSessionCache';
+import type { PerformanceCapabilityCatalogV1 } from '../services/ai-authoring/performance/PerformanceProfileTypes';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -448,7 +449,7 @@ describe('ProjectAgentReadTools', () => {
     expect(taskState.getSceneBinding()?.version).toBe(3);
   });
 
-  it('returns a normal 346-line scene in one default broad read', async () => {
+  it('defaults to a small scene page and supplies a continuation', async () => {
     const taskState = new ProjectAgentTaskState();
     const document = makeDialogueScene(346);
     const tools = new ProjectAgentReadTools({
@@ -461,9 +462,10 @@ describe('ProjectAgentReadTools', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.totalLines).toBe(346);
-    expect(result.data.lines).toHaveLength(346);
-    expect(result.data.endLine).toBe(346);
-    expect(result.data.hasMore).toBe(false);
+    expect(result.data.lines).toHaveLength(50);
+    expect(result.data.endLine).toBe(50);
+    expect(result.data.hasMore).toBe(true);
+    expect(result.data.nextStartLine).toBe(51);
     expect(result.data.truncated).toBe(false);
     expect(taskState.getSceneBinding()?.version).toBe(4);
   });
@@ -635,6 +637,137 @@ describe('ProjectAgentReadTools', () => {
     expect(result.data.hits[0]?.line.type).toBe('dialogue');
   });
 
+  it('returns each search match or neighboring line only once per page', async () => {
+    const document = makeDialogueScene(15);
+    const tools = new ProjectAgentReadTools({
+      ports: createPorts({ scene: { getSnapshot: () => ({ document, version: 1 }) } }),
+      taskState: new ProjectAgentTaskState(),
+    });
+    const result = await tools.searchScene({ limit: 5, contextLines: 3 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const numbers = result.data.hits.flatMap((hit) => [hit.line, ...(hit.contextBefore ?? []), ...(hit.contextAfter ?? [])]).map((line) => line.line);
+    expect(numbers.length).toBe(new Set(numbers).size);
+    expect([...numbers].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.data.nextOffset).toBe(5);
+  });
+
+  it('bounds UTF-8 search pages and continues through every match without skipping', async () => {
+    const document = makeDialogueScene(100, '你好'.repeat(200));
+    const tools = new ProjectAgentReadTools({
+      ports: createPorts({ scene: { getSnapshot: () => ({ document, version: 1 }) } }),
+      taskState: new ProjectAgentTaskState(),
+    });
+    const found: number[] = [];
+    let offset = 0;
+    for (let page = 0; page < 100; page += 1) {
+      const result = await tools.searchScene({ limit: 100, contextLines: 3, offset });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeLessThanOrEqual(32_768);
+      found.push(...result.data.hits.map((hit) => hit.line.line));
+      if (!result.data.hasMore) break;
+      expect(result.data.truncated).toBe(true);
+      expect(result.data.nextOffset).toBeGreaterThan(offset);
+      offset = result.data.nextOffset;
+    }
+    expect(found).toEqual(Array.from({ length: 100 }, (_, index) => index + 1));
+  });
+
+  it('rejects an oversized search match without establishing a write binding', async () => {
+    const document = makeDialogueScene(1, 'x'.repeat(40_000));
+    const taskState = new ProjectAgentTaskState();
+    const tools = new ProjectAgentReadTools({ ports: createPorts({ scene: { getSnapshot: () => ({ document, version: 1 }) } }), taskState });
+    const result = await tools.searchScene();
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('result_too_large');
+    expect(taskState.hasSceneRead()).toBe(false);
+  });
+
+  it('detects changed search text even if matching line numbers and times did not change', async () => {
+    let document = makeDialogueScene(3);
+    const tools = new ProjectAgentReadTools({ ports: createPorts({ scene: { getSnapshot: () => ({ document, version: 1 }) } }), taskState: new ProjectAgentTaskState() });
+    await tools.searchScene({ limit: 1 });
+    document = makeDialogueScene(3, 'Changed');
+    const result = await tools.searchScene({ limit: 1, offset: 1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('pagination_changed');
+  });
+
+  it('paginates model inspection keys and supports filtering across all namespaces', async () => {
+    const motions = Array.from({ length: 7065 }, (_, i) => `other/character/motion_${i}`);
+    const tools = new ProjectAgentReadTools({
+      ports: createPorts({ resourceInspect: { inspectResource: (reference) => ({ exists: true, reference, scope: 'project', bindable: true,
+        live2d: { motions, expressions: ['smile'], capabilities: { motionCount: motions.length, expressionCount: 1 } } }) } }),
+      taskState: new ProjectAgentTaskState(),
+    });
+    const first = await tools.inspectResource({ reference: 'figure/model.json' });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.data.live2d?.motions).toHaveLength(30);
+    expect(first.data.live2d?.capabilityPage).toMatchObject({ hasMore: true, nextOffset: 30, total: 7066 });
+    const next = await tools.inspectResource({ reference: 'figure/model.json', capabilityOffset: 30, capabilityLimit: 1 });
+    if (next.ok) expect(next.data.live2d?.motions).toEqual([motions[30]]);
+    const filtered = await tools.inspectResource({ reference: 'figure/model.json', capabilityText: 'SMILE' });
+    expect(filtered.ok).toBe(true);
+    if (filtered.ok) expect(filtered.data.live2d?.expressions).toEqual(['smile']);
+  });
+
+  it('queries exact character keys with profile descriptions and detects changed capabilities', async () => {
+    const character = { characterId: 'tomori', name: 'Tomori', fieldLevelDegrade: false,
+      motions: ['other/angry', 'tomori/idle'], expressions: ['smile'],
+      profile: { profileId: 'profile', profileName: 'Profile', characterId: 'tomori', aliases: [], matchKind: 'preset_id' as const,
+        motions: [{ key: 'other/angry', description: '生气' }], expressions: [] } };
+    let catalog: PerformanceCapabilityCatalogV1 = { version: 1, characters: [character], lookAtTargets: [], reactionTargets: [], diagnostics: [] };
+    const taskState = new ProjectAgentTaskState();
+    const tools = new ProjectAgentReadTools({ ports: createPorts(), taskState });
+    tools.setPerformanceCatalogResolver({ resolve: async () => ({ ok: true, value: { catalog, fingerprint: JSON.stringify(catalog) } }) });
+    const filtered = await tools.searchCharacterCapabilities({ characterId: 'tomori', text: '生气', kind: 'motion' });
+    expect(filtered.ok).toBe(true);
+    if (filtered.ok) expect(filtered.data.entries).toEqual([{ kind: 'motion', key: 'other/angry', description: '生气' }]);
+    await tools.searchCharacterCapabilities({ characterId: 'tomori', limit: 1 });
+    catalog = { ...catalog, characters: [{ ...character, motions: ['new'] }] };
+    const changed = await tools.searchCharacterCapabilities({ characterId: 'tomori', offset: 1, limit: 1 });
+    expect(changed.ok).toBe(false);
+    if (!changed.ok) expect(changed.error.code).toBe('pagination_changed');
+    expect(taskState.hasSceneRead()).toBe(false);
+  });
+
+  it('filters glob queries before pagination and continues without skipped or repeated keys', async () => {
+    const matching = Array.from({ length: 7 }, (_, i) => `mygo/anon/mtn_angry0${i}_C_live_01`);
+    const motions = matching.flatMap((key) => [
+      'mygo/taki/mtn_angry01_C_live_01', key,
+      'mygo/anon/mtn_angry01_C_live_01_mask', 'mygo/anon/mtn_smile01_C_live_01',
+    ]);
+    const catalog: PerformanceCapabilityCatalogV1 = { version: 1, characters: [{
+      characterId: 'anon', name: 'Anon', fieldLevelDegrade: false, motions, expressions: ['mygo/anon/exp_angry01'],
+    }], lookAtTargets: [], reactionTargets: [], diagnostics: [] };
+    const tools = new ProjectAgentReadTools({
+      ports: createPorts({ resourceInspect: { inspectResource: (reference) => ({
+        exists: true, reference, scope: 'project', bindable: true, live2d: { motions, expressions: ['mygo/anon/exp_angry01'] },
+      }) } }), taskState: new ProjectAgentTaskState(),
+    });
+    tools.setPerformanceCatalogResolver({ resolve: async () => ({ ok: true, value: { catalog, fingerprint: 'glob-catalog' } }) });
+    const keys: string[] = [];
+    let offset = 0;
+    for (let page = 0; page < 4; page += 1) {
+      const args = { characterId: 'anon', kind: 'motion' as const, text: 'mygo/anon/*angry*_live_01', offset, limit: 2 };
+      const result = await tools.searchCharacterCapabilities(args);
+      const inspected = await tools.inspectResource({ reference: 'figure/model.json', capabilityText: args.text, capabilityOffset: offset, capabilityLimit: 2 });
+      expect(result.ok).toBe(true);
+      expect(inspected.ok).toBe(true);
+      if (!result.ok || !inspected.ok) return;
+      expect(result.data.total).toBe(7);
+      const pageKeys = result.data.entries.map((entry) => entry.key);
+      expect(inspected.data.live2d?.motions).toEqual(pageKeys);
+      expect(inspected.data.live2d?.capabilityPage?.nextOffset).toBe(result.data.nextOffset);
+      keys.push(...pageKeys);
+      offset = result.data.nextOffset;
+      expect(result.data.hasMore).toBe(page < 3);
+    }
+    expect(keys).toEqual(matching);
+  });
+
   it('distinguishes missing forbidden paths (not_found) from existing forbidden paths', async () => {
     const ports = createPorts({
       text: {
@@ -763,6 +896,6 @@ describe('ProjectAgentReadTools', () => {
     expect(sceneSearch.ok).toBe(true);
     if (!sceneSearch.ok) return;
     expect(sceneSearch.data.hasMore).toBe(false);
-    expect(sceneSearch.data.nextOffset).toBe(100);
+    expect(sceneSearch.data.nextOffset).toBe(sceneSearch.data.hits.length);
   });
 });

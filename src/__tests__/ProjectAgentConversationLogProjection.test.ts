@@ -26,7 +26,7 @@ describe('projectConversationLogFromMessages (ADR0023 log projection)', () => {
     ]);
   });
 
-  it('joins multiple text blocks of one message and skips json/image blocks', () => {
+  it('joins text blocks and projects images as attachment placeholders', () => {
     const log = projectConversationLogFromMessages(messages(
       {
         role: 'user',
@@ -37,7 +37,13 @@ describe('projectConversationLogFromMessages (ADR0023 log projection)', () => {
         ],
       },
     ));
-    expect(log).toEqual([{ role: 'user', text: '第一段\n第二段' }]);
+    expect(log).toEqual([{ role: 'user', text: '第一段\n[已附加图片]\n第二段' }]);
+  });
+
+  it('keeps image-only messages visible without exposing image bytes', () => {
+    const input = messages({ role: 'user', content: [{ type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' }] });
+    expect(projectConversationLogFromMessages(input)).toEqual([{ role: 'user', text: '[已附加图片]' }]);
+    expect(projectConversationTurnFlow(input)).toEqual([{ kind: 'user', text: '[已附加图片]' }]);
   });
 
   it('drops messages without any text block', () => {
@@ -118,7 +124,7 @@ describe('projectConversationTurnFlow (ADR0023 chronological thread projection)'
         ],
       },
     ));
-    expect(flow).toEqual([{ kind: 'user', text: '第一段\n第二段' }]);
+    expect(flow).toEqual([{ kind: 'user', text: '第一段\n[已附加图片]\n第二段' }]);
   });
 });
 

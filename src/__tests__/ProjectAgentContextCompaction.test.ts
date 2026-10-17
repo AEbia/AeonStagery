@@ -159,6 +159,34 @@ function validSummary(overrides?: Record<string, unknown>): Record<string, unkno
 }
 
 describe('SimpleProjectAgentContextBudgetEstimator accounting', () => {
+  it('keeps repeated calibration stable instead of alternating between raw and actual usage', () => {
+    const estimator = new SimpleProjectAgentContextBudgetEstimator();
+    const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: '好'.repeat(4000) }] }], pendingSupplements: [], contextWindow: 100_000, reservedOutputTokens: 0 };
+    const estimates: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const estimate = estimator.estimate(input);
+      estimates.push(estimate.estimatedInputTokens);
+      estimator.calibrate({ inputTokens: 2000 }, estimate.estimatedInputTokens);
+    }
+    expect(estimates).toEqual([1000, 2000, 2000, 2000, 2000]);
+  });
+
+  it('calibrates raw messages independently of fixed schema and image costs', () => {
+    const estimator = new SimpleProjectAgentContextBudgetEstimator();
+    const input = {
+      messages: [toolMessage('readImage', { detail: 'low', imagePayload: { mimeType: 'image/png', width: 100, height: 100 } })],
+      tools: [{ name: 'readScene', parameters: { type: 'object', description: 'x'.repeat(1000) } }],
+      pendingSupplements: [], contextWindow: 100_000, reservedOutputTokens: 0,
+    };
+    const before = estimator.estimate(input);
+    const breakdown = before.breakdown!;
+    const actual = breakdown.messageTokens * 2 + breakdown.imageTokens + breakdown.toolSchemaTokens;
+    for (let i = 0; i < 5; i += 1) {
+      const estimate = estimator.estimate(input);
+      estimator.calibrate({ inputTokens: actual }, estimate.estimatedInputTokens, estimate.breakdown);
+      expect(estimator.estimate(input).estimatedInputTokens).toBe(actual);
+    }
+  });
   it('counts full tool schemas as part of the next request', () => {
     const estimator = new SimpleProjectAgentContextBudgetEstimator();
     const base = {
@@ -451,6 +479,46 @@ describe('ModelProjectAgentContinuationSummarizer', () => {
 });
 
 describe('ProjectAgentCoordinator compaction behavior', () => {
+  it('keeps a huge model catalog bounded across requests and compaction while keys remain queryable', async () => {
+    const catalog: PerformanceCapabilityCatalogV1 = { ...EMPTY_CATALOG, characters: [{
+      characterId: 'soyo', name: 'Soyo', fieldLevelDegrade: false,
+      motions: Array.from({ length: 7065 }, (_, index) => `other/character/mtn_angry01_C_live_01_${index}`),
+      expressions: Array.from({ length: 918 }, (_, index) => `expression_${index}`),
+    }] };
+    const registry = createRegistry();
+    const main = capturingTransport([
+      assistantWithTools([{ status: 'ready', toolCallId: 'cap1', name: 'searchCharacterCapabilities',
+        arguments: { characterId: 'soyo', kind: 'motion', text: 'live_01_7064', limit: 1 } }]),
+      assistantText('done'),
+    ]);
+    const coordinator = new ProjectAgentCoordinator({
+      toolRegistry: registry, transport: main.transport, contextWindow: 16_000,
+      performanceCatalog: { resolve: async () => ({ ok: true, value: { catalog, fingerprint: 'huge-model' } }) },
+      continuationSummarizer: new ModelProjectAgentContinuationSummarizer({ transport: capturingTransport([VALID_SUMMARY_JSON]).transport }),
+    });
+    const started = await coordinator.start({ projectId: 'proj', targetSceneIdentity: 'scene-cc',
+      originalTaskText: 'Find one motion', systemPrompt: buildProjectAgentSystemPrompt({ baseSystemPrompt: 'Agent' }),
+      endpoint: 'offline', model: 'offline' });
+    expect(started.ok).toBe(true);
+    expect(registry.has('searchCharacterCapabilities')).toBe(true);
+    await coordinator.runModelTurn();
+    const tool = coordinator.getMessages().find((message) => message.role === 'tool' && message.name === 'searchCharacterCapabilities');
+    expect(JSON.stringify(tool)).toContain('other/character/mtn_angry01_C_live_01_7064');
+    expect((await coordinator.forceCompact()).ok).toBe(true);
+    const settled = await coordinator.runModelTurn();
+    expect(settled.status).toBe('settled');
+    expect(main.requests).toHaveLength(2);
+    for (const request of main.requests) {
+      const system = JSON.stringify(request.messages.filter((message) => message.role === 'system'));
+      expect(new TextEncoder().encode(system).byteLength).toBeLessThan(20_000);
+      expect(system).toContain('motionCount');
+      expect(system).not.toContain('mtn_angry01');
+    }
+    const reread = await registry.call('searchCharacterCapabilities', { characterId: 'soyo', kind: 'expression', text: 'expression_917' });
+    expect(reread.ok).toBe(true);
+    if (reread.ok) expect(reread.data.entries).toEqual([{ kind: 'expression', key: 'expression_917' }]);
+  });
+
   async function compactingCoordinator(options?: {
     contextWindow?: number;
     continuationSummarizer?: ProjectAgentContinuationSummarizerPort;
@@ -604,6 +672,34 @@ describe('ProjectAgentCoordinator compaction behavior', () => {
     // The original messages stayed intact.
     expect(JSON.stringify(coordinator.getMessages())).toContain('Polish the scene');
     expect(JSON.stringify(coordinator.getMessages())).not.toContain('Continuation summary');
+  });
+
+  it('lets the summary model see attached images before deleting their old payloads', async () => {
+    const summary = capturingTransport([VALID_SUMMARY_JSON]);
+    const journalPort = new InMemoryProjectAgentJournalPort();
+    const coordinator = new ProjectAgentCoordinator({
+      transport: capturingTransport([assistantText('seen')]).transport,
+      toolRegistry: createRegistry(), journalPort, contextWindow: 120_000,
+      continuationSummarizer: new ModelProjectAgentContinuationSummarizer({ transport: summary.transport }),
+    });
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    await coordinator.start({ projectId: 'proj', targetSceneIdentity: 'scene-cc', originalTaskText: 'See image', systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: 'attached-summary', initialImage: image });
+    expect((await coordinator.forceCompact()).ok).toBe(true);
+    expect(summary.requests[0]?.messages.flatMap((m) => m.content)).toContainEqual({ type: 'image', mimeType: image.mimeType, bytes: image.bytes, detail: 'auto' });
+    expect(coordinator.getMessages().flatMap((m) => m.content).some((b) => b.type === 'image')).toBe(false);
+    expect(JSON.stringify(await journalPort.load('proj', 'attached-summary'))).not.toContain('bytesBase64');
+  });
+
+  it('preserves pending image supplements through compaction and includes their visual token cost', async () => {
+    const coordinator = await compactingCoordinator({ contextWindow: 120_000 });
+    coordinator.enqueueSupplement('', { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'high' });
+    const budget = await coordinator.maybeCompactBeforeModelCall();
+    expect(budget.estimate.breakdown?.imageTokens).toBeGreaterThan(0);
+    expect((await coordinator.forceCompact()).ok).toBe(true);
+    expect(coordinator.getMessages().flatMap((m) => m.content)).toContainEqual({
+      type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'high',
+    });
+    expect(coordinator.getTask()?.peekPendingSupplements()).toHaveLength(0);
   });
 
   it('preserves undelivered supplements verbatim after compaction', async () => {

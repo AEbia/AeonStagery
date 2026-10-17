@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserWindow, IpcMainInvokeEvent, WebContents } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import type { ProjectAgentSupplementRequest } from '../api/types/project-agent-ipc';
 import type { AiConversationResponse } from '../api/types/ai-conversation';
 import type { IpcWindowContext } from '../../electron/ipc/windows';
 
@@ -138,10 +139,10 @@ describe('Electron IPC domain composition', () => {
     const channels = [...electron.handlers.keys(), ...electron.listeners.keys()];
     const counts = Object.fromEntries([
       ['aiProse', 8], ['aiConversation', 2], ['fs', 12], ['dialog', 2], ['templates', 4],
-      ['app', 5], ['betaState', 2], ['crash', 4], ['workspaceTools', 8], ['projectAgent', 29],
+      ['app', 5], ['betaState', 2], ['crash', 4], ['workspaceTools', 8], ['projectAgent', 30],
       ['collaborationServer', 5], ['path', 7], ['updater', 4], ['export', 1],
     ]);
-    expect(channels).toHaveLength(93);
+    expect(channels).toHaveLength(94);
     for (const [domain, count] of Object.entries(counts)) {
       expect(channels.filter(channel => channel.startsWith(`${domain}:`))).toHaveLength(count);
     }
@@ -236,5 +237,30 @@ describe('Electron IPC domain composition', () => {
     expect(stopVoice).toHaveBeenCalledWith('Stopping GPT-SoVITS API before app quit.');
     expect(clearSessions).toHaveBeenCalledOnce();
     expect(stopCollaboration).toHaveBeenCalledOnce();
+  });
+});
+
+describe('project Agent image supplement relay', () => {
+  const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+
+  it('relays image-only messages and returns the editor admission result', async () => {
+    const result = invoke('projectAgent:sendSupplement', eventFor(agent.window), 'task-1', '', image);
+    expect(editor.webContents.send).toHaveBeenCalledWith('projectAgent:supplement', expect.objectContaining({ taskId: 'task-1', text: '', image }));
+    const payload = editor.webContents.send.mock.calls.at(-1)?.[1] as ProjectAgentSupplementRequest;
+    await invoke('projectAgent:supplementResult', eventFor(editor.window), { requestId: payload.requestId, ok: false, error: '当前模型不支持图片输入' });
+    expect(await result).toEqual({ ok: false, error: '当前模型不支持图片输入' });
+  });
+
+  it('rejects invalid images and unavailable editors before reporting success', async () => {
+    expect(await invoke('projectAgent:sendSupplement', eventFor(agent.window), 'task-1', '', { ...image, mimeType: 'text/plain' })).toMatchObject({ ok: false });
+    expect(await invoke('projectAgent:sendSupplement', eventFor(agent.window), 'task-1', '', { ...image, bytes: new Uint8Array(6 * 1024 * 1024 + 1) })).toMatchObject({ ok: false });
+    editor.destroyed.mockReturnValue(true);
+    expect(await invoke('projectAgent:sendSupplement', eventFor(agent.window), 'task-1', '', image)).toMatchObject({ ok: false, error: expect.stringContaining('编辑器窗口不可用') });
+    expect(editor.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it('accepts an image-only start request', async () => {
+    expect(await invoke('projectAgent:requestStart', eventFor(agent.window), { taskText: '', image })).toEqual({ ok: true });
+    expect(editor.webContents.send).toHaveBeenCalledWith('projectAgent:startRequest', { taskText: '', image });
   });
 });

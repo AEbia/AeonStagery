@@ -5,7 +5,7 @@ import type {
   ProjectAgentHostWriteReceipt,
   ProjectAgentAccessMode,
 } from '../../api/types/project-agent';
-import type { ProjectAgentJournalRunningRecord } from './ProjectAgentJournal';
+import type { ProjectAgentJournalRunningRecord, ProjectAgentStoredContentBlock } from './ProjectAgentJournal';
 import type { JsonObject, JsonValue } from '../../api/types/ai-conversation';
 
 export const PROJECT_AGENT_PROTOCOL_VERSION = 1 as const;
@@ -150,6 +150,7 @@ const PROJECT_AGENT_ACTIVITY_TEXT: Readonly<Record<string, string>> = {
   searchProjectText: '搜索项目文本',
   searchResources: '搜索资源',
   inspectResource: '检查资源',
+  searchCharacterCapabilities: '查询角色能力',
   readImage: '读取图片',
   runTerminalCommand: '运行命令',
 };
@@ -333,6 +334,11 @@ function activityReadableText(
       return readableResourceSearchContent(record);
     case 'inspectResource':
       return readableInspectResourceContent(record);
+    case 'searchCharacterCapabilities':
+      return Array.isArray(record.entries) ? record.entries.map((value) => {
+        const entry = asActivityRecord(value);
+        return [stringValue(entry.kind), stringValue(entry.key), stringValue(entry.description)].filter(Boolean).join(' · ');
+      }).join('\n') : undefined;
     case 'readImage':
       return readableImageContent(record);
     case 'readProjectOverview':
@@ -856,6 +862,8 @@ function activityDetail(
       const reference = stringArg(args, 'reference');
       return reference ? compactActivityPath(reference) : undefined;
     }
+    case 'searchCharacterCapabilities':
+      return [stringArg(args, 'characterId'), stringArg(args, 'kind'), stringArg(args, 'text')].filter(Boolean).join(' · ') || undefined;
     case 'runTerminalCommand': {
       const command = stringArg(args, 'command');
       if (!command) return undefined;
@@ -1090,6 +1098,8 @@ export interface ProjectAgentUserSupplement {
   readonly text: string;
   readonly enqueuedAt: number;
   readonly deliveredToModel: boolean;
+  /** JSON-safe pending payload; moved to its message when delivered. */
+  readonly image?: Extract<ProjectAgentStoredContentBlock, { type: 'image' }>;
 }
 
 /**
@@ -1345,7 +1355,10 @@ export class ProjectAgentTask {
       ?? (recordLifecycle === 'suspended' || recordLifecycle === 'paused' ? undefined : 'application_exit');
     hydrated.supplements = [];
     hydrated.supplements.push(...record.supplements.map((supplement) => ({ ...supplement })));
-    hydrated.supplementSeq = record.supplements.length;
+    hydrated.supplementSeq = record.supplements.reduce((maximum, entry) => {
+      const sequence = Number(entry.id.split(':').at(-1));
+      return Number.isSafeInteger(sequence) ? Math.max(maximum, sequence) : maximum;
+    }, record.supplements.length);
     hydrated.counters = { successfulTerminalCommandCount: 0, ...record.counters };
     hydrated.committedWriteReceipts = [];
     hydrated.committedWriteReceipts.push(
@@ -1560,13 +1573,14 @@ export class ProjectAgentTask {
     this.pauseRecovery = undefined;
   }
 
-  enqueueSupplement(text: string, enqueuedAt = Date.now()): ProjectAgentUserSupplement {
+  enqueueSupplement(text: string, enqueuedAt = Date.now(), image?: ProjectAgentUserSupplement['image']): ProjectAgentUserSupplement {
     this.supplementSeq += 1;
     const entry: ProjectAgentUserSupplement = {
       id: `${this.identity.taskId}:sup:${this.supplementSeq}`,
       text,
       enqueuedAt,
       deliveredToModel: false,
+      ...(image ? { image } : {}),
     };
     this.supplements.push(entry);
     return entry;
@@ -1579,11 +1593,17 @@ export class ProjectAgentTask {
 
   markSupplementsDelivered(ids: readonly string[]): void {
     const idSet = new Set(ids);
-    for (const s of this.supplements) {
+    for (const [index, s] of this.supplements.entries()) {
       if (idSet.has(s.id)) {
-        (s as { deliveredToModel: boolean }).deliveredToModel = true;
+        const { image: _image, ...metadata } = s;
+        this.supplements[index] = { ...metadata, deliveredToModel: true };
       }
     }
+  }
+
+  removePendingSupplement(id: string): void {
+    const index = this.supplements.findIndex((s) => s.id === id && !s.deliveredToModel);
+    if (index >= 0) this.supplements.splice(index, 1);
   }
 
   recordSuccessfulRelatedRead(): void {

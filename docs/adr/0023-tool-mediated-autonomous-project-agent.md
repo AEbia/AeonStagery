@@ -2,7 +2,7 @@
 status: partially-superseded
 superseded_by:
   - ADR-0024
-last_reviewed: 2026-08-14
+last_reviewed: 2026-10-17
 ---
 
 # Tool-Mediated Persistent Project Agent Conversation
@@ -21,19 +21,21 @@ Conversation 是本机用户级、绑定单一 `{ projectId, sceneEntryId, scene
 
 除目标 scene 的有界表演能力目录外，宿主只提供当前 Conversation 的用户消息、工具定义和受控权限，不预先注入项目、scene、版本或路径内容。Agent 自主选择读取其他内容。工具层内部绑定工作区、路径 allowlist 和 source version，并通过逻辑工具提供当前 scene、资源目录、相关文件、校验/编译和 semantic transaction 能力。Agent 不读取或操作 AI 铺戏草稿，不能任意写入或删除项目文件、执行 Shell 或读取 API key。
 
-宿主在 Conversation 首次执行、上下文压缩/恢复，以及 scene 角色、绑定模型或 performance profile fingerprint 变化后，直接把目标 scene 全部角色的有界 Agent 能力投影注入模型上下文。该投影从正式 `PerformanceCapabilityCatalogV1` 生成，每个实际可用 motion/expression key 及其可用短描述只出现一次，并保留角色、field-level degrade、lookAt/reaction targets 与简短诊断；重复的 profile provenance 和 intersection 结构留在宿主正式目录中。角色绑定可包含主模型与多个副模型（variants）；投影对主模型与全部副模型的实际 motion/expression 取并集并按值去重，主模型实际持有的 key 才附 profile 短描述，仅存在于副模型的 key 以原始值（不带描述）进入投影——目录既不为副模型编造描述，也不因重复 key 膨胀 prompt。目录由 `PerformanceProfileProvider`、当前角色绑定与实际模型 motions/expressions 求交集生成，不注册额外的 Agent 读取工具；这项固定注入是自主上下文选择的唯一例外。
+宿主在 Conversation 首次执行、上下文压缩/恢复，以及 scene 角色、绑定模型或 performance profile fingerprint 变化后，把目标 scene 的有界 Agent 能力投影注入模型上下文。正式 `PerformanceCapabilityCatalogV1` 保留主模型与全部副模型 variants 的 motion/expression 并集、按值去重；只有主模型实际持有的 key 才附 profile 短描述。Agent 固定投影的 UTF-8 JSON 上限为 16 KiB：小目录保留完整键与短描述、角色、field-level degrade、lookAt/reaction targets 和简短诊断；超过上限时注入角色、能力数量、命名空间统计、有限诊断与 `searchCharacterCapabilities` 查询入口，角色摘要仍受总字节上限约束并报告 characterCount / diagnosticCount。命名空间是实际键截至最后一个 `/` 的精确前缀（如 `mygo/anon/`），无 `/` 的键归入空前缀；每个角色的 namespaces 返回 prefix / motionCount / expressionCount，并以 namespaceCount / namespacesTruncated 标明总命名空间数及是否省略。先为角色身份与数量分配容量，再向剩余容量填入按前缀排序的统计，不能因命名空间数量膨胀而恢复成无界注入。完整目录留在宿主，不能因为未注入而把可用 key 当成不支持。
+
+`searchCharacterCapabilities` 是只读工具，从同一当前目录按 characterId、kind（motion / expression）及 text 筛选，以 offset + limit 分页。text 不含通配符时对键或描述做不区分大小写的包含搜索；含 `*` 或 `?` 时只匹配完整动作/表情键，`*` 为任意字符串（可跨 `/`），`?` 为一个 Unicode 字符，其余字符均为字面值，不解释正则。例：`mygo/anon/*angry*_live_01`；通配符不搜索描述，不新增 pattern 参数。先完成筛选，再按 offset / limit 取页，续读保持相同筛选条件；默认 30 条、最多 100 条，单页能力内容受 16 KiB UTF-8 上限约束。返回精确 key、至多 512 字符的资料描述、total、hasMore、nextOffset 和 truncated；nextOffset 按实际返回条数推进。模型声明的其他角色命名空间同样可查，不按 ownerId 删除。角色不在当前目录时返回 not_found；没有 resolver 的宿主不注册此工具，Agent 可通过 readScene 取得模型引用，再用 inspectResource 查询。跨页能力变化返回 pagination_changed，超限首条返回 result_too_large。查询不建立 scene 写入绑定，也不是写入授权。
 
 通用项目文件读取固定为 `readProjectOverview`、`listProjectFiles`、`readProjectText` 和 `searchProjectText`。`readProjectText` 使用显式 `startLine + lineCount`，可接受规范化项目相对路径，或已注册外部库的稳定 `@mount/<id>/...` 引用；列表和搜索结果统一使用非负 `offset + limit` 并只遍历项目目录。未知或超大输出必须携带 `truncated`、`hasMore` 与明确续读参数。所有输入都不能接受绝对路径、`..`、越界 symlink；挂载文本读取只按已注册根目录解析，并应用相同的受保护文件过滤。raw project.json、所有正式 scene 文件、AI 铺戏草稿、Agent Conversation store、版本控制目录、环境文件、凭据和私钥都不能通过通用文件工具读取；目标 scene 只能使用 scene 工具，其他 scene 不进入当前 Conversation 的读取范围。二进制文件只返回元数据。
 
 `readProjectOverview` 返回清理后的项目名称、project version、active scene 名称/相对路径、scene 列表名称/相对路径、asset roots 和模板信息，不返回 projectId/defaultSceneId/scene entry ID、本机根路径或本机 voice preset 绝对路径。注册的外部资源库由资源搜索和检查工具返回稳定的 `@mount/<id>/...` 引用、资源类型和结构化元数据；已知的安全文本引用可再由 `readProjectText` 按行读取，Live2D motion、expression 等能力仍由工具解析。
 
-资源读取固定为 `searchResources` 和 `inspectResource` 两个通用工具，不注册 background、motion、audio 等类型专用工具。`searchResources` 使用 `project`、`mount:<id>` 和 `template:<id>` 三类无冲突 namespace，递归扫描项目资源、已注册 external mounts 与启用模板目录，再按 kind、文本、owner/outfit 和 namespace 过滤，并使用 `offset + limit` 分页。对大型 project/mount 库，调用方可传相对 `pathPrefix` 浏览一个目录的直接子项；目录返回 `kind: "directory"`、所属 namespace 与可继续浏览的 `pathPrefix`，没有可绑定 resource reference，文件才携带项目相对或 `@mount/...` reference。对场景资源选择，空 prefix 先以恒定大小浏览 mount 根，调用方从结果取得 namespace 后再逐层浏览，而不以无范围的递归搜索作为发现前提；因此直接挂载 background 目录仍可按库分类导航。扫描不跟随各注册根目录内的 symlink，不能越过根目录或把本机绝对路径暴露给 Agent；同一规范化查询的首次调用建立扫描 snapshot，后续分页复用该 revision，底层变化时返回 `pagination_changed` 并要求从 offset 0 重查。项目和 mount file candidate 返回可以直接写入 scene 的项目相对或 `@mount/...` reference；模板中尚未采用的 candidate 只返回 `materialization_required` 与语义 metadata，不提供伪 reference；任意外部 path candidate 和本机绝对路径都不进入结果。
+资源文件读取使用 `searchResources` 和 `inspectResource` 两个通用工具；当前 scene 角色的能力查询另由 `searchCharacterCapabilities` 提供，不增加类型专用资源工具。`searchResources` 使用 `project`、`mount:<id>` 和 `template:<id>` 三类无冲突 namespace，递归扫描项目资源、已注册 external mounts 与启用模板目录，再按 kind、文本、owner/outfit 和 namespace 过滤，并使用 `offset + limit` 分页。对大型 project/mount 库，调用方可传相对 `pathPrefix` 浏览一个目录的直接子项；目录返回 `kind: "directory"`、所属 namespace 与可继续浏览的 `pathPrefix`，没有可绑定 resource reference，文件才携带项目相对或 `@mount/...` reference。对场景资源选择，空 prefix 先以恒定大小浏览 mount 根，调用方从结果取得 namespace 后再逐层浏览，而不以无范围的递归搜索作为发现前提；因此直接挂载 background 目录仍可按库分类导航。扫描不跟随各注册根目录内的 symlink，不能越过根目录或把本机绝对路径暴露给 Agent；同一规范化查询的首次调用建立扫描 snapshot，后续分页复用该 revision，底层变化时返回 `pagination_changed` 并要求从 offset 0 重查。项目和 mount file candidate 返回可以直接写入 scene 的项目相对或 `@mount/...` reference；模板中尚未采用的 candidate 只返回 `materialization_required` 与语义 metadata，不提供伪 reference；任意外部 path candidate 和本机绝对路径都不进入结果。
 
 `pathPrefix` 与非空 `ownerId` 或 `outfitId` 组合时，在该相对目录下递归搜索文件，再与 namespace、kind、text、owner/outfit 条件取交集；仅传 `pathPrefix`（可带 kind/text）时仍浏览直接子项。递归查询只遍历 prefix 的祖先及其子树，不跟随 symlink，不匹配同名路径前缀的相邻目录。点号开头的内部目录和文件（例如 `.mtn_exp`）不进入 project、mount 或 template 的资源搜索/目录浏览，显式指定内部 prefix 也不返回候选；inspect 不把内部文件报告为可绑定模型。`project` namespace 只包含本项目资源，外部库属于 `mount:<id>`，因此本地资源为空而外部库有资源是正常状态。
 
 所有 list/search 结果按工具声明的稳定键确定性排序，并返回 `hasMore`、`nextOffset`，只有计算便宜时才返回 total。宿主按 execution + tool + 规范化 query 保存最近分页 revision，不要求模型回传 revision；同一查询翻页期间底层 revision 变化时返回 `pagination_changed`，要求从 `offset: 0` 重查，不能静默跳项或重复。分页状态不携带 scene identity、版本授权或写入权限，在执行回合 suspended、settled 或 lease 更换时清除。
 
-`inspectResource` 只接受项目相对或稳定 mount reference，返回存在性、scope、实际 kind、可绑定状态与受控媒体 metadata。Live2D model 额外解析 motions、expressions 和模型能力；`sizeBytes` / `modelDocumentBytes` 是实际模型入口文档字节数，不是整个 bundle 大小，相同内容的 outfit 入口文件可以返回相同大小。motions 保留模型文档声明的全部 key，即使包含多个角色的命名空间，也不按候选 ownerId 删除可用动作。图片只返回尺寸/MIME，视觉内容使用条件注册的 `readImage`；音频可以返回格式、字节数和可安全取得的 duration，但任何时候都不返回音频内容。两个资源工具都不能复制、导入、重命名、删除或物化文件，且 inspect 结果不是写入授权，每次 semantic transaction 的严格资源 gate 都必须重新检查 reference。
+`inspectResource` 只接受项目相对或稳定 mount reference，返回存在性、scope、实际 kind、可绑定状态与受控媒体 metadata。Live2D model 额外解析 motions、expressions 和模型能力。Agent 的 inspectResource 边界对能力键统一分页：capabilityText 采用与能力查询相同的键匹配规则（普通文本包含搜索、含 `*` / `?` 时完整键通配符匹配），capabilityOffset / capabilityLimit 控制 motion 在前、expression 在后的合并页，默认 30 条、最多 100 条，能力页上限 16 KiB；live2d.capabilityPage 返回 total / hasMore / nextOffset / truncated，模型原始能力数量仍在 capabilities 中返回。底层 resource port 可返回完整目录，不能直接序列化给模型；`sizeBytes` / `modelDocumentBytes` 是实际模型入口文档字节数，不是整个 bundle 大小，相同内容的 outfit 入口文件可以返回相同大小。motions 保留模型文档声明的全部 key，即使包含多个角色的命名空间，也不按候选 ownerId 删除可用动作。图片只返回尺寸/MIME，视觉内容使用条件注册的 `readImage`；音频可以返回格式、字节数和可安全取得的 duration，但任何时候都不返回音频内容。两个资源工具都不能复制、导入、重命名、删除或物化文件，且 inspect 结果不是写入授权，每次 semantic transaction 的严格资源 gate 都必须重新检查 reference。
 
 若当前 Agent model 的最终能力状态为 `imageInput: supported`，宿主额外注册 `readImage({ reference })`；unsupported 或 unknown 模型的工具列表中不存在该工具。reference 只接受项目相对图片或资源工具返回的稳定 `@mount/...` 引用，禁止绝对路径、网络 URL、越界 symlink 和任意 base64 输入。工具以原生 multimodal image result 返回经过字节、MIME、解码像素和输出尺寸限制的图片，附带原始与送模尺寸元数据；超大图安全缩放，SVG 必须安全栅格化否则拒绝，动态图确定性提供首帧。Agent 不得读取音频内容、视频帧，seek、暂停或捕获当前舞台，避免操作共享的 Stage、playback、Live2D 和 UtSystem。未来若提供 scene frame capture，必须建立独立 renderer、Live2D runtime 和 UtSystem 隔离，并另行记录架构决策。
 
@@ -60,6 +62,8 @@ image block 跨 renderer/main IPC 只传经过字节、MIME 与解码上限检�
 provider 原生允许 multimodal tool result 时，adapter 直接映射统一消息。对于允许 user image input、但拒绝在 `role: "tool"` 中放图片的 OpenAI-compatible Chat API，adapter 必须先按原 call 顺序发送该 assistant 轮次的全部文本/JSON tool results，使每个 tool call 在协议上闭合，再追加一条宿主生成的 multimodal user projection；projection 按原调用顺序包含 toolCallId/name 关联标签与对应图片。它只属于 provider transport 投影，不是 Agent 用户消息，不进入用户可见对话日志，也不参与排队用户消息的冲突处理；后续请求从原始 multimodal tool results 确定性重建。由此 `imageInput` 明确 supported 即足以注册 `readImage`，不额外引入 `multimodalToolResult` capability。
 
 `readImage` 的图片 bytes 与文字/JSON content block 使用相同的单份消息持久化规则：只要所属 message 仍在当前 Agent 模型上下文中，经过既有字节和解码限制的 bytes 就随该 message 保存一次；每轮请求只引用并重新组装消息，不复制 bytes。上下文压缩原子替换旧 messages 后删除不再属于当前模型上下文的图片 bytes。Conversation 恢复时直接恢复当前完整 messages，不自动重读资源；资源后来不存在或内容变化时，Agent 必须通过工具重新取得当前事实。
+
+用户附加的图片遵循同样的消息生命周期：新对话、已有对话及执行中的补充消息均接受图片，允许只发图片；执行中的补充图片排队到当前工具轮完整闭合后交给模型。排队期间 payload 以 JSON-safe 形式保存在 supplement 中，交付时在同一次持久化中移入对应 user message 并移除队列中的 payload；后续请求和恢复直接使用该消息，不能首轮后退化为占位文字。对话日志与线程仅投影「已附加图片」提示，不携带 bytes。窗口支持文件选择、剪贴板粘贴和拖入，处理图片时禁止发送；编辑器校验目标对话和当前模型的图片能力并保存输入后，才返回发送成功。切换至不支持图片的模型而当前上下文仍含图片时，暂停并提示更换模型，保留原上下文。
 
 恢复后若资源不存在或内容指纹变化，只向 Agent 报告当前状态，不能把旧视觉观察当作当前资源事实。正常 80% 上下文压缩可以让摘要模型消费当前模型上下文中的图片并提取文字化关键发现；摘要替换提交成功后删除旧图片 payload。
 
@@ -91,7 +95,7 @@ renderer 侧 `AiConversationTransport.complete(request, { signal })` 接收标�
 
 项目 Agent 写工具注册表固定包含 `insertStatement`、`insertCompanion`、`updateStatement`、`updateCompanion`、`deleteLine`、`moveLine`、`reorderCompanions` 和 `applyAuthoringTransaction`。前七个工具一次只接受并提交对应的一个 `SemanticSceneOperationV1`，各自产生独立原子 transaction 与 receipt；最后一个工具显式接受版本化 operations 数组，提供跨 operation 全有或全无语义。八个参数 schema 都从同一 operation 权威定义生成，不维护重复 schema，也不注册额外 `applySceneOperation`、family-specific 或 bulk convenience 写工具。模型在尚未成功读取 scene 时只看到只读工具定义；任一成功 scene read 绑定 snapshot 后才看到完整写工具表。共享的读取绑定、原子性和 transaction 规则写入 system prompt，但每个工具描述仍保留其专有的目标、定位、父子关系、替换和失败语义。
 
-正式 scene 读取注册为 `readScene`、`searchScene` 和 `validateScene` 三个工具。`readScene` 按显式 `startLine + lineCount` 返回 active formal scene 的扁平全局行视图、只读 scene meta、角色目录、总行数和数字 DocumentStore version，并附带 `hasMore`、`nextStartLine` 与 `truncated`；默认和最大页宽均为 500 行，单页 UTF-8 序列化内容还受 200 KB 安全上限约束。到达字节上限时返回可续读页；单个首行本身超限时返回 `result_too_large`，且不建立可写 snapshot 绑定。`searchScene` 按文本、family 或时间范围过滤，以 `offset + limit` 返回按 scene time、source order 与 line 稳定排序的命中行及有限相邻语境；`validateScene` 返回 source schema、semantic、compiler 和严格资源检查 diagnostics，并尽可能映射为 Agent line。三者都不读取 AI 铺戏草稿。
+正式 scene 读取注册为 `readScene`、`searchScene` 和 `validateScene` 三个工具。`readScene` 按显式 `startLine + lineCount` 返回 active formal scene 的扁平全局行视图、只读 scene meta、角色目录、总行数和数字 DocumentStore version，并附带 `hasMore`、`nextStartLine` 与 `truncated`；默认页宽为 50 行，最大页宽为 500 行，单页 UTF-8 序列化内容还受 200 KB 安全上限约束。到达字节上限时返回可续读页；单个首行本身超限时返回 `result_too_large`，且不建立可写 snapshot 绑定。`searchScene` 按文本、family 或时间范围过滤，以 `offset + limit` 返回按 scene time、source order 与 line 稳定排序的命中行及有限相邻语境。同页命中行与邻接行按全局行号只出现一次；先为命中行分配容量，再补邻接语境，整个工具结果的 UTF-8 上限为 32 KiB。nextOffset 按实际返回的命中条数推进，容量导致缩页或语境省略时标记 truncated；首条命中超限返回 result_too_large，不建立 scene 写入绑定。搜索分页 revision 覆盖内容变化（包含相邻语境），不能只比较命中行号与时间。局部任务（含背景或场景设置调整）优先 searchScene 与 10–50 行定向读取，只有明确需要全场景覆盖时才继续翻页；`validateScene` 返回 source schema、semantic、compiler 和严格资源检查 diagnostics，并尽可能映射为 Agent line。三者都不读取 AI 铺戏草稿。
 
 同一模型轮并行发起的 scene reads 必须共享一个宿主 snapshot。每次成功 scene read 都把 base snapshot 与完整行映射保存在模型上下文之外的 Agent 执行状态中；模型无需在写工具参数里重复提交 version，写入默认绑定最近一次成功读取。尚未建立 scene snapshot 时所有写工具返回 `scene_not_read`。一旦已经读取，只要行映射仍适用就不要求机械重读；写入时只接受与 base snapshot 完全相同的 DocumentStore version，并发人类编辑导致 `version_conflict` 后由 Agent 重新读取和规划，不做字段级三方合并。连续内容一律使用行范围续读；列表和搜索只使用 offset 分页，分页位置不作为 scene identity、snapshot 或 version token。
 
@@ -185,7 +189,7 @@ Agent 写入采用乐观预检与权威提交两阶段。工具先在 semantic m
 
 AI prose normalization 仍然只负责无损产生角色对白/旁白语句、确定性 duration/gap 和独立可用的角色表演占位 companion，不读取草稿之外的项目 Agent 工作上下文，也不由项目 Agent 自动接管。用户可以在不启用任何增强处理器时应用占位并手动填写表演。旧 `agentPrompts.ts` 中表达的表演指导与电影感职责保留为 AI 铺戏中的顺序处理步骤，并可对当前 active scene 单独运行，但实现迁移为 semantic scene 的 typed 结果或 patch，不保留旧文件/API 契约，也不再输出 action/timeline JSON。项目 Agent 是独立工作流，不调用、不编排也不接管这两个处理器。
 
-专用表演资料属于启用模板域的只读项目上下文：由模板 manifest/profile 文件声明和加载，按既有模板优先级解析，并通过 `PerformanceProfileProvider` 与实际 Live2D 能力共同形成过滤后的表演能力目录。profile 中的 motion 仍是当前模型的本地动作键，例如 `char-b/angry01`；模板 namespace 只标识资料来源，不成为 scene motion 的外部资源引用。项目 Agent 与表演指导可以消费同一解析结果，但表演指导消费正式 `PerformanceCapabilityCatalogV1`，Agent 只消费其能力保持的紧凑投影，不能修改模板 profile、调用表演指导处理器，或因 profile 存在而跳过 source schema、资源引用和 semantic authoring gate。
+专用表演资料属于启用模板域的只读项目上下文：由模板 manifest/profile 文件声明和加载，按既有模板优先级解析，并通过 `PerformanceProfileProvider` 与实际 Live2D 能力共同形成过滤后的表演能力目录。profile 中的 motion 仍是当前模型的本地动作键，例如 `char-b/angry01`；模板 namespace 只标识资料来源，不成为 scene motion 的外部资源引用。项目 Agent 与表演指导可以消费同一解析结果，但表演指导消费正式 `PerformanceCapabilityCatalogV1`，Agent 消费有界紧凑投影并按需查询完整能力，不能修改模板 profile、调用表演指导处理器，或因 profile 存在而跳过 source schema、资源引用和 semantic authoring gate。
 
 该 profile 只能作为声明式能力目录被读取：角色身份、alias、模型动作/表情键和短描述属于数据；system prompt、可执行规则、强制覆盖策略和固定动作覆盖率不属于 profile，也不能被 Agent 当作工具授权。
 
@@ -233,3 +237,8 @@ Agent 不通过 `PerformanceProfileProvider` 读取模型文件或舞台状态�
 - 运行界面中的后续用户输入是同一 Conversation 的普通消息；用户可以另建多个 Conversation，但它们不能同时执行。
 - 排队用户消息的顺序和原文由宿主保证，语义冲突完全由 Agent 处理。
 - 取消请求停止未来工作，但不会牺牲正在执行的 semantic transaction 原子性或回滚已经提交的变更。
+
+
+## 2026-10-17 token 开销修正
+
+每次无状态模型请求继续携带完整当前对话，压缩阈值仍为上下文窗口的 80%。本次只减少无关读取与无界工具/固定目录内容，不引入累计 token 预算。估算校准以当前请求未经校准的 messageTokens 为分母，扣除单独计入的 imageTokens / toolSchemaTokens 后重新求倍率（限制在 0.2–5），避免用已校准估算覆盖倍率导致来回振荡；旧自定义调用缺少 breakdown 时以实际/估算比值修正现有倍率。工具集版本提升为 6。

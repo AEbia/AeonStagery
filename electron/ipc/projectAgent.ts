@@ -4,6 +4,8 @@ import type {
   ProjectAgentBeginTaskRequest,
   ProjectAgentProjectContext,
   ProjectAgentStartRequest,
+  ProjectAgentImageAttachment,
+  ProjectAgentStartResultPayload,
   ProjectAgentTaskStatusPayload,
   ProjectAgentTerminalCommandRequest,
 } from '../../src/api/types/project-agent-ipc';
@@ -182,32 +184,65 @@ export function registerProjectAgentHandlers(windows: IpcWindowContext) {
     );
   });
 
-  ipcMain.handle('projectAgent:sendSupplement', async (event, taskId: unknown, text: unknown) => {
+  let supplementSequence = 0;
+  const pendingSupplements = new Map<string, (result: { ok: boolean; error?: string }) => void>();
+  ipcMain.handle('projectAgent:supplementResult', (event, value: unknown) => {
+    if (!isMainWindowFrameSender(event) || !value || typeof value !== 'object') return;
+    const payload = value as ProjectAgentStartResultPayload;
+    if (typeof payload.requestId !== 'string' || typeof payload.ok !== 'boolean') return;
+    pendingSupplements.get(payload.requestId)?.({
+      ok: payload.ok,
+      ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+    });
+  });
+
+  ipcMain.handle('projectAgent:sendSupplement', async (event, taskId: unknown, text: unknown, image: unknown) => {
     if (!isAgentWindowFrameSender(event) && !isMainWindowFrameSender(event)) {
       return { ok: false, error: 'Unauthorized project Agent supplement sender.' };
     }
-    if (typeof taskId !== 'string' || typeof text !== 'string' || text.trim().length === 0) {
+    if (typeof taskId !== 'string' || !taskId || typeof text !== 'string'
+      || (!text.trim() && image === undefined)
+      || (image !== undefined && !isProjectAgentImageAttachment(image))) {
       return { ok: false, error: 'Invalid project Agent supplement.' };
     }
-    if (windows.mainWindow && !windows.mainWindow.isDestroyed()) {
-      windows.mainWindow.webContents.send('projectAgent:supplement', { taskId, text });
+    const editorWindow = windows.mainWindow;
+    if (!editorWindow || editorWindow.isDestroyed() || editorWindow.webContents.isDestroyed()) {
+      return { ok: false, error: '编辑器窗口不可用，请打开编辑器后重试。' };
     }
-    return { ok: true };
+    const requestId = `supplement-${++supplementSequence}`;
+    return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const timeout = setTimeout(() => {
+        pendingSupplements.delete(requestId);
+        resolve({ ok: false, error: '消息发送超时，请确认编辑器窗口可用后重试。' });
+      }, 30_000);
+      pendingSupplements.set(requestId, (result) => {
+        clearTimeout(timeout);
+        pendingSupplements.delete(requestId);
+        resolve(result);
+      });
+      try {
+        editorWindow.webContents.send('projectAgent:supplement', {
+          taskId, text, ...(image !== undefined ? { image } : {}), requestId,
+        });
+      } catch {
+        pendingSupplements.get(requestId)?.({ ok: false, error: '消息发送失败，请确认编辑器窗口可用后重试。' });
+      }
+    });
   });
 
   // Agent-window task start (ADR0023): the window requests a start with task
   // text (and optionally a user-attached image); main relays it to the editor
   // renderer, the sole task-lifecycle owner, which validates targets/admission
   // and begins the task. The window never holds project/scene state, so it
-  // never guesses a target identity. Image bytes are transient — they never
-  // enter the main-process journal.
+  // never guesses a target identity. Image bytes follow the editor-owned
+  // single-copy conversation persistence contract.
   const MAX_AGENT_IMAGE_BYTES = 6 * 1024 * 1024;
   const ALLOWED_AGENT_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
   function isProjectAgentStartRequest(value: unknown): value is ProjectAgentStartRequest {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as ProjectAgentStartRequest;
-    if (typeof candidate.taskText !== 'string' || candidate.taskText.trim().length === 0) {
+    if (typeof candidate.taskText !== 'string' || (!candidate.taskText.trim() && candidate.image === undefined)) {
       return false;
     }
     if (candidate.requestId !== undefined && typeof candidate.requestId !== 'string') return false;
@@ -215,8 +250,12 @@ export function registerProjectAgentHandlers(windows: IpcWindowContext) {
       && candidate.accessMode !== 'standard'
       && candidate.accessMode !== 'full_access') return false;
     if (candidate.image === undefined) return true;
-    const image = candidate.image;
-    if (!image || typeof image !== 'object') return false;
+    return isProjectAgentImageAttachment(candidate.image);
+  }
+
+  function isProjectAgentImageAttachment(value: unknown): value is ProjectAgentImageAttachment {
+    if (!value || typeof value !== 'object') return false;
+    const image = value as ProjectAgentImageAttachment;
     if (typeof image.name !== 'string' || typeof image.mimeType !== 'string') return false;
     if (!ALLOWED_AGENT_IMAGE_MIME.has(image.mimeType)) return false;
     if (!(image.bytes instanceof Uint8Array) || image.bytes.byteLength === 0) return false;

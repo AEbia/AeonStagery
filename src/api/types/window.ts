@@ -60,6 +60,8 @@ import type {
   ProjectAgentProjectContext,
   ProjectAgentRenameConversationResult,
   ProjectAgentStartRequest,
+  ProjectAgentImageAttachment,
+  ProjectAgentSupplementRequest,
   ProjectAgentStartResultPayload,
   ProjectAgentTerminalCommandRequest,
   ProjectAgentTerminalCommandResponse,
@@ -180,7 +182,7 @@ export interface AeonStageryElectronAPI {
     journalListByProject(projectId: string): Promise<readonly ProjectAgentJournalRecord[]>;
     publishTaskStatus(status: ProjectAgentTaskStatusPayload): Promise<boolean>;
     getTaskStatus(taskId?: string): Promise<ProjectAgentTaskStatusPayload | null>;
-    sendSupplement(taskId: string, text: string): Promise<{ ok: boolean; error?: string }>;
+    sendSupplement(taskId: string, text: string, image?: ProjectAgentImageAttachment): Promise<{ ok: boolean; error?: string }>;
     requestStart(payload: ProjectAgentStartRequest): Promise<{ ok: boolean; error?: string }>;
     runTerminalCommand?(request: ProjectAgentTerminalCommandRequest): Promise<ProjectAgentTerminalCommandResponse>;
     cancelTerminalCommand?(requestId: string): Promise<void>;
@@ -230,10 +232,11 @@ export interface AeonStageryElectronAPI {
     getProjectContext(): Promise<ProjectAgentProjectContext | null>;
     /** Editor start-result relay (correlated by requestId; Agent window). */
     publishStartResult(payload: ProjectAgentStartResultPayload): Promise<void>;
+    publishSupplementResult(payload: ProjectAgentStartResultPayload): Promise<void>;
     onContext(callback: (context: ProjectAgentProjectContext) => void): () => void;
     onStartResult(callback: (payload: ProjectAgentStartResultPayload) => void): () => void;
     onStatus(callback: (status: ProjectAgentTaskStatusPayload) => void): () => void;
-    onSupplement(callback: (payload: { taskId: string; text: string }) => void): () => void;
+    onSupplement(callback: (payload: ProjectAgentSupplementRequest) => void): () => void;
     onStartRequest(callback: (payload: ProjectAgentStartRequest) => void): () => void;
     onSetModel(callback: (model: string) => void): () => void;
     onSetEffort(callback: (effort: string) => void): () => void;

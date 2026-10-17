@@ -52,9 +52,13 @@ describe('buildProjectAgentSystemPrompt', () => {
     expect(prompt).toMatch(/autonomous/i);
   });
 
-  it('guides broad reads and independent batching without stale control tools', () => {
+  it('guides targeted reads and independent batching without stale control tools', () => {
     const prompt = buildProjectAgentSystemPrompt({ baseSystemPrompt: 'base' });
-    expect(prompt).toContain('readScene({ startLine: 1, lineCount: 500 })');
+    expect(prompt).toContain('first use searchScene');
+    expect(prompt).toContain('10-50 lines');
+    expect(prompt).toContain('hasMore alone is not a reason to continue');
+    expect(prompt).toContain('searchCharacterCapabilities');
+    expect(prompt).not.toContain('readScene({ startLine: 1, lineCount: 500 })');
     expect(prompt).toContain('Batch independent read tools');
     expect(prompt).toContain('pathPrefix');
     expect(prompt).toContain('Use text only to find a known name');

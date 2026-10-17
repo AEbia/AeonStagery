@@ -741,7 +741,20 @@ export function bootstrap(options?: {
   // Agent-window supplements are the same task's input (ADR0023): relay them
   // verbatim into the editor-owned service; the window never creates a task.
   const disposeProjectAgentSupplementRelay = electronCapability?.projectAgent?.onSupplement((payload) => {
-    void projectAgent?.sendSupplement(payload.text).catch(() => undefined);
+    void (async () => {
+      try {
+        const result = await projectAgent?.sendSupplement(payload.text, payload.image, payload.taskId);
+        await electronCapability.projectAgent?.publishSupplementResult({
+          requestId: payload.requestId,
+          ...(result ?? { ok: false, error: '项目 Agent 服务不可用。' }),
+        });
+      } catch (error) {
+        await electronCapability.projectAgent?.publishSupplementResult({
+          requestId: payload.requestId, ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })();
   }) ?? (() => undefined);
 
   // Agent-window task start (ADR0023): the window never holds project/scene
