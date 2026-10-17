@@ -140,6 +140,22 @@ describe('TextLayerManager materialized state', () => {
     expect((textLayerManager.getLayerContainer('title') as any).alpha).toBe(1);
   });
 
+  it('temporarily hides graphic text layers for subtitle exports and restores visibility', () => {
+    textLayerManager.addLayer({ id: 'title', text: 'Title', style: 'instant' });
+    textLayerManager.addLayer({ id: 'credit', text: 'Credit', style: 'instant' });
+    const title = textLayerManager.getLayerContainer('title') as any;
+    const credit = textLayerManager.getLayerContainer('credit') as any;
+    credit.visible = false;
+
+    const restoreVisibility = textLayerManager.hideForSubtitleExport();
+    expect(title.visible).toBe(false);
+    expect(credit.visible).toBe(false);
+
+    restoreVisibility();
+    expect(title.visible).toBe(true);
+    expect(credit.visible).toBe(false);
+  });
+
   it('rebuilds a same-id layer when text content or style changes', () => {
     textLayerManager.addLayer({ id: 'title', text: 'Hello', style: 'instant', color: '#FFFFFF' });
     const previous = textLayerManager.getLayerContainer('title') as any;

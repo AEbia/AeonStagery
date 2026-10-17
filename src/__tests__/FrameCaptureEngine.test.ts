@@ -8,8 +8,12 @@ const customAnimMocks = vi.hoisted(() => ({
   captureFrame: vi.fn().mockResolvedValue(null),
   getActiveAnimationCount: vi.fn(() => 0),
 }));
+const textLayerMocks = vi.hoisted(() => ({
+  hideForSubtitleExport: vi.fn(() => () => {}),
+}));
 
 vi.mock('../engine/CustomAnimHost', () => ({ customAnimHost: customAnimMocks }));
+vi.mock('../engine/TextLayerManager', () => ({ textLayerManager: textLayerMocks }));
 
 import { FrameCaptureEngine } from '../engine/export/FrameCaptureEngine';
 
@@ -92,6 +96,7 @@ describe('FrameCaptureEngine', () => {
     customAnimMocks.seek.mockClear();
     customAnimMocks.captureFrame.mockReset().mockResolvedValue(null);
     customAnimMocks.getActiveAnimationCount.mockReset().mockReturnValue(0);
+    textLayerMocks.hideForSubtitleExport.mockReset().mockImplementation(() => () => {});
     engine = new FrameCaptureEngine(
       stage as any, playback as any, lighting as any,
       live2D as any, camera as any,
@@ -454,6 +459,11 @@ describe('FrameCaptureEngine', () => {
 
     expect(stage.getLayer).toHaveBeenCalledWith('subtitle');
     expect(visibleDuringRender).toBe(false);
+    // Hiding subtitles must still render the scene, rather than using the
+    // now-hidden subtitle layer as the render root and producing blank frames.
+    expect(stage.getApp().renderer.render.mock.calls.every(
+      ([target]: readonly unknown[]) => target === stage.getApp().stage,
+    )).toBe(true);
     expect(subtitleLayer.visible).toBe(true); // restored after capture
   });
 
@@ -551,6 +561,44 @@ describe('FrameCaptureEngine', () => {
     expect(renderTargets.length).toBeGreaterThan(0);
     expect(renderTargets.every((target) => target === subtitleLayer)).toBe(true);
     expect(app.renderer.background.alpha).toBe(1); // restored after capture
+  });
+
+  it.each([
+    ['transparent', { subtitleOnly: true }],
+    ['chroma', { subtitleChroma: true }],
+  ] as const)('temporarily hides graphic text layers during %s subtitle export', async (_mode, exportMode) => {
+    const backend = createMockBackend();
+    const subtitleLayer = { visible: true };
+    const textLayer = { visible: true };
+    const visibilityDuringRender: boolean[] = [];
+    stage.getLayer = vi.fn(() => subtitleLayer);
+    textLayerMocks.hideForSubtitleExport.mockImplementation(() => {
+      const originalVisibility = textLayer.visible;
+      textLayer.visible = false;
+      return () => { textLayer.visible = originalVisibility; };
+    });
+    stage.getApp().renderer.render = vi.fn(() => {
+      visibilityDuringRender.push(textLayer.visible);
+    });
+
+    await engine.capture({
+      fps: 60,
+      rangeStart: 0,
+      rangeEnd: 1 / 60,
+      width: 1920,
+      height: 1080,
+      bitrateBps: 12_000_000,
+      outputPath: '/tmp/subtitles.webm',
+      codec: 'libvpx-vp9',
+      backend: backend as any,
+      onProgress: vi.fn(),
+      ...exportMode,
+    });
+
+    expect(textLayerMocks.hideForSubtitleExport).toHaveBeenCalled();
+    expect(visibilityDuringRender.length).toBeGreaterThan(0);
+    expect(visibilityDuringRender.every((visible) => !visible)).toBe(true);
+    expect(textLayer.visible).toBe(true);
   });
 
   it('clears the renderer background alpha during subtitle-only capture and restores it after', async () => {

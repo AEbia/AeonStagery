@@ -6,7 +6,8 @@ import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompos
 import { customAnimHost } from '../CustomAnimHost';
 import type { CustomAnimationCaptureFrame } from '../CustomAnimHost';
 import { advanceLive2DExportClock } from '../live2d/runtime/Live2DRuntimeControlModule';
-import { Rectangle } from 'pixi.js';
+import { textLayerManager } from '../TextLayerManager';
+import { Rectangle, RenderTexture } from 'pixi.js';
 
 // Minimal interfaces for injected dependencies — only what FrameCaptureEngine actually uses
 interface StageSubsystem {
@@ -223,6 +224,8 @@ export class FrameCaptureEngine {
     const originalBackgroundColor = (app.renderer.background)?.color;
     let subtitleLayer: import('pixi.js').Container | null | undefined;
     let originalSubtitleVisible = true;
+    const isRawPixels = 'pushQueue' in backend;
+    let subtitleRenderTexture: RenderTexture | null = null;
 
     try {
       signal?.throwIfAborted();
@@ -287,9 +290,32 @@ export class FrameCaptureEngine {
 
       // Render only the subtitle layer for subtitle-only exports; the layer
       // was resolved above and is guaranteed non-null in that mode.
-      const renderTarget = subtitleLayer ?? app.stage;
+      const renderTarget = renderSubtitlesOnly && subtitleLayer ? subtitleLayer : app.stage;
 
-      app.renderer.render(renderTarget);
+      const renderCaptureTarget = () => {
+        const restoreTextLayers = renderSubtitlesOnly
+          ? textLayerManager.hideForSubtitleExport()
+          : null;
+        try {
+          if (subtitleRenderTexture) {
+            // Capture the same offscreen frame we render. Extracting a container
+            // would render it a second time with Pixi's default transparent clear,
+            // losing the chroma background and re-running subtitle render state.
+            app.renderer.render({
+              container: renderTarget,
+              target: subtitleRenderTexture,
+              clear: true,
+              clearColor: subtitleChroma ? [0, 1, 0, 1] : [0, 0, 0, 0],
+            });
+          } else {
+            app.renderer.render(renderTarget);
+          }
+        } finally {
+          restoreTextLayers?.();
+        }
+      };
+
+      renderCaptureTarget();
       const nextFrame = typeof requestAnimationFrame !== 'undefined'
         ? requestAnimationFrame
         : (cb: any) => setTimeout(cb, 16);
@@ -309,6 +335,12 @@ export class FrameCaptureEngine {
       const startFrame = Math.floor(rangeStart * fps);
       const endFrame = Math.ceil(rangeEnd * fps);
       const totalFrames = endFrame - startFrame;
+
+      if (renderSubtitlesOnly && isRawPixels) {
+        subtitleRenderTexture = RenderTexture.create({
+          width, height, resolution: 1, antialias: app.renderer.view?.antialias ?? false,
+        });
+      }
 
       let lastUiUpdate = Date.now();
 
@@ -360,7 +392,7 @@ export class FrameCaptureEngine {
         // methods no longer exist on AbstractRenderer's systems.
         app.renderer.resetState();
 
-        app.renderer.render(renderTarget);
+        renderCaptureTarget();
 
         // Custom HTML animations are part of the scene, not the subtitle
         // layer — never composite them into a subtitle-only export.
@@ -389,14 +421,13 @@ export class FrameCaptureEngine {
 
         // If the backend has pushFrame (RawPixelsBackend), it needs the
         // composited RGBA pixels. WebCodecs receives a composited canvas.
-        const isRawPixels = 'pushQueue' in backend || typeof (backend as any).pushQueue !== 'undefined';
         signal?.throwIfAborted();
         if (isRawPixels) {
           const extractedPixels = app.renderer.extract.pixels({
             // Match the render target. Subtitle-only exports must not pull the
             // camera-affected scene (including panorama post effects) back in
             // through a second full-stage extraction.
-            target: renderTarget,
+            target: subtitleRenderTexture ?? renderTarget,
             frame: new Rectangle(0, 0, width, height),
           });
           const pixels = extractedPixels instanceof Uint8Array || extractedPixels instanceof Uint8ClampedArray
@@ -452,6 +483,7 @@ export class FrameCaptureEngine {
       throw error;
     } finally {
       signal?.removeEventListener('abort', cancelBackend);
+      subtitleRenderTexture?.destroy(true);
       // ── Restore ──
       config.voiceLipSync?.dispose();
       app.renderer.resize(originalWidth, originalHeight, originalResolution);

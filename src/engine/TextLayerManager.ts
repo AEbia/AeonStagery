@@ -57,6 +57,26 @@ class TextLayerManager {
   public getLayerContainer(id: string): PIXI.Container | null {
     return this.layers.get(id) ?? null;
   }
+
+  /** Hide graphic text layers while exporting dialogue subtitles on their own. */
+  public hideForSubtitleExport(): () => void {
+    const visibility = Array.from(this.layers.values(), (container) => ({
+      container,
+      visible: container.visible,
+    }));
+    for (const { container } of visibility) {
+      if (!container.destroyed) container.visible = false;
+    }
+
+    let restored = false;
+    return () => {
+      if (restored) return;
+      restored = true;
+      for (const { container, visible } of visibility) {
+        if (!container.destroyed) container.visible = visible;
+      }
+    };
+  }
   
   public clearAll() {
     this.proxies.clear();
