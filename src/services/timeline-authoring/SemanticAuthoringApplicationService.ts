@@ -6,7 +6,7 @@ import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import type { CharacterDirectoryCommand } from '../../api/types/character-directory';
 import type { AgentValidateSceneDiagnostic } from '../../api/types/project-agent';
 import type { ProjectTemplateConfiguration } from '../../api/types/project';
-import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
+import type { CurrentSceneDocument, DialogueImagePresentation } from '../../api/types/semantic-scene';
 import type { DocumentStore } from '../../ui/store/DocumentStore';
 import type { AiScriptSegmentSemanticCompileResult } from '../ai-authoring/AiScriptSegmentCompiler';
 import {
@@ -82,6 +82,12 @@ export interface DialogueDefaultsReader {
   getDialogueDefaults(): Pick<ProjectTemplateConfiguration, 'dialoguePresentation' | 'dialogueTemplate' | 'defaults'> | undefined;
 }
 
+export interface DialogueStyleRefresh {
+  presentation: DialogueImagePresentation;
+  /** Exact previous project snapshot for older dialogues without a style id. */
+  previousPresentation?: DialogueImagePresentation;
+}
+
 interface SemanticHistoryEntry {
   readonly before: CurrentSceneDocument;
   readonly after: CurrentSceneDocument;
@@ -114,6 +120,32 @@ export class SemanticAuthoringApplicationService {
         : this.applyCreatedDialogueDefaults(result.document, result.receipt.createdStatementIds);
       await this.commit(document, next);
       return result.receipt;
+    });
+  }
+
+  /** Update materialized styles in the open scene as one undoable source edit. */
+  refreshDialogueStyles(updates: readonly DialogueStyleRefresh[]): Promise<number> {
+    return this.enqueueOperation(async () => {
+      const document = this.documentStore.getCurrentSceneDocumentSnapshot();
+      if (!document || updates.length === 0) return 0;
+      let changed = 0;
+      const statements = document.statements.map((statement) => {
+        if (statement.type !== 'dialogue' || !statement.params.presentation) return statement;
+        const current = statement.params.presentation;
+        const update = updates.find((candidate) => current.styleId
+          ? current.styleId === candidate.presentation.styleId
+          : candidate.previousPresentation && JSON.stringify(current) === JSON.stringify(candidate.previousPresentation));
+        if (!update || JSON.stringify(current) === JSON.stringify(update.presentation)) return statement;
+        changed++;
+        const presentation: DialogueImagePresentation = JSON.parse(JSON.stringify(update.presentation));
+        return { ...statement, params:{ ...statement.params, presentation } };
+      });
+      if (changed > 0) {
+        await this.commit(document, withSceneDocumentCanonicalOrder(
+          { ...document, statements }, getSceneDocumentCanonicalOrder(document),
+        ));
+      }
+      return changed;
     });
   }
 
@@ -338,6 +370,11 @@ export class SemanticAuthoringApplicationService {
     });
   }
 
+  /** Let edits already queued by blur or another surface settle before saving/closing. */
+  async waitForPendingEdits(): Promise<void> {
+    await this.mutationChain.catch(() => undefined);
+  }
+
   clearHistory(): void {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
@@ -381,7 +418,9 @@ export class SemanticAuthoringApplicationService {
   }
 
   private requireDocument(): CurrentSceneDocument {
-    const document = this.documentStore.getCurrentSceneDocumentSnapshot();
+    // Transactions and undo records consume an immutable source. Detached
+    // save snapshots would copy every other inline motion on each edit.
+    const document = this.documentStore.getCurrentSceneDocumentView();
     if (!document) throw new Error('No semantic scene document loaded');
     return document;
   }

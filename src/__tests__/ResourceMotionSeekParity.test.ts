@@ -1,3 +1,4 @@
+import { characterInfoFixture } from './helpers/characterInfoFixture';
 /**
  * @vitest-environment node
  */
@@ -45,19 +46,22 @@ const cachedEntry: CachedResourceMotion = {
   evaluate: () => ({}),
 };
 
-const fakeSamplerTarget = { internalModel: {}, motionManager: {} } as any;
+const cachedCubism3Entry: CachedResourceMotion = {
+  ...cachedEntry,
+  key: 'untitled-pixi-live2d-engine-cubism::asset://models/char.model3.json::wave',
+};
 
 function createMockLive2D() {
   const characterEntry = {
     id: 'char1',
     model: {},
     modelPath: 'asset://models/char.model3.json',
-    runtime: { adapterId: 'pixi-live2d-display-cubism2' },
+    runtime: { adapterId: 'pixi-live2d-display-cubism2' as const },
   };
   const live2D = {
     listCharacters: vi.fn().mockReturnValue(['char1']),
     hasCharacter: vi.fn().mockReturnValue(true),
-    getAllCharacters: vi.fn().mockReturnValue(new Map([['char1', characterEntry]])),
+    getCharacterInfo: vi.fn().mockImplementation((id: string) => characterInfoFixture(new Map([['char1', characterEntry]]).get(id), id)),
     applySnapshot: vi.fn(),
     captureSnapshot: vi.fn().mockReturnValue(null),
     playMotion: vi.fn(),
@@ -75,8 +79,9 @@ function createMockLive2D() {
     isMotionLoading: vi.fn().mockReturnValue(false),
     clearAllPendingMotions: vi.fn(),
     stopAllMotions: vi.fn(),
+    restoreSeekState: vi.fn().mockResolvedValue(undefined),
     getMotionDuration: vi.fn().mockReturnValue(2),
-    getMotionSamplerTargets: vi.fn(),
+    sampleMotion: vi.fn(async () => ({ status: 'unsupported' as const })),
   };
   return live2D;
 }
@@ -246,7 +251,6 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(null);
     vi.spyOn(motionCurveCache, 'missReason').mockReturnValue(null);
     const ensure = vi.spyOn(motionCurveCache, 'ensure').mockResolvedValue(cachedEntry);
-    live2D.getMotionSamplerTargets.mockReturnValue([fakeSamplerTarget]);
 
     const charSnap = {
       params: new Float32Array([0, 0, 0, 0]),
@@ -279,15 +283,19 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
       fps: 30,
     });
 
-    // The seek resolves the convertible miss through the shared sampler once:
-    expect(live2D.getMotionSamplerTargets).toHaveBeenCalledWith('char1');
+    // The seek asks the bound domain behavior to sample the resource motion.
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(ensure).toHaveBeenCalledWith({
       adapterId: 'pixi-live2d-display-cubism2',
       modelRuntimePath: 'asset://models/char.model3.json',
       motionKey: 'wave',
-      targets: [fakeSamplerTarget],
       fps: 30,
+      sample: expect.any(Function),
+    });
+    const source = ensure.mock.calls[0][0];
+    await source.sample?.({ fps: 30, zeroSourceFades: true, skipMissingParameters: true });
+    expect(live2D.sampleMotion).toHaveBeenCalledWith('char1', 'wave', {
+      fps: 30, zeroSourceFades: true, skipMissingParameters: true,
     });
     // The freshly built curve entry feeds Phase 3 exactly like a pre-warmed
     // hit: one desired-motion playMotion with the motion-start handoff.
@@ -297,11 +305,45 @@ describe('CharacterSynchronizer cache-first resource motion seek', () => {
     expect(updateCalls).toEqual([0]);
   });
 
+  it('routes cached Cubism 3+ parameter motions through the custom evaluator instead of native replay', async () => {
+    live2D.getCharacterInfo.mockReturnValue(characterInfoFixture({
+      modelPath: 'asset://models/char.model3.json',
+      runtime: { runtimeFamily: 'cubism3-plus' as const, adapterId: 'untitled-pixi-live2d-engine-cubism' as const, supported: true },
+    }));
+    vi.spyOn(motionCurveCache, 'get').mockReturnValue(cachedCubism3Entry);
+
+    await synchronizer.syncTo({
+      time: 120,
+      desiredChars: new Map([['char1', {
+        id: 'char1',
+        model: 'asset://models/char.model3.json',
+        config: {},
+        motion: {
+          output: { kind: 'resource', key: 'wave', fadeInSeconds: 0.5 } as CharacterMotionOutput,
+          priority: 3,
+          time: 0,
+        },
+      }]]),
+      transformationProxies: new ProxyRegistry(),
+      snapshotStore: snapshots,
+      shouldCancel: () => false,
+      skipHardReset: false,
+      isScrubbing: false,
+    });
+
+    expect(live2D.restoreSeekState).not.toHaveBeenCalled();
+    expect(live2D.playCustomMotion).toHaveBeenCalledWith(
+      'char1',
+      cachedCubism3Entry.motion,
+      0,
+      undefined,
+    );
+  });
+
   it('never re-samples a permanently-rejected motion during seek (SDK fallback)', async () => {
     vi.spyOn(motionCurveCache, 'get').mockReturnValue(null);
     vi.spyOn(motionCurveCache, 'missReason').mockReturnValue('parts-layout-curves');
     const ensure = vi.spyOn(motionCurveCache, 'ensure');
-    live2D.getMotionSamplerTargets.mockReturnValue([fakeSamplerTarget]);
 
     await synchronizer.syncTo({
       time: 0.2,

@@ -7,7 +7,7 @@
  * while only the target's parameters fade — the visible "突变" (snap).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { Cubism2PixiLive2DModelControls } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { applyRenderHook } from '../engine/Live2DModelSetup';
 
 interface QueueEntry {

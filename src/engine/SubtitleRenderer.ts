@@ -22,6 +22,53 @@ const STAGE_HEIGHT = 1080;
 // Performance: TextMetrics Cache
 const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
 
+/** Fill subtitle lines across whitespace/hyphens before breaking CJK or oversized tokens. */
+function wrapDialogueTokens(text: string, style: PIXI.TextStyle): string {
+  const limit = style.wordWrapWidth;
+  const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  const widths = new Map<string, number>();
+  const widthOf = (value: string): number => {
+    let width = widths.get(value);
+    if (width === undefined) {
+      width = PIXI.CanvasTextMetrics.measureText(value, style, undefined, false).maxLineWidth;
+      widths.set(value, width);
+    }
+    return width;
+  };
+  // Match Pixi's whitespace and hyphen boundaries without changing their glyphs.
+  const tokensOf = (line: string) => line.split(/([\t \u2000-\u2006\u2008-\u200a\u205f\u3000]|[-\u2010\u2013\u2014\u00ad])/u).filter(Boolean);
+  return text.split(/(\r\n|\r|\n)/).map((paragraph) => {
+    if (/^[\r\n]+$/.test(paragraph)) return paragraph;
+    const tokens = tokensOf(paragraph);
+    if (tokens.length < 2 || widthOf(paragraph) <= limit
+      || !tokens.some((token) => cjk.test(token) || widthOf(token) > limit)) return paragraph;
+
+    const lines: string[] = [];
+    let line = '';
+    for (const token of tokens) {
+      if (!cjk.test(token) && widthOf(token) <= limit) {
+        if (line && widthOf(line + token) > limit) {
+          lines.push(line);
+          line = '';
+        }
+        line += token;
+        continue;
+      }
+      // Pixi moves the whole token to a new line here. Keep the available space,
+      // and split by grapheme so emoji and combining characters stay intact.
+      for (const character of PIXI.CanvasTextMetrics.wordWrapSplit(token)) {
+        if (line && widthOf(line + character) > limit) {
+          lines.push(line);
+          line = '';
+        }
+        line += character;
+      }
+    }
+    lines.push(line);
+    return lines.join('\n');
+  }).join('');
+}
+
 class SubtitleRenderer {
   private dialogueContainer: PIXI.Container | null = null;
   private dialogueOpacity = 1;
@@ -135,7 +182,6 @@ class SubtitleRenderer {
       return this.dialogueCache.get(cacheKey)!.timeline;
     }
 
-    const text = rawText;
     const globalFontSize = this.getDialogueFontSize();
     const container = new PIXI.Container();
 
@@ -181,6 +227,7 @@ class SubtitleRenderer {
     } else if (templateId === 'glass') textStyle.wordWrapWidth = STAGE_WIDTH - 360;
     else if (templateId === 'minimal') textStyle.wordWrapWidth = STAGE_WIDTH - 400;
 
+    const text = wrapDialogueTokens(rawText, textStyle);
     const metrics = this.getCachedMetrics(text, textStyle);
     // Local body-text preferences must not change the template's speaker font.
     const layout = template.render(container, config, metrics);
@@ -190,6 +237,20 @@ class SubtitleRenderer {
     dialogueText.resolution = 2;
     dialogueText.x = layout.textX;
     dialogueText.y = layout.textY;
+    // PixiJS only honors `style.align` when a line actually wraps, so a
+    // single-line subtitle stayed flush left even when `align` was `center`.
+    // Anchor the sprite against the column the text actually wraps to:
+    // `wordWrapWidth` above was tightened to the textbox and the stage, while
+    // the authored `maxWidth` can still reach past both.
+    const textAlignment = (textStyle.align as string | undefined) ?? 'left';
+    const alignmentSpan = Math.max(
+      1,
+      Number(textStyle.wordWrapWidth) || layout.textWidth || metrics.maxLineWidth,
+    );
+    if (textAlignment === 'center' || textAlignment === 'right') {
+      dialogueText.anchor.x = textAlignment === 'right' ? 1 : 0.5;
+      dialogueText.x = layout.textX + alignmentSpan * (textAlignment === 'right' ? 1 : 0.5);
+    }
     container.addChild(dialogueText);
 
     const textMask = new PIXI.Graphics();
@@ -259,10 +320,15 @@ class SubtitleRenderer {
       y: 0, duration: 0.45, ease: 'back.out(1.4)',
       onUpdate: syncEntrance,
     }, 0);
-    // Image dialogue reveals text itself so sprite/stencil batching cannot
-    // expose the unrevealed suffix. Wrap and alignment use the full metrics.
-    if (style === 'typewriter' && config.presentation?.renderer === 'image-dialogue-v1') {
+    // Image dialogue and minimal text reveal their actual line contents so
+    // renderer batching or mask behavior cannot expose the unrevealed suffix.
+    // Wrap and alignment continue to use the full-text metrics.
+    if (style === 'typewriter' && (
+      config.presentation?.renderer === 'image-dialogue-v1' || templateId === 'minimal'
+    )) {
       dialogueText.mask = null;
+      // This branch positions every line itself, so undo the anchored alignment above.
+      dialogueText.anchor.x = 0;
       container.removeChild(textMask);
       textMask.destroy();
       const lineStyle = textStyle.clone();
@@ -275,7 +341,10 @@ class SubtitleRenderer {
         lineText.style = lineStyle;
         lineText.text = '';
         lineText.resolution = 2;
-        const alignmentOffset = metrics.maxLineWidth - metrics.lineWidths[index];
+        // Align inside the authored text column rather than the longest line:
+        // for a single line the two are equal, which is why centered dialogue
+        // used to drift back to the left.
+        const alignmentOffset = Math.max(0, alignmentSpan - metrics.lineWidths[index]);
         lineText.x = layout.textX + (align === 'center' ? alignmentOffset / 2 : align === 'right' ? alignmentOffset : 0);
         lineText.y = layout.textY + index * lineHeight;
         if (index > 0) container.addChild(lineText);

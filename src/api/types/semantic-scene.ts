@@ -225,9 +225,13 @@ export interface DialogueImagePanelStyle {
   height?: number;
   minHeight?: number;
   opacity?: number;
+  /** Horizontal anchor applied after measuring the final panel width. */
+  anchorX?: number;
 }
 
 export interface DialogueImageTextStyle {
+  /** Suppress the body glyph layer while retaining its layout geometry. */
+  hidden?: boolean;
   fontFile?: string;
   fontFamily?: string;
   fontSize?: number;
@@ -237,6 +241,7 @@ export interface DialogueImageTextStyle {
   y: number;
   maxWidth: number;
   lineHeight?: number;
+  letterSpacing?: number;
   align?: 'left' | 'center' | 'right';
   strokeColor?: string;
   strokeWidth?: number;
@@ -245,6 +250,8 @@ export interface DialogueImageTextStyle {
   dropShadowAlpha?: number;
   dropShadowBlur?: number;
   dropShadowDistance?: number;
+  /** Shadow direction in radians, following Pixi's text style convention. */
+  dropShadowAngle?: number;
 }
 
 export interface DialogueImageSpeakerStyle {
@@ -252,9 +259,20 @@ export interface DialogueImageSpeakerStyle {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
+  letterSpacing?: number;
   color?: string;
   padding?: DialogueNineSlice;
   textOffset?: Vec2;
+  /** Nameplate text alignment. Absent means `center`, matching legacy templates. */
+  align?: 'left' | 'center' | 'right';
+  strokeColor?: string;
+  strokeWidth?: number;
+  dropShadow?: boolean;
+  dropShadowColor?: string;
+  dropShadowAlpha?: number;
+  dropShadowBlur?: number;
+  dropShadowDistance?: number;
+  dropShadowAngle?: number;
 }
 
 export interface DialogueImagePresentation {
@@ -343,6 +361,8 @@ export type CharacterMotionOutput =
   | {
       readonly kind: 'resource';
       readonly key: string;
+      /** Finite scene extent, materialized from the resource before compilation. */
+      readonly durationSeconds?: number;
       readonly fadeInSeconds?: number;
     }
   | {

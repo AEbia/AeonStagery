@@ -11,18 +11,15 @@ import {
   type CustomMotionDensity,
   type CustomMotionSampledTrack,
 } from '../../engine/live2d/customMotionConversion';
-import {
-  Cubism2MotionSamplingError,
-  mergeCubism2SampledCurves,
-  resolveCubism2MotionMeta,
-  sampleCubism2MotionCurves,
-  type Cubism2MotionCurve,
-  type Cubism2MotionMeta,
-  type Cubism2MotionSamplerTarget,
-  type Cubism2MotionSamplingOptions,
-} from '../../engine/live2d/cubism2MotionSampler';
+import type {
+  Live2DMotionSampledCurve,
+  Live2DMotionSamplingMetadata,
+  Live2DMotionSamplingOptions,
+  Live2DMotionSamplingResult,
+} from '../../engine/runtime/Live2DRuntimeContracts';
 import { SemanticAuthoringApplicationService } from './SemanticAuthoringApplicationService';
-import { type CustomMotionEditLeaseGate, locatorToLeaseTarget } from './CustomMotionEditLeaseGate';
+import { InMemoryCustomMotionEditAuthority, type CustomMotionEditAuthority, type HeldCustomMotionLease } from './CustomMotionEditAuthority';
+import { customMotionFingerprint } from './customMotionKeyframeEdits';
 import { assertCanonicalCustomMotion, CustomMotionContractError } from '../semantic-scene';
 
 /**
@@ -43,6 +40,7 @@ export interface CustomMotionConversionRequest {
   origin: AuthoringOrigin;
   correlationId?: string;
   scope?: AuthoringScope;
+  signal?: AbortSignal;
 }
 
 export interface CustomMotionConversionReceipt {
@@ -55,24 +53,19 @@ export interface CustomMotionConversionReceipt {
 export interface CustomMotionConversionPorts {
   /** Existing atomic authoring service; the converted motion commits through it. */
   authoring: SemanticAuthoringApplicationService;
+  /** Preferred bound-runtime sampling behavior. */
+  sampleMotion?: (characterId: string, motionKey: string, options: Live2DMotionSamplingOptions) => Promise<Live2DMotionSamplingResult>;
+  /** Shared application authority; standalone callers use in-memory ownership. */
+  authority?: CustomMotionEditAuthority;
   /**
-   * Concrete Cubism 2.1 sampler targets of a character. Empty when the
-   * character is not loaded or is not a Cubism 2.1 runtime.
-   */
-  samplerTargets: (characterId: string) => readonly Cubism2MotionSamplerTarget[];
-  /** Optional collaboration lease gate; when set, conversion requires the lease. */
-  leaseGate?: CustomMotionEditLeaseGate;
-  /**
-   * Injectable sampler seam (tests substitute fakes here). Defaults to the
-   * real Cubism 2.1 sampler implementation.
+   * Legacy sampled-curve seam. Native curve segments use sampleMotion instead.
    */
   sampler?: CustomMotionConversionSampler;
 }
 
 export interface CustomMotionConversionSampler {
-  sample: typeof sampleCubism2MotionCurves;
-  merge: typeof mergeCubism2SampledCurves;
-  resolveMeta: typeof resolveCubism2MotionMeta;
+  sample(characterId: string, motionKey: string, options: Live2DMotionSamplingOptions): Promise<readonly Live2DMotionSampledCurve[]>;
+  resolveMeta(characterId: string, motionKey: string): Promise<Live2DMotionSamplingMetadata>;
 }
 
 export type CustomMotionConversionErrorCode =
@@ -111,17 +104,15 @@ interface CharacterPerformanceParamsLike {
  * refused.
  */
 export class CustomMotionConversionCommand {
-  private readonly samplerImpl: CustomMotionConversionSampler;
+  private readonly samplerImpl?: CustomMotionConversionSampler;
+  private readonly authority: CustomMotionEditAuthority;
 
   constructor(private readonly ports: CustomMotionConversionPorts) {
-    this.samplerImpl = ports.sampler ?? {
-      sample: sampleCubism2MotionCurves,
-      merge: mergeCubism2SampledCurves,
-      resolveMeta: resolveCubism2MotionMeta,
-    };
+    this.authority = ports.authority ?? new InMemoryCustomMotionEditAuthority();
+    this.samplerImpl = ports.sampler;
   }
 
-  async convert(request: CustomMotionConversionRequest): Promise<CustomMotionConversionReceipt> {
+  async convert(request: CustomMotionConversionRequest, handoff?: (lease: HeldCustomMotionLease) => Promise<boolean>): Promise<CustomMotionConversionReceipt> {
     const document = this.ports.authoring.getDocumentSnapshot();
     const entity = resolveCharacterPerformance(document, request.locator);
     const params = entity.params as CharacterPerformanceParamsLike;
@@ -135,67 +126,62 @@ export class CustomMotionConversionCommand {
     }
 
     const motionKey = source.motionKey;
-    const characterId = params.target;
-    console.log(`[CustomMotionConvert] 开始转换 motion="${motionKey}" character="${characterId}"`);
-    const targets = this.ports.samplerTargets(characterId);
-    console.log(`[CustomMotionConvert] samplerTargets 数量=${targets.length}`);
-    if (targets.length === 0) {
+    const characterId = resolveCharacterId(document, request.locator, params);
+    if (!this.ports.sampleMotion && !this.samplerImpl) {
       throw new CustomMotionConversionError(
-        `Character "${characterId}" is not loaded as a Cubism 2.1 model; conversion requires a loaded concrete model`,
+        `Character "${characterId}" is not loaded for motion sampling`,
         'character-not-loaded',
         { characterId },
       );
     }
-    targets.forEach((target, index) => {
-      const mm = target.motionManager;
-      console.log(`[CustomMotionConvert] target[${index}] 有 motionManager=${!!mm}, 有 settings=${!!mm?.settings}, settings.motions 键=${mm?.settings?.motions ? Object.keys(mm.settings.motions).join(',') : '(无)'}`);
-    });
 
-    let meta: Cubism2MotionMeta;
+    let meta: Live2DMotionSamplingMetadata;
+    let merged: readonly Live2DMotionSampledCurve[];
+    let nativeMotion: Extract<CharacterMotionOutput, { kind: 'custom' }> | undefined;
     try {
-      meta = await this.samplerImpl.resolveMeta(targets[0], motionKey);
-      console.log(`[CustomMotionConvert] resolveMeta 成功: duration=${meta.durationSeconds}s fadeIn=${meta.fadeInSeconds} fadeOut=${meta.fadeOutSeconds}`);
+      if (this.ports.sampleMotion) {
+        const sampled = await this.ports.sampleMotion(characterId, motionKey, {
+          fps: document.meta.fps ?? DEFAULT_SCENE_FPS,
+          zeroSourceFades: true,
+        });
+        if (sampled.status !== 'sampled' || !sampled.metadata) {
+          throw new Error(sampled.diagnostics?.join('; ') ?? 'Runtime does not support motion sampling');
+        }
+        meta = sampled.metadata;
+        if (sampled.motion) {
+          nativeMotion = structuredClone(sampled.motion);
+          merged = [];
+        } else {
+          merged = sampled.curves ?? [];
+        }
+      } else {
+        const sampler = this.samplerImpl!;
+        meta = await sampler.resolveMeta(characterId, motionKey);
+        merged = await sampler.sample(characterId, motionKey, {
+          fps: document.meta.fps ?? DEFAULT_SCENE_FPS,
+          zeroSourceFades: true,
+        });
+      }
     } catch (error) {
-      console.error(`[CustomMotionConvert] resolveMeta 失败:`, error);
       throw wrapSamplingError(error, characterId, motionKey);
     }
 
     const fps = document.meta.fps ?? DEFAULT_SCENE_FPS;
-    const samplingOptions: Cubism2MotionSamplingOptions = {
-      fps,
-      durationSeconds: meta.durationSeconds,
-      fadeInSeconds: meta.fadeInSeconds,
-      fadeOutSeconds: meta.fadeOutSeconds,
-    };
-
-    let merged: readonly Cubism2MotionCurve[];
-    try {
-      const perModel = await Promise.all(
-        targets.map((target) => this.samplerImpl.sample(target, motionKey, samplingOptions)),
-      );
-      merged = this.samplerImpl.merge(perModel);
-      console.log(`[CustomMotionConvert] 采样成功: ${merged.length} 条曲线`);
-    } catch (error) {
-      console.error(`[CustomMotionConvert] 采样失败:`, error);
-      throw wrapSamplingError(error, characterId, motionKey);
-    }
 
     const sampledTracks: CustomMotionSampledTrack[] = merged.map((curve) => ({
       parameterId: curve.parameterId,
       samples: curve.samples,
     }));
 
-    const leaseTarget = locatorToLeaseTarget(request.locator);
-    if (this.ports.leaseGate) {
-      const acquired = await this.ports.leaseGate.acquire(leaseTarget);
-      if (!acquired) {
-        throw new CustomMotionConversionError(
-          `Edit lease for character performance "${request.locator.statementId}" is held by another collaborator`,
-          'lease-denied',
-          { statementId: request.locator.statementId },
-        );
-      }
-    }
+    const leaseTarget = request.locator.kind === 'companion'
+      ? { kind: 'companion' as const, statementId: request.locator.statementId, companionId: request.locator.companionId }
+      : { kind: 'statement' as const, statementId: request.locator.statementId };
+    const signal = request.signal ?? new AbortController().signal;
+    const decision = await this.authority.acquire(leaseTarget, signal);
+    if (decision.status !== 'granted') throw new CustomMotionConversionError('Custom motion edit authority refused the conversion', 'lease-denied');
+    let retained = false;
+    let lost = false;
+    const unsubscribeLoss = this.authority.onLoss(decision.lease, () => { lost = true; });
 
     try {
       let conversion: ReturnType<typeof convertSampledMotionToCustomMotion> | undefined;
@@ -203,10 +189,15 @@ export class CustomMotionConversionCommand {
         // Execute the post-sampling read, conversion, and replacement intent
         // inside the application service queue. This preserves sibling output
         // edits that were queued while the lease was pending.
+        if (signal.aborted || lost || currentDocument.sceneId !== document.sceneId || (currentDocument.meta.fps ?? DEFAULT_SCENE_FPS) !== fps) {
+          throw new CustomMotionConversionError('Conversion context changed before commit', 'entity-changed');
+        }
         const currentEntity = resolveCharacterPerformance(currentDocument, request.locator);
         const currentParams = currentEntity.params as CharacterPerformanceParamsLike;
         const currentSource = resolveConversionSource(currentParams.motion);
-        if (!currentSource || currentSource.kind !== source.kind || currentSource.motionKey !== motionKey) {
+        if (!currentSource || currentSource.kind !== source.kind || currentSource.motionKey !== motionKey
+          || resolveCharacterId(currentDocument, request.locator, currentParams) !== characterId
+          || (params.motion?.kind === 'custom' && (currentParams.motion?.kind !== 'custom' || customMotionFingerprint(currentParams.motion) !== customMotionFingerprint(params.motion)))) {
           throw new CustomMotionConversionError(
             `Source motion of "${request.locator.statementId}" changed while sampling; conversion aborted`,
             'entity-changed',
@@ -221,15 +212,38 @@ export class CustomMotionConversionCommand {
             ?? CUSTOM_MOTION_CONVERSION_DEFAULT_FADE_IN_SECONDS;
 
         try {
-          conversion = convertSampledMotionToCustomMotion({
-            durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds),
-            fadeInSeconds,
-            derivedFromKey: motionKey,
-            derivedFromFadeInSeconds: meta.fadeInSeconds,
-            derivedFromFadeOutSeconds: meta.fadeOutSeconds,
-            density: request.density,
-            sampledTracks,
-          });
+          if (nativeMotion) {
+            if (nativeMotion.tracks.length === 0) throw new Error('Expected at least one convertible parameter track');
+            conversion = {
+              motion: {
+                ...nativeMotion,
+                durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds,
+                  ...nativeMotion.tracks.map((track) => track.fadeInSeconds ?? 0)),
+                fadeInSeconds,
+                derivedFrom: {
+                  key: motionKey,
+                  ...(meta.fadeInSeconds !== undefined ? { fadeInSeconds: meta.fadeInSeconds } : {}),
+                  ...(meta.fadeOutSeconds !== undefined ? { fadeOutSeconds: meta.fadeOutSeconds } : {}),
+                },
+              },
+              staticTrackIds: nativeMotion.tracks.filter((track) => track.keyframes.length > 0
+                && track.keyframes.every((point) => point.value === track.keyframes[0].value
+                  && (point.segment?.type !== 'bezier'
+                    || point.segment.controlPoints.every((control) => control.value === point.value))))
+                .map((track) => track.parameterId),
+              simplifiedTrackIds: [],
+            };
+          } else {
+            conversion = convertSampledMotionToCustomMotion({
+              durationSeconds: Math.max(meta.durationSeconds, fadeInSeconds),
+              fadeInSeconds,
+              derivedFromKey: motionKey,
+              derivedFromFadeInSeconds: meta.fadeInSeconds,
+              derivedFromFadeOutSeconds: meta.fadeOutSeconds,
+              density: request.density,
+              sampledTracks,
+            });
+          }
           // Conversion adapter: the engine layer stays free of semantic-scene
           // dependencies, so the canonical contract (ADR-0029) is enforced
           // here on the produced motion before it can be committed. Non-finite
@@ -250,9 +264,6 @@ export class CustomMotionConversionCommand {
               },
             );
           }
-          if (error instanceof Cubism2MotionSamplingError) {
-            throw wrapSamplingError(error, characterId, motionKey);
-          }
           if (error instanceof Error && /track|parameter/i.test(error.message)) {
             throw new CustomMotionConversionError(
               `Source motion "${motionKey}" has no convertible parameter curves (only ignored Parts curves remain)`,
@@ -266,6 +277,7 @@ export class CustomMotionConversionCommand {
         return [buildConversionIntent(request, currentEntity, conversion.motion)];
       });
       if (!conversion) throw new Error('Custom motion conversion did not produce a motion');
+      if (handoff && !lost && !signal.aborted) retained = await handoff(decision.lease);
       return {
         authoring: receipt,
         motion: conversion.motion,
@@ -273,17 +285,19 @@ export class CustomMotionConversionCommand {
         simplifiedTrackIds: conversion.simplifiedTrackIds,
       };
     } finally {
-      // ADR-0029: a conversion either commits atomically or releases the
-      // edit lease immediately, so collaborators are never blocked until the
-      // lease timeout (default ~30s).
-      if (this.ports.leaseGate) {
-        this.ports.leaseGate.release(leaseTarget);
-      }
+      unsubscribeLoss();
+      if (!retained) await this.authority.release(decision.lease);
     }
   }
 }
 
 const DEFAULT_SCENE_FPS = 60 as const;
+
+function resolveCharacterId(document: CurrentSceneDocument, locator: CustomMotionConversionTarget, params: CharacterPerformanceParamsLike): string {
+  if (params.target !== '$speaker') return params.target;
+  const parent = document.statements.find((statement) => statement.id === locator.statementId);
+  return parent?.type === 'dialogue' ? parent.params.speakerId ?? '' : '';
+}
 
 type ResolvedConversionSource =
   | { kind: 'resource'; motionKey: string; fadeInSeconds?: number }
@@ -383,11 +397,10 @@ function wrapSamplingError(
   characterId: string,
   motionKey: string,
 ): CustomMotionConversionError {
-  const code = error instanceof Cubism2MotionSamplingError ? error.code : 'queue-evaluation-failed';
   const message = error instanceof Error ? error.message : String(error);
   return new CustomMotionConversionError(
     `Sampling motion "${motionKey}" on character "${characterId}" failed: ${message}`,
     'sampling-failed',
-    { characterId, motionKey, code },
+    { characterId, motionKey },
   );
 }

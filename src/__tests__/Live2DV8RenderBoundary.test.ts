@@ -18,7 +18,7 @@
  */
 import fs from 'node:fs';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { Cubism2PixiLive2DModelControls } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
 import {
   findRenderGuardAnchor,

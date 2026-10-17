@@ -1,17 +1,25 @@
 # Custom Motion Authoring Reference
 
-自定义 Motion 已作为 scene schema v5（当前 schema epoch，支持自 v3/v4 自动迁移）的能力实现。用户从已有 Cubism 2.1 资源 Motion 发起显式转换，得到场景内联、自包含的 Parameter 关键帧副本；源 `.mtn` 不被修改，也不再是该副本播放时的依赖。
+自定义 Motion 已作为 scene schema v5（当前 schema epoch，支持自 v3/v4 自动迁移）的能力实现。用户从已有 Cubism 2.1 或 Cubism 3/4/5 资源 Motion 发起显式转换，得到场景内联、自包含的 Parameter 关键帧副本；源 `.mtn` / `.motion3.json` 不被修改，也不再是该副本播放时的依赖。
 
 权威产品与数据契约见 [ADR-0029](adr/0029-live2d-custom-motion-keyframe-authoring.md)，协作编辑权与并发租约见 [ADR-0028](adr/0028-scoped-custom-motion-edit-lease.md)，演进兼容与 scene v5 迁移见 [ADR-0031](adr/0031-evolution-compatibility-policy.md) 与 [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md)。本页只提供实现入口和维护检查，不复制完整需求。
 
 ## 用户流程
 
 1. 在时间线上选中已有资源 Motion，通过 Inspector 或片段菜单选择“转为自定义动作”。
-2. 选择稀疏、标准、精细或逐帧密度。转换命令读取已加载的 Cubism 2.1 模型并原子生成关键帧；失败时不修改场景。
+2. Cubism 2.1 选择稀疏、标准、精细或逐帧密度；Cubism 3/4/5 直接保留原生曲线分段和控制点，Model 效果组合按场景帧率展开。转换命令原子生成关键帧；失败时不修改场景。
 3. 在时间轴展开编辑器，使用轨道、曲线或列表视图修改关键帧时间、数值与分段，并调整 Motion 时长或淡入。支持多关键帧框选/多选与成组移动（Group Move），并在多端协作时维护并发编辑租约。
 4. 需要重新采样时选择“重新转换”。该操作从 `derivedFrom` 指向的源动作整体重建轨道，会替换已有关键帧、逐轨道淡入与裁剪结果。
 
-首版不能从空白创建自定义 Motion，不烘焙呼吸、眨眼、口型、physics 或 Parts 曲线，也不修改原始 Motion 文件。Cubism 3/4/5 共用数据抽象，但当前转换入口只支持已加载的 Cubism 2.1 模型。
+首版不能从空白创建自定义 Motion，不烘焙独立呼吸、眨眼、口型、physics 或 Parts 曲线，也不修改原始 Motion 文件。Cubism 3/4/5 源 Motion 中的 Model EyeBlink / LipSync 曲线按模型 Groups 合成到 Parameter 轨道。
+
+## 大规模动作的性能边界
+
+- 场景只读订阅、动作编辑会话和 authoring/Undo 使用 `DocumentStore.getCurrentSceneDocumentView()` 的稳定冻结视图，读取不会复制或校验全部动作。需要独立副本的保存等边界继续使用 `getCurrentSceneDocumentSnapshot()`。
+- 淡入签名和编辑冲突指纹对深度冻结的 Motion 按对象身份缓存，缓存使用弱引用。浅冻结或可变输入仍重新计算；修改关键帧产生的新对象不会命中旧缓存。
+- Motion3 restricted Bezier 的时间轴直接求解，合法单调控制点使用二分；历史非单调曲线保留多根扫描。不会为了减少点数改变源曲线、删除恒定 Parameter 的控制权。
+- 运行时资源准备同步处理没有 asset slot 的 JSON 子树，并复用经过递归检查的不可变子树，避免为每个关键帧及控制点字段创建 Promise。source readiness 没有替换文档时不重复执行 codec。
+
 
 ## 运行时曲线缓存（区别于作者态转换）
 

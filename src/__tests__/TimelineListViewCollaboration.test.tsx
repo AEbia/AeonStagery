@@ -68,8 +68,9 @@ function makeContext(
       } as any,
       camera: {} as any,
       character: {
-        getCoreModel: () => null,
-        getModel: () => null,
+        inspectParameters: () => null,
+        editParameters: vi.fn(),
+        getDisplayObject: () => null,
       } as any,
       stage: {} as any,
       timeline: {} as any,

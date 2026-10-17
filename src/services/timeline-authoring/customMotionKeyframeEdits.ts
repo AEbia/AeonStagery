@@ -5,6 +5,7 @@ import type {
   CustomMotionTrack,
 } from '../../api/types/semantic-scene';
 import { evaluateCustomMotionTrack, solveBezierTime } from '../../engine/live2d/customMotion';
+import { isDeeplyFrozen } from '../../shared/immutable';
 import {
   assertCanonicalCustomMotion,
   CustomMotionContractError,
@@ -12,14 +13,20 @@ import {
 } from '../semantic-scene';
 
 /** Compare persisted motion structure independently of object field insertion order. */
+const immutableFingerprints = new WeakMap<object, string>();
+
 export function customMotionFingerprint(motion: Extract<CharacterMotionOutput, { kind: 'custom' }>): string {
-  return JSON.stringify(motion, (_key, value: unknown) => {
+  const cached = immutableFingerprints.get(motion);
+  if (cached !== undefined) return cached;
+  const fingerprint = JSON.stringify(motion, (_key, value: unknown) => {
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>;
       return Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]));
     }
     return value;
   });
+  if (isDeeplyFrozen(motion)) immutableFingerprints.set(motion, fingerprint);
+  return fingerprint;
 }
 
 export interface CustomMotionKeyframeRef {
@@ -33,6 +40,8 @@ export type CustomMotionKeyframeEdit =
       type: 'move-keyframes';
       keyframes: readonly CustomMotionKeyframeRef[];
       deltaTime: number;
+      /** Internal frame-intent lowering; selected native subframe points snap only when moved. */
+      targetTimes?: readonly (CustomMotionKeyframeRef & { targetTime: number })[];
       /** Value movement is restricted to a single parameter. */
       deltaValue?: number;
     }
@@ -243,8 +252,9 @@ function moveKeyframes(
     if (!times || (edit.deltaTime === 0 && deltaValue === 0)) return track;
     const originalByPoint = new Map<CustomMotionKeyframe, number>();
     const points = track.keyframes.map((point, index) => {
+      const targetTime = edit.targetTimes?.find((ref) => ref.parameterId === track.parameterId && ref.time === point.time)?.targetTime;
       const next = times.has(point.time)
-        ? { ...point, time: point.time + edit.deltaTime, value: point.value + deltaValue }
+        ? { ...point, time: targetTime ?? point.time + edit.deltaTime, value: point.value + deltaValue }
         : point;
       originalByPoint.set(next, index);
       return next;

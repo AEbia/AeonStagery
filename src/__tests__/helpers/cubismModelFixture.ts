@@ -5,11 +5,21 @@ import { installCubismPixiModelRuntime } from '../../engine/CubismPixiModel';
 export function createCubismModelFixture(
   ids = ['ParamEyeLOpen', 'ParamEyeROpen', 'ParamBreath', 'ParamMouthOpenY', 'ParamAngleX'],
   eyeBlinkParameters: string[] = [],
+  suppliedExpressionManager?: object,
 ) {
-  const values = new Float32Array(ids.map((id) => id.includes('Eye') ? 1 : 0));
+  const values = new Float32Array(ids.map((id) => id.includes('Eye') && id.includes('Open') ? 1 : 0));
   let saved = values.slice();
   let drawn = values.slice();
   const opacities = new Float32Array([1]);
+  const focusController = {
+    x: 0, y: 0, targetX: 0, targetY: 0, vx: 0, vy: 0,
+    focus(x: number, y: number, instant = false) {
+      this.targetX = Math.max(-1, Math.min(1, x));
+      this.targetY = Math.max(-1, Math.min(1, y));
+      if (instant) { this.x = this.targetX; this.y = this.targetY; }
+    },
+    update: vi.fn(),
+  };
   const core = {
     getParameterCount: () => ids.length,
     getParameterId: (index: number) => ({ getString: () => ({ s: ids[index] }) }),
@@ -22,7 +32,7 @@ export function createCubismModelFixture(
     loadParameters: vi.fn(() => values.set(saved)),
     update: vi.fn(() => { drawn = values.slice(); }),
   };
-  const expressionManager: any = {
+  const expressionManager: any = suppliedExpressionManager ?? {
     stopAllExpressions: vi.fn(), resetExpression: vi.fn(),
     getExpressionIndex: (key: string) => key === 'smile' ? 0 : -1,
     loadExpression: vi.fn(async () => ({})),
@@ -37,6 +47,7 @@ export function createCubismModelFixture(
   };
   const internal: any = new EventEmitter();
   Object.assign(internal, {
+    focusController,
     coreModel: core, motionManager, settings: {
       motions: {}, expressions: [{ Name: 'smile', File: 'smile.exp3.json' }],
       getEyeBlinkParameters: () => eyeBlinkParameters,
@@ -52,6 +63,16 @@ export function createCubismModelFixture(
       internal.updateMotions(core, now);
       core.saveParameters();
       internal.emit('expressionUpdate');
+      focusController.update();
+      for (const [id, value] of Object.entries({
+        ParamEyeBallX: focusController.x, ParamEyeBallY: focusController.y,
+        ParamAngleX: focusController.x * 30, ParamAngleY: focusController.y * 30,
+        ParamAngleZ: focusController.x * focusController.y * -30,
+        ParamBodyAngleX: focusController.x * 10,
+      })) {
+        const index = ids.indexOf(id);
+        if (index >= 0) values[index] += value;
+      }
       internal.updateNaturalMovements(dt, now);
       internal.emit('beforeModelUpdate');
       core.update();

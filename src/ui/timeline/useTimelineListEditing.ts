@@ -158,7 +158,7 @@ export function useTimelineListEditing(
     } finally {
       gapInsertPendingRef.current = false;
     }
-  }, [activeGapMenu, blockOfflineAuthoring, commands, documentStore, availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems]);
+  }, [activeGapMenu, blockOfflineAuthoring, commands, documentStore, availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems, gapInsertPendingRef, setActiveGapMenu]);
 
   const handlePasteAtGap = useCallback(async (time: number) => {
     const editorStore = app?.stores?.editor;
@@ -167,7 +167,7 @@ export function useTimelineListEditing(
     const receipt = await commands.paste(editorStore.copyBuffer, time, 'timeline-list-gap');
     if (receipt) showToast(`已粘贴 ${receipt.createdStatementIds.length} 个语句`, 'success');
     setActiveGapMenu(null);
-  }, [app, blockOfflineAuthoring, commands, semanticAuthoring]);
+  }, [app, blockOfflineAuthoring, commands, semanticAuthoring, setActiveGapMenu]);
 
   const dropRootStatementAt = useCallback(async (movedStatementId: string, insertionIndex: number) => {
     if (!semanticAuthoring || !sceneDocument || blockOfflineAuthoring()) return;

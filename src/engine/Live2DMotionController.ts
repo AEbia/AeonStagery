@@ -6,14 +6,14 @@
  * with Live2DManager — no copying.
  */
 
+import { getLive2DRuntimeCapabilities } from './live2d/runtime/Live2DRuntimeControlModule';
 import gsap from 'gsap';
 import type { CharacterEntry, ModelSnapshot } from './Live2DConfig';
-import { acquireUtSystemLock, describeInvalidModelSnapshot, releaseUtSystemLock } from './Live2DConfig';
+import { describeInvalidModelSnapshot } from './Live2DConfig';
 import { hookSystem } from '../api/hooks';
-import { cubism2Live2DAdapter, getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
-import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
+import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { releaseCustomMotionOwnership } from './live2d/customMotionOwnership';
-import { purgeCharacterRuntimeState, restoreNeutralModelPose } from './live2d/characterStatePurge';
+import { purgeCharacterRuntimeState } from './live2d/characterStatePurge';
 import {
   decideLive2DMotionRestart,
   getLive2DSnapshotRestorePolicy,
@@ -22,9 +22,6 @@ import {
   isLive2DEpochStale,
   normalizeLive2DMotionOffset,
 } from './Live2DFrameEvaluation';
-import { seekProfiler } from './SeekProfiler';
-
-let cubism2ConfigPromise: Promise<any> | null = null;
 
 function isDefaultPoseSnapshot(snapshot: ModelSnapshot | null): boolean {
   if (!snapshot?.params?.length) return true;
@@ -51,13 +48,6 @@ function clearPendingSeekBoundary(entry: CharacterEntry): void {
   entry.pendingSeekBoundaryDuration = undefined;
 }
 
-async function loadCubism2Config(): Promise<any> {
-  if (!cubism2ConfigPromise) {
-    cubism2ConfigPromise = cubism2Live2DAdapter.init().then(() => cubism2Live2DAdapter.getConfig());
-  }
-  return cubism2ConfigPromise;
-}
-
 export interface MotionRequest {
   key: string;
   priority: number;
@@ -73,28 +63,13 @@ export class Live2DMotionController {
     private characters: Map<string, CharacterEntry>,
     private containers: Map<string, any>,
     private pendingMotions: Map<string, MotionRequest[]>,
-    private pendingConfigs: Map<string, any[]>,
+    private pendingConfigs: Map<string, unknown[]>,
     private motionMutex: Map<string, Promise<void>>,
     private hardResetMutex: Map<string, Promise<void>>,
     private activeMotionLoads: Set<string>,
-    private jumpingCharacters: Set<string>,
+    _jumpingCharacters: Set<string>,
     private getScriptEngine: () => any,
   ) {}
-
-  private isCubism2Runtime(entry: CharacterEntry): boolean {
-    return (entry.runtime?.adapterId ?? 'pixi-live2d-display-cubism2') === 'pixi-live2d-display-cubism2';
-  }
-
-  private restoreExpressionAfterMotionReset(entry: CharacterEntry): void {
-    if (entry.expressionKey === undefined) return;
-
-    if (entry.runtimeHandle) {
-      entry.runtimeHandle.expression.setExpression(entry.expressionKey);
-      return;
-    }
-
-    getLive2DRuntimeAdapter(entry.runtime).getControls().setExpression(entry.model, entry.expressionKey);
-  }
 
   private getGeneration(entry: CharacterEntry): number {
     return entry.lifecycleGeneration ?? 0;
@@ -117,21 +92,11 @@ export class Live2DMotionController {
     if (!entry?.model) return 0;
 
     try {
-      return getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionDuration(entry.model, motionKey);
+      return getBoundRuntimeHandle(entry)?.motion.getMotionDuration(motionKey) ?? 0;
     } catch (e) {
       console.warn(`[Live2D] Cannot get motion duration for ${id}/${motionKey}:`, e);
       return 0;
     }
-  }
-
-  /**
-   * Return the concrete Cubism 2.1 sampling targets for a loaded character.
-   * Used by the runtime motion curve cache pre-warm and seek integration.
-   */
-  getMotionSamplerTargets(id: string): readonly Cubism2MotionSamplerTarget[] {
-    const entry = this.characters.get(id);
-    if (!entry?.model) return [];
-    return getLive2DRuntimeAdapter(entry.runtime).getControls().getMotionSamplingTargets(entry.model);
   }
 
   /**
@@ -159,7 +124,7 @@ export class Live2DMotionController {
     const preserveTinyOffset = skipHardReset || scriptEngine?.isReconstructing === true;
     const targetOffset = normalizeLive2DMotionOffset(offset, { preserveTinyOffset });
     const shouldCaptureHandoffAtIntent =
-      entry?.runtime?.adapterId === 'untitled-pixi-live2d-engine-cubism'
+      (entry && getLive2DRuntimeCapabilities(entry).supportsMotionHandoff)
       || (preserveTinyOffset && isLive2DMotionHandoffOffset(targetOffset));
 
     if (!entry) {
@@ -181,7 +146,7 @@ export class Live2DMotionController {
     // 我们只把最后的指令存下来，交由下一帧 of updateAll 去执行，彻底避开微任务的时序陷阱。
     const reqEpoch = ++entry.motionEpoch; // 意图产生时立刻推进版本
     const handoffSnapshot = shouldCaptureHandoffAtIntent
-      ? getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(id, entry.model, entry.motionStartTime)
+      ? getBoundRuntimeHandle(entry)?.snapshot.captureSnapshot(entry.motionStartTime) ?? null
       : null;
     entry._pendingPlayMotion = { key: motionKey, priority, offset: targetOffset, sceneTime, skipHardReset, handoffSnapshot, reqEpoch };
   }
@@ -216,7 +181,7 @@ export class Live2DMotionController {
       entry.lastOffset = undefined; // reset so _executePlayMotion doesn't think we're playing
       // Clear every concrete model's motion state so composite sub-models do not
       // carry stale queued frames into seek reconstruction.
-      getLive2DRuntimeAdapter(entry.runtime).getControls().clearMotionState(entry.model);
+      getBoundRuntimeHandle(entry)?.lifecycle.clearMotionState();
     }
   }
 
@@ -235,322 +200,142 @@ export class Live2DMotionController {
     // 曲线值，把无动作区域的姿态污染成动作姿态，破坏后续播放的淡入交接。
     this.releaseCustomMotion(entry);
     if (!entry.model) return;
-    getLive2DRuntimeAdapter(entry.runtime).getControls().stopAllMotions(entry.model);
+    getBoundRuntimeHandle(entry)?.lifecycle.stopAllMotions();
   }
 
   /**
    * 核心重构：彻底解决"立正"的同步切割法
    */
-  async _executePlayMotion(id: string, motionKey: string, priority: number, offset: number, sceneTime: number, skipHardReset: boolean = false, reqEpoch: number = 0, requestHandoffSnapshot: ModelSnapshot | null = null): Promise<void> {
-    // Serialize per character — only one motion operation at a time per ID
+  async _executePlayMotion(
+    id: string,
+    motionKey: string,
+    priority: number,
+    offset: number,
+    sceneTime: number,
+    skipHardReset: boolean = false,
+    reqEpoch: number = 0,
+    requestHandoffSnapshot: ModelSnapshot | null = null,
+  ): Promise<void> {
     const prevMutex = this.motionMutex.get(id) || Promise.resolve();
     let releaseMutex: () => void;
-    const nextMutex = new Promise<void>(r => { releaseMutex = r; });
+    const nextMutex = new Promise<void>(resolve => { releaseMutex = resolve; });
     this.motionMutex.set(id, nextMutex);
 
     await prevMutex;
     try {
-      const targetMap = this.characters;
-      const entry = targetMap.get(id);
-      if (!entry || !entry.model) return;
-      // Resource selectors may expose aggregate keys (for example
-      // `mygo/soyo/mtn_smile...`) while the runtime model uses the exact group
-      // name from its own model.json. Resolve the key before probing/starting.
+      const entry = this.characters.get(id);
+      if (!entry?.model) return;
+      const runtime = getBoundRuntimeHandle(entry);
+      if (!runtime) return;
+
       const normalizedRequestedKey = motionKey.trim();
-      const availableGroups = getLive2DRuntimeAdapter(entry.runtime).getControls().getAvailableMotions(entry.model) as string[];
+      const availableGroups = runtime.motion.getAvailableMotions();
       if (!availableGroups.includes(normalizedRequestedKey)) {
         const leaf = normalizedRequestedKey.split('/').at(-1) ?? normalizedRequestedKey;
-        const matches = availableGroups.filter((group) => {
-          const groupLeaf = group.split('/').at(-1) ?? group;
-          return groupLeaf === leaf;
-        });
+        const matches = availableGroups.filter((group) => (group.split('/').at(-1) ?? group) === leaf);
         if (matches.length === 1) motionKey = matches[0];
       }
+
       const generation = this.getGeneration(entry);
+      const isCurrent = () => this.isEntryCurrent(id, entry, generation)
+        && !isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch });
+      if (!isCurrent()) return;
 
-      // 拿到锁后第一时间校验：如果外头产生过更新的 playMotion 意图，立刻丢弃旧指令
-      if (isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) return;
-
-      if (!this.isCubism2Runtime(entry)) {
-        this.activeMotionLoads.add(id);
-        try {
-          if (!skipHardReset) {
-            await this._hardReset(id, entry.model, true);
-            if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-              return;
-            }
-          }
-
-          await getLive2DRuntimeAdapter(entry.runtime).getControls().preloadMotion(entry.model, motionKey);
-          if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-            return;
-          }
-
-          // Native Cubism 3+/4/5 motion fade-in is stateful: it blends the new
-          // curve from the parameters that existed when the action took over.
-          // A hard reset clears that source, so restore the captured handoff
-          // after reset and before the first motion update.
-          if (requestHandoffSnapshot) {
-            this.applySnapshot(id, requestHandoffSnapshot);
-            entry.lastSnapshot = requestHandoffSnapshot;
-          }
-
-          const started = await entry.model.startMotion?.(motionKey, 0, priority, offset);
-          if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-            return;
-          }
-          if (!started) {
-            console.warn(`[Live2D] Motion group "${motionKey}" not found for character "${id}".`);
-            return;
-          }
-          entry.motionStartTime = sceneTime - offset;
-          entry.lastOffset = offset;
-
-          if (skipHardReset && entry.lastSnapshot) {
-            this.applySnapshot(id, entry.lastSnapshot);
-          }
-
-          hookSystem.execute('character:motion', { id, motionKey, offset });
-        } finally {
-          this.activeMotionLoads.delete(id);
-        }
-        return;
-      }
-
-      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-      const targetGroup = motionKey; // 恢复精确匹配
-      if (!controls.hasMotionGroup(entry.model, targetGroup)) {
-        console.warn(`[Live2D] Motion group "${motionKey}" not found for character "${id}".`);
-        this.activeMotionLoads.delete(id);
-        return;
-      }
-
-      // 第一阶段：静默、异步地在后台加载 .mtn 文件
-      // (epoch 已在 playMotion 中推进，这里直接使用 reqEpoch 做校验)
       this.activeMotionLoads.add(id);
       try {
-        await controls.preloadMotion(entry.model, targetGroup);
-      } catch (e) {
-        this.activeMotionLoads.delete(id);
-        return;
-      }
-
-      // --- 核心修复：检查实例是否依然有效 ---
-      // 如果在 await 期间角色被销毁重建了，entry 将不再是 Map 中的那个对象
-      if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-        this.activeMotionLoads.delete(id);
-        return;
-      }
-
-      // 第二阶段：进入同步临界区，瞬间完成 [重置 -> 塞动作 -> 偏移时间]
-      const scriptEngine = this.getScriptEngine();
-      const isReconstructing = scriptEngine?.isReconstructing;
-      // 核心修复：Cubism 2 的 MotionManager 直接暴露了 playing 属性。
-      // 在重建期间只要 Group 匹配我们就认为在播放；非重建期间额外校验 playing。
-      // 通过 runtime controls 读取（不触碰运行时内部实现）。
-      const motionDebug = controls.getMotionDebugState(entry.model);
-      const currentMotionGroup = motionDebug?.currentGroup as string | undefined;
-      const isMotionActuallyPlaying = isReconstructing
-        ? (currentMotionGroup === targetGroup)
-        : (currentMotionGroup === targetGroup && motionDebug?.playing === true);
-
-      const restartDecision = decideLive2DMotionRestart({
-        currentMotionGroup,
-        targetMotionGroup: targetGroup,
-        isMotionActuallyPlaying,
-        previousOffset: entry.lastOffset,
-        requestedOffset: offset,
-        motionStartTime: entry.motionStartTime,
-        sceneTime,
-      });
-      entry.lastOffset = offset;
-      let expressionWasReset = false;
-
-      if (restartDecision.needsRestart) {
+        const isReconstructing = this.getScriptEngine()?.isReconstructing;
         const skipReset = getLive2DSnapshotRestorePolicy({ skipHardReset, isReconstructing }) === 'preserve-current';
-        // A seek purge clears motion bookkeeping before rebuilding the target
-        // state. In that case there is no legitimate handoff pose: this is
-        // the character's first motion at the target time and must fade from
-        // the model instance's captured neutral pose. Existing motion
-        // switches retain the live pose through the normal handoff path.
-        const firstMotionAfterPurge = skipReset
-          && entry.motionStartTime === undefined
-          && entry.lastSnapshot === undefined
-          && requestHandoffSnapshot === null;
-        if (firstMotionAfterPurge && entry.model) {
-          restoreNeutralModelPose(entry, entry.model);
-        }
-        const currentHandoffSnapshot = skipReset && isLive2DMotionHandoffOffset(offset)
-          ? getLive2DRuntimeAdapter(entry.runtime).getControls().captureSnapshot(id, entry.model, entry.motionStartTime)
-          : null;
-        const capturedHandoffSnapshot = skipReset
-          ? requestHandoffSnapshot ?? currentHandoffSnapshot
-          : null;
-        const handoffSnapshot = skipReset
-          ? selectValidHandoffSnapshot(capturedHandoffSnapshot, entry.lastSnapshot, currentHandoffSnapshot)
-          : null;
-          if (skipReset) {
-            await loadCubism2Config();
-            if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-              this.activeMotionLoads.delete(id);
-              return;
-            }
-          }
-        // 1. 同步进行物理和参数硬重置
-        if (!skipReset) {
-          await this._hardReset(id, entry.model, true);
-          // 有意统一为无条件恢复：HEAD 只在 cubism2 时置位，导致官方 runtime
-          // 硬重置后当前表情丢失；resetModelToIdle 现对两个 runtime 都执行
-          // 表情/队列收尾，因此恢复表达式对两者都成立（无 expressionKey 时
-          // restoreExpressionAfterMotionReset 是 no-op）。
-          expressionWasReset = true;
+        const playback = runtime.motion.getPlaybackState();
+        const restartDecision = decideLive2DMotionRestart({
+          currentMotionGroup: playback.currentGroup ?? undefined,
+          targetMotionGroup: motionKey,
+          isMotionActuallyPlaying: isReconstructing
+            ? playback.currentGroup === motionKey
+            : playback.currentGroup === motionKey && playback.playing,
+          previousOffset: entry.lastOffset,
+          requestedOffset: offset,
+          motionStartTime: entry.motionStartTime,
+          sceneTime,
+        });
+        if (restartDecision.needsRestart) {
+          const firstMotionAfterPurge = skipReset
+            && entry.motionStartTime === undefined
+            && entry.lastSnapshot === undefined
+            && requestHandoffSnapshot === null;
+          if (firstMotionAfterPurge) runtime.resetRuntimeState({ pose: 'neutral' });
 
-          // 再次检查实例有效性（因为 _hardReset 内部也有 await）
-          if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-            this.activeMotionLoads.delete(id);
+          const currentHandoffSnapshot = skipReset && isLive2DMotionHandoffOffset(offset)
+            ? runtime.snapshot.captureSnapshot(entry.motionStartTime)
+            : null;
+          const handoffSnapshot = skipReset
+            ? selectValidHandoffSnapshot(
+                requestHandoffSnapshot ?? currentHandoffSnapshot,
+                entry.lastSnapshot,
+                currentHandoffSnapshot,
+              )
+            : null;
+
+          let expressionWasReset = false;
+          if (!skipReset) {
+            await this._hardReset(id, entry.model, true);
+            if (!isCurrent()) return;
+            expressionWasReset = true;
+          }
+          if (!isCurrent()) return;
+
+          const motionStartTime = sceneTime - offset;
+          const transition = await runtime.performance.transition({
+            motionKey,
+            priority,
+            offsetSeconds: offset,
+            sceneTimeSeconds: motionStartTime,
+            clearQueueFirst: skipReset,
+            fadeInSeconds: undefined,
+            handoffSnapshot,
+            finalSnapshot: skipReset ? handoffSnapshot ?? entry.lastSnapshot : undefined,
+            expressionKey: expressionWasReset ? entry.expressionKey : undefined,
+            restoreHandoffBoundary: skipReset && isLive2DMotionHandoffOffset(offset),
+            isCurrent,
+          });
+          if (transition.status === 'cancelled' || !isCurrent()) return;
+          if (transition.status === 'missing') {
+            if (!skipReset) console.warn(`[Live2D] Motion group "${motionKey}" failed to start for character "${id}".`);
             return;
           }
-        }
 
-        // 2. 预加载动作 (mtn 已经在上面 loadMotion 了，这里是二次确认)
-        if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-          this.activeMotionLoads.delete(id);
-          return;
-        }
-
-        entry.motionStartTime = sceneTime - offset;
-
-        const clock = getLive2DRuntimeAdapter(entry.runtime).getClock();
-        if (clock) {
-          this.jumpingCharacters.add(id);
-          // Acquire GLOBAL SDK clock lock — only ONE character across the entire app
-          // may spoof the Cubism SDK clock at a time, including BakeEngine.
-          await acquireUtSystemLock();
-          try {
-            if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-              return;
-            }
-            // 核心修复：以 SDK 时钟当前值为锚点，所有操作只在其基础上递增。
-            // 时钟回拨、动作入队、快进回放与 physics 摘除全部由 runtime adapter
-            // 在锁内完成（等效旧代码的第一~四步）。
-
-            // 快照注入窗口：动作入队、时钟停在动作起始时刻之后、快进回放之前。
-            // 必须在此之前应用恢复快照，否则快进计算出的平滑目标参数会被旧快照
-            // 覆盖，导致严重的视觉步进感（等效旧代码的第 2.5 步）。
-            const snapshotToRestore = selectValidHandoffSnapshot(handoffSnapshot, entry.lastSnapshot);
-            const isHandoffOffset = isLive2DMotionHandoffOffset(offset);
-
-            const startResult = await controls.startMotion(entry.model, targetGroup, priority, offset, {
-              clock,
-              clearQueueFirst: skipReset,
-              stepAfterStartMs: !skipReset && offset <= 0 ? 16 : undefined,
-              beforeReplay: () => {
-                if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-                  return;
-                }
-                if (skipReset && snapshotToRestore) {
-                  controls.applySnapshot(entry.model, snapshotToRestore);
-                  entry.lastSnapshot = snapshotToRestore;
-                  entry.pendingSeekBoundarySnapshot = isHandoffOffset ? snapshotToRestore : undefined;
-                  entry.pendingSeekBoundaryMotionStartTime = isHandoffOffset ? entry.motionStartTime : undefined;
-                  entry.pendingSeekBoundaryDuration = isHandoffOffset ? LIVE2D_MOTION_HANDOFF_OFFSET_SECONDS : undefined;
-                } else {
-                  clearPendingSeekBoundary(entry);
-                }
-              },
-            });
-            if (!startResult.ok && !skipReset) {
-              console.warn(`[Live2D] Motion group "${targetGroup}" failed to start for character "${id}".`);
-            }
-            entry.motionStartUtTime = startResult.motionStartUtTimeMs;
-
-            // 快进后处理：handoff 边界快照的“快进结果是否回到默认姿态”检查。
-            if (isHandoffOffset && skipReset && snapshotToRestore) {
-              const advancedSnapshot = controls.captureSnapshot(id, entry.model, entry.motionStartTime);
-              if (isDefaultPoseSnapshot(advancedSnapshot)) {
-                controls.applySnapshot(entry.model, snapshotToRestore);
-              } else {
-                entry.pendingSeekBoundarySnapshot = snapshotToRestore;
-                entry.pendingSeekBoundaryMotionStartTime = entry.motionStartTime;
-                entry.pendingSeekBoundaryDuration = LIVE2D_MOTION_HANDOFF_OFFSET_SECONDS;
-              }
-            }
-            // console.log(`[Live2D] Motion ${targetGroup} started with spoofed offset ${offset}s for ${id} (skipReset=${skipReset})`);
-          } finally {
-            releaseUtSystemLock();
-            this.jumpingCharacters.delete(id);
-            this.activeMotionLoads.delete(id);
+          entry.motionStartTime = sceneTime - offset;
+          if (handoffSnapshot && skipReset) entry.lastSnapshot = handoffSnapshot;
+          if (transition.retainedHandoffBoundary && handoffSnapshot) {
+            entry.pendingSeekBoundarySnapshot = handoffSnapshot;
+            entry.pendingSeekBoundaryMotionStartTime = entry.motionStartTime;
+            entry.pendingSeekBoundaryDuration = LIVE2D_MOTION_HANDOFF_OFFSET_SECONDS;
+          } else {
+            clearPendingSeekBoundary(entry);
           }
-        } else {
-          if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-            this.activeMotionLoads.delete(id);
-            return;
-          }
-          try {
-            const startResult = await controls.startMotion(entry.model, targetGroup, priority, offset, { clock: null });
-            if (!startResult.ok && !skipReset) {
-              console.warn(`[Live2D] Motion group "${targetGroup}" failed to start for character "${id}".`);
+        } else if (skipReset && runtime.capabilities.determinism.supportsMotionOffsetReplay) {
+          const seekResult = await runtime.performance.seekMotionOffset({
+            offsetSeconds: offset,
+            handoffBoundarySnapshot: entry.pendingSeekBoundarySnapshot,
+            isCurrent,
+          });
+          if (seekResult.status === 'cancelled' || !isCurrent()) return;
+          if (seekResult.status === 'advanced') {
+            if (entry.pendingSeekBoundarySnapshot && !seekResult.retainedHandoffBoundary) {
+              clearPendingSeekBoundary(entry);
             }
-            entry.motionStartUtTime = startResult.motionStartUtTimeMs;
-            // console.log(`[Live2D] Motion ${targetGroup} started (no spoofing) for ${id}`);
-            if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-              return;
-            }
-          } finally {
-            this.activeMotionLoads.delete(id);
           }
         }
-      } else {
-        const skipReset = getLive2DSnapshotRestorePolicy({ skipHardReset, isReconstructing }) === 'preserve-current';
-        const clock = getLive2DRuntimeAdapter(entry.runtime).getClock();
-        if (skipReset && clock) {
-          this.jumpingCharacters.add(id);
-          await acquireUtSystemLock();
-          try {
-            if (!this.isEntryCurrent(id, entry, generation) || isLive2DEpochStale({ currentEpoch: entry.motionEpoch, requestEpoch: reqEpoch })) {
-              return;
-            }
 
-            const motionStartUtTime = entry.motionStartUtTime ?? (clock.getUserTimeMSec() - offset * 1000);
-            entry.motionStartUtTime = motionStartUtTime;
-            const targetUtTime = motionStartUtTime + offset * 1000;
-            clock.setUserTimeMSec(targetUtTime);
-
-            const motionStepStart = performance.now();
-            // 仅推进 Cubism2 动作队列（adapter 内做 physics 摘除保护），避免在
-            // Pixi 渲染边界之外运行模型完整更新路径。
-            controls.advanceMotionOnly(entry.model, targetUtTime);
-            seekProfiler.addTime('motion-step', performance.now() - motionStepStart);
-
-            if (entry.pendingSeekBoundarySnapshot) {
-              const currentSnapshot = controls.captureSnapshot(id, entry.model, entry.motionStartTime);
-              if (isDefaultPoseSnapshot(currentSnapshot)) {
-                controls.applySnapshot(entry.model, entry.pendingSeekBoundarySnapshot);
-              } else {
-                clearPendingSeekBoundary(entry);
-              }
-            }
-          } finally {
-            releaseUtSystemLock();
-            this.jumpingCharacters.delete(id);
-            this.activeMotionLoads.delete(id);
-          }
-        } else {
-          this.activeMotionLoads.delete(id);
+        if (isCurrent()) {
+          entry.lastOffset = offset;
+          hookSystem.execute('character:motion', { id, motionKey, offset });
         }
+      } finally {
+        this.activeMotionLoads.delete(id);
       }
-
-      if (expressionWasReset && this.isEntryCurrent(id, entry, generation)) {
-        this.restoreExpressionAfterMotionReset(entry);
-      }
-
-      hookSystem.execute('character:motion', { id, motionKey: targetGroup, offset });
     } finally {
       releaseMutex!();
-      // Remove resolved mutex from map so waitForAllLoaded can rely on size
-      if (this.motionMutex.get(id) === nextMutex) {
-        this.motionMutex.delete(id);
-      }
+      if (this.motionMutex.get(id) === nextMutex) this.motionMutex.delete(id);
     }
   }
 
@@ -567,11 +352,8 @@ export class Live2DMotionController {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return;
 
-    if (entry.runtimeHandle) {
-      entry.runtimeHandle.snapshot.applySnapshot(snapshot);
-    } else {
-      getLive2DRuntimeAdapter(entry.runtime).getControls().applySnapshot(entry.model, snapshot);
-    }
+    if (!getLive2DRuntimeCapabilities(entry).supportsSnapshot) return;
+    getBoundRuntimeHandle(entry)?.snapshot.applySnapshot(snapshot);
 
     // Restore motion context (don't play the motion — syncAllStates handles that).
     // CRITICAL: Do NOT set the motion queue's current group here.  Setting it
@@ -660,13 +442,7 @@ export class Live2DMotionController {
 
     // 2. Kill all GSAP tweens targeting the model or its internal components
     gsap.killTweensOf(entry.model);
-    for (const focusController of getLive2DRuntimeAdapter(entry.runtime).getControls().getFocusControllers(entry.model)) {
-      gsap.killTweensOf(focusController);
-      if (focusController.__aeonOriginalFocusUpdate) {
-        focusController.update = focusController.__aeonOriginalFocusUpdate;
-        delete focusController.__aeonOriginalFocusUpdate;
-      }
-    }
+    getBoundRuntimeHandle(entry)?.focus.manageAnimations('stop');
   }
 
   /**
@@ -677,9 +453,7 @@ export class Live2DMotionController {
       const entry = this.characters.get(id);
       if (entry) {
         gsap.getTweensOf(entry.model).forEach((t: any) => t.pause());
-        for (const focusController of getLive2DRuntimeAdapter(entry.runtime).getControls().getFocusControllers(entry.model)) {
-          gsap.getTweensOf(focusController).forEach((t: any) => t.pause());
-        }
+        getBoundRuntimeHandle(entry)?.focus.manageAnimations('pause');
         const container = this.containers.get(id);
         if (container) gsap.getTweensOf(container).forEach((t: any) => t.pause());
         const rimProxy = (entry as any).rimProxy;
@@ -696,9 +470,7 @@ export class Live2DMotionController {
       const entry = this.characters.get(id);
       if (entry) {
         gsap.getTweensOf(entry.model).forEach((t: any) => t.resume());
-        for (const focusController of getLive2DRuntimeAdapter(entry.runtime).getControls().getFocusControllers(entry.model)) {
-          gsap.getTweensOf(focusController).forEach((t: any) => t.resume());
-        }
+        getBoundRuntimeHandle(entry)?.focus.manageAnimations('resume');
         const container = this.containers.get(id);
         if (container) gsap.getTweensOf(container).forEach((t: any) => t.resume());
         const rimProxy = (entry as any).rimProxy;
@@ -713,11 +485,14 @@ export class Live2DMotionController {
   async preloadMotion(id: string, motionKey: string): Promise<void> {
     const entry = this.characters.get(id);
     if (!entry || !entry.model) return;
-    if (entry.runtime.adapterId !== 'pixi-live2d-display-cubism2') return;
+    if (!getLive2DRuntimeCapabilities(entry).supportsMotion) return;
 
     this.activeMotionLoads.add(id);
     try {
-      await getLive2DRuntimeAdapter(entry.runtime).getControls().preloadMotion(entry.model, motionKey);
+      const runtime = getBoundRuntimeHandle(entry);
+      if (!runtime) return;
+      const generation = this.getGeneration(entry);
+      await runtime.motion.preloadMotion(motionKey, () => this.isEntryCurrent(id, entry, generation));
     } finally {
       this.activeMotionLoads.delete(id);
     }
@@ -761,25 +536,21 @@ export class Live2DMotionController {
 
       // Runtime reset semantics live in the adapter (motion/expression queue
       // teardown, idle-group flush, idle pose restore, focus reset, step).
-      const controls = getLive2DRuntimeAdapter(entry.runtime).getControls();
-      await controls.resetModelToIdle(model, {
+      const runtime = getBoundRuntimeHandle(entry);
+      if (!runtime) return;
+      const reset = await runtime.lifecycle.resetToIdle({
         keepFocus,
         idleSnapshot: entry?.idleSnapshot ? entry.idleSnapshot as ModelSnapshot : null,
-      });
+      }, () => this.isEntryCurrent(id, entry, generationAtRequest, model));
+      if (!reset || !this.isEntryCurrent(id, entry, generationAtRequest, model)) return;
 
       if (entry) {
-        if (!this.isCubism2Runtime(entry)) {
+        if (!runtime.capabilities.determinism.supportsMotionOffsetReplay) {
           entry.motionStartTime = undefined;
           entry.lastOffset = undefined;
           entry.lastSnapshot = undefined;
         }
         entry.lastManualTimeMs = undefined;
-      }
-
-      // The legacy Cubism 2 reset ended with one wrapper-level advance after
-      // the per-concrete steps; keep that final frame.
-      if (this.isCubism2Runtime(entry)) {
-        controls.advanceFrame(model, 16);
       }
 
       // Unified soft-tween teardown for BOTH runtimes. HEAD only killed these

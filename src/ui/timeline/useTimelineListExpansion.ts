@@ -50,37 +50,38 @@ export function useTimelineListExpansion(
     };
   }), [filteredActions, allowInlineExpand, expandedActionIds]);
   const virtualRows = useVirtualTimelineRows(listContainerRef, virtualRowSizes);
+  const { revealRow, cancelReveal } = virtualRows;
   const lastRevealedSelectionRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!selectedSingleId) {
-      virtualRows.cancelReveal();
+      cancelReveal();
       lastRevealedSelectionRef.current = undefined;
       setRevealedActionId(null);
       return;
     }
     if (lastRevealedSelectionRef.current === selectedSingleId) return;
-    virtualRows.cancelReveal();
+    cancelReveal();
     // Expand first so the scroll range includes the inline inspector's height.
     if (allowInlineExpand && !expandedActionIds[selectedSingleId]) return;
-    if (virtualRows.revealRow(selectedSingleId)) {
+    if (revealRow(selectedSingleId)) {
       lastRevealedSelectionRef.current = selectedSingleId;
       setRevealedActionId(selectedSingleId);
     }
-  }, [allowInlineExpand, expandedActionIds, selectedSingleId, virtualRows.revealRow, virtualRows.cancelReveal]);
+  }, [allowInlineExpand, expandedActionIds, selectedSingleId, revealRow, cancelReveal]);
 
   const handleExpandAll = useCallback(() => {
-    virtualRows.cancelReveal();
+    cancelReveal();
     const next: Record<string, boolean> = {};
     filteredActions.forEach((action) => {
       if (action._id) next[action._id] = true;
     });
     setExpansionState((current) => ({ ...current, manual: next, suppressAutomatic: true }));
-  }, [filteredActions, virtualRows.cancelReveal]);
+  }, [filteredActions, cancelReveal]);
 
   const handleCollapseAll = useCallback(() => {
-    virtualRows.cancelReveal();
+    cancelReveal();
     setExpansionState((current) => ({ ...current, manual: {}, suppressAutomatic: true }));
-  }, [virtualRows.cancelReveal]);
+  }, [cancelReveal]);
 
   return {
     listContainerRef, selectedIdsList, expandedActionIds, automaticallyExpandedActionId,

@@ -48,9 +48,10 @@ export class SemanticScenePipeline {
       isSceneDocumentLike(input) ? input : undefined,
     );
     const parsed = this.codec.parseAndValidate(input);
-    const validatedSource = this.codec.parseAndValidate(
-      this.prepareSource ? await this.prepareSource(parsed) : parsed,
-    );
+    const readySource = this.prepareSource ? await this.prepareSource(parsed) : parsed;
+    // The codec already detached, validated and froze parsed. Revalidate only
+    // when source readiness actually produced a different document.
+    const validatedSource = readySource === parsed ? parsed : this.codec.parseAndValidate(readySource);
     const source = canonicalOrder
       ? withSceneDocumentCanonicalOrder(validatedSource, canonicalOrder)
       : validatedSource;

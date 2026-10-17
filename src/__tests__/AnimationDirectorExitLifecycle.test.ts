@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const live2DMocks = vi.hoisted(() => ({
-  getModel: vi.fn(),
+  getDisplayObject: vi.fn(),
   getContainer: vi.fn(),
   removeCharacter: vi.fn(),
 }));
@@ -11,7 +11,7 @@ vi.mock('../engine/Live2DManager', () => ({ live2DManager: live2DMocks }));
 describe('Task 2 AnimationDirector exit lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    live2DMocks.getModel.mockReturnValue(undefined);
+    live2DMocks.getDisplayObject.mockReturnValue(undefined);
   });
 
   it('keeps a non-linear exit ease on the child and removes after the child completes', async () => {

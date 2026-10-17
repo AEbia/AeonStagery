@@ -125,7 +125,7 @@ export interface ProjectAgentServiceOptions {
   /**
    * Optional capability-aware prompt builder. When provided, the effective
    * system prompt follows the CURRENT model's imageInput capability on every
-   * start/continue (readImage guidance is only included when vision is
+   * request (readImage guidance is only included when vision is
    * explicitly supported, ADR0023). Falls back to `systemPrompt` when absent.
    */
   readonly buildSystemPrompt?: (imageInputAvailable: boolean) => string;
@@ -275,7 +275,7 @@ export class ProjectAgentService {
     image?: ProjectAgentImageAttachment;
     accessMode?: ProjectAgentAccessMode;
   }): Promise<ProjectAgentServiceStartResult> {
-    const text = request.taskText.trim();
+    const text = request.taskText.trim() || (request.image ? '请查看这张图片。' : '');
     if (!text) {
       return { ok: false, code: 'invalid_arguments', message: 'Task text is required' };
     }
@@ -490,19 +490,32 @@ export class ProjectAgentService {
     return result;
   }
 
-  async sendSupplement(text: string): Promise<{ ok: boolean; error?: string }> {
+  async sendSupplement(text: string, image?: ProjectAgentImageAttachment, taskId?: string): Promise<{ ok: boolean; error?: string }> {
     if (!this.coordinator) return { ok: false, error: 'No active project Agent task' };
+    const coordinator = this.coordinator;
+    if (taskId && coordinator.getTask()?.identity.taskId !== taskId) {
+      return { ok: false, error: '目标对话已切换，请重新发送。' };
+    }
+    if (!text.trim() && !image) return { ok: false, error: '请输入文字或附加图片。' };
+    if (image) {
+      const admission = await this.admission.resolve();
+      if (!admission.ok) return { ok: false, error: admission.message };
+      if (admission.imageInputSupported !== true) {
+        return { ok: false, error: '当前模型不支持图片输入，请切换支持图片的模型后再上传图片。' };
+      }
+      if (this.coordinator !== coordinator) return { ok: false, error: '目标对话已切换，请重新发送。' };
+    }
     try {
-      this.coordinator.enqueueSupplement(text);
+      await coordinator.acceptSupplement(text, image);
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     // A Conversation remains input-capable after a normal assistant reply.
     // Starting here closes the status/IPC race where the window observed a
     // running round, but its message arrived just after that round settled.
-    if (this.coordinator.getTask()?.getExecutionRoundState() === 'idle') {
-      const continued = await this.continueTask();
-      if (!continued.ok) return { ok: false, error: continued.message };
+    if (this.coordinator !== coordinator) return { ok: true };
+    if (coordinator.getTask()?.getExecutionRoundState() === 'idle') {
+      await this.continueTask();
       return { ok: true };
     }
     await this.publishStatus('waiting');
@@ -852,6 +865,8 @@ export class ProjectAgentService {
           ok: true,
           endpoint: admission.endpoint,
           model: admission.model,
+          imageInputSupported: admission.imageInputSupported === true,
+          systemPrompt: this.effectiveSystemPrompt(admission.imageInputSupported === true),
           ...(admission.contextWindow !== undefined
             ? { contextWindow: admission.contextWindow }
             : {}),

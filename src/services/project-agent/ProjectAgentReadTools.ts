@@ -1,5 +1,7 @@
 import type {
   AgentSceneSourceLine,
+  AgentSceneSearchHit,
+  AgentSearchCharacterCapabilitiesArgs,
   AgentInspectResourceArgs,
   AgentListProjectFilesArgs,
   AgentProjectFileEntry,
@@ -40,12 +42,15 @@ import {
 } from './ProjectAgentPathRules';
 import type { ProjectAgentTaskState } from './ProjectAgentTaskState';
 import { ProjectAgentSourceIdentityFacade } from './ProjectAgentSourceIdentity';
+import type { ProjectAgentPerformanceCatalogResolver } from './ProjectAgentPerformanceCatalog';
+import { projectPerformanceCapabilityCatalogForAgent } from './ProjectAgentPerformanceCatalog';
+import { normalizeCapabilityQuery, takeCapabilityPage } from './ProjectAgentCapabilityQueries';
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
 const DEFAULT_TEXT_LINE_COUNT = 80;
 const MAX_TEXT_LINE_COUNT = 200;
-const DEFAULT_SCENE_LINE_COUNT = 500;
+const DEFAULT_SCENE_LINE_COUNT = 50;
 const MAX_SCENE_LINE_COUNT = 500;
 const DEFAULT_SEARCH_LIMIT = 30;
 const MAX_SEARCH_LIMIT = 100;
@@ -55,6 +60,7 @@ const MAX_SCENE_CONTEXT = 3;
 const MAX_TEXT_PAGE_BYTES = 200_000;
 /** A scene page uses the same bounded payload capacity as project text. */
 const MAX_SCENE_PAGE_BYTES = MAX_TEXT_PAGE_BYTES;
+const MAX_SCENE_SEARCH_BYTES = 32_768;
 /** A single search hit may not exceed this many characters. */
 const MAX_HIT_TEXT_CHARS = 8192;
 /** One search page may not deliver more than this many characters of hits. */
@@ -77,6 +83,11 @@ export class ProjectAgentReadTools {
   private readonly taskState: ProjectAgentTaskState;
   private readonly imageAvailable: boolean;
   private readonly imageCache?: ProjectAgentImageSessionCache;
+  private performanceCatalog?: ProjectAgentPerformanceCatalogResolver;
+
+  setPerformanceCatalogResolver(resolver: ProjectAgentPerformanceCatalogResolver | undefined): void {
+    this.performanceCatalog = resolver;
+  }
 
   constructor(options: ProjectAgentReadToolsOptions) {
     this.ports = options.ports;
@@ -522,6 +533,8 @@ export class ProjectAgentReadTools {
         suggestedAction: 'fix_arguments',
       });
     }
+    const query = normalizeCapabilityQuery({ text: args.capabilityText, offset: args.capabilityOffset, limit: args.capabilityLimit });
+    if (!query.ok) return toolFail(query.error);
     const reference = normalizeResourceReference(args.reference);
     if (!reference.ok) return toolFail(reference.error);
     if (!reference.path.startsWith('@mount/') && isForbiddenProjectPath(reference.path)) {
@@ -543,7 +556,29 @@ export class ProjectAgentReadTools {
       'Resource could not be inspected',
     );
     if (!inspectPort.ok) return toolFail(inspectPort.error);
-    const result = inspectPort.value;
+    let result = inspectPort.value;
+    if (result.live2d) {
+      const entries = [
+        ...(result.live2d.motions ?? []).map((key) => ({ kind: 'motion' as const, key })),
+        ...(result.live2d.expressions ?? []).map((key) => ({ kind: 'expression' as const, key })),
+      ].filter(query.matches);
+      const changed = this.checkCapabilityRevision(
+        stableQueryKey('inspectResourceCapabilities', { reference: reference.path, text: query.text }),
+        entries, query.offset,
+      );
+      if (changed) return toolFail(changed);
+      const selected = takeCapabilityPage(entries, query);
+      if (!selected.ok) return toolFail(selected.error);
+      result = {
+        ...result,
+        live2d: {
+          ...result.live2d,
+          motions: selected.entries.filter((entry) => entry.kind === 'motion').map((entry) => entry.key),
+          expressions: selected.entries.filter((entry) => entry.kind === 'expression').map((entry) => entry.key),
+          capabilityPage: selected.page,
+        },
+      };
+    }
     if (result.materializationRequired || result.scope === 'template') {
       return toolOk({
         ...result,
@@ -556,6 +591,46 @@ export class ProjectAgentReadTools {
       ...result,
       reference: reference.path,
     });
+  }
+
+  async searchCharacterCapabilities(
+    args: AgentSearchCharacterCapabilitiesArgs,
+  ): Promise<AgentToolResult<ProjectAgentToolResultByName['searchCharacterCapabilities']>> {
+    if (!args || typeof args.characterId !== 'string' || !args.characterId.trim()
+      || (args.kind !== undefined && args.kind !== 'motion' && args.kind !== 'expression')) {
+      return toolFail({ code: 'invalid_arguments', message: 'Provide characterId and optional kind: motion | expression', retryable: false });
+    }
+    const query = normalizeCapabilityQuery(args);
+    if (!query.ok) return toolFail(query.error);
+    const resolver = this.performanceCatalog;
+    if (!resolver) return toolFail({ code: 'not_found', message: 'Character capabilities are unavailable; inspect the model resource instead', retryable: false });
+    const resolved = await this.safePortCall(() => resolver.resolve(), 'Character capabilities could not be read');
+    if (!resolved.ok) return toolFail(resolved.error);
+    if (!resolved.value.ok) return toolFail({ code: 'not_found', message: 'Character capabilities could not be resolved', retryable: false });
+    const character = projectPerformanceCapabilityCatalogForAgent(resolved.value.value.catalog)
+      .characters.find((entry) => entry.characterId === args.characterId);
+    if (!character) return toolFail({ code: 'not_found', message: 'Character is not in the current scene catalog', retryable: false });
+    const entries = [
+      ...character.motions.map((entry) => ({ ...entry, kind: 'motion' as const })),
+      ...character.expressions.map((entry) => ({ ...entry, kind: 'expression' as const })),
+    ].filter((entry) => (!args.kind || entry.kind === args.kind)
+      && query.matches(entry))
+      .map((entry) => ({ ...entry, ...(entry.description ? { description: entry.description.slice(0, 512) } : {}) }));
+    const changed = this.checkCapabilityRevision(
+      stableQueryKey('searchCharacterCapabilities', { characterId: args.characterId, kind: args.kind ?? '', text: query.text }),
+      entries, query.offset,
+    );
+    if (changed) return toolFail(changed);
+    const selected = takeCapabilityPage(entries, query);
+    if (!selected.ok) return toolFail(selected.error);
+    return toolOk({ entries: selected.entries, ...selected.page }, selected.page);
+  }
+
+  private checkCapabilityRevision(queryKey: string, entries: readonly unknown[], offset: number): AgentToolError | null {
+    const revision = hashEntries(entries.map((entry) => JSON.stringify(entry)));
+    return this.taskState.checkPaginationRevision(queryKey, revision, offset) === 'changed'
+      ? { code: 'pagination_changed', message: 'Capabilities changed; restart from offset 0', retryable: true, suggestedAction: 'retry_from_offset_zero' }
+      : null;
   }
 
   async readImage(
@@ -762,9 +837,9 @@ export class ProjectAgentReadTools {
       });
     }
 
-    const binding = this.taskState.bindSceneRead(snapshot.document, snapshot.version);
+    const lineView = new SemanticSceneLineView(snapshot.document);
     const identities = new Map(new ProjectAgentSourceIdentityFacade(snapshot.document).project().map((item) => [item.line, item]));
-    const lines = binding.lineView.lines.map((line) => projectSourceLine(line, identities));
+    const lines = lineView.lines.map((line) => projectSourceLine(line, identities));
     const text = args.text?.toLowerCase();
     const matched = lines.filter((line) => matchesSceneFilter(line, args, text));
     const sorted = [...matched].sort((a, b) => {
@@ -772,7 +847,7 @@ export class ProjectAgentReadTools {
       return a.line - b.line;
     });
 
-    const revision = hashEntries(sorted.map((line) => `${line.line}:${line.type}:${line.time}`));
+    const revision = hashEntries(lines.map((line) => JSON.stringify(line)));
     const queryKey = stableQueryKey('searchScene', {
       text: args.text ?? '',
       family: args.family ?? '',
@@ -789,30 +864,50 @@ export class ProjectAgentReadTools {
     }
 
     const slice = sorted.slice(offset, offset + limit);
-    const hits = slice.map((line) => {
-      const before = contextLines > 0
-        ? lines.slice(Math.max(0, line.line - 1 - contextLines), line.line - 1)
-        : [];
-      const after = contextLines > 0
-        ? lines.slice(line.line, line.line + contextLines)
-        : [];
-      return {
-        line,
-        ...(before.length > 0 ? { contextBefore: before } : {}),
-        ...(after.length > 0 ? { contextAfter: after } : {}),
-      };
-    });
-    const hasMore = offset + limit < sorted.length;
+    const hits: AgentSceneSearchHit[] = [];
+    let usedBytes = 512; // Includes both result envelopes and pagination fields.
+    let truncated = limitRaw > MAX_SEARCH_LIMIT || contextRaw > MAX_SCENE_CONTEXT;
+    // Prioritize matches; context must never crowd the next match off the page.
+    for (const line of slice) {
+      const bytes = utf8ByteLength(JSON.stringify({ line })) + 1;
+      if (usedBytes + bytes > MAX_SCENE_SEARCH_BYTES) {
+        if (hits.length === 0) return toolFail({ code: 'result_too_large', message: 'A matching scene line exceeds the safe search capacity; narrow the query or use readScene', retryable: false });
+        truncated = true;
+        break;
+      }
+      hits.push({ line });
+      usedBytes += bytes;
+    }
+    const emitted = new Set(hits.map((hit) => hit.line.line));
+    for (let index = 0; index < hits.length; index += 1) {
+      const hit = hits[index]!;
+      const before: AgentSceneSourceLine[] = [];
+      const after: AgentSceneSourceLine[] = [];
+      for (const neighbor of lines.slice(Math.max(0, hit.line.line - 1 - contextLines), hit.line.line + contextLines)) {
+        if (emitted.has(neighbor.line)) continue;
+        const bytes = utf8ByteLength(JSON.stringify(neighbor)) + 32;
+        if (usedBytes + bytes > MAX_SCENE_SEARCH_BYTES) { truncated = true; continue; }
+        (neighbor.line < hit.line.line ? before : after).push(neighbor);
+        emitted.add(neighbor.line);
+        usedBytes += bytes;
+      }
+      hits[index] = { ...hit, ...(before.length ? { contextBefore: before } : {}), ...(after.length ? { contextAfter: after } : {}) };
+    }
+    const nextOffset = offset + hits.length;
+    const hasMore = nextOffset < sorted.length;
+    this.taskState.bindSceneRead(snapshot.document, snapshot.version);
     return toolOk(
       {
         hits,
         hasMore,
-        nextOffset: offset + limit,
+        nextOffset,
         total: sorted.length,
+        truncated,
       },
       {
         hasMore,
-        nextOffset: offset + limit,
+        nextOffset,
+        truncated,
       },
     );
   }

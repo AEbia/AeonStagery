@@ -12,15 +12,14 @@
  *    resource) and tracks native SDK motions using the timeline intent as its
  *    state source. It never consults the cache and never performs async work
  *    inside the Bake tick.
- *  - `advanceNative()` performs the one-time start/restart + offset replay in
- *    the BakeEngine-owned global SDK clock lock.
+ *  - `pendingNativeStart()` returns a domain motion intent. The runtime-owned
+ *    Bake frame batch performs its transition and records the result.
  *
  * BakeEngine therefore stops regenerating `_pendingPlayMotion` per frame and
  * stops duplicating Live2DMotionController's `_executePlayMotion`.
  */
 
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
-import type { Cubism2MotionSamplerTarget } from './live2d/cubism2MotionSampler';
 import {
   motionCurveCache,
   motionCurveCacheKey,
@@ -28,9 +27,7 @@ import {
   type MotionCurveCacheKey,
   type MotionCurveCacheSource,
 } from './live2d/motionCurveCache';
-import { getLive2DRuntimeAdapter } from './Live2DRuntimeAdapter';
-import type { Live2DAdapterId, Live2DRuntimeDescriptor } from './Live2DRuntimeResolver';
-import type { Cubism2NativeMotionClock } from './live2d/Cubism2NativeMotionSession';
+import type { Live2DMotionSamplingResult, Live2DPerformanceTransitionResult } from './runtime/Live2DRuntimeContracts';
 import {
   applyCustomMotionValues,
   customMotionControlledParameterIds,
@@ -40,6 +37,7 @@ import {
   type CustomMotionFadeResumeFrames,
   type CustomMotionHandoffPose,
 } from './live2d/customMotionRuntime';
+import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from './live2d/customMotionStage';
 
 export interface BakeMotionPlanRequest {
   readonly charId: string;
@@ -71,30 +69,24 @@ export interface BakeMotionPlan {
   readonly byCacheKey: ReadonlyMap<string, BakeMotionPlanResolution>;
 }
 
-export interface BakeMotionModelInfo {
-  readonly model: any;
-  readonly runtimeFamily: string;
-  readonly adapterId: string;
-}
-
 export interface BakeMotionRuntimeHost {
   /** Scene frame rate used for on-demand curve cache sampling. */
   readonly fps: number;
-  getSamplingTargets(charId: string): readonly Cubism2MotionSamplerTarget[];
+  sampleMotion?(charId: string, motionKey: string, options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }): Promise<Live2DMotionSamplingResult>;
   preloadMotion(charId: string, motionKey: string): Promise<void>;
   getBaseValues(
     charId: string,
     controlledParameterIds: readonly string[],
     excludeParameterIds?: ReadonlySet<string>,
   ): Record<string, number>;
-  stopNativeMotion(charId: string): void;
-  getModel(charId: string): BakeMotionModelInfo | undefined;
   /**
    * Scene time of the seed snapshot this bake resumed from, if any.
    * A seed strictly after a curve motion's start means the current pose is
    * already mid-fade and must continue the 60Hz accumulation (ADR-0029).
    */
   getSeedSceneTime?(): number | undefined;
+  /** Use the model's normal motion/expression pipeline when a writer is available. */
+  installCustomMotionStage?(charId: string, input: Omit<InstallCustomMotionStageInput, 'targets'>): CustomMotionStageHandle | null;
 }
 
 export interface BakeMotionRuntimeReport {
@@ -113,6 +105,9 @@ interface CurveDriverState {
   readonly motion: Extract<CharacterMotionOutput, { kind: 'custom' }>;
   readonly startSceneTime: number;
   readonly handoff: CustomMotionHandoffPose;
+  readonly controlledParameterIds: readonly string[];
+  readonly protectedParameterIds: Set<string>;
+  stage?: CustomMotionStageHandle | null;
 }
 
 interface NativeDriverState {
@@ -139,6 +134,7 @@ interface CharacterRuntimeState {
   curve?: CurveDriverState;
   native?: NativeDriverState;
   pendingNativeStart?: PendingNativeStart;
+  nativeStopPending?: boolean;
 }
 
 interface CacheServiceLike {
@@ -161,17 +157,21 @@ export interface BakeMotionApplyInput {
 }
 
 export type BakeMotionApplyResult =
-  | { driver: 'none'; nativeStartRequested: false }
-  | { driver: 'curve'; nativeStartRequested: false; motion: Extract<CharacterMotionOutput, { kind: 'custom' }> }
-  | { driver: 'native'; nativeStartRequested: boolean; nativeKey: string; offset: number };
+  | { driver: 'none'; nativeStartRequested: false; nativeStopRequested: boolean }
+  | { driver: 'curve'; nativeStartRequested: false; nativeStopRequested: boolean; motion: Extract<CharacterMotionOutput, { kind: 'custom' }> }
+  | { driver: 'native'; nativeStartRequested: boolean; nativeStopRequested: false; nativeKey: string; offset: number };
 
-export interface BakeMotionAdvanceInput {
+export interface BakeMotionNativeStart {
   readonly charId: string;
-  readonly utSystem: Cubism2NativeMotionClock | null;
+  readonly motionKey: string;
+  readonly priority: number;
+  readonly offsetSeconds: number;
+  readonly sceneTimeSeconds: number;
+  readonly fadeInSeconds?: number;
 }
 
-export interface BakeMotionAdvanceResult {
-  readonly executed: boolean;
+export interface BakeMotionStartCompletion {
+  readonly status: 'started' | 'missing' | 'cancelled' | 'ignored';
   readonly offsetReplayMs: number;
 }
 
@@ -217,8 +217,10 @@ export class BakeMotionRuntime {
           seenCache.add(cacheKeyString);
           const source: MotionCurveCacheSource = {
             ...cacheKey,
-            targets: this.host.getSamplingTargets(request.charId),
             fps: this.host.fps,
+            ...(this.host.sampleMotion
+              ? { sample: (options) => this.host.sampleMotion!(request.charId, request.motionKey, options) }
+              : {}),
           };
           const cacheEntry = await this.cache.ensure(source);
           if (cacheEntry) {
@@ -266,6 +268,17 @@ export class BakeMotionRuntime {
     return this.reportValues;
   }
 
+  releaseCharacter(charId: string, injectedParams: Record<string, number>): void {
+    const state = this.states.get(charId);
+    if (state) this.clearCurveDriver(state, injectedParams);
+    this.states.delete(charId);
+  }
+
+  dispose(): void {
+    for (const state of this.states.values()) state.curve?.stage?.dispose();
+    this.states.clear();
+  }
+
   applyIntent(input: BakeMotionApplyInput): BakeMotionApplyResult {
     const charId = input.charId;
     const state = this.getOrCreateState(charId);
@@ -273,27 +286,23 @@ export class BakeMotionRuntime {
 
     if (!input.intent) {
       this.clearCurveDriver(state, injectedParams);
-      if (state.native || state.pendingNativeStart) {
-        this.host.stopNativeMotion(charId);
-      }
-      state.native = undefined;
-      state.pendingNativeStart = undefined;
-      return { driver: 'none', nativeStartRequested: false };
+      const nativeStopRequested = this.resetNativeDriver(state);
+      return { driver: 'none', nativeStartRequested: false, nativeStopRequested };
     }
 
     const motion = input.intent.output;
     if (motion.kind === 'custom') {
-      this.resetNativeDriver(state, charId);
+      const nativeStopRequested = this.resetNativeDriver(state);
       this.applyCurveDriver(state, charId, motion, input.intent.time ?? input.simTime, input.simTime, injectedParams, input.channelProtected);
-      return { driver: 'curve', nativeStartRequested: false, motion };
+      return { driver: 'curve', nativeStartRequested: false, nativeStopRequested, motion };
     }
 
     const planEntry = this.planByChar.get(charId)?.get(motion.key);
     if (planEntry?.resolution.kind === 'curve') {
-      this.resetNativeDriver(state, charId);
+      const nativeStopRequested = this.resetNativeDriver(state);
       this.applyCurveDriver(state, charId, planEntry.resolution.cacheEntry.motion, input.intent.time ?? input.simTime, input.simTime, injectedParams, input.channelProtected);
       this.reportValues = { ...this.reportValues, cacheHitFrames: this.reportValues.cacheHitFrames + 1 };
-      return { driver: 'curve', nativeStartRequested: false, motion: planEntry.resolution.cacheEntry.motion };
+      return { driver: 'curve', nativeStartRequested: false, nativeStopRequested, motion: planEntry.resolution.cacheEntry.motion };
     }
 
     // Native SDK path: use the timeline intent as the only restart state source.
@@ -330,38 +339,48 @@ export class BakeMotionRuntime {
     return {
       driver: 'native',
       nativeStartRequested: needsStart,
+      nativeStopRequested: false,
       nativeKey: motion.key,
       offset,
     };
   }
 
-  async advanceNative(input: BakeMotionAdvanceInput): Promise<BakeMotionAdvanceResult> {
-    const state = this.states.get(input.charId);
+  pendingNativeStart(charId: string): BakeMotionNativeStart | undefined {
+    const state = this.states.get(charId);
+    const pending = state?.pendingNativeStart;
+    if (!pending) return undefined;
+    return {
+      charId,
+      motionKey: pending.motionKey,
+      priority: pending.priority,
+      offsetSeconds: pending.offset,
+      sceneTimeSeconds: pending.simTime,
+      fadeInSeconds: pending.fadeInSeconds,
+    };
+  }
+
+  hasPendingNativeStop(charId: string): boolean {
+    return this.states.get(charId)?.nativeStopPending === true;
+  }
+
+  completeNativeStop(charId: string): void {
+    const state = this.states.get(charId);
+    if (state) state.nativeStopPending = false;
+  }
+
+  completeNativeStart(charId: string, result: Live2DPerformanceTransitionResult): BakeMotionStartCompletion {
+    const state = this.states.get(charId);
     const pending = state?.pendingNativeStart;
     if (!state || !pending) {
-      return { executed: false, offsetReplayMs: 0 };
+      return { status: 'ignored', offsetReplayMs: 0 };
     }
 
-    const modelInfo = this.host.getModel(input.charId);
-    if (!modelInfo?.model) {
+    if (result.status !== 'started') {
       state.pendingNativeStart = undefined;
-      return { executed: false, offsetReplayMs: 0 };
+      return { status: result.status, offsetReplayMs: 0 };
     }
 
-    const controls = getLive2DRuntimeAdapter({
-      runtimeFamily: modelInfo.runtimeFamily as Live2DRuntimeDescriptor['runtimeFamily'],
-      adapterId: modelInfo.adapterId as Live2DAdapterId,
-      supported: true,
-    }).getControls();
-    const result = await controls.startMotion(
-      modelInfo.model,
-      pending.motionKey,
-      pending.priority,
-      pending.offset,
-      { clock: input.utSystem, fadeInSeconds: pending.fadeInSeconds },
-    );
     const offsetReplayMs = result.offsetReplayMs;
-
     state.native = {
       motionKey: pending.motionKey,
       startSceneTime: pending.startSceneTime,
@@ -378,7 +397,7 @@ export class BakeMotionRuntime {
       offsetReplayMs: this.reportValues.offsetReplayMs + offsetReplayMs,
     };
 
-    return { executed: true, offsetReplayMs };
+    return { status: 'started', offsetReplayMs };
   }
 
   private getOrCreateState(charId: string): CharacterRuntimeState {
@@ -392,18 +411,20 @@ export class BakeMotionRuntime {
 
   private clearCurveDriver(state: CharacterRuntimeState, injectedParams: Record<string, number>): void {
     if (!state.curve) return;
-    for (const parameterId of customMotionControlledParameterIds(state.curve.motion)) {
+    state.curve.stage?.dispose();
+    for (const parameterId of state.curve.controlledParameterIds) {
+      if (state.curve.protectedParameterIds.has(parameterId)) continue;
       delete injectedParams[parameterId];
     }
     state.curve = undefined;
   }
 
-  private resetNativeDriver(state: CharacterRuntimeState, charId: string): void {
-    if (state.native || state.pendingNativeStart) {
-      this.host.stopNativeMotion(charId);
-    }
+  private resetNativeDriver(state: CharacterRuntimeState): boolean {
+    const shouldStop = !!state.native || !!state.pendingNativeStart;
+    state.nativeStopPending = state.nativeStopPending || shouldStop;
     state.native = undefined;
     state.pendingNativeStart = undefined;
+    return state.nativeStopPending;
   }
 
   private applyCurveDriver(
@@ -446,8 +467,23 @@ export class BakeMotionRuntime {
         ? { values: baseValues, resumeFrames }
         : { values: baseValues };
       this.clearCurveDriver(state, injectedParams);
-      active = { motion, startSceneTime, handoff };
+      active = { motion, startSceneTime, handoff, controlledParameterIds: controlled, protectedParameterIds: new Set(channelProtected) };
       state.curve = active;
+      active.stage = this.host.installCustomMotionStage?.(charId, {
+        getState: () => state.curve ?? null,
+        lipSyncParameterIds: active.protectedParameterIds,
+      });
+      if (active.stage) {
+        for (const parameterId of controlled) {
+          if (!channelProtected?.has(parameterId)) delete injectedParams[parameterId];
+        }
+      }
+    }
+    active.protectedParameterIds.clear();
+    channelProtected?.forEach((id) => active!.protectedParameterIds.add(id));
+    if (active.stage) {
+      active.stage.setSceneTime(simTime);
+      return;
     }
     const evaluation = evaluateCustomMotionRuntime(motion, startSceneTime, simTime, active.handoff);
     applyCustomMotionValues(injectedParams, customMotionControlledParameterIds(motion), evaluation.values, channelProtected);

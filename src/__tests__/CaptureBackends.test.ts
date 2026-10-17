@@ -141,6 +141,32 @@ describe('capture backend stream cleanup', () => {
     });
   });
 
+  it('user cancellation closes WebCodecs without flushing the cancelled FFmpeg stream', async () => {
+    await withMockWebCodecs(async () => {
+      const api = createExportApi();
+      const backend = new WebCodecsBackend(api);
+      await backend.init(createInitConfig());
+      await backend.abort(true);
+      expect(MockVideoEncoder.instances[0].state).toBe('closed');
+      expect(api.endStreamExport).not.toHaveBeenCalled();
+      await backend.abort(true);
+      expect(api.endStreamExport).not.toHaveBeenCalled();
+    });
+  });
+
+  it('user cancellation releases queued raw writes without finalizing the cancelled stream', async () => {
+    const api = createExportApi();
+    let rejectWrite!: (reason: Error) => void;
+    api.pushFrame.mockImplementation(() => new Promise((_resolve, reject) => { rejectWrite = reject; }));
+    const backend = new RawPixelsBackend(api);
+    await backend.init(createInitConfig());
+    await backend.encodeFrame({ pixels: new Uint8Array(16), frameIndex: 0, fps: 60 });
+    await backend.abort(true);
+    rejectWrite(new Error('Export cancelled'));
+    expect(api.endStreamExport).not.toHaveBeenCalled();
+    await backend.abort(true);
+  });
+
   it('WebCodecsBackend rejects frame encoding before initialization without touching the stream', async () => {
     await withMockWebCodecs(async () => {
       const api = createExportApi();

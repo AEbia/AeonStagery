@@ -49,7 +49,10 @@ vi.mock('../ui/context/AppContext', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: [] }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({
+    state: 'closed', session: null, target: null, fps: 60,
+    canonicalMotion: null, motion: null, keyframes: [], committing: false,
+  }),
 }));
 vi.mock('../ui/SettingsStore', () => ({
   useSettings: () => ({

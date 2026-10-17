@@ -7,6 +7,7 @@ import { SemanticDocumentCoordinator } from '../services/document/SemanticDocume
 import { SemanticScenePipeline } from '../services/semantic-scene';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
 import { DocumentStore } from '../ui/store/DocumentStore';
+import { getSceneDocumentCanonicalOrder, withSceneDocumentCanonicalOrder } from '../services/semantic-scene/SceneDocumentCanonicalOrder';
 
 async function makeServices(templates: ProjectTemplateConfiguration, resources?: ResourceAuthoringService) {
   const store = new DocumentStore();
@@ -25,7 +26,7 @@ async function makeServices(templates: ProjectTemplateConfiguration, resources?:
     store, coordinator, undefined, resources, undefined,
     { getDialogueDefaults: () => templates },
   );
-  return { store, authoring };
+  return { store, authoring, coordinator };
 }
 
 const base = { version: AUTHORING_SCHEMA_VERSION, correlationId: 'new-dialogue', origin: 'timeline-editor' } as const;
@@ -43,6 +44,77 @@ const insertionCases: Array<[string, SemanticAuthorIntent]> = [
 ];
 
 describe('project default dialogue style', () => {
+  it('preserves canonical dialogue order when refreshing presentations', async () => {
+    const { store, authoring, coordinator } = await makeServices({ enabledTemplateIds:[], dialoguePresentation:imagePresentation });
+    await authoring.author({
+      ...base, kind:'append-sequential-lines', lines:['First', 'Second'],
+    });
+    const document = store.getCurrentSceneDocumentSnapshot()!;
+    const order = document.statements.map((statement) => statement.id).reverse();
+    await coordinator.applyDocument(withSceneDocumentCanonicalOrder(document, order));
+    expect(getSceneDocumentCanonicalOrder(store.getCurrentSceneDocumentSnapshot())).toEqual(order);
+    const updated = { ...imagePresentation, textbox:{ ...imagePresentation.textbox, image:'images/new.svg' } };
+    expect(await authoring.refreshDialogueStyles([{ presentation:updated }])).toBe(2);
+    expect(getSceneDocumentCanonicalOrder(store.getCurrentSceneDocumentSnapshot())).toEqual(order);
+  });
+
+  it('refreshes id-less legacy snapshots only when they match the previous project style', async () => {
+    const { store, authoring } = await makeServices({ enabledTemplateIds:[] });
+    const { styleId: _styleId, ...legacy } = imagePresentation;
+    const other = { ...legacy, textbox:{ ...legacy.textbox, x:700 } };
+    await authoring.author({
+      ...base, kind:'insert-script-segment', anchorTime:1,
+      statements:[
+        { type:'dialogue', params:{ text:'Legacy', durationSeconds:1, presentation:legacy } },
+        { type:'dialogue', time:1, params:{ text:'Other', durationSeconds:1, presentation:other } },
+      ],
+    });
+    const before = store.getCurrentSceneDocumentSnapshot()!;
+    authoring.clearHistory();
+    const updated = { ...imagePresentation, textbox:{ ...imagePresentation.textbox, image:'images/new.svg' } };
+    expect(await authoring.refreshDialogueStyles([{ presentation:updated, previousPresentation:legacy }])).toBe(1);
+    expect(store.getCurrentSceneDocumentSnapshot()?.statements.find((statement) => statement.type === 'dialogue' && statement.params.text === 'Legacy')?.params)
+      .toMatchObject({ presentation:updated });
+    expect(store.getCurrentSceneDocumentSnapshot()?.statements.find((statement) => statement.type === 'dialogue' && statement.params.text === 'Other')?.params)
+      .toMatchObject({ presentation:other });
+    await authoring.undo();
+    expect(store.getCurrentSceneDocumentSnapshot()).toEqual(before);
+  });
+
+  it('reads the latest queued dialogue edits before refreshing and skips unchanged snapshots', async () => {
+    const { store, authoring } = await makeServices({ enabledTemplateIds:[] });
+    await authoring.author({
+      ...base, kind:'update-statement', statementId:'existing',
+      patch:{ params:{ text:'Existing', durationSeconds:1, presentation:imagePresentation } },
+    });
+    authoring.clearHistory();
+    expect(await authoring.refreshDialogueStyles([{ presentation:imagePresentation }])).toBe(0);
+    expect(authoring.canUndo).toBe(false);
+    const updated = { ...imagePresentation, textbox:{ ...imagePresentation.textbox, image:'images/new.svg' } };
+    const edit = authoring.author({
+      ...base, kind:'update-statement', statementId:'existing',
+      patch:{ params:{ text:'Queued edit', durationSeconds:1, presentation:imagePresentation } },
+    });
+    const refresh = authoring.refreshDialogueStyles([{ presentation:updated }]);
+    await edit;
+    expect(await refresh).toBe(1);
+    expect(store.getCurrentSceneDocumentSnapshot()?.statements[0].params)
+      .toMatchObject({ text:'Queued edit', presentation:updated });
+    await authoring.undo();
+    expect(store.getCurrentSceneDocumentSnapshot()?.statements[0].params)
+      .toMatchObject({ text:'Queued edit', presentation:imagePresentation });
+  });
+
+  it('does not refresh a document when no scene is loaded', async () => {
+    const store = new DocumentStore();
+    const coordinator = new SemanticDocumentCoordinator(store,
+      new SemanticScenePipeline({ resolveAsset:async (source) => source }),
+      { projectPreparedScene:vi.fn(async () => undefined) });
+    const authoring = new SemanticAuthoringApplicationService(store, coordinator);
+    expect(await authoring.refreshDialogueStyles([{ presentation:imagePresentation }])).toBe(0);
+    expect(authoring.canUndo).toBe(false);
+  });
+
   it.each(insertionCases)('applies the builtin default to %s', async (_name, intent) => {
     const { store, authoring } = await makeServices({ enabledTemplateIds: [], dialogueTemplate: 'classic' });
     const receipt = await authoring.author(intent);

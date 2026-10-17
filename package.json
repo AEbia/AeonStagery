@@ -1,6 +1,6 @@
 {
   "name": "aeonstagery",
-  "version": "0.8.3-beta",
+  "version": "0.8.4-beta",
   "author": "White_AE",
   "license": "Apache-2.0",
   "repository": {
@@ -32,6 +32,10 @@
     "extraResources": [
       "projects/**/*"
     ],
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
     "asar": true,
     "publish": [
       {
@@ -60,6 +64,7 @@
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "migrate:scene-v2": "tsx scripts/migrate-scene-v2.ts",
     "migrate:template-v2": "tsx scripts/migrate-template-v2.ts",
+    "import:webgal-template": "tsx scripts/webgal-scss-to-package.ts",
     "postinstall": "node scripts/sync-live2d-runtime.mjs --quiet",
     "predev": "npm run sync:live2d-runtime -- --quiet",
     "dev": "vite",

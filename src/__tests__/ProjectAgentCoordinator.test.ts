@@ -149,6 +149,51 @@ async function startCoordinator(
 }
 
 describe('ProjectAgentCoordinator', () => {
+  it.each(['recoverable', 'terminal'] as const)('gates capability queries when the target becomes %s during a model request', async (kind) => {
+    let activeScene = 'scene_coord';
+    const resolvedScenes: string[] = [];
+    const registry = createRegistry();
+    const dispatch = vi.spyOn(registry, 'dispatch');
+    const coordinator = new ProjectAgentCoordinator({
+      transport: {
+        complete: async () => {
+          activeScene = 'other_scene';
+          return { message: assistantWithTools([
+            { status: 'ready', toolCallId: 'capabilities', name: 'searchCharacterCapabilities', arguments: { characterId: 'a' } },
+          ]) };
+        },
+      },
+      toolRegistry: registry,
+      lease: new InMemoryProjectAgentLeasePort(),
+      sceneGate: () => activeScene === 'scene_coord'
+        ? { ok: true }
+        : { ok: false, kind, code: 'target_scene_unavailable', message: 'Target scene is unavailable' },
+      performanceCatalog: {
+        resolve: async () => {
+          resolvedScenes.push(activeScene);
+          return { ok: true, value: {
+            fingerprint: activeScene,
+            catalog: { version: 1, characters: [{
+              characterId: 'a', name: 'A', fieldLevelDegrade: false,
+              motions: [`${activeScene}/idle`], expressions: [],
+            }], lookAtTargets: [], reactionTargets: [], diagnostics: [] },
+          } };
+        },
+      },
+    });
+    await coordinator.start({
+      projectId: 'proj', targetSceneIdentity: 'scene_coord', originalTaskText: 'Inspect motions',
+      systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: `capability-gate-${kind}`,
+    });
+
+    await coordinator.runModelTurn();
+
+    expect(coordinator.getTask()?.getPauseReason()).toBe(kind === 'terminal' ? 'target_scene_unavailable' : 'target_scene_inactive');
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(resolvedScenes).not.toContain('other_scene');
+    expect(registry.taskState.hasSceneRead()).toBe(false);
+  });
+
   it('acquires global lease on start and rejects a second running lease', async () => {
     const lease = new InMemoryProjectAgentLeasePort();
     const transport = transportFromResponses([]);
@@ -615,6 +660,82 @@ describe('ProjectAgentCoordinator', () => {
     expect(firstNames).toContain('applyAuthoringTransaction');
     expect(secondNames).toContain('updateStatement');
     expect(secondNames).toContain('applyAuthoringTransaction');
+  });
+
+  it.each([
+    { initialVision: true, nextVision: false },
+    { initialVision: false, nextVision: true },
+  ])('updates readImage and the system prompt when the active model changes capability ($initialVision -> $nextVision)', async ({
+    initialVision,
+    nextVision,
+  }) => {
+    const requests: AiConversationRequest[] = [];
+    const responses: AiConversationResponse[] = [
+      {
+        message: assistantWithTools([
+          { status: 'ready', toolCallId: 'read-1', name: 'readScene', arguments: {} },
+        ]),
+      },
+      { message: assistantText('finished') },
+    ];
+    let responseIndex = 0;
+    let currentVision = initialVision;
+    const imagePort: NonNullable<ProjectAgentReadPorts['image']> = {
+      readImage: () => ({
+        mimeType: 'image/png',
+        bytes: new Uint8Array([0]),
+        originalWidth: 1,
+        originalHeight: 1,
+        deliveredWidth: 1,
+        deliveredHeight: 1,
+        scaled: false,
+        contentFingerprint: 'image-fingerprint',
+      }),
+    };
+    const registry = createRegistry({ imagePort, registerReadImage: initialVision });
+    const coordinator = new ProjectAgentCoordinator({
+      transport: {
+        async complete(request) {
+          requests.push(request);
+          return responses[responseIndex++]!;
+        },
+      },
+      toolRegistry: registry,
+      resolvePerRequestSettings: () => ({
+        ok: true,
+        endpoint: 'https://example.test',
+        model: currentVision ? 'vision-model' : 'text-model',
+        imageInputSupported: currentVision,
+        systemPrompt: currentVision ? 'System prompt with readImage guidance.' : 'System prompt without readImage guidance.',
+      }),
+    });
+    await coordinator.start({
+      projectId: 'proj',
+      targetSceneIdentity: 'scene_coord',
+      originalTaskText: 'Inspect this scene',
+      systemPrompt: initialVision ? 'System prompt with readImage guidance.' : 'System prompt without readImage guidance.',
+      endpoint: 'https://example.test',
+      model: initialVision ? 'vision-model' : 'text-model',
+      taskId: `model-switch-${initialVision}-${nextVision}`,
+    });
+
+    expect((await coordinator.runModelTurn()).status).toBe('tools_executed');
+    currentVision = nextVision;
+    expect((await coordinator.runModelTurn()).status).toBe('settled');
+
+    expect(requests[0]?.tools?.some((tool) => tool.name === 'readImage')).toBe(initialVision);
+    expect(requests[1]?.tools?.some((tool) => tool.name === 'readImage')).toBe(nextVision);
+    expect(requests[1]?.model).toBe(nextVision ? 'vision-model' : 'text-model');
+    expect(requests[1]?.messages[0]).toMatchObject({
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: nextVision
+          ? 'System prompt with readImage guidance.'
+          : 'System prompt without readImage guidance.',
+      }],
+    });
+    expect(registry.has('readImage')).toBe(nextVision);
   });
 
   it('does not treat completeTask as a lifecycle/control tool', async () => {
@@ -1505,10 +1626,46 @@ describe('ProjectAgentCoordinator', () => {
 });
 
 describe('ProjectAgentCoordinator user-attached image (ADR0023)', () => {
-  it('delivers the image on the first request and replaces it with a placeholder afterwards', async () => {
-    // Snapshot the blocks at delivery time: the coordinator replaces the
-    // image bytes in-place after the first delivery, so inspecting the
-    // captured request afterwards would see the placeholder.
+  it('does not leave a rejected image in the pending queue when persistence fails', async () => {
+    const journalPort = new InMemoryProjectAgentJournalPort();
+    const coordinator = new ProjectAgentCoordinator({ transport: transportFromResponses([{ message: assistantText('seen') }]), toolRegistry: createRegistry(), journalPort });
+    await coordinator.start({ projectId: 'proj', targetSceneIdentity: 'scene_coord', originalTaskText: 'Inspect', systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: 'failed-image' });
+    const save = vi.spyOn(journalPort, 'save');
+    save.mockRejectedValueOnce(new Error('Disk full'));
+    const image = { name: 'ref.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto' as const };
+    await expect(coordinator.acceptSupplement('', image)).rejects.toThrow('Disk full');
+    expect(coordinator.getTask()?.peekPendingSupplements()).toHaveLength(0);
+    await coordinator.acceptSupplement('', image);
+    await coordinator.runModelTurn();
+    expect(coordinator.getMessages().flatMap((m) => m.content).filter((b) => b.type === 'image')).toHaveLength(1);
+  });
+
+  it('restores queued image supplements and moves each image to exactly one user message', async () => {
+    const transport = transportFromResponses([{ message: { role: 'assistant', content: [{ type: 'text', text: 'Seen' }], toolCalls: [] } }]);
+    const journalPort = new InMemoryProjectAgentJournalPort();
+    const coordinator = new ProjectAgentCoordinator({ transport, toolRegistry: createRegistry(), journalPort });
+    await coordinator.start({ projectId: 'proj', targetSceneIdentity: 'scene_coord', originalTaskText: 'Inspect', systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: 'queued-images' });
+    coordinator.enqueueSupplement('first', { name: 'one.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2]), detail: 'high' });
+    coordinator.enqueueSupplement('', { name: 'two.png', mimeType: 'image/png', bytes: new Uint8Array([3, 4]), detail: 'low' });
+    await coordinator.pause();
+    const record = await journalPort.load('proj', 'queued-images');
+    if (!record) throw new Error('Missing queued images');
+    const restored = new ProjectAgentCoordinator({ transport, toolRegistry: createRegistry(), journalPort });
+    await restored.hydrateFromJournal(JSON.parse(JSON.stringify(record)));
+    expect((await restored.continuePaused()).ok).toBe(true);
+    await restored.runModelTurn();
+    const users = restored.getMessages().filter((m) => m.role === 'user');
+    expect(users.at(-2)?.content).toEqual([
+      { type: 'text', text: 'first' },
+      { type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2]), detail: 'high' },
+    ]);
+    expect(users.at(-1)?.content).toEqual([{ type: 'image', mimeType: 'image/png', bytes: new Uint8Array([3, 4]), detail: 'low' }]);
+    const saved = await journalPort.load('proj', 'queued-images');
+    expect(saved?.supplements.every((entry) => entry.deliveredToModel && !entry.image)).toBe(true);
+    expect(JSON.stringify(saved).match(/bytesBase64/g)).toHaveLength(2);
+  });
+
+  it('keeps the attached image available in later model requests', async () => {
     let deliveredBlocks: string[] | null = null;
     const transport = {
       calls: 0,
@@ -1552,20 +1709,13 @@ describe('ProjectAgentCoordinator user-attached image (ADR0023)', () => {
 
     expect(deliveredBlocks).toEqual(['text', 'image']);
 
-    // The in-memory history no longer carries bytes; the placeholder stays.
     const historyUser = coordinator.getMessages().find((message) => message.role === 'user');
-    expect(historyUser?.role).toBe('user');
-    if (historyUser?.role === 'user') {
-      expect(historyUser.content.some((block) => block.type === 'image')).toBe(false);
-      expect(
-        historyUser.content.some(
-          (block) => block.type === 'text' && block.text.includes('已附加图片'),
-        ),
-      ).toBe(true);
-    }
+    expect(historyUser?.content).toContainEqual(expect.objectContaining({
+      type: 'image', bytes: new Uint8Array([1, 2, 3]),
+    }));
   });
 
-  it('never persists the image bytes into the journal conversation blob', async () => {
+  it('restores attached image bytes from the single-copy conversation store', async () => {
     const journalPort = new InMemoryProjectAgentJournalPort();
     const coordinator = new ProjectAgentCoordinator({
       transport: transportFromResponses([]),
@@ -1590,13 +1740,16 @@ describe('ProjectAgentCoordinator user-attached image (ADR0023)', () => {
     });
 
     const record = await journalPort.load('proj', 'image-task-2');
-    expect(record?.kind).not.toBe('terminal');
-    if (record) {
-      const serialized = JSON.stringify(record.conversationBlob);
-      expect(serialized).not.toContain('storyboard.png');
-      expect(serialized).not.toContain('"bytes"');
-      expect(serialized).toContain('已附加图片');
-    }
+    expect(record).toBeTruthy();
+    if (!record) throw new Error('Missing persisted conversation');
+    const restored = new ProjectAgentCoordinator({
+      transport: transportFromResponses([]), toolRegistry: createRegistry(),
+      lease: new InMemoryProjectAgentLeasePort(), journalPort,
+    });
+    await restored.hydrateFromJournal(JSON.parse(JSON.stringify(record)));
+    expect(restored.getMessages().flatMap((message) => message.content)).toContainEqual({
+      type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto',
+    });
   });
 });
 

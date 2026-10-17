@@ -1,17 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as PIXI from 'pixi.js';
 import {
-  Cubism2PixiLive2DModelControls,
   Cubism2PixiLive2DAdapter,
   getLive2DRuntimeAdapter,
   CubismPixiLive2DAdapter,
 } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
+import { isSharedRuntimeClockLocked, withSharedRuntimeClock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { Cubism2BakeRenderCore } from '../engine/live2d/runtime/Cubism2BakeRenderCore';
 import * as sdk from '../engine/CubismPixiSdk';
 import { setLive2DCubism2RuntimeAvailable } from '../engine/Live2DRuntimeResolver';
 import { createCubismPixiModel } from '../engine/CubismPixiModel';
 import { applyRenderHook } from '../engine/Live2DModelSetup';
+import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 
 vi.mock('../engine/CubismPixiModel', () => ({
   createCubismPixiModel: vi.fn(async (modelUrl: string) => ({ modelUrl, internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } } })),
@@ -44,8 +46,7 @@ describe('Live2DRuntimeAdapter', () => {
     expect(adapter.id).toBe('pixi-live2d-display-cubism2');
     expect(adapter.supported).toBe(true);
     expect(adapter.isReady()).toBe(true);
-    expect(adapter.getModelClass()).toBe(Live2DModel);
-    expect(adapter.getConfig().cubism2.maskSize).toBe(1024);
+    expect(Live2DModel.config.cubism2.maskSize).toBe(1024);
     expect(from).toHaveBeenCalledWith('asset://localhost/model.json', {
       autoHitTest: false,
       autoFocus: false,
@@ -111,8 +112,8 @@ describe('Live2DRuntimeAdapter', () => {
     await adapter.init();
 
     expect(adapter.isReady()).toBe(true);
-    expect(adapter.getModelClass()).toBeNull();
-    expect(adapter.getConfig().cubism2.maskSize).toBe(1024);
+    expect(adapter).not.toHaveProperty('getModelClass');
+    expect(adapter).not.toHaveProperty('getControls');
     await expect(adapter.createModel('asset://localhost/model.json', {}))
       .rejects.toThrow('Live2DModel class is not available');
   });
@@ -218,7 +219,7 @@ describe('Live2DRuntimeAdapter', () => {
     });
 
     expect(handle.id).toBe('tomori');
-    expect(handle.capabilities.usesCubism2PrivateControls).toBe(true);
+    expect(handle.capabilities.determinism.supportsMotionOffsetReplay).toBe(true);
     expect(handle.displayObject).toBe(model);
     expect(handle.motion.getAvailableMotions()).toEqual(['idle', 'wave']);
     expect(handle.expression.getAvailableExpressions()).toEqual(['smile', 'angry']);
@@ -270,7 +271,18 @@ describe('Live2DRuntimeAdapter', () => {
     });
 
     expect(handle.id).toBe('rana');
-    expect(handle.capabilities.usesCubism2PrivateControls).toBe(false);
+    expect(handle.capabilities.determinism.supportsMotionOffsetReplay).toBe(false);
+    expect(handle.capabilities.determinism).toEqual({
+      tier: 'native-offset-deterministic',
+      supportsParameterCurves: true,
+      supportsNativeMotionOffset: true,
+      supportsMotionOffsetReplay: false,
+      supportsStateReplay: false,
+      diagnostics: [
+        'Cubism 3+ parameter motions use the runtime-neutral deterministic curve cache when available.',
+        'Native Cubism 3+ motion offsets are restored in O(1); Physics/Pose/LookAt state replay is not guaranteed.',
+      ],
+    });
     expect(handle.motion.getAvailableMotions()).toEqual(['TapBody']);
     expect(handle.expression.getAvailableExpressions()).toEqual(['smile']);
     expect(handle.diagnostics.describeInvalidState()).toBe('primary param[1] (PARAM_BROKEN)=NaN');
@@ -281,6 +293,50 @@ describe('Live2DRuntimeAdapter', () => {
     expect(setParameterValueByIndex.mock.calls[0][1]).toBeCloseTo(0.2);
     expect(setParameterValueByIndex.mock.calls[1][0]).toBe(1);
     expect(setParameterValueByIndex.mock.calls[1][1]).toBeCloseTo(0.4);
+  });
+
+  it('installs the custom-motion stage through the official Core parameter seam', () => {
+    const values = [0];
+    const listeners = new Set<() => void>();
+    const setParameterValueByIndex = vi.fn((index: number, value: number) => { values[index] = value; });
+    const internalModel = {
+      on: (_event: string, handler: () => void) => listeners.add(handler),
+      off: (_event: string, handler: () => void) => listeners.delete(handler),
+      coreModel: {
+        getParameterCount: () => 1,
+        getParameterId: () => 'ParamAngleX',
+        setParameterValueByIndex,
+      },
+    };
+    const motion: Extract<CharacterMotionOutput, { kind: 'custom' }> = {
+      kind: 'custom',
+      durationSeconds: 1,
+      fadeInSeconds: 0,
+      derivedFrom: { key: 'probe' },
+      tracks: [{
+        parameterId: 'ParamAngleX',
+        keyframes: [{ time: 0, value: 0 }, { time: 1, value: 10 }],
+      }],
+    };
+    const runtime = new CubismPixiLive2DAdapter();
+    const handle = runtime.createModelHandle('custom-motion-stage', { internalModel }).customMotion.installStage(
+      {
+        getState: () => ({
+          motion,
+          startSceneTime: 0,
+          handoff: { values: {} },
+          controlledParameterIds: ['ParamAngleX'],
+        }),
+      },
+    );
+
+    expect(handle).not.toBeNull();
+    handle!.setSceneTime(0.5);
+    listeners.forEach((listener) => listener());
+    expect(setParameterValueByIndex).toHaveBeenCalledWith(0, 5);
+    expect(values[0]).toBe(5);
+    handle!.dispose();
+    expect(listeners).toHaveLength(0);
   });
 
   it('keeps Cubism 2 expression reset details inside runtime controls', () => {
@@ -453,6 +509,49 @@ describe('Live2DRuntimeAdapter', () => {
     expect(utTime).toBe(10_000);
   });
 
+  it('keeps the Cubism 2 shared clock monotonic after successful, cancelled, and failed expression seeks', async () => {
+    const evaluate = async (outcome: 'success' | 'cancel' | 'failure') => {
+      let utTime = 10_000;
+      let current = true;
+      const clock = {
+        getUserTimeMSec: () => utTime,
+        setUserTimeMSec: (value: number) => { utTime = value; },
+      };
+      (globalThis as any).window = { UtSystem: clock };
+      const expressionManager = {
+        expressions: [],
+        currentExpression: null,
+        defaultExpression: {},
+        reserveExpressionIndex: -1,
+        queueManager: { stopAllMotions: vi.fn() },
+        getExpressionIndex: () => 0,
+        loadExpression: vi.fn(async () => ({})),
+        _setExpression: vi.fn(),
+        update: vi.fn(() => {
+          utTime += 1000;
+          if (outcome === 'cancel') current = false;
+          if (outcome === 'failure') throw new Error('expression update failed');
+        }),
+      };
+      const model = {
+        update: vi.fn(),
+        internalModel: { coreModel: {}, motionManager: { expressionManager } },
+      };
+      const controls = new Cubism2PixiLive2DModelControls({ clock: () => clock });
+      const seek = controls.setExpressionForSeek(model, 'smile', 0, undefined, () => current);
+
+      if (outcome === 'failure') await expect(seek).rejects.toThrow('expression update failed');
+      else await seek;
+
+      expect(utTime).toBe(11_000);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
+    };
+
+    await evaluate('success');
+    await evaluate('cancel');
+    await evaluate('failure');
+  });
+
   it('prevents an older Cubism 2 expression request from landing after seek restoration', async () => {
     let resolveOldExpression!: (expression: any) => void;
     const oldExpression = { name: 'old' };
@@ -595,7 +694,6 @@ describe('Live2DRuntimeAdapter', () => {
 
   it('applies official Cubism Web snapshots and injected parameters through runtime controls', () => {
     const adapter = new CubismPixiLive2DAdapter();
-    const controls = adapter.getControls();
     const setParameterValueByIndex = vi.fn();
     const setPartOpacityByIndex = vi.fn();
     const syncInputParameters = vi.fn();
@@ -621,8 +719,9 @@ describe('Live2DRuntimeAdapter', () => {
       },
     };
 
-    controls.setInjectedParameter(model, 'PARAM_MOUTH_OPEN_Y', 0.75);
-    controls.applySnapshot(model, {
+    const handle = adapter.createModelHandle('snapshot', model);
+    handle.parameters.setInjectedParameter('PARAM_MOUTH_OPEN_Y', 0.75);
+    handle.snapshot.applySnapshot({
       params: new Float32Array([0.25, 0.5]),
       opacities: new Float32Array([0.2, 0.9]),
     } as any);
@@ -638,7 +737,7 @@ describe('Live2DRuntimeAdapter', () => {
     expect(partOpacities[0]).toBeCloseTo(0.2);
     expect(partOpacities[1]).toBeCloseTo(0.9);
     expect(syncInputParameters).toHaveBeenCalled();
-    expect(controls.getParameterMetadata(model)).toEqual([
+    expect(handle.parameters.getParameterMetadata()).toEqual([
       {
         id: 'PARAM_ANGLE_X',
         index: 0,
@@ -660,9 +759,7 @@ describe('Live2DRuntimeAdapter', () => {
 
   it('describes invalid official Cubism Web state through runtime controls', () => {
     const adapter = new CubismPixiLive2DAdapter();
-    const controls = adapter.getControls();
-
-    expect(controls.describeInvalidState({
+    const handle = adapter.createModelHandle('invalid-state', {
       internalModel: {
         parameterValues: new Float32Array([0, Number.NaN]),
         partOpacities: new Float32Array([1]),
@@ -672,12 +769,13 @@ describe('Live2DRuntimeAdapter', () => {
           }),
         },
       },
-    })).toBe('primary param[1] (PARAM_BROKEN)=NaN');
+    });
+
+    expect(handle.diagnostics.describeInvalidState()).toBe('primary param[1] (PARAM_BROKEN)=NaN');
   });
 
   it('routes official Cubism Web motion and expression controls through the model instance wrapper', async () => {
     const adapter = new CubismPixiLive2DAdapter();
-    const controls = adapter.getControls();
     const preloadMotion = vi.fn().mockResolvedValue(undefined);
     const stopAllMotions = vi.fn();
     const setExpression = vi.fn();
@@ -697,23 +795,21 @@ describe('Live2DRuntimeAdapter', () => {
         },
       },
     };
+    const handle = adapter.createModelHandle('motion-controls', model);
 
-    expect(controls.getMotionDuration(model, 'idle')).toBe(1.75);
-    expect(controls.getMotionDebugState(model)).toEqual({
+    expect(handle.motion.getMotionDuration('idle')).toBe(1.75);
+    expect(handle.motion.getMotionDebugState()).toEqual({
       currentGroup: 'idle',
       reservedGroup: undefined,
       isFinished: false,
       playing: true,
       queueLength: 1,
-      internalModel: model.internalModel,
-      motionManager: model.internalModel.motionManager,
-      queueManager: ['motion-a'],
     });
 
-    await controls.preloadMotion(model, 'idle');
-    controls.setExpression(model, 'smile');
-    controls.stopAllMotions(model);
-    controls.clearMotionState(model);
+    await handle.motion.preloadMotion('idle');
+    handle.expression.setExpression('smile');
+    handle.lifecycle.stopAllMotions();
+    handle.lifecycle.clearMotionState();
 
     expect(preloadMotion).toHaveBeenCalledWith('idle', 0);
     expect(setExpression).toHaveBeenCalledWith('smile');
@@ -729,11 +825,15 @@ describe('Live2DRuntimeAdapter', () => {
     cubism2Controls.renderForBake({ render: cubism2Render }, renderer);
     expect(cubism2Render).toHaveBeenCalledWith(renderer);
 
-    const officialControls = new CubismPixiLive2DAdapter().getControls();
+    const official = new CubismPixiLive2DAdapter();
     const renderForBake = vi.fn();
     const render = vi.fn();
     const renderTexture = { id: 'offscreen' };
-    officialControls.renderForBake({ renderForBake, render }, renderer, 'rana', renderTexture);
+    official.createModelHandle('rana', { renderForBake, render }).render.renderForBake(
+      renderer as any,
+      'rana',
+      renderTexture as any,
+    );
     expect(renderForBake).toHaveBeenCalledWith(renderer, renderTexture);
     expect(render).not.toHaveBeenCalled();
   });
@@ -817,7 +917,7 @@ describe('Live2DRuntimeAdapter', () => {
     expect(controls.getAvailableExpressions(model)).toEqual(['smile', 'blush', 'cry']);
   });
 
-  it('returns Cubism 2 motion debug state and parameter values through runtime controls', () => {
+  it('returns neutral motion diagnostics and parameter values through the bound handle', () => {
     const controls = new Cubism2PixiLive2DModelControls();
     const queue = {
       isFinished: vi.fn(() => false),
@@ -842,20 +942,25 @@ describe('Live2DRuntimeAdapter', () => {
       },
     };
 
-    expect(controls.getMotionDebugState(model)).toEqual({
+    const handle = createLive2DModelHandle({
+      id: 'hero',
+      model,
+      runtime: { runtimeFamily: 'cubism2', adapterId: 'pixi-live2d-display-cubism2', supported: true },
+      controls,
+    });
+
+    expect(handle.motion.getMotionDebugState()).toEqual({
       currentGroup: 'wave',
       reservedGroup: 'idle',
+      playing: undefined,
       isFinished: false,
       queueLength: 1,
-      internalModel: model.internalModel,
-      motionManager,
-      queueManager: queue,
     });
-    expect(controls.getParameterValues(model)).toEqual([
+    expect(handle.parameters.getParameterValues()).toEqual([
       { index: 0, name: 'PARAM_ANGLE_X', value: 0.25 },
       { index: 1, name: 'PARAM_MOUTH_OPEN_Y', value: 0.75 },
     ]);
-    expect(controls.getParameterMetadata(model)).toEqual([
+    expect(handle.parameters.getParameterMetadata()).toEqual([
       {
         id: 'PARAM_ANGLE_X',
         index: 0,
@@ -1026,6 +1131,10 @@ describe('Live2DRuntimeAdapter', () => {
           _userTimeMSec: 0,
         },
         expressionManager: {
+          defaultExpression: { name: 'default' },
+          currentExpression: { name: 'smile' },
+          reserveExpressionIndex: 0,
+          queueManager: { stopAllMotions: vi.fn() },
           stopAllExpressions: vi.fn(),
           state: { currentGroup: undefined },
           resetExpression: vi.fn(),
@@ -1074,11 +1183,6 @@ describe('Live2DRuntimeAdapter', () => {
           targetY: 0,
           vx: 0,
           vy: 0,
-        },
-        expressionManager: {
-          stopAllExpressions: vi.fn(),
-          state: { currentGroup: undefined },
-          resetExpression: vi.fn(),
         },
         on: () => {},
         off: () => {},
@@ -1233,13 +1337,13 @@ describe('Live2DRuntimeAdapter', () => {
       expect(motionManager._motionQueueManager.stopAllMotions).toHaveBeenCalled();
     });
 
-    it('reports motion groups and sampling targets from concrete models', () => {
+    it('reports motion groups without exposing SDK sampler targets', () => {
       const controls = new Cubism2PixiLive2DModelControls();
-      const { model, internalModel, motionManager } = cubism2DeepModel();
+      const { model } = cubism2DeepModel();
 
       expect(controls.hasMotionGroup(model, 'wave')).toBe(true);
       expect(controls.hasMotionGroup(model, 'sad')).toBe(false);
-      expect(controls.getMotionSamplingTargets(model)).toEqual([{ internalModel, motionManager }]);
+      expect(controls).not.toHaveProperty('getMotionSamplingTargets');
     });
 
     it('flushes the idle state inside the global SDK clock lock', async () => {
@@ -1299,8 +1403,35 @@ describe('Live2DRuntimeAdapter', () => {
       expect(params[1]).toBeCloseTo(0.2, 5);
       expect(opacities[0]).toBeCloseTo(0.9, 5);
       expect(opacities[1]).toBeCloseTo(0.8, 5);
-      expect(internalModel.expressionManager.stopAllExpressions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.queueManager.stopAllMotions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.currentExpression).toBe(motionManager.expressionManager.defaultExpression);
+      expect(motionManager.expressionManager.reserveExpressionIndex).toBe(-1);
       expect(internalModel.focusController.focus).toHaveBeenCalledWith(0, 0, true);
+    });
+
+    it('coordinates idle reset clock updates and reuses an active transaction', async () => {
+      let utTime = 3000;
+      const clock = {
+        getUserTimeMSec: () => utTime,
+        setUserTimeMSec: (value: number) => { utTime = value; },
+      };
+      const controls = new Cubism2PixiLive2DModelControls({ clock: () => clock });
+      const { model, motionManager } = cubism2DeepModel();
+      motionManager.startMotion.mockImplementation(async () => {
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+        return true;
+      });
+
+      await controls.resetModelToIdle(model);
+      expect(utTime).toBe(3016);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
+
+      await withSharedRuntimeClock(clock, () => true, async (transaction) => {
+        await controls.resetModelToIdle(model, {}, () => true, transaction ?? undefined);
+        expect(isSharedRuntimeClockLocked()).toBe(true);
+      });
+      expect(utTime).toBe(3032);
+      expect(isSharedRuntimeClockLocked()).toBe(false);
     });
 
     it('resets core parameters when no idle snapshot exists and keeps focus on request', async () => {
@@ -1399,7 +1530,10 @@ describe('Live2DRuntimeAdapter', () => {
 
       expect(motionManager.stopAllMotions).toHaveBeenCalled();
       expect(motionManager._motionQueueManager.stopAllMotions).toHaveBeenCalled();
-      expect(motionManager.expressionManager.resetExpression).toHaveBeenCalled();
+      expect(motionManager.expressionManager.queueManager.stopAllMotions).toHaveBeenCalled();
+      expect(motionManager.expressionManager.currentExpression).toBe(motionManager.expressionManager.defaultExpression);
+      expect(motionManager.expressionManager.reserveExpressionIndex).toBe(-1);
+      expect(motionManager.expressionManager.resetExpression).not.toHaveBeenCalled();
       expect(internalModel.motionManager).toBe(motionManager);
     });
 
@@ -1445,7 +1579,21 @@ describe('Live2DRuntimeAdapter', () => {
       expect(controls.getHeadAnchor(model)).toBeNull();
     });
 
-    it('exposes the SDK clock handle and bake texture disposal on the adapter', async () => {
+    it('restores the SDK focus updater when a focus tween is stopped', () => {
+      const controls = new Cubism2PixiLive2DModelControls();
+      const { model, internalModel } = cubism2DeepModel();
+      const originalUpdate = vi.fn();
+      internalModel.focusController.update = originalUpdate;
+
+      controls.applyFocus(model, { focusX: 0.8, focusY: -0.4, duration: 1 });
+      expect(internalModel.focusController.update).not.toBe(originalUpdate);
+
+      controls.manageFocusAnimations(model, 'stop');
+
+      expect(internalModel.focusController.update).toBe(originalUpdate);
+    });
+
+    it('keeps SDK controls off the adapter and exposes bake texture disposal', async () => {
       delete (globalThis as any).window;
       const adapter = new Cubism2PixiLive2DAdapter(async () => ({
         config: { cubism2: { maskSize: 1024 } },
@@ -1453,11 +1601,8 @@ describe('Live2DRuntimeAdapter', () => {
       }));
       await adapter.init();
 
-      expect(adapter.getClock()).toBeNull();
-
-      const utSystem = { getUserTimeMSec: () => 42, setUserTimeMSec: vi.fn() };
-      (globalThis as any).window = { UtSystem: utSystem };
-      expect(adapter.getClock()).toBe(utSystem);
+      expect(adapter).not.toHaveProperty('getControls');
+      expect(adapter).not.toHaveProperty('getModelClass');
 
       expect(() => adapter.disposeBakeRenderTexture()).not.toThrow();
     });

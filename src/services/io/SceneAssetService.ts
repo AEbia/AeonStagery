@@ -16,6 +16,7 @@ import { WmdlConfigRegistry } from '../../engine/WmdlConfigRegistry';
 import { ProjectResourceService } from './ProjectResourceService';
 import { ProjectPathResolver } from './ProjectPathResolver';
 import type { IFileAccess } from './IFileAccess';
+import { materializeResourceMotionDurations } from './Live2DResourceMotionDuration';
 import {
   browserCollaborativeAssetHashAdapter,
   collectLive2DAssetBundleClosure,
@@ -235,9 +236,9 @@ export class SceneAssetService implements SceneAssetHooks {
   }
 
   async normalizeSemanticSource(scene: CurrentSceneDocument): Promise<CurrentSceneDocument> {
-    if (!this.projectResources.getCurrentProject()) return scene;
     const cloned = JSON.parse(JSON.stringify(scene)) as CurrentSceneDocument;
-    for (const character of cloned.meta.characters ?? []) {
+    const charactersToNormalize = this.projectResources.getCurrentProject() ? cloned.meta.characters ?? [] : [];
+    for (const character of charactersToNormalize) {
       if (character.model) {
         character.model = await this.normalizeSemanticAssetReferenceOrKeep(character.model, 'figure');
       }
@@ -245,6 +246,7 @@ export class SceneAssetService implements SceneAssetHooks {
         variant.model = await this.normalizeSemanticAssetReferenceOrKeep(variant.model, 'figure');
       }
     }
+    await materializeResourceMotionDurations(cloned, this.fileAccess, (reference) => this.resolveScenePathForRead(reference));
     return cloned;
   }
 

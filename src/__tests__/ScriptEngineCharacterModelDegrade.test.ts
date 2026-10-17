@@ -28,7 +28,7 @@ function mockReconstructSeek() {
   const spies = {
     hasCharacter: vi.spyOn(live2DManager, 'hasCharacter').mockReturnValue(false),
     listCharacters: vi.spyOn(live2DManager, 'listCharacters').mockReturnValue([]),
-    getAllCharacters: vi.spyOn(live2DManager, 'getAllCharacters').mockReturnValue(new Map()),
+    getCharacterInfo: vi.spyOn(live2DManager, 'getCharacterInfo').mockReturnValue(null),
     addCharacter: vi.spyOn(live2DManager, 'addCharacter').mockResolvedValue(undefined),
     removeCharacter: vi.spyOn(live2DManager, 'removeCharacter').mockImplementation(() => {}),
     clearAllPendingMotions: vi.spyOn(live2DManager, 'clearAllPendingMotions').mockImplementation(() => {}),
@@ -93,7 +93,7 @@ describe('ScriptEngine reconstruct-seek degrades missing character model resourc
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => {});
     const loaded = new Map([['stale', { modelPath: 'asset://localhost/figure/old.json' } as any]]);
     const spies = mockReconstructSeek();
-    spies.getAllCharacters.mockReturnValue(loaded);
+    spies.getCharacterInfo.mockReturnValue(loaded.get('stale'));
     spies.listCharacters.mockReturnValue(['stale']);
     vi.spyOn(engine as any, 'syncAllStates').mockResolvedValue(undefined);
     vi.spyOn(engine as any, 'takeSnapshot').mockImplementation(() => {});

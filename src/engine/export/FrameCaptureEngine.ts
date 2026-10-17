@@ -5,8 +5,9 @@ import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
 import { customAnimHost } from '../CustomAnimHost';
 import type { CustomAnimationCaptureFrame } from '../CustomAnimHost';
-import { cubism2Live2DAdapter } from '../Live2DRuntimeAdapter';
-import { Rectangle } from 'pixi.js';
+import { advanceLive2DExportClock } from '../live2d/runtime/Live2DRuntimeControlModule';
+import { textLayerManager } from '../TextLayerManager';
+import { Rectangle, RenderTexture } from 'pixi.js';
 
 // Minimal interfaces for injected dependencies — only what FrameCaptureEngine actually uses
 interface StageSubsystem {
@@ -52,6 +53,8 @@ export interface FrameCaptureVisualRuntime {
 }
 
 interface FrameCaptureConfig {
+  signal?: AbortSignal;
+  onBackendStarted?: () => void;
   fps: number;
   rangeStart: number;
   rangeEnd: number;
@@ -147,19 +150,6 @@ function createCompositeCanvas(
   }
 }
 
-declare const UtSystem: {
-  getUserTimeMSec(): number;
-  setUserTimeMSec(ms: number): void;
-} | undefined;
-
-/**
- * Best-effort SDK clock access through the Cubism 2 runtime adapter (export
- * keeps the same monotonic discipline as the engine runtime).
- */
-function getRuntimeClock(): import('../Live2DRuntimeAdapter').Live2DRuntimeClock | null {
-  return cubism2Live2DAdapter.getClock();
-}
-
 export class FrameCaptureEngine {
   private stage: StageSubsystem;
   private playback: PlaybackSubsystem;
@@ -209,6 +199,15 @@ export class FrameCaptureEngine {
       ? { width: canvasStyle.width, height: canvasStyle.height }
       : null;
     let backendFinished = false;
+    const signal = config.signal;
+    const abortBackend = (backend as ICaptureBackend & { abort?: (cancelled?: boolean) => Promise<void> }).abort;
+    let backendReady = false;
+    const cancelBackend = () => {
+      if (backendReady && !backendFinished && abortBackend) {
+        void abortBackend.call(backend, true).catch((error) => console.error('[FrameCapture] Cancellation cleanup failed:', error));
+      }
+    };
+    signal?.addEventListener('abort', cancelBackend, { once: true });
 
     // Subtitle layer handling for the optional subtitle export modes:
     //  - includeSubtitles=false hides the subtitle layer for the whole capture
@@ -225,8 +224,11 @@ export class FrameCaptureEngine {
     const originalBackgroundColor = (app.renderer.background)?.color;
     let subtitleLayer: import('pixi.js').Container | null | undefined;
     let originalSubtitleVisible = true;
+    const isRawPixels = 'pushQueue' in backend;
+    let subtitleRenderTexture: RenderTexture | null = null;
 
     try {
+      signal?.throwIfAborted();
       // ── Init ──
       // Video dimensions are physical output pixels. Preview DPR must not
       // multiply the encoder input size.
@@ -261,6 +263,9 @@ export class FrameCaptureEngine {
         isEncoded: true,
         transparent: subtitleOnly,
       });
+      backendReady = true;
+      config.onBackendStarted?.();
+      signal?.throwIfAborted();
 
       // ── Deterministic Lockdown ──
       live2D.setExportMode(true);
@@ -285,9 +290,32 @@ export class FrameCaptureEngine {
 
       // Render only the subtitle layer for subtitle-only exports; the layer
       // was resolved above and is guaranteed non-null in that mode.
-      const renderTarget = subtitleLayer ?? app.stage;
+      const renderTarget = renderSubtitlesOnly && subtitleLayer ? subtitleLayer : app.stage;
 
-      app.renderer.render(renderTarget);
+      const renderCaptureTarget = () => {
+        const restoreTextLayers = renderSubtitlesOnly
+          ? textLayerManager.hideForSubtitleExport()
+          : null;
+        try {
+          if (subtitleRenderTexture) {
+            // Capture the same offscreen frame we render. Extracting a container
+            // would render it a second time with Pixi's default transparent clear,
+            // losing the chroma background and re-running subtitle render state.
+            app.renderer.render({
+              container: renderTarget,
+              target: subtitleRenderTexture,
+              clear: true,
+              clearColor: subtitleChroma ? [0, 1, 0, 1] : [0, 0, 0, 0],
+            });
+          } else {
+            app.renderer.render(renderTarget);
+          }
+        } finally {
+          restoreTextLayers?.();
+        }
+      };
+
+      renderCaptureTarget();
       const nextFrame = typeof requestAnimationFrame !== 'undefined'
         ? requestAnimationFrame
         : (cb: any) => setTimeout(cb, 16);
@@ -302,30 +330,34 @@ export class FrameCaptureEngine {
         document.body.classList.add('is-exporting');
       }
 
-      const runtimeClock = getRuntimeClock();
-      let exportUtBaseline = runtimeClock ? runtimeClock.getUserTimeMSec() : 0;
+      let exportUtBaseline = advanceLive2DExportClock(0) ?? 0;
 
       const startFrame = Math.floor(rangeStart * fps);
       const endFrame = Math.ceil(rangeEnd * fps);
       const totalFrames = endFrame - startFrame;
 
+      if (renderSubtitlesOnly && isRawPixels) {
+        subtitleRenderTexture = RenderTexture.create({
+          width, height, resolution: 1, antialias: app.renderer.view?.antialias ?? false,
+        });
+      }
+
       let lastUiUpdate = Date.now();
 
       for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+        signal?.throwIfAborted();
         const time = rangeStart + frameIdx / fps;
         const dtMs = 1000 / fps;
 
         // Monotonically advance UtSystem — never rewind
-        if (runtimeClock) {
-          exportUtBaseline += dtMs;
-          runtimeClock.setUserTimeMSec(exportUtBaseline);
-        }
+        exportUtBaseline = advanceLive2DExportClock(dtMs, exportUtBaseline) ?? exportUtBaseline;
 
         // Reconcile all graphic layers through the awaited seek seam on every
         // export frame. Directly crossing a GSAP callback is not sufficient
         // when export starts in the middle of an action interval.
         config.voiceLipSync?.beforeSeek(time);
         await this.playback.seek(time);
+        signal?.throwIfAborted();
         gsap.globalTimeline.totalTime(time, false);
         config.visualRuntime?.applyCompositeAtTime(time);
         const visualOverlay = config.visualRuntime?.resolveLightingOverlayAtTime(time) ?? null;
@@ -360,7 +392,7 @@ export class FrameCaptureEngine {
         // methods no longer exist on AbstractRenderer's systems.
         app.renderer.resetState();
 
-        app.renderer.render(renderTarget);
+        renderCaptureTarget();
 
         // Custom HTML animations are part of the scene, not the subtitle
         // layer — never composite them into a subtitle-only export.
@@ -389,13 +421,13 @@ export class FrameCaptureEngine {
 
         // If the backend has pushFrame (RawPixelsBackend), it needs the
         // composited RGBA pixels. WebCodecs receives a composited canvas.
-        const isRawPixels = 'pushQueue' in backend || typeof (backend as any).pushQueue !== 'undefined';
+        signal?.throwIfAborted();
         if (isRawPixels) {
           const extractedPixels = app.renderer.extract.pixels({
             // Match the render target. Subtitle-only exports must not pull the
             // camera-affected scene (including panorama post effects) back in
             // through a second full-stage extraction.
-            target: renderTarget,
+            target: subtitleRenderTexture ?? renderTarget,
             frame: new Rectangle(0, 0, width, height),
           });
           const pixels = extractedPixels instanceof Uint8Array || extractedPixels instanceof Uint8ClampedArray
@@ -429,16 +461,19 @@ export class FrameCaptureEngine {
             totalFrames,
           });
           lastUiUpdate = now;
+          // Yield to input events even when frame awaits only resolve microtasks.
+          await new Promise(resolve => setTimeout(resolve, 0));
         }
       }
 
+      signal?.throwIfAborted();
       await backend.finish();
+      signal?.throwIfAborted();
       backendFinished = true;
     } catch (error) {
-      const abortBackend = (backend as typeof backend & { abort?: () => Promise<void> }).abort;
       if (!backendFinished && typeof abortBackend === 'function') {
         try {
-          await abortBackend.call(backend);
+          await abortBackend.call(backend, signal?.aborted);
         } catch (cleanupError) {
           // Preserve the capture/renderer/seek failure while still exposing
           // cleanup problems in diagnostics.
@@ -447,6 +482,8 @@ export class FrameCaptureEngine {
       }
       throw error;
     } finally {
+      signal?.removeEventListener('abort', cancelBackend);
+      subtitleRenderTexture?.destroy(true);
       // ── Restore ──
       config.voiceLipSync?.dispose();
       app.renderer.resize(originalWidth, originalHeight, originalResolution);

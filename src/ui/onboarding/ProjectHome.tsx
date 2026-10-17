@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
+import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFile, IconFolder, IconInfo, IconPencil, IconPlus, IconTarget, IconTrash, IconUsers } from '../icons';
 import { MAX_RECENT_PROJECTS } from '../SettingsStore';
+import { DEFAULT_DIALOGUE_STYLE_ID } from '../../api/types/project';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import type {
   CharacterVariantImportMode,
@@ -70,7 +71,9 @@ interface ProjectHomeProps {
   onBrowseCollaborationDirectory: (currentPath: string) => Promise<string | null>;
   onOpenProject: () => void | Promise<void>;
   onImportTemplatePackage: () => void | Promise<void>;
+  onDeleteTemplatePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   onOpenRecentProject: (projectFilePath: string) => void | Promise<void>;
+  onRenameRecentProject: (project: RecentProjectEntry) => void;
   onRemoveRecentProject: (projectFilePath: string) => void;
   onHostNewCollaboration: (payload: { name: string; rootPath: string; displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
   onHostExistingCollaboration: (payload: { displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
@@ -135,7 +138,9 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   onBrowseCollaborationDirectory,
   onOpenProject,
   onImportTemplatePackage,
+  onDeleteTemplatePackage,
   onOpenRecentProject,
+  onRenameRecentProject,
   onRemoveRecentProject,
   onHostNewCollaboration,
   onHostExistingCollaboration,
@@ -318,7 +323,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       templatePackages,
       selectedTemplateIds,
       defaultOverrides,
-      'glass',
+      DEFAULT_DIALOGUE_STYLE_ID,
     ),
     [defaultOverrides, selectedTemplateIds, templatePackages],
   );
@@ -532,8 +537,6 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   };
 
   const toggleTemplate = (templateId: string) => {
-    const isSelected = selectedTemplateIds.includes(templateId);
-    if (isSelected && selectedTemplateIds.length === 1) return;
     hasCustomizedTemplateSelectionRef.current = true;
     setSelectedTemplateIds((current) => {
       if (current.includes(templateId)) {
@@ -715,7 +718,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
         <div className="ph-ambient-orb ph-ambient-orb--3" />
       </div>
 
-      <div className="ph-launcher">
+      <div className={`ph-launcher${mode === 'start' ? ' ph-launcher--start' : ''}`}>
         <header className="ph-header">
           <div key={headerTitle} className="ph-header-content">
             <div className="ph-eyebrow">{headerEyebrow}</div>
@@ -807,10 +810,12 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
 
                 <div className="ph-stagger-3">
                   <TemplatePackageSelector
+                    compact
                     packages={templatePackages}
                     selectedIds={selectedTemplateIds}
                     onToggle={toggleTemplate}
                     onMove={moveTemplate}
+                    onDeletePackage={onDeleteTemplatePackage}
                   />
                 </div>
 
@@ -1588,7 +1593,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
             </div>
 
             <div className="ph-content-grid ph-stagger-2">
-              <section className="ph-surface">
+              <section className="ph-surface ph-recent-surface">
                 <div className="ph-section-header">
                   <div>
                     <div className="ph-section-title">
@@ -1619,15 +1624,27 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           </span>
                           <span className="ph-recent-time">{formatRecentTime(project.lastOpenedAt)}</span>
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn--icon btn--danger ph-recent-delete"
-                          onClick={() => setProjectToRemove(project)}
-                          aria-label={`移除最近项目：${project.name}`}
-                          title="移除最近项目"
-                        >
-                          <IconTrash width={14} height={14} />
-                        </button>
+                        <div className="ph-recent-actions">
+                          <button
+                            type="button"
+                            className="btn btn--icon"
+                            onClick={() => onRenameRecentProject(project)}
+                            disabled={openingRecentPath !== null}
+                            aria-label={`重命名项目：${project.name}`}
+                            title="重命名项目"
+                          >
+                            <IconPencil width={14} height={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--icon btn--danger ph-recent-delete"
+                            onClick={() => setProjectToRemove(project)}
+                            aria-label={`移除最近项目：${project.name}`}
+                            title="移除最近项目"
+                          >
+                            <IconTrash width={14} height={14} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1642,6 +1659,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                 isBusy={isChoosingLibrary}
                 isImportingTemplate={isImportingTemplate}
                 onImportTemplate={handleImportTemplatePackage}
+                templatePackages={templatePackages}
+                onDeleteTemplatePackage={onDeleteTemplatePackage}
                 onAdd={handleChooseExternalLibrary}
                 onReplace={handleReplaceExternalLibrary}
                 onRemove={handleRemoveExternalLibrary}
@@ -1692,6 +1711,8 @@ const ExternalLibraryManager = ({
   isBusy,
   isImportingTemplate,
   onImportTemplate,
+  templatePackages,
+  onDeleteTemplatePackage,
   onAdd,
   onReplace,
   onRemove,
@@ -1702,30 +1723,25 @@ const ExternalLibraryManager = ({
   isBusy: boolean;
   isImportingTemplate?: boolean;
   onImportTemplate?: () => void | Promise<void>;
+  templatePackages: TemplatePackageSummary[];
+  onDeleteTemplatePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   onAdd: () => void | Promise<void>;
   onReplace: (index: number) => void | Promise<void>;
   onRemove: (index: number) => void | Promise<void>;
   onSkip: () => void | Promise<void>;
 }) => (
-  <section className="ph-surface">
-    <div className="ph-section-header">
-      <div>
-        <div className="ph-section-title">
-          外部库与模板
-          <InfoTip content="管理只读素材来源与应用专用模板包。" />
+  <section className="ph-surface ph-resource-manager" aria-label="外部库与模板">
+    <div className="ph-section-title">
+      外部库与模板
+      <InfoTip content="管理只读素材来源与应用专用模板包。" />
+    </div>
+
+    <section className="ph-resource-group" aria-label="外部库">
+      <div className="ph-resource-group-header">
+        <div className="ph-resource-group-heading">
+          <div className="ph-resource-group-title">外部库</div>
+          <div className="ph-hint-text">{paths.length} 个外部库</div>
         </div>
-      </div>
-      <div className="ph-header-actions">
-        {onImportTemplate && (
-          <button
-            className="btn ph-btn-compact"
-            onClick={() => { void onImportTemplate(); }}
-            disabled={isImportingTemplate}
-            title="安装 ZIP 到应用专用模板库"
-          >
-            <IconPlus width={13} height={13} /> {isImportingTemplate ? '正在导入模板…' : '导入模板包'}
-          </button>
-        )}
         <button
           className="btn btn--primary ph-btn-compact"
           data-tutorial-target="external-library-add"
@@ -1735,36 +1751,58 @@ const ExternalLibraryManager = ({
           <IconPlus width={13} height={13} /> 添加外部库
         </button>
       </div>
-    </div>
 
-    <div className="ph-library-list">
-      {paths.length > 0 ? (
-        paths.map((path, index) => (
-          <div key={`${path}:${index}`} className="ph-library-item">
-            <IconFolder width={16} height={16} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
-            <div className="ph-library-path" title={path}>{path}</div>
-            <button
-              className="btn ph-btn-tiny"
-              data-tutorial-target={`external-library-replace-${index}`}
-              onClick={() => { void onReplace(index); }}
-              disabled={isBusy}
-            >
-              修改
-            </button>
-            <button className="btn ph-btn-tiny" onClick={() => { void onRemove(index); }} disabled={isBusy}>移除</button>
+      <div
+        className="ph-library-list"
+        role={paths.length > 0 ? 'region' : undefined}
+        aria-label={paths.length > 0 ? '外部库列表' : undefined}
+        tabIndex={paths.length > 0 ? 0 : undefined}
+      >
+        {paths.length > 0 ? (
+          paths.map((path, index) => (
+            <div key={`${path}:${index}`} className="ph-library-item">
+              <IconFolder width={16} height={16} style={{ flexShrink: 0, color: 'var(--text-secondary)' }} />
+              <div className="ph-library-path" title={path}>{path}</div>
+              <button
+                className="btn ph-btn-tiny"
+                data-tutorial-target={`external-library-replace-${index}`}
+                onClick={() => { void onReplace(index); }}
+                disabled={isBusy}
+              >
+                修改
+              </button>
+              <button className="btn ph-btn-tiny" onClick={() => { void onRemove(index); }} disabled={isBusy}>移除</button>
+            </div>
+          ))
+        ) : (
+          <div className="ph-library-empty">
+            <IconInfo width={16} height={16} />
+            <span>{shouldPrompt ? '还没有连接外部素材库。' : '未配置外部素材库。'}</span>
+            {shouldPrompt && (
+              <button className="btn ph-btn-tiny" onClick={() => { void onSkip(); }} disabled={isBusy}>
+                暂不配置
+              </button>
+            )}
           </div>
-        ))
-      ) : (
-        <div className="ph-library-empty">
-          <IconInfo width={16} height={16} />
-          <span>{shouldPrompt ? '还没有连接外部素材库。' : '未配置外部素材库。'}</span>
-          {shouldPrompt && (
-            <button className="btn ph-btn-tiny" onClick={() => { void onSkip(); }} disabled={isBusy}>
-              暂不配置
-            </button>
-          )}
-        </div>
-      )}
+        )}
+      </div>
+    </section>
+    <div className="ph-resource-group ph-resource-group--templates">
+      <TemplatePackageSelector
+        compact
+        packages={templatePackages}
+        onDeletePackage={onDeleteTemplatePackage}
+        headerActions={onImportTemplate && (
+          <button
+            className="btn ph-btn-compact"
+            onClick={() => { void onImportTemplate(); }}
+            disabled={isImportingTemplate}
+            title="安装 ZIP 到应用专用模板库"
+          >
+            <IconPlus width={13} height={13} /> {isImportingTemplate ? '正在导入模板…' : '导入模板包'}
+          </button>
+        )}
+      />
     </div>
   </section>
 );

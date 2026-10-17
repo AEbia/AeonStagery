@@ -19,7 +19,7 @@ export function registerFileSystemHandlers() {
       const absolutePath = path.isAbsolute(filePath)
         ? filePath
         : path.resolve(app.getAppPath(), filePath);
-      const buffer = fs.readFileSync(absolutePath);
+      const buffer = await fs.promises.readFile(absolutePath);
       const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       return { success: true, data };
     } catch (err: any) {
@@ -153,8 +153,8 @@ export function registerFileSystemHandlers() {
       const absoluteDest = path.isAbsolute(destPath)
         ? destPath
         : path.resolve(app.getAppPath(), destPath);
-      fs.mkdirSync(path.dirname(absoluteDest), { recursive: true });
-      fs.copyFileSync(absoluteSource, absoluteDest);
+      await fs.promises.mkdir(path.dirname(absoluteDest), { recursive: true });
+      await fs.promises.copyFile(absoluteSource, absoluteDest);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };

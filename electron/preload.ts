@@ -22,6 +22,8 @@ import type {
   ProjectAgentProjectContext,
   ProjectAgentRenameConversationResult,
   ProjectAgentStartRequest,
+  ProjectAgentImageAttachment,
+  ProjectAgentSupplementRequest,
   ProjectAgentStartResultPayload,
   ProjectAgentTerminalCommandRequest,
   ProjectAgentTaskStatusPayload,
@@ -32,6 +34,7 @@ import type {
   ProjectAgentTaskCommandResult,
 } from '../src/services/project-agent-service/ProjectAgentTaskCoordinator';
 import type { CrashReport, CrashEnvironmentInfo } from '../src/api/types/crash';
+import type { WebGalScssImportInstallRequest } from '../src/api/types/template-package-import';
 
 /**
  * AeonStagery Preload Bridge
@@ -74,6 +77,12 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   },
   templates: {
     importZip: () => ipcRenderer.invoke('templates:importZip'),
+    // WebGAL dialogue template: inspect picks the directory and reports what
+    // would be installed (including duplicates), install performs the write.
+    inspectWebgalScss: () => ipcRenderer.invoke('templates:inspectWebGalScss'),
+    installWebgalScss: (request: WebGalScssImportInstallRequest) =>
+      ipcRenderer.invoke('templates:installWebGalScss', request),
+    deletePackage: (request: import('../src/api/types/template-package-import').TemplatePackageDeleteRequest) => ipcRenderer.invoke('templates:deletePackage', request),
   },
 
   // ─── Live2D Runtime Availability ───────────────────────
@@ -158,8 +167,10 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('projectAgent:publishStatus', status),
     getTaskStatus: (taskId: string) =>
       ipcRenderer.invoke('projectAgent:getTaskStatus', taskId),
-    sendSupplement: (taskId: string, text: string) =>
-      ipcRenderer.invoke('projectAgent:sendSupplement', taskId, text),
+    sendSupplement: (taskId: string, text: string, image?: ProjectAgentImageAttachment) =>
+      ipcRenderer.invoke('projectAgent:sendSupplement', taskId, text, image),
+    publishSupplementResult: (payload: ProjectAgentStartResultPayload) =>
+      ipcRenderer.invoke('projectAgent:supplementResult', payload),
     requestStart: (payload: ProjectAgentStartRequest) =>
       ipcRenderer.invoke('projectAgent:requestStart', payload),
     runTerminalCommand: (request: ProjectAgentTerminalCommandRequest) =>
@@ -227,8 +238,8 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.on('projectAgent:setEffort', listener);
       return () => ipcRenderer.removeListener('projectAgent:setEffort', listener);
     },
-    onSupplement: (callback: (payload: { taskId: string; text: string }) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, payload: { taskId: string; text: string }) => callback(payload);
+    onSupplement: (callback: (payload: ProjectAgentSupplementRequest) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: ProjectAgentSupplementRequest) => callback(payload);
       ipcRenderer.on('projectAgent:supplement', listener);
       return () => ipcRenderer.removeListener('projectAgent:supplement', listener);
     },
@@ -268,6 +279,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('ffmpeg:pushEncodedChunk', chunkData),
     endStreamExport: () =>
       ipcRenderer.invoke('ffmpeg:endStreamExport'),
+    cancelExport: () => ipcRenderer.invoke('ffmpeg:cancelExport'),
     onLog: (callback: (msg: string) => void) => {
       const listener = (_event: any, msg: string) => callback(msg);
       ipcRenderer.on('ffmpeg:log', listener);

@@ -10,6 +10,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { Texture } from 'pixi.js';
+import * as PIXI from 'pixi.js';
 import { Cubism2PixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 
 function installInert2dContext() {
@@ -52,18 +53,16 @@ describe('Cubism2PixiLive2DAdapter.createFallbackModel', () => {
     const fallback = adapter.createFallbackModel(undefined);
 
     expect(fallback).toBeTruthy();
-    expect(typeof fallback.update).toBe('function');
-    expect(fallback.internalModel.coreModel).toBeTruthy();
-    expect(typeof fallback.internalModel.coreModel.getParameterValues).toBe('function');
-    expect(typeof fallback.internalModel.coreModel.getPartOpacities).toBe('function');
-    expect(fallback.internalModel.settings.motions).toBeTruthy();
-    // The placeholder must survive the adapter's own lifecycle hooks.
-    adapter.getControls().advanceFrame(fallback, 16);
-    adapter.getControls().clearMotionState(fallback);
-    adapter.getControls().stopAllMotions(fallback);
-    expect(adapter.getControls().describeInvalidState(fallback)).toBeNull();
-    expect(() => adapter.getControls().disposeModel(fallback, { mode: 'soft-detach' })).not.toThrow();
-    expect(() => adapter.getControls().disposeModel(fallback, { mode: 'destroy', keepTextures: false })).not.toThrow();
+    expect(fallback).toBeInstanceOf(PIXI.Sprite);
+    expect(fallback).toHaveProperty('internalModel.coreModel');
+    expect(fallback).toHaveProperty('internalModel.settings.motions');
+    const handle = adapter.createModelHandle('fallback', fallback);
+    expect(handle.frame.submit({ deltaMs: 16, shouldAdvance: true }).status).toBe('submitted');
+    handle.lifecycle.clearMotionState();
+    handle.lifecycle.stopAllMotions();
+    expect(handle.diagnostics.describeInvalidState()).toBeNull();
+    expect(() => handle.dispose({ mode: 'soft-detach' })).not.toThrow();
+    expect(() => handle.dispose({ mode: 'destroy', keepTextures: false })).not.toThrow();
   });
 
   it('renders through a provided renderer texture instead of a raw canvas when available', async () => {
@@ -77,6 +76,6 @@ describe('Cubism2PixiLive2DAdapter.createFallbackModel', () => {
 
     const fallback = adapter.createFallbackModel(renderer as any);
 
-    expect(fallback.texture).toBe(fakeTexture);
+    expect(fallback).toHaveProperty('texture', fakeTexture);
   });
 });

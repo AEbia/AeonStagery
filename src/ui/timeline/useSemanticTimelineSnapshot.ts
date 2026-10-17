@@ -13,10 +13,18 @@ export interface SemanticTimelineSnapshot {
   readonly itemById: ReadonlyMap<string, SemanticTimelineReadModelItem>;
 }
 
+type SemanticTimelineSnapshotStore = Pick<ReadonlyDocumentStore, 'getCompiledSceneSnapshot'>
+  & (Pick<ReadonlyDocumentStore, 'getCurrentSceneDocumentView'>
+    | Pick<ReadonlyDocumentStore, 'getCurrentSceneDocumentSnapshot'>);
+
 export function readSemanticTimelineSnapshot(
-  store: Pick<ReadonlyDocumentStore, 'getCurrentSceneDocumentSnapshot' | 'getCompiledSceneSnapshot'>,
+  store: SemanticTimelineSnapshotStore,
 ): SemanticTimelineSnapshot {
-  const document = store.getCurrentSceneDocumentSnapshot();
+  // Current stores expose the stable view. The snapshot branch keeps older
+  // read-only adapters working while they migrate to that interface.
+  const document = 'getCurrentSceneDocumentView' in store
+    ? store.getCurrentSceneDocumentView()
+    : store.getCurrentSceneDocumentSnapshot();
   const compiled = store.getCompiledSceneSnapshot();
   const items = buildSemanticTimelineReadModel(document, compiled);
   return {
@@ -36,5 +44,8 @@ export function useSemanticTimelineSnapshot(provided?: SemanticTimelineSnapshot)
     : store.subscribe?.(listener) ?? (() => {}), [provided, store]);
   const getVersion = useCallback(() => provided ? 0 : store.version, [provided, store]);
   const version = useSyncExternalStore(subscribe, getVersion);
-  return useMemo(() => provided ?? readSemanticTimelineSnapshot(store), [provided, store, version]);
+  return useMemo(() => {
+    void version;
+    return provided ?? readSemanticTimelineSnapshot(store);
+  }, [provided, store, version]);
 }

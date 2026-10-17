@@ -10,6 +10,7 @@ import {
   SCENE_SCHEMA_VERSION_V4,
   type PreparedCompiledScene,
 } from '../api/types/semantic-scene';
+import { SemanticScenePipeline } from '../services/semantic-scene';
 
 function createFileAccess(): Record<keyof IFileAccess, any> {
   return {
@@ -68,6 +69,40 @@ function createProject(): ProjectState {
 }
 
 describe('SceneAssetService collaborative asset preparation', () => {
+  it('extends the compiled and export scene end through the final resource motion', async () => {
+    const fileAccess = createFileAccess();
+    fileAccess.readFile.mockImplementation(async (path: string) => ({
+      path,
+      data: JSON.stringify(path.endsWith('.model3.json')
+        ? { FileReferences: { Motions: { wave: [{ File: 'wave.motion3.json' }] } } }
+        : { Meta: { Duration: 2.5 } }),
+    }));
+    const resources = new ProjectResourceService(fileAccess, new ProjectPathResolver(null), () => []);
+    resources.setCurrentProject(createProject());
+    const assets = new SceneAssetService(fileAccess, new WmdlConfigRegistry(), resources, () => '');
+    const pipeline = new SemanticScenePipeline({
+      resolveAsset: (source) => source,
+      prepareSource: (source) => assets.normalizeSemanticSource(source),
+    });
+
+    const bundle = await pipeline.processDocument({
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'resource-motion-tail',
+      meta: {
+        title: 'Resource motion tail', durationSeconds: 6,
+        characters: [{ id: 'alice', name: 'Alice', model: 'figure/alice.model3.json' }],
+      },
+      statements: [{
+        id: 'wave', time: 6, type: 'characterPerformance',
+        params: { target: 'alice', motion: { kind: 'resource', key: 'wave' } },
+      }],
+    });
+
+    expect(bundle.compiled.durationSeconds).toBe(8.5);
+    expect(bundle.prepared.durationSeconds).toBe(8.5);
+    expect(bundle.source.statements[0].params).toMatchObject({ motion: { durationSeconds: 2.5 } });
+  });
+
   it('stores stable mounted references during normal editing imports', async () => {
     const fileAccess = createFileAccess();
     const projectResources = new ProjectResourceService(

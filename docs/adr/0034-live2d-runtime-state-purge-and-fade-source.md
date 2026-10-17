@@ -54,7 +54,7 @@ Seek / 编辑后重放时，画面会继续播放上一个时间点的动作或�
 
 针对问题 7 / 8：
 
-- `captureModelNeutralPoseOnce(model)` 在每个 `internalModel` 上以 `__aeonstageryNeutralPose` 记录**第一次**看到的姿态（参数 + part opacity）。捕获点是 `Live2DModelLoader` 建实例之后、以及 `resetModelToNeutralPose` 的开头——都必须早于该实例的第一次 `model.update()`，否则捕获到的已经是动作姿态。实例进预加载池后标记仍在，所以复用时仍能还原自己的 pristine 姿态。
+- `captureModelNeutralPoseOnce(model)` 在每个 `internalModel` 上以 `__aeonstageryNeutralPose` 记录**第一次**看到的姿态（参数 + part opacity）。捕获点是 `Live2DModelResources` 建实例之后、以及 `resetModelToNeutralPose` 的开头——都必须早于该实例的第一次 `model.update()`，否则捕获到的已经是动作姿态。实例进预加载池后标记仍在，所以复用时仍能还原自己的 pristine 姿态。
 - `restoreNeutralModelPose` / `resetModelToNeutralPose` 还原时优先用这份捕获（参数 **和** part opacity），其次 `entry.idleSnapshot`，最后才退回 `resetCoreParams()`。后者只写参数，且 `loadParam()` 在模型已经跑过一帧后拿到的是上一帧动作姿态，因此只能当兜底。
 
 ## 后果

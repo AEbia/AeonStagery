@@ -109,6 +109,7 @@ function renderTrackArea(options: {
           source: { statementId: `statement-${id}` },
         })),
       }),
+      getCurrentSceneDocumentView: () => options.semanticDocument ?? null,
       getCurrentSceneDocumentSnapshot: () => options.semanticDocument ?? null,
       subscribe: () => () => {},
     } as any,

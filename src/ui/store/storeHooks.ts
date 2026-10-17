@@ -12,6 +12,7 @@ import {
   isCollaborationUndoDisabled
 } from '../context/AppContext';
 import { showToast } from '../Toast';
+import type { CustomMotionEditSessionSnapshot } from '../../services/timeline-authoring/CustomMotionEditingTypes';
 import type { SaveResult } from '../../services/io/SceneFileService';
 
 export function useSemanticDocument() {
@@ -24,7 +25,7 @@ export function useSemanticDocument() {
     getVersion,
   );
   const documentSnapshot = useMemo(
-    () => ({ document: store.getCurrentSceneDocumentSnapshot(), version }),
+    () => ({ document: store.getCurrentSceneDocumentView(), version }),
     [store, version],
   );
   const document = documentSnapshot.document;
@@ -180,19 +181,17 @@ export function useGizmosVisible() {
   };
 }
 
-// ── useCustomMotionEditorActionId ─────────────────────────────────
-/** 当前在轨道区展开关键帧编辑器的动作 id（null 表示未展开）。 */
-export function useCustomMotionEditorActionId() {
-  const store = useEditorStore();
-  const getActionId = useCallback(
-    () => store?.customMotionEditorActionId ?? null,
-    [store],
-  );
+const closedCustomMotionSnapshot: CustomMotionEditSessionSnapshot = {
+  state: 'closed', session: null, target: null, fps: 60,
+  canonicalMotion: null, motion: null, keyframes: [], committing: false,
+};
 
-  return useSyncExternalStore(
-    (listener) => (typeof store?.subscribe === 'function' ? store.subscribe(listener) : () => {}),
-    getActionId,
-  );
+/** Thin React bridge to the singleton editing module. */
+export function useCustomMotionEditingSnapshot() {
+  const editing = useApp().services?.customMotionEditing;
+  const subscribe = useCallback((listener: () => void) => editing?.subscribe(listener) ?? (() => {}), [editing]);
+  const getSnapshot = useCallback(() => editing?.getSnapshot() ?? closedCustomMotionSnapshot, [editing]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 // ── useEditorSaveStatus ───────────────────────────────────────────
@@ -268,9 +267,7 @@ export function useEditorState() {
     handleSave: async (): Promise<SaveResult | undefined> => {
       if (sceneFileService) {
         const res = await sceneFileService.save();
-        if (res.success) {
-          showToast('剧本保存成功！', 'success');
-        } else if ('error' in res) {
+        if ('error' in res) {
           showToast(`剧本保存失败: ${res.error}`, 'error');
         } else if ('cancelled' in res) {
           // Explicitly matched: User cancelled dialog. No error toast shown.
@@ -399,7 +396,7 @@ export function useValidationSummary() {
 
 export function useDocumentTitle() {
   const store = useDocumentStore();
-  const getTitle = useCallback(() => store.getCurrentSceneDocumentSnapshot()?.meta?.title || '', [store]);
+  const getTitle = useCallback(() => store.getCurrentSceneDocumentView()?.meta?.title || '', [store]);
 
   return useSyncExternalStore(
     (listener) => store.subscribe(listener),

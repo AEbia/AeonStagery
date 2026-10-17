@@ -7,7 +7,7 @@ import {
   applyParameterOverride,
   applyRenderHook,
 } from '../engine/Live2DModelSetup';
-import { getLive2DRuntimeAdapter } from '../engine/Live2DRuntimeAdapter';
+import { Cubism2PixiLive2DModelControls } from '../engine/runtime/Cubism2PixiLive2DModelControls';
 import { setScriptEngineForSetup } from '../engine/Live2DSetupState';
 import { createV8GuardRenderer } from './helpers/v8GuardRendererStub';
 
@@ -159,7 +159,7 @@ describe('explicit Cubism 2 blink control', () => {
     applyParameterOverride(entry, coreModel, internalModel, false);
 
     const model = { internalModel };
-    const controls = getLive2DRuntimeAdapter(undefined).getControls();
+    const controls = new Cubism2PixiLive2DModelControls();
     controls.setBlink(model, true, 1000, 0.8, 0);
     controls.setBlink(model, true, 1000, 0.8, 0);
     internalModel.updateNaturalMovements(800, 0);

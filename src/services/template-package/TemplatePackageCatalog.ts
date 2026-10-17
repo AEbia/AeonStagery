@@ -20,6 +20,7 @@ export interface TemplatePackageSummary {
   name: string;
   version: string;
   scope: TemplatePackageScope;
+  packageRoot?: string;
   category?: string;
   description?: string;
   characterPresets?: TemplateCharacterPresetSummary[];
@@ -100,6 +101,7 @@ export class TemplatePackageCatalog implements ITemplatePackageCatalog {
         name: templatePackage.manifest.template.name,
         version: templatePackage.manifest.template.version,
         scope: templatePackage.source.scope,
+        packageRoot: templatePackage.source.packageRoot,
         category: templatePackage.manifest.template.category,
         description: templatePackage.manifest.template.description,
         defaults: { ...view.defaults },

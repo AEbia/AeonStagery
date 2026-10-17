@@ -14,6 +14,13 @@
   z-index: 10;
 }
 
+.agent-promptbox__hint {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 /* Context-window usage chip in the header. */
 .agent-window__context-used {
   display: inline-flex;

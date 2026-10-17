@@ -21,6 +21,7 @@ import { ProjectAgentWriteTools } from './ProjectAgentWriteTools';
 import { toolFail } from './ProjectAgentPathRules';
 import type { ProjectAgentImageSessionCache } from './ProjectAgentImageSessionCache';
 import { ProjectAgentTerminalTools } from './ProjectAgentTerminalTools';
+import type { ProjectAgentPerformanceCatalogResolver } from './ProjectAgentPerformanceCatalog';
 
 export interface ProjectAgentToolDefinition {
   readonly name: ProjectAgentToolName;
@@ -89,6 +90,12 @@ const WRITE_TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
  * Registers read/write tools by name with JSON schemas and dispatches calls.
  */
 export class ProjectAgentToolRegistry {
+  private capabilityQueryEligible = false;
+
+  setPerformanceCatalogResolver(resolver: ProjectAgentPerformanceCatalogResolver | undefined): void {
+    this.capabilityQueryEligible = !!resolver;
+    this.readTools.setPerformanceCatalogResolver(resolver);
+  }
   readonly taskState: ProjectAgentTaskState;
   private readonly readPorts: ProjectAgentReadPorts;
   private readonly readTools: ProjectAgentReadTools;
@@ -126,10 +133,12 @@ export class ProjectAgentToolRegistry {
       (includeWrites || tool.readOnly)
       && (this.readImageEligible || tool.name !== 'readImage')
       && (this.terminalEligible || tool.name !== 'runTerminalCommand')
+      && (this.capabilityQueryEligible || tool.name !== 'searchCharacterCapabilities')
     ));
   }
 
   has(name: string): boolean {
+    if (name === 'searchCharacterCapabilities' && !this.capabilityQueryEligible) return false;
     if (name === 'readImage' && !this.readImageEligible) return false;
     if (name === 'runTerminalCommand' && !this.terminalEligible) return false;
     return this.handlers.has(name);
@@ -334,7 +343,7 @@ export class ProjectAgentToolRegistry {
     );
     this.register(
       'inspectResource',
-      'Inspect a project-relative or @mount resource reference without materializing files. @mount is an existing registered external-library reference, not a template. For Live2D models, sizeBytes/modelDocumentBytes measure the entry document, not the full bundle. Motions are the keys declared by that model and may include multiple characters; ownerId does not restrict these keys.',
+      'Inspect a project-relative or @mount resource reference without materializing files. For Live2D models, sizeBytes/modelDocumentBytes measure the entry document, not the full bundle. Capability keys are paginated (30 by default, at most 100 and 16 KB); narrow with capabilityText and continue with live2d.capabilityPage.nextOffset. Declared keys may include multiple characters; ownerId does not restrict them.',
       true,
       {
         type: 'object',
@@ -342,9 +351,28 @@ export class ProjectAgentToolRegistry {
         required: ['reference'],
         properties: {
           reference: { type: 'string' },
+          capabilityText: { type: 'string', description: 'Case-insensitive key substring; if * or ? is present, match the whole key as a glob (* any string including /, ? one character). Example: mygo/anon/*angry*_live_01.' },
+          capabilityOffset: { type: 'integer', minimum: 0 },
+          capabilityLimit: { type: 'integer', minimum: 1, maximum: 100 },
         },
       },
       (args) => this.readTools.inspectResource(asRecord(args) as never),
+    );
+    this.register(
+      'searchCharacterCapabilities',
+      'Find valid motion/expression keys and profile descriptions for a current-scene character. Filter by text (key or description) and kind; 30 entries by default, at most 100 and 16 KB. Follow nextOffset only when more candidates are needed. Other-character namespaces declared by the model remain valid.',
+      true,
+      {
+        type: 'object', additionalProperties: false, required: ['characterId'],
+        properties: {
+          characterId: { type: 'string' },
+          kind: { type: 'string', enum: ['motion', 'expression'] },
+          text: { type: 'string', description: 'Case-insensitive substring in key or description. With * or ?, match the whole key only (* any string including /, ? one character). Example: mygo/anon/*angry*_live_01. Filtering happens before pagination.' },
+          offset: { type: 'integer', minimum: 0 },
+          limit: { type: 'integer', minimum: 1, maximum: 100 },
+        },
+      },
+      (args) => this.readTools.searchCharacterCapabilities(asRecord(args) as never),
     );
 
     // Registered whenever an image read port exists; eligibility (the model's
@@ -369,7 +397,7 @@ export class ProjectAgentToolRegistry {
 
     this.register(
       'readScene',
-      'Read the active formal scene as a flat Agent line view; one broad read returns up to 500 lines.',
+      'Read a targeted range of the active formal scene with source identities. Defaults to 50 lines; maximum 500. Search first for local edits and read only the relevant range.',
       true,
       {
         type: 'object',
@@ -383,7 +411,7 @@ export class ProjectAgentToolRegistry {
     );
     this.register(
       'searchScene',
-      'Search active scene lines by text, family, or time range.',
+      'Search active scene lines by text, family, or time range. Results fit 32 KB; neighboring lines appear once per page. Continue with nextOffset when hasMore. Use contextLines: 0 for discovery.',
       true,
       {
         type: 'object',

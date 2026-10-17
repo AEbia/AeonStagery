@@ -16,8 +16,7 @@ export interface AudioSource {
 
 interface ElectronFsAPI {
   exists(path: string): Promise<boolean>;
-  readFile(path: string): Promise<{ success: boolean; data?: ArrayBuffer; error?: string }>;
-  writeFile(path: string, data: ArrayBuffer): Promise<{ success: boolean; error?: string }>;
+  copyFile(sourcePath: string, destinationPath: string): Promise<{ success: boolean; error?: string }>;
 }
 
 interface ElectronExportAPI {
@@ -76,9 +75,15 @@ type PreparedSceneWithLegacyAudio = PreparedCompiledScene & {
   readonly audio?: AudioTimelineScene['audio'];
 };
 
+/** Shared by audio collection and mouth analysis for exactly one export. */
+export class AudioResourceCache {
+  readonly paths = new Map<string, Promise<string>>();
+  readonly existence = new Map<string, Promise<boolean>>();
+}
+
 export class AudioMixer {
-  private fsAPI: ElectronFsAPI;
-  private exportAPI: ElectronExportAPI;
+  private fsAPI: ElectronFsAPI | null | undefined;
+  private exportAPI: ElectronExportAPI | null | undefined;
   private projectResources?: ProjectResourceService | null;
 
   constructor(
@@ -86,8 +91,8 @@ export class AudioMixer {
     exportAPI?: ElectronExportAPI | null,
     projectResources?: ProjectResourceService | null,
   ) {
-    this.fsAPI = fsAPI as any;
-    this.exportAPI = exportAPI as any;
+    this.fsAPI = fsAPI;
+    this.exportAPI = exportAPI;
     this.projectResources = projectResources;
   }
 
@@ -99,6 +104,7 @@ export class AudioMixer {
     sceneData: AudioTimelineScene | null,
     basePath: string,
     exportStart: number,
+    cache = new AudioResourceCache(),
   ): Promise<AudioSource[]> {
     if (!sceneData) return [];
 
@@ -122,12 +128,12 @@ export class AudioMixer {
         loop: bgm.loop ?? true,
         fadeIn: bgm.fadeIn ?? 2,
         fadeOut: bgm.fadeOut,
-      }, basePath, exportStart);
+      }, basePath, exportStart, cache);
       if (source) sources.push(source);
     }
 
     for (const interval of this.collectTimelineAudioIntervals(sceneData.timeline)) {
-      const source = await this.createSourceFromInterval(interval, basePath, exportStart);
+      const source = await this.createSourceFromInterval(interval, basePath, exportStart, cache);
       if (source) sources.push(source);
     }
 
@@ -142,7 +148,7 @@ export class AudioMixer {
           duration: finiteNumber(action.params.duration),
           volume: finiteNumber(action.params.volume),
           fadeOut: finiteNumber(action.params.fadeOut),
-        }, basePath, exportStart);
+        }, basePath, exportStart, cache);
         if (source) sources.push(source);
       }
     }
@@ -154,6 +160,7 @@ export class AudioMixer {
     scene: PreparedCompiledScene,
     exportStart: number,
     basePath = '',
+    cache = new AudioResourceCache(),
   ): Promise<AudioSource[]> {
     const sources: AudioSource[] = [];
     const legacyScene = scene as PreparedSceneWithLegacyAudio;
@@ -169,12 +176,12 @@ export class AudioMixer {
         loop: bgm?.loop ?? true,
         fadeIn: bgm?.fadeIn ?? 2,
         fadeOut: bgm?.fadeOut,
-      }, basePath, exportStart);
+      }, basePath, exportStart, cache);
       if (source) sources.push(source);
     }
 
     for (const interval of this.collectTimelineAudioIntervals(scene.actions)) {
-      const source = await this.createSourceFromInterval(interval, basePath, exportStart);
+      const source = await this.createSourceFromInterval(interval, basePath, exportStart, cache);
       if (source) sources.push(source);
     }
 
@@ -189,7 +196,7 @@ export class AudioMixer {
         duration: finiteNumber(action.params.duration),
         volume: finiteNumber(action.params.volume),
         fadeOut: finiteNumber(action.params.fadeOut),
-      }, basePath, exportStart);
+      }, basePath, exportStart, cache);
       if (source) sources.push(source);
     }
 
@@ -279,15 +286,28 @@ export class AudioMixer {
     interval: AudioInterval,
     basePath: string,
     exportStart: number,
+    cache: AudioResourceCache,
   ): Promise<AudioSource | null> {
-    const fullPath = await this.resolveAudioPath(interval.file, basePath);
-    if (!(await this.fsAPI.exists(fullPath))) {
+    const timing = this.resolveExportTiming(interval.startTime, interval.duration, exportStart);
+    if (!timing) return null;
+    if (!this.fsAPI) throw new Error('Audio file system is unavailable');
+    const key = JSON.stringify([basePath, interval.file]);
+    let resolved = cache.paths.get(key);
+    if (!resolved) {
+      resolved = this.resolveAudioPath(interval.file, basePath);
+      cache.paths.set(key, resolved);
+    }
+    const fullPath = await resolved;
+    let exists = cache.existence.get(fullPath);
+    if (!exists) {
+      exists = this.fsAPI.exists(fullPath);
+      cache.existence.set(fullPath, exists);
+    }
+    if (!(await exists)) {
       console.warn(`[AudioMixer] Audio file not found: ${fullPath}`);
       return null;
     }
 
-    const timing = this.resolveExportTiming(interval.startTime, interval.duration, exportStart);
-    if (!timing) return null;
     const envelope = resolveExportEnvelope(interval, timing.startOffset ?? 0);
     return {
       path: fullPath,
@@ -354,6 +374,7 @@ export class AudioMixer {
     isTranscodeNeeded: boolean,
   ): Promise<{ success: boolean; error?: string }> {
     if (sources.length > 0 || isTranscodeNeeded) {
+      if (!this.exportAPI) return { success: false, error: 'Video conversion is unavailable' };
       const result = await this.exportAPI.convert(videoPath, outputPath, {
         fps: config.fps,
         codec: isTranscodeNeeded ? config.codec : 'copy',
@@ -375,15 +396,12 @@ export class AudioMixer {
       return { success: true };
     }
 
-    // No transcode and no audio — copy temp video to final path
-    const tempData = await this.fsAPI.readFile(videoPath);
-    if (tempData.success && tempData.data) {
-      const writeResult = await this.fsAPI.writeFile(outputPath, tempData.data);
-      if (writeResult.success) return { success: true };
-      return { success: false, error: writeResult.error || 'Failed to write final video file' };
-    }
-
-    return { success: false, error: 'Failed to read temp video file' };
+    // Only paths cross IPC; the main process copies the file asynchronously.
+    if (!this.fsAPI) return { success: false, error: 'Audio file system is unavailable' };
+    const result = await this.fsAPI.copyFile(videoPath, outputPath);
+    return result.success
+      ? { success: true }
+      : { success: false, error: result.error || 'Failed to copy final video file' };
   }
 }
 

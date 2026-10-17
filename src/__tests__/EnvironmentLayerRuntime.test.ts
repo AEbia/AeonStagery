@@ -18,6 +18,32 @@ function makeScene(timeline: RuntimeTimelineScene['timeline']): RuntimeTimelineS
 }
 
 describe('EnvironmentLayerRuntime', () => {
+  it.each(['none', 'fadeIn', 'crossFade'])('keeps replacement artwork at its authored scale during %s', (transition) => {
+    const scene = makeScene([
+      { _id: 'first', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'first.png', duration: 0 } },
+      { _id: 'second', time: 1, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'second.png', scale: 1.5, transition, duration: 2 } },
+    ]);
+
+    for (const time of [1, 1.5, 2, 2.5, 3]) {
+      const background = reconstructEnvironmentAtTime(scene, time).background!;
+      expect(background.scale).toBe(1.5);
+      const outgoing = background.images.find((entry) => entry.image === 'first.png');
+      if (outgoing) expect(outgoing.transform?.scale).toBe(1);
+    }
+  });
+
+  it('still animates an explicit transform after replacing artwork', () => {
+    const scene = makeScene([
+      { _id: 'set', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'background.png', scale: 1.5, duration: 1 } },
+      { _id: 'zoom', time: 1, action: 'transformEnvironmentLayer', params: { layerId: 'background', scale: 2, duration: 2 } },
+    ]);
+
+    expect(reconstructEnvironmentAtTime(scene, 0.5).background?.scale).toBe(1.5);
+    expect(reconstructEnvironmentAtTime(scene, 1).background?.scale).toBe(1.5);
+    expect(reconstructEnvironmentAtTime(scene, 2).background?.scale).toBe(1.75);
+    expect(reconstructEnvironmentAtTime(scene, 3).background?.scale).toBe(2);
+  });
+
   it('reconstructs cross-fade render truth during seek and scrub', () => {
     const scene = makeScene([
       {

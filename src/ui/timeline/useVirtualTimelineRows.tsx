@@ -117,7 +117,10 @@ export function useVirtualTimelineRows(containerRef: RefObject<HTMLDivElement>, 
     measurementFrame.current = null;
   }, []);
 
-  const rowLayout = useMemo(() => new TimelineRowLayout(rows, heights.current), [rows, cacheGeneration]);
+  const rowLayout = useMemo(() => {
+    void cacheGeneration;
+    return new TimelineRowLayout(rows, heights.current);
+  }, [rows, cacheGeneration]);
   useLayoutEffect(() => { committedLayout.current = rowLayout; }, [rowLayout]);
   const layout = useMemo(() => {
     void measurementVersion;
@@ -151,7 +154,7 @@ export function useVirtualTimelineRows(containerRef: RefObject<HTMLDivElement>, 
     setViewport((current) => current.top === container.scrollTop && current.height === height
       ? current : { top: container.scrollTop, height });
     return true;
-  }, [containerRef, layout, rowLayout]);
+  }, [containerRef, rowLayout]);
 
   useLayoutEffect(() => {
     const id = revealTargetId.current;

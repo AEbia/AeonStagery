@@ -38,6 +38,7 @@ const testState = vi.hoisted(() => {
     },
     characterAdapter: {
       getModelDataFromPath,
+      hasCharacter: vi.fn(() => true),
       playMotion: vi.fn(),
       stopAllMotions: vi.fn(),
       setExpression: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('../ui/context/AppContext', () => ({
             { id: 'glass', name: 'Premium Glass', renderer: 'glass' },
             { id: 'minimal', name: 'Minimal', renderer: 'minimal' },
             { id: 'classic', name: 'Classic', renderer: 'classic' },
+            { id: 'immersive-subtitle', name: 'Immersive Subtitle', renderer: 'image-dialogue-v1' },
           ],
         }, {
           id: 'webgal.mygo.v3_1_0.portable',
@@ -89,7 +91,7 @@ vi.mock('../ui/context/AppContext', () => ({
 vi.mock('../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: testState.semanticDocument, filePath: null }),
   useValidationIssues: () => ({ issues: [], loading: false }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({ state: 'closed', target: null, session: null }),
 }));
 
 describe('ActionInspector', () => {
@@ -518,9 +520,43 @@ describe('ActionInspector', () => {
     expect(screen.getAllByRole('option', { name: /玻璃/ })).toHaveLength(1);
     expect(screen.getAllByRole('option', { name: /极简/ })).toHaveLength(1);
     expect(screen.getAllByRole('option', { name: /经典/ })).toHaveLength(1);
+    expect(screen.getAllByRole('option', { name: '沉浸字幕' })).toHaveLength(1);
     expect(screen.queryByRole('option', { name: 'Premium Glass' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Minimal' })).toBeNull();
     expect(screen.queryByRole('option', { name: 'Classic' })).toBeNull();
+  });
+
+  it('persists the selected typewriter subtitle style on the dialogue source', () => {
+    testState.semanticDocument = {
+      schemaVersion: 3,
+      sceneId: 'scene_1',
+      meta: { title: 'Typewriter style selection', durationSeconds: 20 },
+      statements: [{
+        id: 'dialogue_1',
+        time: 2,
+        type: 'dialogue',
+        params: { text: 'hello', durationSeconds: 2, style: 'instant' },
+      }],
+    };
+    const replaceSourceParams = vi.fn();
+
+    render(
+      <ActionInspector
+        sceneData={{ sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] }}
+        selectedActionIds={{ dialogue_1: true }}
+        setSelectedIds={vi.fn()}
+        updateAction={vi.fn()}
+        updateParam={vi.fn()}
+        replaceSourceParams={replaceSourceParams}
+        deleteAction={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('字幕样式'));
+    fireEvent.click(screen.getByRole('option', { name: '打字机' }));
+
+    expect(replaceSourceParams).toHaveBeenCalledWith('dialogue_1', expect.objectContaining({ style: 'typewriter' }));
   });
 
   it('does not expose internal presentation asset paths as Inspector fields', () => {

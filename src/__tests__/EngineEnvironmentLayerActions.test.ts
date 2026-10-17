@@ -29,7 +29,7 @@ function createContext() {
 }
 
 describe('environment layer action schedulers', () => {
-  it('resolves an environment image and animates its layer proxy', async () => {
+  it('resolves an environment image at its authored transform throughout the transition', async () => {
     const ctx = createContext();
 
     actionSchedulers.setEnvironmentLayer(ctx, {
@@ -39,7 +39,7 @@ describe('environment layer action schedulers', () => {
       params: {
         layerId: 'background',
         image: 'rooms/quiet.png',
-        transition: 'crossfade',
+        transition: 'crossFade',
         duration: 2,
         x: 120,
         y: 80,
@@ -56,21 +56,21 @@ describe('environment layer action schedulers', () => {
       'background',
       'asset://rooms/quiet.png',
       expect.objectContaining({
-        transition: 'crossfade',
+        transition: 'crossFade',
         duration: 2,
-        x: 0,
-        y: 0,
-        scale: 1,
-        opacity: 1,
+        x: 120,
+        y: 80,
+        scale: 1.3,
+        opacity: 0.75,
       }),
     );
 
     ctx.tl.seek(2, false);
     expect(ctx.backgroundProxy).toMatchObject({
-      x: 60,
-      y: 40,
-      scale: 1.15,
-      opacity: 0.875,
+      x: 120,
+      y: 80,
+      scale: 1.3,
+      opacity: 0.75,
     });
     ctx.tl.seek(3, false);
     expect(ctx.backgroundProxy).toMatchObject({
@@ -98,6 +98,8 @@ describe('environment layer action schedulers', () => {
     });
 
     const layerProxy = ctx.environmentLayerProxies.get('foreground');
+    expect(layerProxy).toMatchObject({ x: 0, opacity: 1 });
+    ctx.tl.seek(2.001, false);
     expect(layerProxy).toMatchObject({
       x: 240,
       y: 0,
@@ -107,11 +109,10 @@ describe('environment layer action schedulers', () => {
       z: 0,
     });
 
-    ctx.tl.seek(2.001, false);
     await vi.waitFor(() => expect(environmentMocks.setEnvironmentLayer).toHaveBeenCalledWith(
       'foreground',
       'asset://rooms/foreground.png',
-      expect.objectContaining({ duration: 0 }),
+      expect.objectContaining({ duration: 0, x: 240, opacity: 0.5 }),
     ));
   });
 

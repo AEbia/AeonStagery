@@ -1,13 +1,16 @@
+import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Live2DModelLoader } from '../engine/Live2DModelLoader';
+import { Live2DModelResources } from '../engine/Live2DModelResources';
 import * as sdk from '../engine/CubismPixiSdk';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
-import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import { mockControls, mockAdapter } from './helpers/mockLive2DRuntimeAdapter';
+import { Container, ObservablePoint } from 'pixi.js';
 
-describe('Live2DModelLoader', () => {
+describe('Live2DModelResources', () => {
   afterEach(() => {
     delete (global as any).window;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('resolves /figure paths against the configured base path before reading model data', async () => {
@@ -25,7 +28,7 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
@@ -39,7 +42,7 @@ describe('Live2DModelLoader', () => {
   });
 
   it('builds asset URLs for /figure paths under the configured base path', () => {
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
@@ -56,7 +59,7 @@ describe('Live2DModelLoader', () => {
     const pendingRead = new Promise<{ success: boolean; data: string }>((resolve) => { finishRead = resolve; });
     const readTextFile = vi.fn(() => pendingRead);
     (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
-    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+    const loader = new Live2DModelResources(() => 'D:/projects/demo');
 
     const requests = Array.from({ length: 4 }, () => loader.getModelDataFromPath('figure/model.json'));
     await vi.waitFor(() => expect(readTextFile).toHaveBeenCalledTimes(1));
@@ -79,7 +82,7 @@ describe('Live2DModelLoader', () => {
       data: JSON.stringify({ motions: { [path.includes('/first/') ? 'idle' : 'wave']: [{}] } }),
     }));
     (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
-    const loader = new Live2DModelLoader(() => basePath);
+    const loader = new Live2DModelResources(() => basePath);
 
     expect(await loader.getModelDataFromPath('figure/model.json')).toEqual({ motions: ['idle'], expressions: [] });
     basePath = 'D:/projects/second';
@@ -102,7 +105,7 @@ describe('Live2DModelLoader', () => {
         getCurrentProject: () => ({ rootPath: 'D:/projects/demo' }), resolveForRead,
       } } },
     };
-    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+    const loader = new Live2DModelResources(() => 'D:/projects/demo');
 
     expect(await loader.getModelDataFromPath('@mount/library/model.json')).toEqual({ motions: ['idle'], expressions: [] });
     resolvedPath = 'E:/second/model.json';
@@ -118,7 +121,7 @@ describe('Live2DModelLoader', () => {
       .mockResolvedValueOnce(failure)
       .mockResolvedValue({ success: true, data: JSON.stringify({ motions: { idle: [{}] } }) });
     (global as any).window = { aeonStageryAPI: { fs: { readTextFile } } };
-    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+    const loader = new Live2DModelResources(() => 'D:/projects/demo');
     const path = 'D:/projects/demo/figure/model.json';
 
     expect(await loader.getModelDataFromPath(path)).toEqual({ motions: [], expressions: [] });
@@ -127,20 +130,21 @@ describe('Live2DModelLoader', () => {
     expect(readTextFile).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves POSIX roots when converting resolved model paths to asset URLs', () => {
-    const loader = new Live2DModelLoader(
-      () => '/home/gamma/project',
-    );
-
-    expect(loader.resolvedPathToUrl('/home/gamma/文档/model.json')).toBe(
-      'asset://localhost//home/gamma/%E6%96%87%E6%A1%A3/model.json',
-    );
-    expect(loader.resolvedPathToUrl('file:///home/gamma/文档/model.json')).toBe(
-      'asset://localhost//home/gamma/%E6%96%87%E6%A1%A3/model.json',
-    );
-    expect(loader.resolvedPathToUrl('file:///D:/project/model.json')).toBe(
-      'asset://localhost/D:/project/model.json',
-    );
+  it.each([
+    ['asset://localhost//home/gamma/文档/model.json', 'asset://localhost//home/gamma/%E6%96%87%E6%A1%A3/model.json'],
+    ['file:///home/gamma/文档/model.json', 'asset://localhost//home/gamma/%E6%96%87%E6%A1%A3/model.json'],
+    ['file:///D:/project/model.json', 'asset://localhost/D:/project/model.json'],
+  ])('preserves absolute roots when loading %s', async (path, expectedUrl) => {
+    vi.stubGlobal('window', { aeonStageryAPI: { fs: {
+      readTextFile: async () => ({ success: true, data: '{"model":"hero.moc"}' }),
+    } } });
+    const adapter = mockAdapter({ createModel: async () => Object.assign(new Container(), {
+      anchor: new ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+    }) });
+    const resources = new Live2DModelResources(() => '/home/gamma/project', () => adapter);
+    await resources.loadCharacter('hero', path, async loaded => {
+      expect(loaded.modelUrl).toBe(expectedUrl);
+    });
   });
 
   it('uses project resource resolution for external-library relative model data', async () => {
@@ -169,7 +173,7 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
@@ -206,7 +210,7 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(() => 'D:/projects/demo');
+    const loader = new Live2DModelResources(() => 'D:/projects/demo');
     const data = await loader.getModelDataFromPath(
       'C:/Games/short/game/figure/mygo/soyo/live_01/adv_live2d_soyo_004_live_01.model3.json',
     );
@@ -242,11 +246,11 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath(
+    const data = await loader.getModelDataFromPath(
       '@mount/webgal-sv/game/figure/anon/casual-2023/model.json',
     );
 
@@ -256,7 +260,7 @@ describe('Live2DModelLoader', () => {
     expect(readTextFile).toHaveBeenCalledWith(
       'E:/Library/game/figure/anon/casual-2023/model.json',
     );
-    expect(probe.fullPath).toBe('E:/Library/game/figure/anon/casual-2023/model.json');
+    expect(data.motions).toEqual(['idle']);
   });
 
   it('does not hide mounted-reference resolution errors behind a project-relative fallback', async () => {
@@ -274,16 +278,16 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    await expect(loader.probeModelPath(
-      '@mount/webgal-sv/game/figure/anon/casual-2023/model.json',
+    await expect(loader.loadCharacter('hero',
+      '@mount/webgal-sv/game/figure/anon/casual-2023/model.json', async () => {},
     )).rejects.toBe(resolutionError);
   });
 
-  it('probes Cubism 3 plus model entries without routing them through Cubism 2', async () => {
+  it('rejects unavailable Cubism 3 plus entries before creating a model', async () => {
     vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: false,
       initialized: false,
@@ -305,21 +309,17 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath('figure/tomori/tomori.model3.json');
-
-    expect(probe.exists).toBe(true);
-    expect(probe.runtime).toEqual(expect.objectContaining({
-      runtimeFamily: 'cubism3-plus',
-      adapterId: 'untitled-pixi-live2d-engine-cubism',
-      supported: false,
-    }));
+    const create = vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'createModel');
+    await expect(loader.loadCharacter('tomori', 'figure/tomori/tomori.model3.json', async () => {}))
+      .rejects.toMatchObject({ message: expect.stringContaining('Cubism 3/4/5 runtime adapter') });
+    expect(create).not.toHaveBeenCalled();
   });
 
-  it('probes WMDL children before choosing a runtime', async () => {
+  it('rejects unsupported WMDL children before model creation', async () => {
     vi.spyOn(sdk, 'getCubismPixiSdkStatus').mockReturnValue({
       available: true,
       initialized: false,
@@ -348,20 +348,16 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath('figure/tomori/tomori.wmdl');
-
+    const create = vi.spyOn(runtimeAdapter.cubism2Live2DAdapter, 'createModel');
+    await expect(loader.loadCharacter('tomori', 'figure/tomori/tomori.wmdl', async () => {}))
+      .rejects.toMatchObject({ message: expect.stringContaining('Cubism 3/4/5 runtime adapter') });
     expect(readTextFile).toHaveBeenCalledWith('D:/projects/demo/figure/tomori/tomori.wmdl');
     expect(readTextFile).toHaveBeenCalledWith('D:/projects/demo/figure/tomori/main/tomori.model3.json');
-    expect(probe.exists).toBe(true);
-    expect(probe.runtime).toEqual(expect.objectContaining({
-      runtimeFamily: 'cubism3-plus',
-      supported: false,
-    }));
-    expect(probe.error).toContain('composed cubism3-plus');
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('preloads Cubism 3 plus models through the official adapter instead of the Cubism 2 create path', async () => {
@@ -370,10 +366,11 @@ describe('Live2DModelLoader', () => {
       initialized: false,
       message: null,
     });
-    const officialCreate = vi.fn(async () => ({
+    const officialCreate = vi.fn(async () => Object.assign(new Container(), {
+      anchor: new ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+      autoUpdate: false,
       visible: true,
       alpha: 1,
-      update: () => {},
       internalModel: { coreModel: {}, settings: { motions: {}, expressions: {} } },
     }));
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue({
@@ -381,61 +378,11 @@ describe('Live2DModelLoader', () => {
       supported: true,
       init: async () => {},
       isReady: () => true,
-      getModelClass: () => null,
-      getConfig: () => null,
-      getClock: () => null,
       createFallbackModel: () => null,
       disposeBakeRenderTexture: () => {},
-      getControls: () => mockControls({
-        getCoreModel: () => null,
-      }),
-      createModelHandle: (id: string, model: any, runtime: any) => ({
-        id,
-        runtime,
-        displayObject: model,
-        rawModel: model,
-        capabilities: {
-          runtimeFamily: runtime.runtimeFamily,
-          adapterId: runtime.adapterId,
-          supportsMotion: true,
-          supportsExpression: true,
-          supportsParameterInjection: true,
-          supportsSnapshot: true,
-          supportsBakeRender: true,
-          usesCubism2PrivateControls: false,
-        },
-        lifecycle: {
-          getCoreModel: () => null,
-          clearMotionState: () => {},
-          stopAllMotions: () => {},
-        },
-        motion: {
-          getAvailableMotions: () => [],
-          getMotionDuration: () => 0,
-          getMotionDebugState: () => null,
-          preloadMotion: async () => {},
-        },
-        expression: {
-          getAvailableExpressions: () => [],
-          setExpression: () => {},
-        },
-        parameters: {
-          getParameterValues: () => null,
-          getParameterMetadata: () => null,
-          setInjectedParameter: () => {},
-          syncInputParameters: () => {},
-        },
-        snapshot: {
-          captureSnapshot: () => null,
-          applySnapshot: () => {},
-          restoreSeekState: async () => ({ status: 'restored', tierUsed: 'native' }),
-        },
-        render: {
-          renderForBake: () => {},
-        },
-        diagnostics: {
-          describeInvalidState: () => null,
-        },
+      createModelHandle: (id, model, runtime) => createLive2DModelHandle({
+        id, model, runtime: runtime ?? { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true },
+        controls: mockControls(),
       }),
       createModel: officialCreate,
       getUnsupportedMessage: () => null,
@@ -456,7 +403,7 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
@@ -486,14 +433,12 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath('figure/casual-2023/missing-model.json');
-
-    expect(probe.exists).toBe(false);
-    expect(probe.fullPath).toBe('D:/projects/demo/figure/casual-2023/missing-model.json');
+    await expect(loader.loadCharacter('hero', 'figure/casual-2023/missing-model.json', async () => {}))
+      .rejects.toMatchObject({ fullPath: 'D:/projects/demo/figure/casual-2023/missing-model.json' });
   });
 
   it('strips asset URLs before reading model files from the filesystem', async () => {
@@ -514,15 +459,15 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath(
+    const data = await loader.getModelDataFromPath(
       'asset://localhost/D:/projects/demo/figure/casual-2023/model.json',
     );
 
-    expect(probe.exists).toBe(true);
+    expect(data).toEqual({ motions: ['idle'], expressions: ['smile'] });
     expect(readTextFile).toHaveBeenCalledTimes(1);
   });
 
@@ -544,15 +489,15 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => 'D:/projects/demo',
     );
 
-    const probe = await loader.probeModelPath(
+    const data = await loader.getModelDataFromPath(
       'asset://localhost/D:/projects/demo/figure/anon/%E8%85%B1%E9%9E%98%E7%82%8E/model.json',
     );
 
-    expect(probe.exists).toBe(true);
+    expect(data).toEqual({ motions: ['idle'], expressions: [] });
     expect(readTextFile).toHaveBeenCalledTimes(1);
   });
 
@@ -575,17 +520,15 @@ describe('Live2DModelLoader', () => {
       },
     };
 
-    const loader = new Live2DModelLoader(
+    const loader = new Live2DModelResources(
       () => '/home/gamma/project',
     );
 
-    const probe = await loader.probeModelPath(
+    const data = await loader.getModelDataFromPath(
       'asset://localhost//home/gamma/%E6%96%87%E6%A1%A3/template/anon/model.json',
     );
 
-    expect(probe).toMatchObject({
-      exists: true,
-      fullPath: expectedPath,
-    });
+    expect(data).toEqual({ motions: ['idle'], expressions: [] });
+    expect(readTextFile).toHaveBeenCalledWith(expectedPath);
   });
 });

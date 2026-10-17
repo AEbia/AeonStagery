@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
       motions: ['wave', 'nod', 'mygo/alice/greet', 'mygo/alice/bow', 'mygo/bob/idle'],
       expressions: ['smile', 'happy', 'mygo/alice/happy', 'mygo/bob/sad'],
     })),
+    hasCharacter: vi.fn(() => true),
     playMotion: vi.fn(), stopAllMotions: vi.fn(), setExpression: vi.fn(),
   },
 }));
@@ -62,7 +63,10 @@ vi.mock('../../ui/context/AppContext', () => ({
 vi.mock('../../ui/store/storeHooks', () => ({
   useSemanticDocument: () => ({ document: state.document, filePath: null }),
   useValidationIssues: () => ({ issues: [] }),
-  useCustomMotionEditorActionId: () => null,
+  useCustomMotionEditingSnapshot: () => ({
+    state: 'closed', session: null, target: null, fps: 60,
+    canonicalMotion: null, motion: null, keyframes: [], committing: false,
+  }),
 }));
 
 vi.mock('../../ui/SettingsStore', () => ({

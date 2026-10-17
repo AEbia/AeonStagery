@@ -13,6 +13,10 @@ import type { TimelineAction, TimelineScene } from '../../semanticTimelineTypes'
 import type { CharacterMotionOutput } from '../../../../api/types/semantic-scene';
 import type { useCharacterAdapter } from '../../../context/AppContext';
 import type { SemanticAuthoringApplicationService } from '../../../../services/timeline-authoring/SemanticAuthoringApplicationService';
+import type {
+  WebGalScssImportInspection,
+  WebGalScssImportInstallRequest,
+} from '../../../../api/types/template-package-import';
 
 export type InspectorSemanticDocument = ReturnType<typeof useSemanticDocument>['document'];
 
@@ -26,6 +30,26 @@ export interface ParamControlBase {
 }
 
 /** The component environment the dispatch chain closes over, passed explicitly. */
+/**
+ * Importing a WebGAL dialogue template, injected by the host rather than read
+ * from a global so panels stay testable and a host without the feature can
+ * simply omit it.
+ */
+export interface WebGalStyleImportActions {
+  /**
+   * Ask the host to pick a template directory and read it. Returns `null` when
+   * the user cancelled or the directory could not be read (the host reports why).
+   */
+  inspect: () => Promise<WebGalScssImportInspection | null>;
+  /**
+   * Write an inspected template into the template library. `message` is written
+   * for the user either way, so the host owns the wording.
+   */
+  install: (
+    request: WebGalScssImportInstallRequest,
+  ) => Promise<{ ok: boolean; message: string }>;
+}
+
 export interface InspectorParamContext {
   rowFieldKeys?: ReadonlySet<string>;
   action: TimelineAction;
@@ -68,6 +92,8 @@ export interface InspectorParamContext {
   updateVisualSemanticOverride: (key: string, value: unknown, isTransient?: boolean) => void;
   characterAdapter: ReturnType<typeof useCharacterAdapter>;
   semanticAuthoring: SemanticAuthoringApplicationService | undefined;
+  /** Present when the host can import WebGAL dialogue templates. */
+  webGalStyleImport?: WebGalStyleImportActions;
 }
 
 export type ParamControlResolver = (

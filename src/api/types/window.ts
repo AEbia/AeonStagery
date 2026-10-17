@@ -60,6 +60,8 @@ import type {
   ProjectAgentProjectContext,
   ProjectAgentRenameConversationResult,
   ProjectAgentStartRequest,
+  ProjectAgentImageAttachment,
+  ProjectAgentSupplementRequest,
   ProjectAgentStartResultPayload,
   ProjectAgentTerminalCommandRequest,
   ProjectAgentTerminalCommandResponse,
@@ -80,7 +82,14 @@ import type {
 import type {
   ProjectAgentPauseReason,
 } from '../../services/project-agent/ProjectAgentTask';
-import type { TemplatePackageImportResult } from './template-package-import';
+import type {
+  TemplatePackageDeleteRequest,
+  TemplatePackageDeleteResult,
+  TemplatePackageImportResult,
+  WebGalScssImportInstallRequest,
+  WebGalScssImportInstallResult,
+  WebGalScssImportInspectResult,
+} from './template-package-import';
 
 export interface CollaborationSessionSummary {
   name: string;
@@ -126,6 +135,13 @@ export interface AeonStageryElectronAPI {
   };
   templates?: {
     importZip(): Promise<TemplatePackageImportResult>;
+    /** Pick a WebGAL template directory and report what importing it would do. */
+    inspectWebgalScss?(): Promise<WebGalScssImportInspectResult>;
+    /** Write the inspected template into the template library. */
+    installWebgalScss?(
+      request: WebGalScssImportInstallRequest,
+    ): Promise<WebGalScssImportInstallResult>;
+    deletePackage(request: TemplatePackageDeleteRequest): Promise<TemplatePackageDeleteResult>;
   };
   app: {
     getPath(): Promise<string>;
@@ -166,7 +182,7 @@ export interface AeonStageryElectronAPI {
     journalListByProject(projectId: string): Promise<readonly ProjectAgentJournalRecord[]>;
     publishTaskStatus(status: ProjectAgentTaskStatusPayload): Promise<boolean>;
     getTaskStatus(taskId?: string): Promise<ProjectAgentTaskStatusPayload | null>;
-    sendSupplement(taskId: string, text: string): Promise<{ ok: boolean; error?: string }>;
+    sendSupplement(taskId: string, text: string, image?: ProjectAgentImageAttachment): Promise<{ ok: boolean; error?: string }>;
     requestStart(payload: ProjectAgentStartRequest): Promise<{ ok: boolean; error?: string }>;
     runTerminalCommand?(request: ProjectAgentTerminalCommandRequest): Promise<ProjectAgentTerminalCommandResponse>;
     cancelTerminalCommand?(requestId: string): Promise<void>;
@@ -216,10 +232,11 @@ export interface AeonStageryElectronAPI {
     getProjectContext(): Promise<ProjectAgentProjectContext | null>;
     /** Editor start-result relay (correlated by requestId; Agent window). */
     publishStartResult(payload: ProjectAgentStartResultPayload): Promise<void>;
+    publishSupplementResult(payload: ProjectAgentStartResultPayload): Promise<void>;
     onContext(callback: (context: ProjectAgentProjectContext) => void): () => void;
     onStartResult(callback: (payload: ProjectAgentStartResultPayload) => void): () => void;
     onStatus(callback: (status: ProjectAgentTaskStatusPayload) => void): () => void;
-    onSupplement(callback: (payload: { taskId: string; text: string }) => void): () => void;
+    onSupplement(callback: (payload: ProjectAgentSupplementRequest) => void): () => void;
     onStartRequest(callback: (payload: ProjectAgentStartRequest) => void): () => void;
     onSetModel(callback: (model: string) => void): () => void;
     onSetEffort(callback: (effort: string) => void): () => void;
@@ -287,6 +304,7 @@ export interface AeonStageryElectronAPI {
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;
+    cancelExport(): Promise<{ success: boolean; error?: string }>;
     onLog(callback: (msg: string) => void): () => void;
   };
   path: {
@@ -396,8 +414,8 @@ export interface CharacterAPI {
   setZIndex(id: string, zIndex: number): void;
   /** Get available motion keys for a character */
   getMotions(id: string): string[];
-  /** Get the raw PixiJS Live2D model for advanced manipulation */
-  getModel(id: string): any;
+  /** Typed Pixi display capabilities for character animation. */
+  getDisplayObject(id: string): import('pixi.js').Container | null;
   /** Get the normalized bounds/points of a character for cinematic framing */
   getPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center'): Vec2 | null;
   /** List all active characters */

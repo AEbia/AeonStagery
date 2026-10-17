@@ -14,20 +14,59 @@ import { FormSelect } from './FormSelect';
 import { InfoTip } from './Tooltip';
 import type { ExportProgress } from '../api/types/export';
 import { useModalDialog } from './hooks/useModalDialog';
+import { ExportEtaEstimator } from './ExportEtaEstimator';
 
 interface Props {
   onClose: () => void;
 }
 
-type UIState = 'idle' | 'recording' | 'converting' | 'done' | 'error';
+type UIState = 'idle' | 'recording' | 'converting' | 'done' | 'cancelled' | 'error';
+
+function formatEstimatedRemainingTime(remainingSeconds: number | null): string {
+  if (remainingSeconds === null || !Number.isFinite(remainingSeconds)) {
+    return '预计剩余时间计算中...';
+  }
+  if (remainingSeconds <= 2) return '预计即将完成';
+
+  const roundingStep = remainingSeconds < 60 ? 5 : remainingSeconds < 600 ? 15 : 60;
+  const displaySeconds = Math.ceil(remainingSeconds / roundingStep) * roundingStep;
+  if (displaySeconds < 60) return `预计剩余约 ${displaySeconds} 秒`;
+  if (displaySeconds < 3600) {
+    const minutes = Math.floor(displaySeconds / 60);
+    const seconds = displaySeconds % 60;
+    return seconds === 0
+      ? `预计剩余约 ${minutes} 分钟`
+      : `预计剩余约 ${minutes} 分钟 ${seconds} 秒`;
+  }
+
+  const hours = Math.floor(displaySeconds / 3600);
+  const minutes = Math.floor((displaySeconds % 3600) / 60);
+  return minutes === 0
+    ? `预计剩余约 ${hours} 小时`
+    : `预计剩余约 ${hours} 小时 ${minutes} 分钟`;
+}
 
 export default function ExportDialog({ onClose }: Props) {
   const dialogRef = useModalDialog(onClose);
   const [uiState, setUiState] = useState<UIState>('idle');
   const [progress, setProgress] = useState(0);
+  const [estimatedRemainingSeconds, setEstimatedRemainingSeconds] = useState<number | null>(null);
   const [statusText, setStatusText] = useState('准备导出');
   const [outputPath, setOutputPath] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const exportControllerRef = useRef<AbortController | null>(null);
+  const exportStartedAtRef = useRef<number | null>(null);
+  const etaProgressRef = useRef(0);
+  const etaEstimatorRef = useRef(new ExportEtaEstimator());
+  const progressPhaseRef = useRef<'capture' | 'mix' | null>(null);
+  const handleCancelExport = () => {
+    const controller = exportControllerRef.current;
+    if (!controller || controller.signal.aborted) return;
+    setCancelling(true);
+    setStatusText('正在取消导出...');
+    controller.abort();
+  };
 
   const playbackAdapter = usePlaybackAdapter();
   const exportAdapter = useExportAdapter();
@@ -55,17 +94,43 @@ export default function ExportDialog({ onClose }: Props) {
   const uiStateRef = useRef<UIState>('idle');
   useEffect(() => { uiStateRef.current = uiState; }, [uiState]);
 
+  const updateProgress = useCallback((nextProgress: number, etaProgress = nextProgress) => {
+    etaProgressRef.current = etaProgress;
+    setProgress(nextProgress);
+  }, []);
+
+  useEffect(() => {
+    if (uiState !== 'recording' && uiState !== 'converting') return;
+
+    const updateRemainingEstimate = () => {
+      const startedAt = exportStartedAtRef.current;
+      if (startedAt !== null) {
+        const now = Date.now();
+        setEstimatedRemainingSeconds(
+          etaEstimatorRef.current.update(etaProgressRef.current, now),
+        );
+      }
+    };
+
+    updateRemainingEstimate();
+    const intervalId = window.setInterval(updateRemainingEstimate, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [uiState]);
+
   const ffmpegLogCallback = useCallback((msg: string) => {
     console.log(`[FFmpeg Main] ${msg}`);
-    if (uiStateRef.current === 'converting' && totalFramesRef.current > 0) {
+    if (!exportControllerRef.current?.signal.aborted && uiStateRef.current === 'converting' && totalFramesRef.current > 0) {
       const match = msg.match(/frame=\s*(\d+)/);
       if (match) {
         const currentFrame = parseInt(match[1]);
-        const pct = Math.min(99, Math.round((currentFrame / totalFramesRef.current) * 100));
-        setProgress(pct);
+        const frameRatio = Math.max(0, currentFrame / totalFramesRef.current);
+        const mixProgress = Math.min(9, Math.round(frameRatio * 10));
+        const etaProgress = 90 + Math.min(9.9, frameRatio * 10);
+        const pct = 90 + mixProgress;
+        updateProgress(pct, etaProgress);
       }
     }
-  }, []);
+  }, [updateProgress]);
 
   const handleExport = useCallback(async () => {
     try {
@@ -82,8 +147,16 @@ export default function ExportDialog({ onClose }: Props) {
 
       if (saveResult.canceled || !saveResult.filePath) return;
 
+      const controller = new AbortController();
+      exportControllerRef.current = controller;
+      exportStartedAtRef.current = Date.now();
+      etaEstimatorRef.current.reset();
+      progressPhaseRef.current = 'capture';
+      etaProgressRef.current = 0;
+      setEstimatedRemainingSeconds(null);
+      setCancelling(false);
       setOutputPath(saveResult.filePath);
-      setProgress(0);
+      updateProgress(0);
       setUiState('recording');
       setStatusText('正在初始化导出...');
 
@@ -110,25 +183,48 @@ export default function ExportDialog({ onClose }: Props) {
           ffmpegLogCallback,
         },
         (p: ExportProgress) => {
+          if (controller.signal.aborted) return;
           if (p.phase === 'capture') {
+            if (progressPhaseRef.current !== 'capture') {
+              etaEstimatorRef.current.reset();
+              progressPhaseRef.current = 'capture';
+              setEstimatedRemainingSeconds(null);
+            }
             setUiState('recording');
-            setProgress(p.percent);
+            const captureEtaProgress = p.frame !== undefined
+              && p.totalFrames !== undefined
+              && p.totalFrames > 0
+              ? Math.min(100, Math.max(0, (p.frame / p.totalFrames) * 100))
+              : p.percent;
+            updateProgress(p.percent, captureEtaProgress);
             setStatusText(
               `正在导出: ${p.percent.toFixed(1)}% (${p.frame}/${p.totalFrames} 帧)`,
             );
           } else if (p.phase === 'mix') {
+            if (progressPhaseRef.current !== 'mix') {
+              etaEstimatorRef.current.reset();
+              progressPhaseRef.current = 'mix';
+              setEstimatedRemainingSeconds(null);
+            }
             setUiState('converting');
-            setProgress(p.percent);
+            updateProgress(p.percent);
             const srcNote = p.audioSourceCount
               ? ` (${p.audioSourceCount} 个音频轨道)`
               : '';
             setStatusText(`正在进行音视频混合...${srcNote}`);
           } else if (p.phase === 'done') {
-            setProgress(100);
+            updateProgress(100);
+            setEstimatedRemainingSeconds(0);
           }
         },
+        controller.signal,
       );
 
+      if (result.cancelled) {
+        setUiState('cancelled');
+        setStatusText('导出已取消');
+        return;
+      }
       if (!result.success) {
         setUiState('error');
         setErrorMsg(result.error || '导出失败');
@@ -138,15 +234,19 @@ export default function ExportDialog({ onClose }: Props) {
 
       setUiState('done');
       setStatusText(`已导出至 ${saveResult.filePath}`);
-      setProgress(100);
+      updateProgress(100);
     } catch (err: any) {
       setUiState('error');
       setErrorMsg(err.message);
       setStatusText('导出失败');
+    } finally {
+      exportControllerRef.current = null;
+      exportStartedAtRef.current = null;
+      setCancelling(false);
     }
   }, [
     format, codec, bitrate, exportStart, exportEnd, includeAudio,
-    subtitleExportMode, exportMode, fullDuration, exportAdapter, ffmpegLogCallback,
+    subtitleExportMode, exportMode, fullDuration, exportAdapter, ffmpegLogCallback, updateProgress,
   ]);
 
   return (
@@ -411,7 +511,9 @@ export default function ExportDialog({ onClose }: Props) {
             </div>
             <div role="status" aria-live="polite" style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-primary)' }}>
               {uiState === 'recording' && <span className="recording-dot" />}
-              <span className="tabular-nums">{statusText} — {progress.toFixed(0)}%</span>
+              <span className="tabular-nums">
+                {statusText} — {cancelling ? '正在停止...' : formatEstimatedRemainingTime(estimatedRemainingSeconds)}
+              </span>
             </div>
           </div>
         )}
@@ -436,14 +538,25 @@ export default function ExportDialog({ onClose }: Props) {
           </div>
         )}
 
+        {uiState === 'cancelled' && (
+          <div className="empty-state" role="status" aria-live="polite" style={{ padding: '24px 0' }}>
+            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: '16px' }}>导出已取消</div>
+          </div>
+        )}
+
         <div className="modal__footer">
+          {(uiState === 'recording' || uiState === 'converting') && (
+            <button className="btn" onClick={handleCancelExport} disabled={cancelling}>
+              {cancelling ? '正在取消...' : '取消导出'}
+            </button>
+          )}
           {uiState === 'idle' && (
             <>
               <button className="btn" onClick={onClose}>取消</button>
               <button className="btn btn--primary" onClick={handleExport}>开始导出</button>
             </>
           )}
-          {(uiState === 'done' || uiState === 'error') && (
+          {(uiState === 'done' || uiState === 'error' || uiState === 'cancelled') && (
             <button className="btn btn--primary" onClick={onClose}>关闭</button>
           )}
         </div>

@@ -46,6 +46,8 @@ import { resolveVisualStateAtTime } from '../services/visual-authoring/VisualSta
 import { BACKGROUND_LAYER_ID, type EnvironmentLayerRenderState } from './environmentLayerModel';
 import { toEnvironmentRenderPlan } from './EnvironmentLayerRuntime';
 import { preparedSceneToRuntimeTimelineScene } from './PreparedRuntimeScene';
+import type { CustomMotion } from '../services/timeline-authoring/CustomMotionEditingTypes';
+import type { CustomMotionHandoffPose } from './live2d/customMotionRuntime';
 
 class ScriptEngine {
   private logger = getLogger('ScriptEngine');
@@ -74,6 +76,8 @@ class ScriptEngine {
   /** Unified snapshot storage — shared between real-time capture and pre-bake daemon */
   private snapshotStore = new SnapshotStore();
   private lastSnapshotTime: number = -1;
+  private customMotionPreview: { characterId: string; motion: CustomMotion; blockTime: number; handoff?: CustomMotionHandoffPose } | null = null;
+  private customMotionPreviewUpdates: Promise<void> = Promise.resolve();
 
   private cameraCoordinator = new CameraCoordinator(cameraController);
   private characterSynchronizer = new CharacterSynchronizer(live2DManager);
@@ -101,6 +105,36 @@ class ScriptEngine {
   getCurrentTime(): number { return this.masterTimeline?.time() ?? 0; }
   getDuration(): number { return this.masterTimeline?.duration() ?? 0; }
   getMasterTimeline(): gsap.core.Timeline | null { return this.masterTimeline; }
+  /** Temporary pose projection; neither the scene nor its snapshot cache owns it. */
+  previewCustomMotion(input: { characterId: string; motion: CustomMotion; blockTime: number }): void {
+    this.pause();
+    const previous = this.customMotionPreview;
+    this.customMotionPreview = { ...input, ...(previous?.characterId === input.characterId && previous.blockTime === input.blockTime
+      ? { handoff: previous.handoff } : {}) };
+    void this.applyCustomMotionPreview().catch((error) => this.logger.error('Custom Motion preview failed', error));
+  }
+
+  async clearCustomMotionPreview(): Promise<void> {
+    if (!this.customMotionPreview) return;
+    this.customMotionPreview = null;
+    await this.customMotionPreviewUpdates;
+    await this.seek(this.getCurrentTime(), false);
+  }
+
+  private async applyCustomMotionPreview(): Promise<void> {
+    const preview = this.customMotionPreview;
+    if (!preview || !live2DManager.hasCharacter(preview.characterId)) return;
+    preview.handoff ??= live2DManager.getCustomMotionPreviewHandoff(preview.characterId, preview.blockTime);
+    if (preview.handoff) {
+      live2DManager.playCustomMotion(preview.characterId, preview.motion, preview.blockTime, undefined, preview.handoff);
+    } else {
+      live2DManager.playCustomMotion(preview.characterId, preview.motion, preview.blockTime);
+      preview.handoff = live2DManager.getCustomMotionPreviewHandoff(preview.characterId, preview.blockTime);
+    }
+    const updating = live2DManager.updateAll(0, true, this.getCurrentTime() * 1000);
+    this.customMotionPreviewUpdates = Promise.allSettled([this.customMotionPreviewUpdates, updating]).then(() => {});
+    await updating;
+  }
   getCurrentCamera(): CameraState {
     return cameraController.getState();
   }
@@ -568,6 +602,7 @@ class ScriptEngine {
 
 
   private takeSnapshot(time: number): void {
+    if (this.customMotionPreview) return;
     const charIds = live2DManager.listCharacters();
     if (charIds.length === 0) return;
     const models = new Map<string, ModelSnapshot>();
@@ -644,6 +679,7 @@ class ScriptEngine {
 
   private async _doSeek(time: number, forceReconstruct: boolean, suppressSeekSideEffects: boolean): Promise<void> {
     if (!this.masterTimeline) return;
+    await this.customMotionPreviewUpdates;
 
     const seekVersion = ++this._seekVersion;
     const wasPlaying = this.playing;
@@ -734,7 +770,7 @@ class ScriptEngine {
             live2DManager.removeCharacter(id);
           } else {
             // Character consistency check: reload if the model path changed
-            const currentEntry = live2DManager.getAllCharacters().get(id);
+            const currentEntry = live2DManager.getCharacterInfo(id);
             if (currentEntry && currentEntry.modelPath !== resolvedModelPaths.get(id)) {
               live2DManager.removeCharacter(id);
             }
@@ -817,6 +853,7 @@ class ScriptEngine {
       }
     }
 
+    await this.applyCustomMotionPreview();
     seekProfiler.finishSeek(live2DManager.listCharacters().length);
 
     if (this._pendingSeek) return;
@@ -1301,6 +1338,7 @@ class ScriptEngine {
   }
 
   private cleanup(full: boolean = true, invalidationTime: number = 0): void {
+    if (full) this.customMotionPreview = null;
     this.masterTimeline?.kill(); this.masterTimeline = null; this.setPlaying(false);
     gsap.ticker.remove(this.live2DTransformSync);
     this.lastVisualOverlayKey = null;
@@ -1410,19 +1448,19 @@ class ScriptEngine {
     const fps = script.meta.fps ?? 60;
     const tasks: Promise<void>[] = [];
     for (const [id, keys] of requiredByCharacter) {
-      const entry = live2DManager.getAllCharacters().get(id);
-      if (!entry?.model) continue;
-      const targets = live2DManager.getMotionSamplerTargets(id);
-      if (targets.length === 0) continue;
+      const entry = live2DManager.getCharacterInfo(id);
+      if (!entry) continue;
       for (const motionKey of keys) {
+        const source = {
+          adapterId: entry.adapterId,
+          modelRuntimePath: entry.modelPath,
+          motionKey,
+          fps,
+          sample: (options: { fps: number; zeroSourceFades?: boolean; skipMissingParameters?: boolean }) =>
+            live2DManager.sampleMotion(id, motionKey, options),
+        } satisfies import('./live2d/motionCurveCache').MotionCurveCacheSource;
         tasks.push(
-          motionCurveCache.ensure({
-            adapterId: entry.runtime.adapterId,
-            modelRuntimePath: entry.modelPath,
-            motionKey,
-            targets,
-            fps,
-          }).then(() => undefined, (error) => {
+          motionCurveCache.ensure(source).then(() => undefined, (error) => {
             this.logger.warn(`[MotionCurveCache] Pre-warm failed for "${id}/${motionKey}": ${String(error)}`);
           }),
         );

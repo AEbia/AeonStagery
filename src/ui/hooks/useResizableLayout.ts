@@ -56,8 +56,8 @@ export function useResizableLayout(options: ResizableLayoutOptions = {}) {
     else return;
     event.preventDefault();
     setLeftPanelWidth(next);
-    options.onLeftPanelWidthCommit?.(leftPanelWidthRef.current);
-  }, [options.onLeftPanelWidthCommit, setLeftPanelWidth]);
+    optionsRef.current.onLeftPanelWidthCommit?.(leftPanelWidthRef.current);
+  }, [setLeftPanelWidth]);
   const [panelWidth, setPanelWidthState] = useState(() => clampWorkbenchValue(
     options.initialPanelWidth,
     WORKBENCH_PANEL_WIDTH.min,

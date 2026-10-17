@@ -213,14 +213,14 @@ describe('StageManager environment layer clear lifecycle', () => {
     await stageManager.renderEnvironmentLayer(snapshot.background!);
     const [outgoing, incoming] = (backgroundLayer.children[0] as any).children;
     expect(outgoing.scale.set.mock.lastCall).toEqual([1.5]);
-    expect(incoming.scale.set.mock.lastCall).toEqual([1.25]);
-    stageManager.applyEnvironmentLayerTransform('background', { scale: 1.25, opacity: 1 });
+    expect(incoming.scale.set.mock.lastCall).toEqual([1]);
+    stageManager.applyEnvironmentLayerTransform('background', { scale: 1, opacity: 1 });
     expect(outgoing.scale.set.mock.lastCall).toEqual([1.5]);
-    stageManager.applyEnvironmentLayerTransform('background', { scale: 1.25, opacity: 1 }, {
+    stageManager.applyEnvironmentLayerTransform('background', { scale: 1, opacity: 1 }, {
       position: { x: 960, y: 540 }, zoom: 2,
     });
     expect(outgoing.scale.set.mock.lastCall).toEqual([3]);
-    expect(incoming.scale.set.mock.lastCall).toEqual([2.5]);
+    expect(incoming.scale.set.mock.lastCall).toEqual([2]);
 
     await stageManager.renderEnvironmentLayer({
       layerId: 'background', scale: 2, images: [{ image: 'first.png', weight: 1 }],
