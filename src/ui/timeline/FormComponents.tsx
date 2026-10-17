@@ -1447,12 +1447,26 @@ export const NumericInput = React.memo(({ label, value, onChange, step = "0.1", 
   );
 });
 
-export const SelectInput = React.memo(({ label, value, onChange, options }: { label: string; value: string; onChange: (val: string) => void; options: { value: string; label: string }[] }) => {
+export const SelectInput = React.memo(({ label, value, onChange, options, action }: {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  options: { value: string; label: string }[];
+  /** Optional control rendered beside the select (kept from stretching the row). */
+  action?: React.ReactNode;
+}) => {
   const inputId = useId();
   return (
     <div className="inspector-row">
       <label className="inspector-label" htmlFor={inputId}>{label}</label>
-      <FormSelect id={inputId} value={value || ''} onChange={onChange} options={options} />
+      {action ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <FormSelect id={inputId} value={value || ''} onChange={onChange} options={options} style={{ flex: 1, minWidth: 0 }} />
+          {action}
+        </div>
+      ) : (
+        <FormSelect id={inputId} value={value || ''} onChange={onChange} options={options} />
+      )}
     </div>
   );
 });
@@ -1608,10 +1622,12 @@ export const DialogueTemplateSelect = React.memo(({
   value,
   onChange,
   customOptions = [],
+  action,
 }: {
   value: string;
   onChange: (val: string) => void;
   customOptions?: Array<{ value: string; label: string; disabled?: boolean }>;
+  action?: React.ReactNode;
 }) => {
   const loadedStyleIds = new Set(customOptions.map((option) => option.value));
   const options = [
@@ -1625,6 +1641,7 @@ export const DialogueTemplateSelect = React.memo(({
       value={value || 'glass'}
       onChange={onChange}
       options={options}
+      action={action}
     />
   );
 });

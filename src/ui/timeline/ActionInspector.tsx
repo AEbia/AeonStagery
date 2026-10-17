@@ -245,7 +245,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     updateResourceParam, updateSemanticSourceParam, updateAuthoringParam,
     canRemoveCharacterPerformanceField, updateDialogueSpeaker,
     currentDialogueTemplateValue, customDialogueTemplateOptions, updateDialogueTemplate,
-    updateVisualSemanticOverride,
+    webGalStyleImport, updateVisualSemanticOverride,
   } = createInspectorMutations({
     appContext, action, actionId, actionParams, sourceParams, usesSourceParamForm, sceneData,
     updateParam, replaceSourceParams,
@@ -289,6 +289,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     updateParam, replaceSourceParams, updateResourceParam, updateSemanticSourceParam,
     updateAuthoringParam, updateDialogueSpeaker, updateDialogueTemplate,
     updateVisualSemanticOverride, characterAdapter, semanticAuthoring,
+    webGalStyleImport,
   };
 
   const renderParam = (key: string) => {

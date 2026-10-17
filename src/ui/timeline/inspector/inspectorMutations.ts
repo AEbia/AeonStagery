@@ -2,11 +2,14 @@
 // the inspector passes down through InspectorParamContext and the panels.
 // Move-only extraction from ActionInspector's component body.
 import type { useApp } from '../../context/AppContext';
+import { DEFAULT_PROJECT_TEMPLATE_CONFIGURATION } from '../../../api/types/project';
 import { buildAvailableDialogueStyles } from '../../templates/TemplateCapabilityConfig';
 import { showToast } from '../../Toast';
 import type { ActionInspectorProps } from '../ActionInspector';
 import type { TimelineAction, TimelineScene } from '../semanticTimelineTypes';
 import { asRecord } from './asRecord';
+import type { WebGalStyleImportActions } from './paramControls/context';
+import type { DialogueStyleRefresh } from '../../../services/timeline-authoring/SemanticAuthoringApplicationService';
 
 export interface InspectorMutationsDeps {
   appContext: ReturnType<typeof useApp>;
@@ -162,6 +165,118 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     }
   };
 
+  // The style list is derived from the template catalog, so an import has to
+  // re-scan the library before the new style can be selected.
+  const templatePackageCatalog = appContext.services?.templatePackages;
+
+  /**
+   * Make an imported package usable from the current project.
+   *
+   * The dialogue style list is filtered by `enabledTemplateIds`, so a package
+   * that is merely installed is invisible: the import reports success while its
+   * style stays missing from the dropdown until the user enables it by hand.
+   *
+   * `metadata.templates` is optional — the project type and its codec both allow
+   * it to be absent, and other surfaces supply this default — so a project
+   * without one is filled in rather than skipped. A replace of an already
+   * enabled package still goes through the save, because that is what
+   * re-materialises the project's default `dialoguePresentation` snapshot: the
+   * style was just rewritten on disk, and leaving the snapshot alone would keep
+   * new dialogues on the old artwork.
+   */
+  const enableImportedPackage = async (packageId: string): Promise<void> => {
+    const project = projectWorkspace?.getCurrentProject();
+    if (!projectWorkspace || !project) return;
+    const currentTemplates = project.metadata.templates ?? DEFAULT_PROJECT_TEMPLATE_CONFIGURATION;
+    const enabled = (currentTemplates.enabledTemplateIds ?? []).includes(packageId);
+    // Existing order determines which package wins when resource ids overlap.
+    // Enabling a new package must preserve the project's authored precedence.
+    const enabledTemplateIds = enabled
+      ? [...(currentTemplates.enabledTemplateIds ?? [])]
+      : [...(currentTemplates.enabledTemplateIds ?? []), packageId];
+    const result = await projectWorkspace.updateTemplateConfiguration({
+      ...currentTemplates,
+      enabledTemplateIds,
+    });
+    // `updateTemplateConfiguration` can report failure *after* the project was
+    // already saved (it resolves the default scene last), so the session is
+    // asked rather than the flag believed: reporting "not enabled" for a
+    // package that is enabled would send the user looking for a problem.
+    const applied = (projectWorkspace.getCurrentProject()?.metadata.templates?.enabledTemplateIds ?? [])
+      .includes(packageId);
+    if (!applied && !result.success) {
+      showToast(`已导入，但未能在当前项目启用：${result.error ?? '未知错误'}`, 'error');
+    }
+  };
+
+  const webGalStyleImport: WebGalStyleImportActions = {
+    inspect: async () => {
+      const templates = window.aeonStageryAPI?.templates;
+      if (!templates?.inspectWebgalScss) {
+        showToast('当前桌面版本不支持导入 WebGAL 模板，请更新应用', 'error');
+        return null;
+      }
+      try {
+        const result = await templates.inspectWebgalScss();
+        if (!result.success) {
+          if (!result.canceled) showToast(`读取模板失败：${result.error ?? '未知错误'}`, 'error');
+          return null;
+        }
+        return result.inspection;
+      } catch (error) {
+        showToast(`读取模板失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+        return null;
+      }
+    },
+    install: async (request) => {
+      const templates = window.aeonStageryAPI?.templates;
+      if (!templates?.installWebgalScss) {
+        return { ok: false, message: '当前桌面版本不支持导入 WebGAL 模板，请更新应用' };
+      }
+      try {
+        const result = await templates.installWebgalScss(request);
+        if (!result.success) {
+          return { ok: false, message: `导入失败：${result.error ?? '未知错误'}` };
+        }
+        if (templatePackageCatalog) await templatePackageCatalog.refresh();
+        // Refreshing alone is not enough: the style is only buildable once the
+        // package is enabled for the project, so enable it while persisting the
+        // project template configuration.
+        await enableImportedPackage(result.package.id);
+        let updatedDialogues = 0;
+        const semanticAuthoring = appContext.services?.semanticAuthoring;
+        if (result.package.replaced && projectWorkspace?.getCurrentProject() && semanticAuthoring) {
+          try {
+            const styles = templatePackageCatalog?.getSummaries()
+              .find((candidate) => candidate.id === result.package.id)?.dialogueStyles ?? [];
+            const updates: DialogueStyleRefresh[] = [];
+            for (const style of styles.filter((candidate) => candidate.renderer === 'image-dialogue-v1')) {
+              const prepared = await projectWorkspace.prepareDialogueStyle(style.id);
+              if (!prepared.dialoguePresentation) throw new Error(`字幕样式不可用：${style.name}`);
+              updates.push({
+                presentation:prepared.dialoguePresentation,
+                ...(projectDialogueStyleId === style.id ? { previousPresentation:projectDialoguePresentation } : {}),
+              });
+            }
+            updatedDialogues = await semanticAuthoring.refreshDialogueStyles(updates);
+          } catch (error) {
+            return { ok:false, message:`模板包已更新，但当前场景对白更新失败：${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+        return {
+          ok: true,
+          message: `${result.package.replaced ? '已更新' : '已导入'}字幕样式：${result.package.name}`
+            + (updatedDialogues > 0 ? `，已同步当前场景 ${updatedDialogues} 句对白（可撤销）` : ''),
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          message: `导入失败：${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
+  };
+
   const updateVisualSemanticOverride = (key: string, value: unknown, isTransient?: boolean) => {
     const currentOverride = asRecord(sourceParams.semanticOverride);
     const nextOverride = { ...currentOverride };
@@ -183,6 +298,7 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     currentDialogueTemplateValue,
     customDialogueTemplateOptions,
     updateDialogueTemplate,
+    webGalStyleImport,
     updateVisualSemanticOverride,
   };
 }

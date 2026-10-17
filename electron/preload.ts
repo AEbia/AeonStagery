@@ -32,6 +32,7 @@ import type {
   ProjectAgentTaskCommandResult,
 } from '../src/services/project-agent-service/ProjectAgentTaskCoordinator';
 import type { CrashReport, CrashEnvironmentInfo } from '../src/api/types/crash';
+import type { WebGalScssImportInstallRequest } from '../src/api/types/template-package-import';
 
 /**
  * AeonStagery Preload Bridge
@@ -74,6 +75,11 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   },
   templates: {
     importZip: () => ipcRenderer.invoke('templates:importZip'),
+    // WebGAL dialogue template: inspect picks the directory and reports what
+    // would be installed (including duplicates), install performs the write.
+    inspectWebgalScss: () => ipcRenderer.invoke('templates:inspectWebGalScss'),
+    installWebgalScss: (request: WebGalScssImportInstallRequest) =>
+      ipcRenderer.invoke('templates:installWebGalScss', request),
     deletePackage: (request: import('../src/api/types/template-package-import').TemplatePackageDeleteRequest) => ipcRenderer.invoke('templates:deletePackage', request),
   },
 
