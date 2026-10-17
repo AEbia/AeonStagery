@@ -21,6 +21,7 @@ import {
 } from '../../FormComponents';
 import { FormSelect } from '../../../FormSelect';
 import { LightingTargetPicker } from '../../LightingTargetPicker';
+import { WebGalScssImportButton } from './WebGalScssImportButton';
 import type { InspectorParamContext, ParamControlBase } from './context';
 
 export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, base: ParamControlBase): React.ReactNode | undefined {
@@ -98,6 +99,7 @@ export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, 
       key={key}
       value={ctx.currentDialogueTemplateValue}
       customOptions={ctx.customDialogueTemplateOptions}
+      action={ctx.webGalStyleImport ? <WebGalScssImportButton importer={ctx.webGalStyleImport} /> : undefined}
       onChange={(value) => { void ctx.updateDialogueTemplate(value); }}
     />
   );
