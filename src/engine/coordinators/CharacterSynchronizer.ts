@@ -320,13 +320,14 @@ export class CharacterSynchronizer {
 
     for (const [id, state] of desiredChars) {
       const entry = this.live2D.getCharacterInfo?.(id);
-      // A cached Cubism 3+ parameter-only motion is already represented by the
-      // runtime-neutral evaluator. Restore it through that same evaluator so
-      // seek and playback keep one owner for its parameters. Native offset
-      // restoration remains the fallback for unsupported/unconverted motions
-      // and other runtime-owned state.
+      // Inline custom motions and cached Cubism 3+ parameter-only motions
+      // belong to the runtime-neutral evaluator. Native restoration accepts
+      // resource keys only, so sending an inline motion there would restore
+      // an idle pose and skip its curves during the state-sync phase below.
+      const usesCustomMotionEvaluator = !!this.live2D.playCustomMotion
+        && (state.motion?.output.kind === 'custom' || cachedResourceMotions.has(id));
       if (!entry || !entry.determinism.supportsNativeMotionOffset
-        || (cachedResourceMotions.has(id) && !!this.live2D.playCustomMotion)
+        || usesCustomMotionEvaluator
         || !this.live2D.restoreSeekState
         || !this.live2D.hasCharacter(id)) {
         continue;
