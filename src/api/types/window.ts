@@ -1,3 +1,5 @@
+import type { CrashReport, CrashRecordResult, CrashEnvironmentInfo } from './crash';
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
 import type { LayerName, Vec2 } from './common';
 import type { UpdateSource, UpdateStatus } from './updater';
 import type {
@@ -11,7 +13,7 @@ import type {
   CameraMotionConfig,
 } from './camera';
 import type { CharacterConfig, CharacterTransformConfig } from './character';
-import type { ExportConfig, ExportProgress, ExportResult } from './export';
+import type { ExportConfig, ExportProgress, ExportResult, FFmpegConvertOptions } from './export';
 import type { HookEvent, HookContext } from './hook';
 import type {
   WorkspaceRuntimeSnapshot,
@@ -130,8 +132,8 @@ export interface AeonStageryElectronAPI {
     removeFile(path: string): Promise<{ success: boolean; error?: string }>;
   };
   dialog: {
-    showSave(options: any): Promise<{ canceled: boolean; filePath?: string }>;
-    showOpen(options: any): Promise<{ canceled: boolean; filePaths?: string[] }>;
+    showSave(options: SaveDialogOptions): Promise<{ canceled: boolean; filePath?: string }>;
+    showOpen(options: OpenDialogOptions): Promise<{ canceled: boolean; filePaths?: string[] }>;
   };
   templates?: {
     importZip(): Promise<TemplatePackageImportResult>;
@@ -150,6 +152,12 @@ export interface AeonStageryElectronAPI {
     getDefaultProjectsPath(): Promise<string>;
     restart(): Promise<{ success: boolean }>;
     openExternal?(url: string): Promise<{ success: boolean }>;
+  };
+  crash?: {
+    record(report: CrashReport): Promise<CrashRecordResult | { success: false; error: string }>;
+    openReportDir(): Promise<{ success: boolean }>;
+    getLatestReport(): Promise<CrashReport | null>;
+    getEnvironment(): Promise<Partial<CrashEnvironmentInfo>>;
   };
   aiProse: {
     complete(request: AiProseLlmRequest): Promise<AiProseLlmResponse>;
@@ -298,9 +306,9 @@ export interface AeonStageryElectronAPI {
   };
   export: {
     saveVideo(buffer: ArrayBuffer, path: string): Promise<{ success: boolean; error?: string }>;
-    convert(inputPath: string, outputPath: string, options?: any): Promise<{ success: boolean; error?: string; stderr?: string; path?: string }>;
+    convert(inputPath: string, outputPath: string, options?: FFmpegConvertOptions): Promise<{ success: boolean; error?: string; stderr?: string; path?: string }>;
     getTempDir(): Promise<string>;
-    startStreamExport(outputPath: string, options?: { fps?: number; width?: number; height?: number; codec?: string; crf?: number; vflip?: boolean; isEncoded?: boolean; bitrate?: number }): Promise<{ success: boolean; error?: string }>;
+    startStreamExport(outputPath: string, options?: { fps?: number; width?: number; height?: number; codec?: string; crf?: number; vflip?: boolean; isEncoded?: boolean; bitrate?: number; transparent?: boolean }): Promise<{ success: boolean; error?: string }>;
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;

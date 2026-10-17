@@ -1,29 +1,5 @@
-export interface FFmpegAudioSource {
-  path: string;
-  delayMs: number;
-  startOffset?: number;
-  duration?: number;
-  volume?: number;
-  fadeIn?: number;
-  fadeInStartGain?: number;
-  fadeOut?: number;
-  fadeOutStartGain?: number;
-  loop?: boolean;
-}
-
-export interface FFmpegConvertOptions {
-  fps?: number;
-  width?: number;
-  height?: number;
-  audioPaths?: string[];
-  audioSources?: FFmpegAudioSource[];
-  audioCodec?: string;
-  codec?: string;
-  bitrate?: number;
-  totalFrames?: number;
-  /** Preserve the alpha channel (yuva420p) when re-encoding — subtitle-only exports. */
-  transparent?: boolean;
-}
+import type { FFmpegAudioSource, FFmpegConvertOptions } from '../src/api/types/export';
+export type { FFmpegAudioSource, FFmpegConvertOptions } from '../src/api/types/export';
 
 export function buildFFmpegConvertArgs(
   inputPath: string,
