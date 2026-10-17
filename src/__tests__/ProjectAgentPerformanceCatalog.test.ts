@@ -12,6 +12,7 @@ import {
   injectPerformanceCapabilityCatalog,
   projectPerformanceCapabilityCatalogForAgent,
   serializePerformanceCapabilityCatalogForAgent,
+  MAX_AGENT_CAPABILITY_CATALOG_BYTES,
 } from '../services/project-agent/ProjectAgentPerformanceCatalog';
 
 const FIXTURE_MOTION_CODES = [
@@ -99,6 +100,54 @@ function buildFullFixtureCatalog(): PerformanceCapabilityCatalogV1 {
 }
 
 describe('ProjectAgent performance catalog projection', () => {
+  it('summarizes huge model catalogs without a profile instead of injecting every key', () => {
+    const catalog: PerformanceCapabilityCatalogV1 = { ...CATALOG, characters: [{
+      characterId: 'anon', name: '爱音', fieldLevelDegrade: false,
+      motions: Array.from({ length: 7065 }, (_, i) => `other/character/mtn_angry01_C_live_01_${i}`),
+      expressions: Array.from({ length: 918 }, (_, i) => `expression_${i}`),
+    }] };
+    const serialized = serializePerformanceCapabilityCatalogForAgent(catalog);
+    expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(MAX_AGENT_CAPABILITY_CATALOG_BYTES);
+    expect(JSON.parse(serialized)).toMatchObject({ truncated: true, queryTool: 'searchCharacterCapabilities',
+      characters: [{ characterId: 'anon', motionCount: 7065, expressionCount: 918, fieldLevelDegrade: false }] });
+    expect(serialized).not.toContain('mtn_angry01');
+    expect(catalog.characters[0]?.motions).toHaveLength(7065);
+  });
+
+  it('bounds even large character directories and diagnostics in the fixed catalog', () => {
+    const serialized = serializePerformanceCapabilityCatalogForAgent({ ...CATALOG,
+      characters: Array.from({ length: 1000 }, (_, i) => ({ ...CATALOG.characters[0]!, characterId: `char_${i}`, name: '爱'.repeat(1000) })),
+      diagnostics: Array.from({ length: 1000 }, () => ({ code: 'profile_motion_unavailable' as const, message: '诊断'.repeat(1000) })),
+    });
+    expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(MAX_AGENT_CAPABILITY_CATALOG_BYTES);
+    expect(JSON.parse(serialized)).toMatchObject({ truncated: true, characterCount: 1000, diagnosticCount: 1000 });
+  });
+
+  it('summarizes exact namespaces with separate motion/expression counts and bare-key counts', () => {
+    const serialized = serializePerformanceCapabilityCatalogForAgent({ ...CATALOG, diagnostics: [], characters: [{
+      characterId: 'anon', name: 'Anon', fieldLevelDegrade: false,
+      motions: [...Array.from({ length: 396 }, (_, i) => `mygo/anon/mtn_angry01_C_live_01_${i}`),
+        ...Array.from({ length: 300 }, (_, i) => `other/role/motion_${i}`), 'idle'],
+      expressions: [...Array.from({ length: 36 }, (_, i) => `mygo/anon/exp_${i}`), 'smile'],
+    }] });
+    expect(JSON.parse(serialized)).toMatchObject({ characters: [{
+      characterId: 'anon', namespaceCount: 3, namespacesTruncated: false,
+      namespaces: [
+        { prefix: '', motionCount: 1, expressionCount: 1 },
+        { prefix: 'mygo/anon/', motionCount: 396, expressionCount: 36 },
+        { prefix: 'other/role/', motionCount: 300, expressionCount: 0 },
+      ],
+    }] });
+  });
+
+  it('keeps namespace summaries under the fixed byte limit and reports omitted namespaces', () => {
+    const serialized = serializePerformanceCapabilityCatalogForAgent({ ...CATALOG, diagnostics: [], characters: [{
+      characterId: 'anon', name: 'Anon', fieldLevelDegrade: false,
+      motions: Array.from({ length: 1000 }, (_, i) => `mygo/角色_${i}/motion`), expressions: [],
+    }] });
+    expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(MAX_AGENT_CAPABILITY_CATALOG_BYTES);
+    expect(JSON.parse(serialized)).toMatchObject({ characters: [{ namespaceCount: 1000, namespacesTruncated: true }] });
+  });
   it('preserves usable keys, descriptions, targets, and concise diagnostics once', () => {
     const projection = projectPerformanceCapabilityCatalogForAgent(CATALOG);
 

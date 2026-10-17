@@ -10,7 +10,7 @@ import type {
   SEMANTIC_SCENE_PATCH_VERSION,
 } from './semantic-scene-patch';
 
-export const PROJECT_AGENT_TOOLSET_VERSION = 5 as const;
+export const PROJECT_AGENT_TOOLSET_VERSION = 6 as const;
 
 /**
  * Standard conversations receive the bounded project/scene tool surface.
@@ -209,6 +209,7 @@ export interface AgentInspectResourceResult {
     readonly motions?: readonly string[];
     readonly expressions?: readonly string[];
     readonly capabilities?: Readonly<Record<string, unknown>>;
+    readonly capabilityPage?: AgentPaginationMeta;
   };
 }
 
@@ -413,6 +414,27 @@ export interface AgentSearchResourcesArgs {
 
 export interface AgentInspectResourceArgs {
   readonly reference: string;
+  /** Substring key search, or whole-key glob when * / ? is present (case-insensitive). */
+  readonly capabilityText?: string;
+  readonly capabilityOffset?: number;
+  readonly capabilityLimit?: number;
+}
+
+export interface AgentSearchCharacterCapabilitiesArgs {
+  readonly characterId: string;
+  readonly kind?: 'motion' | 'expression';
+  /** Plain text searches keys/descriptions; * / ? switches to a whole-key glob. */
+  readonly text?: string;
+  readonly offset?: number;
+  readonly limit?: number;
+}
+
+export interface AgentCharacterCapabilitiesResult extends AgentPaginationMeta {
+  readonly entries: readonly {
+    readonly kind: 'motion' | 'expression';
+    readonly key: string;
+    readonly description?: string;
+  }[];
 }
 
 export interface AgentReadImageArgs {
@@ -591,6 +613,7 @@ export type ProjectAgentToolName =
   | 'searchProjectText'
   | 'searchResources'
   | 'inspectResource'
+  | 'searchCharacterCapabilities'
   | 'readImage'
   | 'runTerminalCommand'
   | 'readScene'
@@ -612,6 +635,7 @@ export type ProjectAgentToolArgsByName = {
   searchProjectText: AgentSearchProjectTextArgs;
   searchResources: AgentSearchResourcesArgs;
   inspectResource: AgentInspectResourceArgs;
+  searchCharacterCapabilities: AgentSearchCharacterCapabilitiesArgs;
   readImage: AgentReadImageArgs;
   runTerminalCommand: AgentRunTerminalCommandArgs;
   readScene: AgentReadSceneArgs;
@@ -634,6 +658,7 @@ export type ProjectAgentToolResultByName = {
   searchProjectText: AgentSearchProjectTextResult;
   searchResources: AgentSearchResourcesResult;
   inspectResource: AgentInspectResourceResult;
+  searchCharacterCapabilities: AgentCharacterCapabilitiesResult;
   readImage: AgentReadImageResult;
   runTerminalCommand: AgentRunTerminalCommandResult;
   readScene: AgentReadSceneResult;

@@ -150,6 +150,7 @@ const PROJECT_AGENT_ACTIVITY_TEXT: Readonly<Record<string, string>> = {
   searchProjectText: '搜索项目文本',
   searchResources: '搜索资源',
   inspectResource: '检查资源',
+  searchCharacterCapabilities: '查询角色能力',
   readImage: '读取图片',
   runTerminalCommand: '运行命令',
 };
@@ -333,6 +334,11 @@ function activityReadableText(
       return readableResourceSearchContent(record);
     case 'inspectResource':
       return readableInspectResourceContent(record);
+    case 'searchCharacterCapabilities':
+      return Array.isArray(record.entries) ? record.entries.map((value) => {
+        const entry = asActivityRecord(value);
+        return [stringValue(entry.kind), stringValue(entry.key), stringValue(entry.description)].filter(Boolean).join(' · ');
+      }).join('\n') : undefined;
     case 'readImage':
       return readableImageContent(record);
     case 'readProjectOverview':
@@ -856,6 +862,8 @@ function activityDetail(
       const reference = stringArg(args, 'reference');
       return reference ? compactActivityPath(reference) : undefined;
     }
+    case 'searchCharacterCapabilities':
+      return [stringArg(args, 'characterId'), stringArg(args, 'kind'), stringArg(args, 'text')].filter(Boolean).join(' · ') || undefined;
     case 'runTerminalCommand': {
       const command = stringArg(args, 'command');
       if (!command) return undefined;

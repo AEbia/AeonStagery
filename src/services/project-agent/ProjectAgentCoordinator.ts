@@ -141,7 +141,8 @@ export interface ProjectAgentContextBudgetPort {
    * request (ADR0023). Actual usage only adjusts the estimate; it never
    * changes the 80% compaction threshold and no cumulative budgets exist.
    */
-  calibrate?(usage: Pick<AiConversationUsage, 'inputTokens'>, estimatedInputTokens: number): void;
+  calibrate?(usage: Pick<AiConversationUsage, 'inputTokens'>, estimatedInputTokens: number,
+    breakdown?: ProjectAgentContextBudgetBreakdown): void;
 }
 
 export interface ProjectAgentContinuationSummarizerPort {
@@ -197,10 +198,15 @@ export const PROJECT_AGENT_IMAGE_TOKEN_COST_DETAILED = 1700 as const;
 export class SimpleProjectAgentContextBudgetEstimator implements ProjectAgentContextBudgetPort {
   private calibrationRatio = 1;
 
-  calibrate(usage: Pick<AiConversationUsage, 'inputTokens'>, estimatedInputTokens: number): void {
+  calibrate(usage: Pick<AiConversationUsage, 'inputTokens'>, estimatedInputTokens: number,
+    breakdown?: ProjectAgentContextBudgetBreakdown): void {
     if (!Number.isFinite(usage.inputTokens) || usage.inputTokens <= 0) return;
     if (!Number.isFinite(estimatedInputTokens) || estimatedInputTokens <= 0) return;
-    const ratio = usage.inputTokens / estimatedInputTokens;
+    // Rebase on the raw message estimate. Image/schema costs are already
+    // accounted for separately and must not be calibrated a second time.
+    const ratio = breakdown && breakdown.messageTokens > 0
+      ? (usage.inputTokens - breakdown.imageTokens - breakdown.toolSchemaTokens) / breakdown.messageTokens
+      : this.calibrationRatio * usage.inputTokens / estimatedInputTokens;
     this.calibrationRatio = Math.min(5, Math.max(0.2, ratio));
   }
 
@@ -529,6 +535,7 @@ export class ProjectAgentCoordinator {
     this.sceneGate = options.sceneGate;
     this.resolvePerRequestSettings = options.resolvePerRequestSettings;
     this.performanceCatalog = options.performanceCatalog;
+    this.toolRegistry.setPerformanceCatalogResolver(options.performanceCatalog);
     this.imageCache = options.imageCache;
     this.now = options.now ?? Date.now;
     this.idFactory = options.idFactory ?? (() => `task-${Math.random().toString(36).slice(2, 10)}`);
@@ -1545,7 +1552,7 @@ export class ProjectAgentCoordinator {
     // Actual provider usage calibrates the estimator only; the 80% threshold
     // and the absence of cumulative budgets never change (ADR0023).
     if (response.usage) {
-      this.contextBudget.calibrate?.(response.usage, requestEstimate.estimatedInputTokens);
+      this.contextBudget.calibrate?.(response.usage, requestEstimate.estimatedInputTokens, requestEstimate.breakdown);
       logProjectAgentContextBudget(requestEstimate, response.usage);
     }
     this.lastContextInfo = {
@@ -2577,6 +2584,7 @@ function isRelatedRead(name: string): boolean {
     || name === 'searchProjectText'
     || name === 'searchResources'
     || name === 'inspectResource'
+    || name === 'searchCharacterCapabilities'
     || name === 'listProjectFiles'
     || name === 'readImage'
     || name === 'runTerminalCommand';
@@ -2645,7 +2653,8 @@ function reduceLargestRereadablePayload(
 }
 
 function isSceneTool(name: string): boolean {
-  return name === 'readScene' || name === 'searchScene' || name === 'validateScene';
+  return name === 'readScene' || name === 'searchScene' || name === 'validateScene'
+    || name === 'searchCharacterCapabilities';
 }
 
 /** The fixed Project Agent write toolset (ADR0024). */

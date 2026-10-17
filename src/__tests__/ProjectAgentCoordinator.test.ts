@@ -149,6 +149,51 @@ async function startCoordinator(
 }
 
 describe('ProjectAgentCoordinator', () => {
+  it.each(['recoverable', 'terminal'] as const)('gates capability queries when the target becomes %s during a model request', async (kind) => {
+    let activeScene = 'scene_coord';
+    const resolvedScenes: string[] = [];
+    const registry = createRegistry();
+    const dispatch = vi.spyOn(registry, 'dispatch');
+    const coordinator = new ProjectAgentCoordinator({
+      transport: {
+        complete: async () => {
+          activeScene = 'other_scene';
+          return { message: assistantWithTools([
+            { status: 'ready', toolCallId: 'capabilities', name: 'searchCharacterCapabilities', arguments: { characterId: 'a' } },
+          ]) };
+        },
+      },
+      toolRegistry: registry,
+      lease: new InMemoryProjectAgentLeasePort(),
+      sceneGate: () => activeScene === 'scene_coord'
+        ? { ok: true }
+        : { ok: false, kind, code: 'target_scene_unavailable', message: 'Target scene is unavailable' },
+      performanceCatalog: {
+        resolve: async () => {
+          resolvedScenes.push(activeScene);
+          return { ok: true, value: {
+            fingerprint: activeScene,
+            catalog: { version: 1, characters: [{
+              characterId: 'a', name: 'A', fieldLevelDegrade: false,
+              motions: [`${activeScene}/idle`], expressions: [],
+            }], lookAtTargets: [], reactionTargets: [], diagnostics: [] },
+          } };
+        },
+      },
+    });
+    await coordinator.start({
+      projectId: 'proj', targetSceneIdentity: 'scene_coord', originalTaskText: 'Inspect motions',
+      systemPrompt: 'sys', endpoint: 'e', model: 'm', taskId: `capability-gate-${kind}`,
+    });
+
+    await coordinator.runModelTurn();
+
+    expect(coordinator.getTask()?.getPauseReason()).toBe(kind === 'terminal' ? 'target_scene_unavailable' : 'target_scene_inactive');
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(resolvedScenes).not.toContain('other_scene');
+    expect(registry.taskState.hasSceneRead()).toBe(false);
+  });
+
   it('acquires global lease on start and rejects a second running lease', async () => {
     const lease = new InMemoryProjectAgentLeasePort();
     const transport = transportFromResponses([]);
