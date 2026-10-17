@@ -36,6 +36,7 @@ import { deriveTimelineMaxTimeSeconds } from './timeline/timelineMaxTime';
 import { TimelineSelectionBar } from './timeline/TimelineSelectionBar';
 import { pruneSelectedActionIdsForTimeline } from './timeline/selectionHygiene';
 import { getTimelineActionDuration } from './timeline/timelineDensity';
+import { useInspectorTransformPreview } from './timeline/useInspectorTransformPreview';
 import { showToast } from './Toast';
 import { useSetting } from './SettingsStore';
 import { deriveCollaborationStatusUx } from '../services/collaboration/CollaborationStatusUxModel';
@@ -151,11 +152,18 @@ export function TimelineEditor({
     );
   }, [documentStore, timelineReadModelActionById]);
 
+  const previewScope = useMemo(() => ({
+    document: semanticDocument,
+    selection: Object.keys(selectedActionIds).filter((id) => selectedActionIds[id]).sort().join('|'),
+    mode, inspectorView, isOfflineEditingBlocked,
+  }), [semanticDocument, selectedActionIds, mode, inspectorView, isOfflineEditingBlocked]);
+  const { preview: previewInspectorTransform, commit: commitInspectorTransform } = useInspectorTransformPreview(playbackAdapter, previewScope);
+
   const replaceSourceParams = useCallback(async (id: string, params: Record<string, unknown>) => {
     const item = semanticSnapshot.itemById.get(id);
-    if (item) return commands.replaceSourceParams(item.locator, params, item.source.params as Record<string, unknown>);
+    if (item) return commitInspectorTransform(id, () => commands.replaceSourceParams(item.locator, params, item.source.params as Record<string, unknown>));
     return undefined;
-  }, [commands, semanticSnapshot]);
+  }, [commands, semanticSnapshot, commitInspectorTransform]);
   const effectivePixelsPerSecond = zoomViewportPreview?.pixelsPerSecond ?? pixelsPerSecond;
   const effectiveScrollLeft = zoomViewportPreview?.scrollLeft ?? scrollLeft;
 
@@ -319,19 +327,29 @@ export function TimelineEditor({
       if (intent && !isTransient) void semanticAuthoring.author(intent);
     }
     if (Object.keys(paramPatch).length === 0) return;
-    if (isTransient) return;
-    if (shouldUseSourceParamPatch(id, paramPatch)) void commands.updateSourceParams(id, paramPatch);
-    else void commands.updateTimelineParams(id, runtimePatch);
-  }, [blockOfflineEdit, commands, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
+    if (isTransient) {
+      const action = timelineReadModelActionById.get(id);
+      if (action) previewInspectorTransform(action, paramPatch);
+      return;
+    }
+    void commitInspectorTransform(id, () => shouldUseSourceParamPatch(id, paramPatch)
+      ? commands.updateSourceParams(id, paramPatch)
+      : commands.updateTimelineParams(id, runtimePatch));
+  }, [blockOfflineEdit, commands, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch, timelineReadModelActionById, previewInspectorTransform, commitInspectorTransform]);
 
-  const updateParam = useCallback((id: string, key: string, value: any, isTransient?: boolean) => {
+  const updateParam = useCallback((id: string, key: string, value: unknown, isTransient?: boolean) => {
     if (blockOfflineEdit()) return;
     if (!semanticDocument || !semanticAuthoring) return;
     const paramPatch = { [key]: value };
-    if (isTransient) return;
-    if (shouldUseSourceParamPatch(id, paramPatch)) void commands.updateSourceParams(id, paramPatch);
-    else void commands.updateTimelineParams(id, paramPatch);
-  }, [blockOfflineEdit, commands, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch]);
+    if (isTransient) {
+      const action = timelineReadModelActionById.get(id);
+      if (action) previewInspectorTransform(action, paramPatch);
+      return;
+    }
+    void commitInspectorTransform(id, () => shouldUseSourceParamPatch(id, paramPatch)
+      ? commands.updateSourceParams(id, paramPatch)
+      : commands.updateTimelineParams(id, paramPatch));
+  }, [blockOfflineEdit, commands, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch, timelineReadModelActionById, previewInspectorTransform, commitInspectorTransform]);
 
   const addActionAt = useCallback(async (time: number) => {
     await commands.addDialogue(time);
