@@ -4,6 +4,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppProvider } from '../ui/context/AppContext';
+import type { CollaborationConnectionStatus } from '../api/types/collaboration';
 import { isTrackAnimated } from '../ui/timeline/CustomMotionEditor';
 import { CustomMotionEditor, createEditorFixture, type CustomMotionEditorProps } from './fixtures/CustomMotionEditorHarness';
 import { TrackArea } from '../ui/timeline/TrackArea';
@@ -45,6 +46,7 @@ function renderTrackAreaWithCustomMotion(options: {
   selectedIds?: Record<string, boolean>;
   document?: unknown;
   viewWindow?: { start: number; end: number };
+  collaborationStatus?: CollaborationConnectionStatus;
 } = { expandedActionId: null }) {
   const actions = options.actions ?? [createCustomMotionAction('cm1', 2)];
   void actions;
@@ -134,7 +136,7 @@ function renderTrackAreaWithCustomMotion(options: {
   };
 
   const view = render(
-    <AppProvider adapters={adapters} stores={stores} services={{ customMotionEditing } as any}>
+    <AppProvider adapters={adapters} stores={stores} services={{ customMotionEditing } as any} collaboration={{ status: options.collaborationStatus ?? 'disconnected' }}>
       <TrackArea
         tracks={[{ id: 'char:hina', label: 'Hina', actions }]}
         pps={10}
@@ -348,8 +350,13 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
     expect(editor.querySelector('.cme__identity')).not.toBeNull();
     expect(editor.querySelector('.cme__toolbar')).toBeNull();
     expect(editor.textContent).not.toContain('点击菱形编辑');
-    expect(editor.textContent).toContain('已获得编辑权');
+    expect(editor.textContent).not.toContain('已获得编辑权');
     expect(editor.textContent).not.toContain('未连接编辑租约');
+  });
+
+  it('协作连接时显示已获得的编辑权', () => {
+    renderTrackAreaWithCustomMotion({ expandedActionId: 'cm1', collaborationStatus: 'connected' });
+    expect(screen.getByTestId('custom-motion-editor').textContent).toContain('已获得编辑权');
   });
 
   it('滚动时导航条与 32px 标尺底边无额外空隙', () => {
@@ -366,6 +373,7 @@ describe('TrackArea 自定义动作关键帧展开带', () => {
         pixelsPerSecond={10}
         playheadTime={2.5}
         leaseState="held"
+        showLeaseStatus
         onCommit={vi.fn()}
       />,
     );

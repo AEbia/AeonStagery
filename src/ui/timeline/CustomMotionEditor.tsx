@@ -45,6 +45,8 @@ export interface CustomMotionEditorProps {
   onSeek?: (sceneTime: number) => void;
   /** Hide the close button when embedded in a fixed host. */
   hideClose?: boolean;
+  /** Show collaborative edit lease status in the editor header. */
+  showLeaseStatus?: boolean;
   onClose?: () => void;
 }
 
@@ -72,6 +74,7 @@ export function CustomMotionEditor({
   playheadTime,
   onSeek,
   hideClose = false,
+  showLeaseStatus = false,
   onClose,
 }: CustomMotionEditorProps) {
   const motion = snapshot.canonicalMotion!;
@@ -359,7 +362,7 @@ export function CustomMotionEditor({
               <span className="cme__src-sep">·</span>
               {motion.tracks.length} 条轨道
             </span>
-            {leaseState !== 'closed' && (
+            {showLeaseStatus && leaseState !== 'closed' && (
               <span className={`cme__lease${busy ? ' cme__lease--busy' : ''}`}>
                 {leaseState === 'held'
                   ? '已获得编辑权'
