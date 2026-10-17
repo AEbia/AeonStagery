@@ -1507,6 +1507,7 @@ export const TrackArea = React.memo(({
                 scrollContainer={areaRef.current?.closest<HTMLElement>('.timeline-editor-scroll-container')}
                 parameterMetadata={characterAdapter.getParameterMetadata?.(customMotionEditorTarget.characterId)}
                 snapshot={customMotionSnapshot}
+                showLeaseStatus={collaborationStatus !== 'disconnected'}
                 pixelsPerSecond={pps}
                 playheadTime={playheadTimeRef.current}
                 onSeek={(sceneTime) => onSeek(sceneTime, true)}

@@ -58,9 +58,6 @@ export function CustomMotionPanel(props: CustomMotionPanelProps) {
             重新转换…
           </button>
         </div>
-        <div className="inspector-hint" style={{ fontSize: 10.5, lineHeight: 1.5, margin: '2px 0 8px', color: 'var(--text-muted)' }}>
-          关键帧编辑器会在下方轨道区随时间轴展开；修改实时走 codec 严格校验：首帧锁定、时间不冲突、时长不小于淡入。
-        </div>
       </div>
     </div>
   );
