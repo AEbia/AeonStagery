@@ -1,11 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import * as PIXI from 'pixi.js';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
 import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
+import type { CharacterEntry } from '../engine/Live2DConfig';
+import Live2DManager from '../engine/Live2DManager';
+import { CharacterSynchronizer } from '../engine/coordinators/CharacterSynchronizer';
+import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
+import { SnapshotStore } from '../engine/SnapshotStore';
+import { loadCubism3Motion } from '../engine/live2d/cubism3MotionSampler';
+import { live2DStageState } from './helpers/live2DStageState';
 
 const corePath = resolveCubismWebCorePath();
 const entry = process.env.AEON_CUBISM_TEST_MODEL;
@@ -14,9 +22,13 @@ let engine: any;
 function buffer(file: string): ArrayBuffer {
   return new Uint8Array(fs.readFileSync(file)).buffer;
 }
-async function createModel(eyeBlinkParameters?: string[]) {
+async function createModel(eyeBlinkParameters?: string[], motionKey?: string) {
   const root = path.dirname(entry!);
   const json = JSON.parse(fs.readFileSync(entry!, 'utf8'));
+  if (motionKey) {
+    json.FileReferences.Motions = { [motionKey]: json.FileReferences.Motions[motionKey] };
+    json.FileReferences.Expressions = [];
+  }
   json.url = 'file://' + entry;
   if (eyeBlinkParameters) {
     json.Groups = (json.Groups ?? []).filter((group: any) => group.Name !== 'EyeBlink');
@@ -79,6 +91,46 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     await engine.cubismReady();
   });
   afterAll(() => { models.forEach((model) => model.destroy()); vi.unstubAllGlobals(); });
+  it('plays converted custom motion through timeline seek using real Core geometry', async () => {
+    const source: { FileReferences: { Motions: Record<string, { File: string }[]> } } = JSON.parse(fs.readFileSync(entry!, 'utf8'));
+    const motionKey = process.env.AEON_CUBISM_TEST_MOTION ?? Object.keys(source.FileReferences.Motions)[0];
+    expect(motionKey).toBeTruthy();
+    const model = await createModel(undefined, motionKey);
+    const runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } as const;
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('converted', model, runtime);
+    const idleSnapshot = handle.snapshot.captureSnapshot()!;
+    const positions = model.internalModel.coreModel.getModel().drawables.vertexPositions as readonly Float32Array[];
+    const before = positions.map(vertices => vertices.slice());
+    const { motion } = await loadCubism3Motion({ kind: 'cubism3-plus', settings: model.internalModel.settings },
+      motionKey, async file => buffer(file.startsWith('file:') ? fileURLToPath(file) : path.resolve(path.dirname(entry!), file)));
+    const character: CharacterEntry = {
+      id: 'converted', model, modelPath: entry!, modelUrl: entry!, runtime,
+      adapterId: runtime.adapterId, runtimeHandle: handle, config: {}, injectedParams: {},
+      lipSyncParameterIds: new Set(), baseHeight: 100, motionEpoch: 0, idleSnapshot,
+    };
+    const manager = new Live2DManager();
+    live2DStageState(manager).characters.set(character.id, character);
+    try {
+      manager.setAutoUpdate(false);
+      await new CharacterSynchronizer(manager).syncTo({
+        time: Math.max(motion.durationSeconds / 2, motion.fadeInSeconds,
+          ...motion.tracks.map(track => track.fadeInSeconds ?? 0)),
+        desiredChars: new Map([[character.id, {
+          id: character.id, model: entry!, config: {}, motion: { output: motion, time: 0 },
+        }]]),
+        transformationProxies: new ProxyRegistry(), snapshotStore: new SnapshotStore(),
+        shouldCancel: () => false, skipHardReset: true, isScrubbing: true,
+      });
+      expect(character.customMotion?.motion.derivedFrom.key).toBe(motionKey);
+      const snapshot = handle.snapshot.captureSnapshot()!;
+      expect(snapshot.params.some((value, index) => Math.abs(value - idleSnapshot.params[index]) > 1e-4)).toBe(true);
+      expect(positions.some((vertices, index) => vertices.some((value, vertex) => Math.abs(value - before[index][vertex]) > 1e-4))).toBe(true);
+    } finally {
+      manager.releaseCustomMotion(character);
+      live2DStageState(manager).characters.clear();
+      handle.dispose({ mode: 'destroy' });
+    }
+  });
   it('loads a moc3 model with only the modern Core and exposes real parameter names and expressions', async () => {
     const model = await createModel();
     model.update(16);
