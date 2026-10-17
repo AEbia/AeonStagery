@@ -44,5 +44,8 @@ export function useSemanticTimelineSnapshot(provided?: SemanticTimelineSnapshot)
     : store.subscribe?.(listener) ?? (() => {}), [provided, store]);
   const getVersion = useCallback(() => provided ? 0 : store.version, [provided, store]);
   const version = useSyncExternalStore(subscribe, getVersion);
-  return useMemo(() => provided ?? readSemanticTimelineSnapshot(store), [provided, store, version]);
+  return useMemo(() => {
+    void version;
+    return provided ?? readSemanticTimelineSnapshot(store);
+  }, [provided, store, version]);
 }

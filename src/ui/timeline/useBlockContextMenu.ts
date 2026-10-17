@@ -25,15 +25,16 @@ interface BlockContextMenuOptions {
 }
 
 export function useBlockContextMenu(options: BlockContextMenuOptions = {}) {
+  const { selectAfterCommit: selectAfterCommitOption } = options;
   const playbackAdapter = usePlaybackAdapter();
   const documentStore = useDocumentStore();
   const semanticAuthoring = useSemanticAuthoringService();
   const app = useApp();
   const editorStore = app.stores.editor;
   const selectAfterCommit = useCallback((ids: Record<string, boolean>) => {
-    if (options.selectAfterCommit) options.selectAfterCommit(ids);
+    if (selectAfterCommitOption) selectAfterCommitOption(ids);
     else app.adapters.timeline.select(ids);
-  }, [app, options.selectAfterCommit]);
+  }, [app, selectAfterCommitOption]);
   const commands = useSemanticTimelineCommands(selectAfterCommit);
   const semanticSnapshot = useSemanticTimelineSnapshot(options.semanticSnapshot);
   const collaborationStatus = useCollaborationStatus();

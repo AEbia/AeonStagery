@@ -72,6 +72,10 @@ const SettingsDialog = React.lazy(() => import('./ui/SettingsDialog').then(m => 
 const ChangelogDialog = React.lazy(() => import('./ui/changelog/ChangelogDialog').then(m => ({ default: m.ChangelogDialog })));
 const VoiceWorkbench = React.lazy(() => import('./ui/voice/VoiceWorkbench').then(m => ({ default: m.VoiceWorkbench })));
 
+function isCurrentBootstrapLifecycle(ref: { current: number }, generation: number): boolean {
+  return ref.current === generation;
+}
+
 export default function App() {
   const contextValue = useMemo(() => bootstrap(), []);
   const bootstrapLifecycleRef = useRef(0);
@@ -81,7 +85,7 @@ export default function App() {
       // StrictMode effect replay keeps this bootstrap alive; actual unmount
       // disposes after child cleanup has started.
       queueMicrotask(() => {
-        if (bootstrapLifecycleRef.current === generation) {
+        if (isCurrentBootstrapLifecycle(bootstrapLifecycleRef, generation)) {
           void contextValue.dispose().catch((error) => getLogger('App').error('Application disposal failed', error));
         }
       });
@@ -126,6 +130,7 @@ function AppContent({ contextValue, sessionBindings }: {
     setIsPerformanceProfileEditorDirty, handleCloseSettings, handleRestartApp,
   } = useAppDialogs();
   const project = useAppProjectWorkspace(contextValue, hasLoadedScene);
+  const { setIsCollaborationJoinHomeLocked } = project;
   const {
     currentProject, templatePackages, templatePackageRevision, isCollaborationJoinHomeLocked,
     handleLoadFile, handleCreateProject, handleOpenProject, handleOpenRecentProject, handleRenameProject,
@@ -148,13 +153,13 @@ function AppContent({ contextValue, sessionBindings }: {
   );
   const handleReturnHome = useCallback(async () => {
     if (!await handleCloseProject()) return;
-    project.setIsCollaborationJoinHomeLocked(false);
+    setIsCollaborationJoinHomeLocked(false);
     setShowAIWorkbench(false);
     setShowVoiceWorkbench(false);
     setShowExport(false);
     setShowWebGalRegenerate(false);
     setRenameTarget(null);
-  }, [handleCloseProject, project.setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
+  }, [handleCloseProject, setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
   const layout = useAppLayout(hasLoadedScene);
   const {
     contextTab, sidePanelView, isTracksMode, leftPanelWidth, sidePanelWidth,
