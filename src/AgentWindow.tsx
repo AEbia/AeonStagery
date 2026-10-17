@@ -44,6 +44,7 @@ import {
   StreamingReply,
   ThinkDisclosure,
 } from './ui/agent/AgentConversationParts';
+import { hasImageDropData, loadDroppedImage, readDroppedImage, type DroppedImage } from './ui/agent/imageDrop';
 
 const RUNNING_LIFE_CYCLES = new Set(['running', 'cancelling']);
 const SUSPENDED_LIFE_CYCLES = new Set(['suspended', 'paused']);
@@ -1590,12 +1591,14 @@ export const AgentWindow: React.FC = () => {
     if (canAttachImage && !imageProcessing) fileInputRef.current?.click();
   };
 
-  const attachImage = async (file: File) => {
+  const attachImage = async (source: DroppedImage) => {
     if (!canAttachImage) return;
     const sequence = ++imagePickSequence.current;
     setAttachError(null);
     setImageProcessing(true);
     try {
+      const file = await loadDroppedImage(source);
+      if (sequence !== imagePickSequence.current) return;
       const attachment = await processPickedImage(file);
       if (sequence !== imagePickSequence.current) {
         URL.revokeObjectURL(attachment.previewUrl);
@@ -2154,13 +2157,17 @@ export const AgentWindow: React.FC = () => {
         <div className="agent-composer-wrap">
           <div className="agent-promptbox"
             onDragOver={(event) => {
-              if (canAttachImage && event.dataTransfer.types.includes('Files')) event.preventDefault();
+              if (!hasImageDropData(event.dataTransfer)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = canAttachImage ? 'copy' : 'none';
             }}
             onDrop={(event) => {
-              if (!event.dataTransfer.files.length) return;
-              event.preventDefault();
-              const file = Array.from(event.dataTransfer.files).find((entry) => entry.type.startsWith('image/'));
-              if (file) void attachImage(file);
+              const image = readDroppedImage(event.dataTransfer);
+              if (event.dataTransfer.files.length || image) event.preventDefault();
+              if (image && canAttachImage) {
+                event.stopPropagation();
+                void attachImage(image);
+              }
             }}
           >
             {imageProcessing && <p className="agent-promptbox__hint" role="status">正在处理图片…</p>}

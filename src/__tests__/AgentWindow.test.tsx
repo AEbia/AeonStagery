@@ -1170,6 +1170,86 @@ describe('AgentWindow composer', () => {
     expect(screen.getByAltText('dropped.png')).toBeTruthy();
   });
 
+  it.each(['file without MIME', 'file item'] as const)('accepts an external %s dropped onto the textarea', async (kind) => {
+    mockImageProcessing();
+    await renderWithConversation();
+    mocks.publish(status());
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    fireEvent.change(input, { target: { value: '参考这张图片' } });
+    const file = new File(['png'], 'external.PNG');
+    const dataTransfer = {
+      types: ['Files'],
+      files: kind === 'file item' ? [] : [file],
+      items: kind === 'file item' ? [{ kind: 'file', getAsFile: () => file }] : [],
+      dropEffect: 'none',
+    };
+    expect(fireEvent.dragOver(input, { dataTransfer })).toBe(false);
+    expect(dataTransfer.dropEffect).toBe('copy');
+    expect(fireEvent.drop(input, { dataTransfer })).toBe(false);
+    await screen.findByAltText('external.PNG');
+    expect((input as HTMLTextAreaElement).value).toBe('参考这张图片');
+    fireEvent.click(screen.getByRole('button', { name: /^发送$/ }));
+    await waitFor(() => expect(mocks.sendSupplement).toHaveBeenCalledWith('task-1', '参考这张图片', {
+      name: 'external.PNG', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), detail: 'auto',
+    }));
+  });
+
+  it.each(['text/html', 'text/uri-list'])('accepts a browser image dragged as %s', async (format) => {
+    mockImageProcessing();
+    const fetchImage = vi.fn(async () => new Response('png', { headers: { 'content-type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchImage);
+    await renderWithConversation();
+    mocks.publish(status());
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    const url = format === 'text/html' ? 'https://images.example.test/render?id=1' : 'https://images.example.test/reference.png';
+    const dataTransfer = {
+      types: [format], files: [],
+      getData: (type: string) => type !== format ? '' : format === 'text/html'
+        ? `<img src="${url}">` : `# image\r\n${url}`,
+    };
+    expect(fireEvent.dragOver(input, { dataTransfer })).toBe(false);
+    expect(fireEvent.drop(input, { dataTransfer })).toBe(false);
+    await screen.findByAltText(format === 'text/html' ? 'render' : 'reference.png');
+    expect(fetchImage).toHaveBeenCalledWith(url, expect.objectContaining({ credentials: 'omit' }));
+  });
+
+  it('preserves the draft and previous attachment when a network image cannot be fetched', async () => {
+    mockImageProcessing();
+    const fetchImage = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchImage);
+    await renderWithConversation();
+    mocks.publish(status());
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    fireEvent.change(input, { target: { value: '保留草稿' } });
+    fireEvent.drop(input, { dataTransfer: { files: [new File(['png'], 'original.png', { type: 'image/png' })] } });
+    await screen.findByAltText('original.png');
+    fireEvent.drop(input, { dataTransfer: {
+      files: [], getData: (type: string) => type === 'text/uri-list' ? 'https://images.example.test/blocked.png' : '',
+    } });
+    await screen.findByText('无法获取拖入的网络图片，请先保存到本地再拖入。');
+    expect(screen.getByAltText('original.png')).toBeTruthy();
+    expect((input as HTMLTextAreaElement).value).toBe('保留草稿');
+  });
+
+  it('keeps ordinary text drops native and rejects image drops for models without image input', async () => {
+    mockImageProcessing();
+    const fetchImage = vi.fn();
+    vi.stubGlobal('fetch', fetchImage);
+    await renderWithConversation();
+    act(() => mocks.publishContext({ ...CONTEXT, imageInputSupported: false }));
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    expect(fireEvent.drop(input, { dataTransfer: { files: [], getData: () => '' } })).toBe(true);
+    const dataTransfer = {
+      types: ['text/uri-list'], files: [], dropEffect: 'copy',
+      getData: (type: string) => type === 'text/uri-list' ? 'https://images.example.test/blocked.png' : '',
+    };
+    fireEvent.dragOver(input, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe('none');
+    expect(fireEvent.drop(input, { dataTransfer })).toBe(false);
+    expect(fetchImage).not.toHaveBeenCalled();
+    expect(createImageBitmap).not.toHaveBeenCalled();
+  });
+
   it('allows attaching an image while the selected conversation is running', async () => {
     await renderWithConversation();
     mocks.publish(status());
