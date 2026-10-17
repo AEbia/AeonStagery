@@ -14,8 +14,28 @@ function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
-export function useViewport(stageRef: React.RefObject<HTMLDivElement>, enabled = true) {
+export function useViewport(
+  stageRef: React.RefObject<HTMLDivElement>,
+  enabled = true,
+  stageSize = { width: 1920, height: 1080 },
+) {
   const [viewport, setViewport] = useState({ zoom: 1, x: 0, y: 0 });
+  const [fitScale, setFitScale] = useState(1);
+  const { width: stageWidth, height: stageHeight } = stageSize;
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !enabled) return;
+    const measure = () => setFitScale(Math.min(
+      stage.clientWidth / stageWidth,
+      stage.clientHeight / stageHeight,
+    ));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [stageRef, enabled, stageWidth, stageHeight]);
+
   const lastMousePos = useRef({ x: 0, y: 0 });
   const isPanning = useRef(false);
 
@@ -45,12 +65,12 @@ export function useViewport(stageRef: React.RefObject<HTMLDivElement>, enabled =
     }
   }, []);
 
-  /** 完整复位:回到适配窗口(100%)并回中。 */
+  /** 完整复位:回到适配窗口并回中。 */
   const handleStageReset = useCallback(() => {
     setViewport({ zoom: 1, x: 0, y: 0 });
   }, []);
 
-  /** 仅重置缩放到 100%(适配窗口基准),保留当前平移。 */
+  /** 仅重置缩放到适配窗口基准,保留当前平移。 */
   const handleResetZoom = useCallback(() => {
     setViewport(prev => ({ ...prev, zoom: 1 }));
   }, []);
@@ -94,6 +114,7 @@ export function useViewport(stageRef: React.RefObject<HTMLDivElement>, enabled =
 
   return {
     viewport,
+    actualScale: fitScale * viewport.zoom,
     handleStageMouseDown,
     handleStageReset,
     handleResetZoom,

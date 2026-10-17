@@ -2,7 +2,8 @@
  * @vitest-environment jsdom
  */
 import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+afterEach(() => vi.unstubAllGlobals());
 import { MAX_ZOOM, MIN_ZOOM, useViewport } from '../ui/hooks/useViewport';
 
 function renderViewport() {
@@ -102,5 +103,59 @@ describe('useViewport', () => {
 
     act(() => result.current.handleStageReset());
     expect(result.current.viewport).toEqual({ zoom: 1, x: 0, y: 0 });
+  });
+});
+
+describe('viewport actual pixel scale', () => {
+  it('combines fitted stage size with viewport zoom and updates when resized', () => {
+    let width = 960;
+    let height = 540;
+    let notifyResize = () => {};
+    class Observer {
+      constructor(callback: () => void) { notifyResize = callback; }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', Observer);
+    const stage = document.createElement('div');
+    Object.defineProperties(stage, {
+      clientWidth: { get: () => width },
+      clientHeight: { get: () => height },
+    });
+    const { result } = renderHook(() => useViewport({ current: stage }));
+    expect(result.current.actualScale).toBe(0.5);
+    act(() => result.current.handleZoomIn());
+    expect(result.current.actualScale).toBeCloseTo(0.6);
+    width = 1920;
+    height = 600;
+    act(notifyResize);
+    expect(result.current.actualScale).toBeCloseTo((600 / 1080) * 1.2);
+    act(() => result.current.handleResetZoom());
+    expect(result.current.actualScale).toBeCloseTo(600 / 1080);
+    act(() => result.current.handleStageReset());
+    expect(result.current.actualScale).toBeCloseTo(600 / 1080);
+  });
+
+  it('disconnects its size observer and remeasures when the stage is reenabled', () => {
+    const disconnect = vi.fn();
+    const observe = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      observe = observe;
+      disconnect = disconnect;
+    });
+    const stage = document.createElement('div');
+    Object.defineProperties(stage, {
+      clientWidth: { value: 960 }, clientHeight: { value: 540 },
+    });
+    const { result, rerender, unmount } = renderHook(
+      ({ enabled }) => useViewport({ current: stage }, enabled),
+      { initialProps: { enabled: false } },
+    );
+    expect(observe).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    expect(result.current.actualScale).toBe(0.5);
+    expect(observe).toHaveBeenCalledWith(stage);
+    unmount();
+    expect(disconnect).toHaveBeenCalled();
   });
 });
