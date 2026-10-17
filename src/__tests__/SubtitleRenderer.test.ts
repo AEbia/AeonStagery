@@ -214,6 +214,65 @@ describe('SubtitleRenderer', () => {
     }
   });
 
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'].flatMap((template) => (
+    (['typewriter', 'fadeIn', 'cinematic', 'instant'] as const).flatMap((style) => (
+      [' ', '-'].map((separator) => ({ template, style, separator }))
+    ))
+  )))('fills subtitle lines before wrapping after "$separator" with $template/$style', ({ template, style, separator }) => {
+    useRealTextMetrics();
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const content = `前半句${separator}${'后半句中文对白'.repeat(8)}`;
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === template)!;
+    const renderer = new SubtitleRenderer();
+    const config = { speaker: '', text: content, style, template, duration: 4,
+      presentation: preset.renderer === 'image-dialogue-v1'
+        ? sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+          text: content, durationSeconds: 4,
+          presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: template },
+        }, 'subtitle-wrap-test').presentation : undefined };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 3);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const texts = container.children.filter((child): child is PIXI.Text => child instanceof PIXI.Text);
+    const lines = texts.flatMap((text) => {
+      const metrics = PIXI.CanvasTextMetrics.measureText(text.text, text.style);
+      expect(metrics.maxLineWidth).toBeLessThanOrEqual(text.style.wordWrapWidth);
+      return metrics.lines;
+    });
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines[0].length).toBeGreaterThan(4);
+    expect(lines.join('')).toBe(content);
+  });
+
+  it.each(['前半句 后半句', '前半句-后半句', '保留  连续空格', '手动换行\r\n第二行-保留 空格'])(
+    'preserves short subtitle spacing, hyphens and authored newlines: %j', (content) => {
+      useRealTextMetrics();
+      const renderer = new SubtitleRenderer();
+      const config = { speaker: '', text: content, style: 'instant' as const, template: 'minimal', duration: 4 };
+      renderer.showDialogue(config).pause();
+      renderer.ensureDialogueOnStage(config, 3);
+      const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+      const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+      expect(PIXI.CanvasTextMetrics.measureText(text.text, text.style).lines).toEqual(content.split('\r\n'));
+    });
+
+  it.each([' ', '-'])('fills the remaining line with Chinese even when the next token fits a whole column: %j', (separator) => {
+    useRealTextMetrics();
+    const prefix = '前半句'.repeat(5);
+    const content = `${prefix}${separator}${'后半句'.repeat(7)}`;
+    const renderer = new SubtitleRenderer();
+    const config = { speaker: '', text: content, style: 'instant' as const, template: 'minimal', duration: 4 };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 3);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const text = container.children.find((child) => child instanceof PIXI.Text) as PIXI.Text;
+    const metrics = PIXI.CanvasTextMetrics.measureText(text.text, text.style);
+    expect(metrics.lines).toHaveLength(2);
+    expect(metrics.lines[0].length).toBeGreaterThan(prefix.length + 1);
+    expect(metrics.lines.join('')).toBe(content);
+    expect(metrics.maxLineWidth).toBeLessThanOrEqual(text.style.wordWrapWidth);
+  });
+
   it('keeps large classic dialogue text within the stage', () => {
     useRealTextMetrics();
     stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? 96 : key === 'dialogueTextSpeed' ? 0.01 : '');

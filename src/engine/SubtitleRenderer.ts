@@ -22,6 +22,53 @@ const STAGE_HEIGHT = 1080;
 // Performance: TextMetrics Cache
 const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
 
+/** Fill subtitle lines across whitespace/hyphens before breaking CJK or oversized tokens. */
+function wrapDialogueTokens(text: string, style: PIXI.TextStyle): string {
+  const limit = style.wordWrapWidth;
+  const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  const widths = new Map<string, number>();
+  const widthOf = (value: string): number => {
+    let width = widths.get(value);
+    if (width === undefined) {
+      width = PIXI.CanvasTextMetrics.measureText(value, style, undefined, false).maxLineWidth;
+      widths.set(value, width);
+    }
+    return width;
+  };
+  // Match Pixi's whitespace and hyphen boundaries without changing their glyphs.
+  const tokensOf = (line: string) => line.split(/([\t \u2000-\u2006\u2008-\u200a\u205f\u3000]|[-\u2010\u2013\u2014\u00ad])/u).filter(Boolean);
+  return text.split(/(\r\n|\r|\n)/).map((paragraph) => {
+    if (/^[\r\n]+$/.test(paragraph)) return paragraph;
+    const tokens = tokensOf(paragraph);
+    if (tokens.length < 2 || widthOf(paragraph) <= limit
+      || !tokens.some((token) => cjk.test(token) || widthOf(token) > limit)) return paragraph;
+
+    const lines: string[] = [];
+    let line = '';
+    for (const token of tokens) {
+      if (!cjk.test(token) && widthOf(token) <= limit) {
+        if (line && widthOf(line + token) > limit) {
+          lines.push(line);
+          line = '';
+        }
+        line += token;
+        continue;
+      }
+      // Pixi moves the whole token to a new line here. Keep the available space,
+      // and split by grapheme so emoji and combining characters stay intact.
+      for (const character of PIXI.CanvasTextMetrics.wordWrapSplit(token)) {
+        if (line && widthOf(line + character) > limit) {
+          lines.push(line);
+          line = '';
+        }
+        line += character;
+      }
+    }
+    lines.push(line);
+    return lines.join('\n');
+  }).join('');
+}
+
 class SubtitleRenderer {
   private dialogueContainer: PIXI.Container | null = null;
   private dialogueOpacity = 1;
@@ -135,7 +182,6 @@ class SubtitleRenderer {
       return this.dialogueCache.get(cacheKey)!.timeline;
     }
 
-    const text = rawText;
     const globalFontSize = this.getDialogueFontSize();
     const container = new PIXI.Container();
 
@@ -181,6 +227,7 @@ class SubtitleRenderer {
     } else if (templateId === 'glass') textStyle.wordWrapWidth = STAGE_WIDTH - 360;
     else if (templateId === 'minimal') textStyle.wordWrapWidth = STAGE_WIDTH - 400;
 
+    const text = wrapDialogueTokens(rawText, textStyle);
     const metrics = this.getCachedMetrics(text, textStyle);
     // Local body-text preferences must not change the template's speaker font.
     const layout = template.render(container, config, metrics);
