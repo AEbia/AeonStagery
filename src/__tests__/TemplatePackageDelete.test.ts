@@ -9,7 +9,6 @@ import { registerTemplateHandlers } from '../../electron/ipc/templates';
 
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, unknown>(),
-  selectedDirectory: '',
   showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: [] as string[] })),
   showMessageBox: vi.fn(async () => ({ response: 0 })),
   trashItem: vi.fn(async (_directory: string) => {}),
@@ -32,8 +31,7 @@ const mainEvent = { sender: webContents, senderFrame: mainFrame } as unknown as 
 beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), 'aeon-template-delete-'));
   electron.handlers.clear();
-  electron.selectedDirectory = '';
-  electron.showOpenDialog.mockReset().mockImplementation(async () => ({ canceled: false, filePaths: [electron.selectedDirectory] }));
+  electron.showOpenDialog.mockReset().mockResolvedValue({ canceled: false, filePaths: [] });
   electron.showMessageBox.mockReset().mockResolvedValue({ response: 0 });
   electron.trashItem.mockReset().mockImplementation(async (directory) => { await rm(directory, { recursive: true }); });
   registerTemplateHandlers({
@@ -59,7 +57,6 @@ async function makePackage(directory = path.join(root, 'templates', 'webgal')) {
 }
 
 function deletePackage(request: TemplatePackageDeleteRequest, event = mainEvent) {
-  electron.selectedDirectory = request.packageRoot;
   const handler = electron.handlers.get('templates:deletePackage') as (
     event: IpcMainInvokeEvent, request: TemplatePackageDeleteRequest,
   ) => Promise<TemplatePackageDeleteResult>;
@@ -67,11 +64,19 @@ function deletePackage(request: TemplatePackageDeleteRequest, event = mainEvent)
 }
 
 describe('template package deletion', () => {
-  it('confirms deletion and removes the whole WebGAL package including subtitle assets', async () => {
+  it('confirms deletion directly without a directory picker and removes the whole WebGAL package including subtitle assets', async () => {
     const request = await makePackage();
     const neighbor = await makePackage(path.join(root, 'templates', 'neighbor'));
-    expect(await deletePackage(request)).toEqual({ success: true, id: request.id });
-    expect(electron.showMessageBox).toHaveBeenCalledWith(mainWindow, expect.objectContaining({ defaultId: 1, cancelId: 1 }));
+    const result = await deletePackage(request);
+    expect(electron.showOpenDialog).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: true, id: request.id });
+    expect(electron.showMessageBox).toHaveBeenCalledWith(mainWindow, expect.objectContaining({
+      title: '删除模板包？',
+      message: '删除「WebGAL Subtitle」？',
+      detail: expect.stringContaining(request.packageRoot),
+      defaultId: 1,
+      cancelId: 1,
+    }));
     expect(electron.trashItem).toHaveBeenCalledWith(request.packageRoot);
     await expect(readFile(path.join(request.packageRoot, 'manifest.v2.json'))).rejects.toThrow();
     expect(await readFile(path.join(neighbor.packageRoot, 'assets', 'subtitle.svg'), 'utf8')).toBe('<svg/>');
