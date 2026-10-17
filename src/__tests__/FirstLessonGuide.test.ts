@@ -23,6 +23,7 @@ const baseInput = (
   hasCameraFocusStatement: false,
   hasTunedCameraFocusPart: false,
   motionCtiPositioned: false,
+  previewCtiPositioned: false,
   characterDirectoryVisible: false,
   inspectorPickerOpen: false,
   assetBrowserVisible: false,
@@ -312,11 +313,19 @@ describe('resolveFirstLessonGuideStep', () => {
 
     expect(resolveFirstLessonGuideStep(baseInput({
       firstUnmetStep: 'start-preview',
+      previewCtiPositioned: true,
     }))).toBe('start-preview');
     expect(getGuidePresentation('start-preview', 'idle')).toMatchObject({
       selector: '.btn--play',
       step: 12,
     });
+  });
+
+  it('guides positioning the CTI before camera focus before the final preview', () => {
+    expect(resolveFirstLessonGuideStep(baseInput({
+      firstUnmetStep: 'start-preview',
+      previewCtiPositioned: false,
+    }))).toBe('position-preview-cti');
   });
 });
 

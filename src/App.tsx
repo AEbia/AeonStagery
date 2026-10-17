@@ -721,6 +721,7 @@ function AppContent({ contextValue, sessionBindings }: {
         projectResources={contextValue.services.projectResources}
         characterAdapter={contextValue.adapters.character}
         playbackStore={contextValue.stores.playback}
+        playbackAdapter={contextValue.adapters.playback}
       >
         {({ startFirstLesson }) => showProjectHome ? (
           <ProjectHome

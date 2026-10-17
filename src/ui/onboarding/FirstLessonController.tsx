@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { IProjectOpenWorkflow } from '../../api/interfaces/IProjectOpenWorkflow';
+import type { IPlaybackAdapter } from '../../api/interfaces/IPlaybackAdapter';
 import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
 import { isLive2DRuntimeFamilyAvailable } from '../../engine/Live2DRuntimeResolver';
 import { waitForLive2DRuntimeBootstrap } from '../../engine/Live2DRuntimeAvailability';
@@ -101,6 +102,7 @@ export type FirstLessonGuideStep =
   | 'choose-camera-focus-part-menu'
   | 'stretch-dialogue'
   | 'move-dialogue-time'
+  | 'position-preview-cti'
   | 'start-preview';
 
 interface GuideDomSnapshot {
@@ -133,6 +135,7 @@ export interface ResolveFirstLessonGuideStepInput extends GuideDomSnapshot {
   hasCameraFocusStatement: boolean;
   hasTunedCameraFocusPart: boolean;
   motionCtiPositioned: boolean;
+  previewCtiPositioned: boolean;
 }
 
 const FIRST_LESSON_GUIDE_TOTAL_STEPS = 13;
@@ -210,6 +213,7 @@ interface FirstLessonControllerServices {
     readonly playing: boolean;
     subscribe(listener: () => void): () => void;
   };
+  playbackAdapter: Pick<IPlaybackAdapter, 'getCurrentTime' | 'subscribeTime'>;
 }
 
 export interface FirstLessonControls {
@@ -364,7 +368,7 @@ export function resolveFirstLessonGuideStep(
       : 'select-camera-focus';
   }
 
-  return 'start-preview';
+  return input.previewCtiPositioned ? 'start-preview' : 'position-preview-cti';
 }
 
 export const getGuidePresentation = (
@@ -680,6 +684,14 @@ export const getGuidePresentation = (
         step: 12,
         padding: 3,
       };
+    case 'position-preview-cti':
+      return {
+        selector: '.timeline-ruler',
+        title: '把 CTI 移到镜头对焦之前',
+        description: '在时间标尺上点击镜头对焦语句之前的位置，让播放从对焦前开始。如果对焦位于 0 秒，就把 CTI 移到 0 秒。',
+        step: 12,
+        padding: 2,
+      };
     case 'start-preview':
       return {
         selector: '.btn--play',
@@ -862,6 +874,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   projectResources,
   characterAdapter,
   playbackStore,
+  playbackAdapter,
   children,
 }) => {
   const { settings } = useSettings();
@@ -885,6 +898,8 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   const [motionCtiPositioned, setMotionCtiPositioned] = useState(false);
   const [motionPlaybackRequested, setMotionPlaybackRequested] = useState(false);
   const [hasPreviewedLive2DMotion, setHasPreviewedLive2DMotion] = useState(false);
+  const [previewCtiPositioned, setPreviewCtiPositioned] = useState(false);
+  const [previewPlaybackStarted, setPreviewPlaybackStarted] = useState(false);
   const [exitConfirmationOpen, setExitConfirmationOpen] = useState(false);
   const operationTokenRef = useRef(0);
   const assetFingerprintRef = useRef('');
@@ -1089,6 +1104,44 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
     };
   }, [evaluation, progress.currentStep]);
 
+  const cameraFocusTime = useMemo(() => {
+    const times = (semanticDocument?.statements ?? [])
+      .filter((statement) => statement.type === 'camera' && statement.params.mode === 'focus')
+      .map((statement) => statement.time);
+    return times.length > 0 ? Math.min(...times) : null;
+  }, [semanticDocument]);
+  const isBeforeCameraFocus = useCallback((time: number) => (
+    cameraFocusTime !== null && Number.isFinite(time) && time >= 0
+    && (time < cameraFocusTime || (cameraFocusTime === 0 && time === 0))
+  ), [cameraFocusTime]);
+
+  useEffect(() => {
+    setPreviewPlaybackStarted(false);
+    if (phase !== 'guiding' || progressEvaluation.firstUnmetStep !== 'start-preview') {
+      setPreviewCtiPositioned(false);
+      return;
+    }
+    setPreviewCtiPositioned(isBeforeCameraFocus(playbackAdapter.getCurrentTime()));
+    const unsubscribeTime = playbackAdapter.subscribeTime((time) => {
+      setPreviewCtiPositioned(isBeforeCameraFocus(time));
+    });
+    let wasPlaying = playbackStore.playing;
+    const unsubscribePlayback = playbackStore.subscribe(() => {
+      const playing = playbackStore.playing;
+      if (playing && !wasPlaying) {
+        // Capture the starting CTI before playback advances past the focus.
+        setPreviewPlaybackStarted(isBeforeCameraFocus(playbackAdapter.getCurrentTime()));
+      } else if (!playing) {
+        setPreviewPlaybackStarted(false);
+      }
+      wasPlaying = playing;
+    });
+    return () => {
+      unsubscribeTime();
+      unsubscribePlayback();
+    };
+  }, [isBeforeCameraFocus, phase, playbackAdapter, playbackStore, progressEvaluation.firstUnmetStep]);
+
   useEffect(() => {
     if (phase !== 'guiding' || progressEvaluation.firstUnmetStep !== 'insert-character-entrance') return;
     const interval = window.setInterval(() => setRuntimeRevision((current) => current + 1), 300);
@@ -1116,10 +1169,16 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
   ]);
 
   useEffect(() => {
-    if (phase !== 'guiding' || !isPlaying || progress.hasStartedPreview) return;
+    if (
+      phase !== 'guiding'
+      || progressEvaluation.firstUnmetStep !== 'start-preview'
+      || !isPlaying
+      || !previewPlaybackStarted
+      || progress.hasStartedPreview
+    ) return;
     const timer = window.setTimeout(() => setProgress(progressStore.markPreviewStarted()), 1000);
     return () => window.clearTimeout(timer);
-  }, [isPlaying, phase, progress.hasStartedPreview, progressStore]);
+  }, [isPlaying, phase, previewPlaybackStarted, progress.hasStartedPreview, progressEvaluation.firstUnmetStep, progressStore]);
 
   useEffect(() => {
     if (phase !== 'guiding' || progressEvaluation.completed) return;
@@ -1277,6 +1336,7 @@ export const FirstLessonController: React.FC<FirstLessonControllerProps> = ({
       hasCameraFocusStatement: hasCameraFocusStatement(semanticDocument),
       hasTunedCameraFocusPart: hasTunedCameraFocusPart(semanticDocument, cameraFocusPartBaselines),
       motionCtiPositioned,
+      previewCtiPositioned: previewCtiPositioned || (isPlaying && previewPlaybackStarted),
     })
     : null;
 

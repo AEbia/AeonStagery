@@ -5,6 +5,19 @@ import type { ChangelogItem } from './announcementTypes';
  */
 export const BUNDLED_CHANGELOGS: readonly ChangelogItem[] = [
   {
+    id: '0.8.5-beta',
+    type: 'release',
+    version: '0.8.5-beta',
+    title: 'AeonStagery 0.8.5-beta',
+    date: '2026-10-18',
+    summary: '首次引导进度、镜头对焦预览与语句插入菜单修复',
+    content: `## 修复
+
+- **首次引导进度**：修复提前播放或长时间预览角色入场时可能跳过教学步骤的问题，完成最后一步预览后才会结束引导。
+- **镜头对焦预览**：最后一步会引导将播放头移到镜头对焦之前，再开始预览；对焦位于 0 秒时可从 0 秒开始，确保能看到完整的镜头变化。
+- **语句插入菜单**：修复插入语句时「最近使用」列表变化导致引导高亮目标移位的问题，菜单再次打开时再刷新列表。`,
+  },
+  {
     id: '0.8.4-beta',
     type: 'release',
     version: '0.8.4-beta',
