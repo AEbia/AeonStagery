@@ -133,6 +133,8 @@ export function CustomMotionEditor({
   }, [clearSelection]);
 
   const playheadKeyframeIndex = useMemo(() => {
+    // The ref preserves event-before-render precision; state still invalidates this cached lookup.
+    void livePlayheadTime;
     if (!activeTrack) return null;
     const localTime = getLocalPlayheadTime();
     const index = findPlayheadKeyframeIndex(activeTrack, localTime, fps);
@@ -251,7 +253,7 @@ export function CustomMotionEditor({
     if (nextTime === point.time) return;
     commit({ type: 'update-keyframe', keyframe: keyframeRef(track.parameterId, point.time), value: point.value, frame: Math.round(nextTime * fps) });
     updateSelection([{ parameterId: track.parameterId, time: nextTime }]);
-  }, [duration, fps, commit, updateSelection, writeBlocked, tracks]);
+  }, [duration, fps, commit, updateSelection, writeBlocked, tracks, keyframeRef]);
 
   const handleKeyframeValueChange = useCallback((track: CustomMotionTrack, index: number, value: number) => {
     const keyframe = track.keyframes[index];

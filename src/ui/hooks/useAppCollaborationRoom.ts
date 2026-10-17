@@ -184,6 +184,7 @@ export function useAppCollaborationRoom(
     collaborationController,
     contextValue.services.projectOpenWorkflow,
     resolveReachableInternalCollaborationEndpoint,
+    setIsCollaborationJoinHomeLocked,
     showProjectWorkflowResult,
     startInternalCollaborationServer,
     stopStartedCollaborationServerAfterHostFailure,
@@ -260,6 +261,7 @@ export function useAppCollaborationRoom(
     collaborationController,
     contextValue.services.projectOpenWorkflow,
     resolveReachableInternalCollaborationEndpoint,
+    setIsCollaborationJoinHomeLocked,
     showProjectWorkflowResult,
     startInternalCollaborationServer,
     stopStartedCollaborationServerAfterHostFailure,
@@ -328,7 +330,7 @@ export function useAppCollaborationRoom(
         setIsCollaborationJoinHomeLocked,
       );
     }
-  }, [collaborationController, collaborationServerStatus, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile]);
+  }, [collaborationController, collaborationServerStatus, contextValue.services.projectOpenWorkflow, contextValue.services.sceneFile, setIsCollaborationJoinHomeLocked]);
 
   const handleStopCollaborationServer = useCallback(async () => {
     const result = await window.aeonStageryAPI.collaborationServer.stop();

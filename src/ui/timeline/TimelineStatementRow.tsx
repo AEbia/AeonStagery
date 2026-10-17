@@ -104,7 +104,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
   isOfflineEditingBlocked, draggingActionId, dropPlacement, gap, gapActive, gapDragOver,
   commands }: TimelineStatementRowProps) {
   const { handleSelect, setSelectedIds, toggleExpand, setDropTarget, setDragOverGapIndex, setDraggingActionId,
-    dropRootStatementAt, handleTimeEdit, handleDeleteItem, commitInlineParams } = commands;
+    dropRootStatementAt, handleTimeEdit, handleDeleteItem, commitInlineParams, deleteActions } = commands;
   const { peers: collaborationPeers } = useCollaborationPresence();
   const selectedActionIds = useMemo(() => ({ [action._id!]: true }), [action._id]);
   const commitQuickParams = useCallback((patch: Parameters<typeof commitInlineParams>[1]) => {
@@ -118,9 +118,9 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
       if (!isTransient) commitInlineParams(action, { [key]: val });
     },
     replaceSourceParams: (_id: string, params: Record<string, unknown>) => { commitInlineParams(action, params, true); },
-    deleteAction: (id: string) => { void commands.deleteActions([id]); },
+    deleteAction: (id: string) => { void deleteActions([id]); },
     onClose: () => toggleExpand(action._id!),
-  }), [action, commitInlineParams, commands.deleteActions, toggleExpand]);
+  }), [action, commitInlineParams, deleteActions, toggleExpand]);
   const readModelItem = action._id
     ? semanticSnapshot.itemById.get(action._id)
     : undefined;
