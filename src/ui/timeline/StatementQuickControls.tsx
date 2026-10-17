@@ -16,9 +16,10 @@ import { switchCameraFocusTarget } from './semanticTimelineEditing';
 
 export type QuickParamPatch = Record<string, unknown> | ((params: Record<string, unknown>) => Record<string, unknown>);
 
-function QuickTextInput({ value, label, multiline = false, expanded = false, readOnly = false, title, disabled, onChange }: {
+function QuickTextInput({ value, label, dataTestId, multiline = false, expanded = false, readOnly = false, title, disabled, onChange }: {
   value: string;
   label: string;
+  dataTestId?: string;
   multiline?: boolean;
   expanded?: boolean;
   readOnly?: boolean;
@@ -32,6 +33,7 @@ function QuickTextInput({ value, label, multiline = false, expanded = false, rea
   const inputProps = {
     value: draft.localValue,
     'aria-label': label,
+    'data-testid': dataTestId,
     disabled,
     readOnly,
     title,
@@ -81,6 +83,7 @@ function QuickPerformanceResourceSelect({ item, fieldKey, sceneData, timelineAct
       onMouseDown={(event) => event.stopPropagation()}>
       <Live2DResourceSelect
         label={label}
+        dataTestId={`action-param-${fieldKey}`}
         value={isMotion ? characterPerformanceMotionKey(source.motion) ?? '' : String(source.expression ?? '')}
         options={isMotion ? modelData.motions : modelData.expressions}
         loading={isModelDataLoading}
@@ -222,6 +225,7 @@ export const StatementQuickControls = memo(function StatementQuickControls({ ite
         }
         if (field.key === 'text') {
           return <QuickTextInput key={field.key} multiline expanded={expanded} disabled={disabled}
+            dataTestId={isDialogue ? 'action-param-text' : undefined}
             value={typeof value === 'string' ? value : ''} label={isDialogue ? '编辑台词内容' : field.label}
             onChange={(text) => onChange({ text })} />;
         }

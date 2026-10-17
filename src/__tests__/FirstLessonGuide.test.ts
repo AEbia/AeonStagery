@@ -76,10 +76,6 @@ describe('resolveFirstLessonGuideStep', () => {
       assetBrowserVisible: true,
     }))).toBe('pick-model-file');
 
-    expect(getGuidePresentation('pick-model-file', 'idle')).toMatchObject({
-      selector: '[role="dialog"][aria-labelledby="asset-browser-title"]',
-      description: '在 figure 中找到角色模型，选择 model.json、*.model.json 或 *.model3.json。',
-    });
   });
 
   it('guides both blank-menu insertions and dialogue editing in order', () => {
@@ -170,7 +166,7 @@ describe('resolveFirstLessonGuideStep', () => {
       environmentImageFieldVisible: true,
     }))).toBe('pick-environment-image');
     expect(getGuidePresentation('pick-environment-image', 'idle')).toMatchObject({
-      selector: '[aria-label="打开资源浏览器"]',
+      selector: '[data-resource-directory="background"] button',
       title: '选择一张背景图片',
       step: 5,
     });

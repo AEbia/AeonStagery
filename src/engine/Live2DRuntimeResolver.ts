@@ -20,6 +20,13 @@ export function isLive2DCubism2RuntimeAvailable(): boolean {
   return runtimeAvailabilityFlags.cubism2;
 }
 
+export function isLive2DRuntimeFamilyAvailable(
+  runtimeFamily: 'cubism2' | 'cubism3-plus',
+): boolean {
+  if (runtimeFamily === 'cubism2') return isLive2DCubism2RuntimeAvailable();
+  return getCubismPixiSdkStatus().available;
+}
+
 export type Live2DAdapterId = 'pixi-live2d-display-cubism2' | 'untitled-pixi-live2d-engine-cubism' | 'unknown';
 
 export interface Live2DRuntimeDescriptor {
@@ -35,16 +42,15 @@ export function resolveLive2DRuntimeDescriptor(modelPath: string, parsedJson?: a
     return {
       runtimeFamily: entry.runtimeFamily,
       adapterId: 'pixi-live2d-display-cubism2',
-      supported: runtimeAvailabilityFlags.cubism2,
+      supported: isLive2DRuntimeFamilyAvailable('cubism2'),
     };
   }
 
   if (entry.runtimeFamily === 'cubism3-plus') {
-    const sdkStatus = getCubismPixiSdkStatus();
     return {
       runtimeFamily: 'cubism3-plus',
       adapterId: 'untitled-pixi-live2d-engine-cubism',
-      supported: sdkStatus.available,
+      supported: isLive2DRuntimeFamilyAvailable('cubism3-plus'),
     };
   }
 

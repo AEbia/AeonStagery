@@ -47,7 +47,9 @@ export interface WebGalAssetSourceFileAccess {
 }
 
 export interface WebGalAssetSourceReadinessOptions {
-  isRuntimeFamilyAvailable?: (runtimeFamily: Exclude<Live2DRuntimeFamily, 'unknown' | 'wmdl'>) => boolean;
+  isRuntimeFamilyAvailable?: (
+    runtimeFamily: Exclude<Live2DRuntimeFamily, 'unknown' | 'wmdl'>,
+  ) => boolean | Promise<boolean>;
   maxVisitedDirectories?: number;
 }
 
@@ -189,7 +191,9 @@ async function findDirectFigureDirectory(
 async function evaluateLive2DEntryForFirstLesson(
   entryPath: string,
   fileAccess: WebGalAssetSourceFileAccess,
-  isRuntimeFamilyAvailable: (runtimeFamily: Exclude<Live2DRuntimeFamily, 'unknown' | 'wmdl'>) => boolean,
+  isRuntimeFamilyAvailable: (
+    runtimeFamily: Exclude<Live2DRuntimeFamily, 'unknown' | 'wmdl'>,
+  ) => boolean | Promise<boolean>,
 ): Promise<CandidateEvaluation> {
   let raw: string;
   try {
@@ -225,7 +229,7 @@ async function evaluateLive2DEntryForFirstLesson(
     }
   }
 
-  if (!isRuntimeFamilyAvailable(entry.runtimeFamily)) {
+  if (!await isRuntimeFamilyAvailable(entry.runtimeFamily)) {
     return { loadable: false, code: 'model-runtime-unavailable' };
   }
 
