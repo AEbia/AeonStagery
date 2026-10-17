@@ -9,6 +9,7 @@ import { FirstLessonController, type FirstLessonControllerProps } from '../ui/on
 import { settingsManager } from '../ui/SettingsStore';
 import { useModalDialog } from '../ui/hooks/useModalDialog';
 import { checkFirstLessonLive2DModelReadiness, checkWebGalAssetSourceReadiness } from '../services/onboarding';
+import { FirstLessonProgressStore } from '../services/onboarding/FirstLessonProgress';
 
 vi.mock('../services/onboarding', async (importOriginal) => ({
   ...await importOriginal<typeof import('../services/onboarding')>(),
@@ -34,11 +35,19 @@ const entranceDocument: CurrentSceneDocument = {
   statements: [{ id: 'entrance', time: 0, type: 'characterPresence', params: { mode: 'enter', id: 'anon' } }],
 };
 
-function renderLesson(document: CurrentSceneDocument | null = null) {
+function renderLesson(document: CurrentSceneDocument | null = null, currentTime = 0) {
   const fileAccess = mock<IFileAccess>();
   fileAccess.join.mockImplementation(async (...parts) => parts.join('/'));
   fileAccess.exists.mockResolvedValue(false);
   const listeners = new Set<() => void>();
+  const timeListeners = new Set<(time: number) => void>();
+  const playbackAdapter = {
+    getCurrentTime: () => currentTime,
+    subscribeTime(listener: (time: number) => void) {
+      timeListeners.add(listener);
+      return () => { timeListeners.delete(listener); };
+    },
+  };
   const playbackStore = {
     playing: false,
     subscribe(listener: () => void) {
@@ -58,8 +67,10 @@ function renderLesson(document: CurrentSceneDocument | null = null) {
     projectResources: { resolveForRead: vi.fn(async (reference: string) => reference) },
     characterAdapter: { hasCharacter: () => visible },
     playbackStore,
+    playbackAdapter,
     children: ({ startFirstLesson }: { startFirstLesson: () => void }) => (
       <><button onClick={startFirstLesson}>Start</button><button className="btn--play">Play</button>
+        <div className="timeline-ruler" />
         <div data-tutorial-target="timeline-blank-start" />
         <div data-tutorial-target="external-library-replace-0" /></>
     ),
@@ -69,6 +80,9 @@ function renderLesson(document: CurrentSceneDocument | null = null) {
     ...result,
     setPlaying(playing: boolean) {
       act(() => { playbackStore.playing = playing; listeners.forEach((listener) => listener()); });
+    },
+    setTime(time: number) {
+      act(() => { currentTime = time; timeListeners.forEach((listener) => listener(time)); });
     },
     showCharacter() { visible = true; },
     hideCharacter() { visible = false; },
@@ -81,6 +95,25 @@ async function openLayoutChooser() {
   fireEvent.click(screen.getByRole('button', { name: '不是' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(500); });
   expect(screen.getByText('选择你喜欢的工作台布局')).toBeTruthy();
+}
+
+async function openPreviewLesson(cameraTime: number, currentTime: number, playing = false) {
+  vi.spyOn(FirstLessonProgressStore.prototype, 'reset').mockImplementationOnce(() => (
+    new FirstLessonProgressStore(localStorage).save({
+      currentStep: 'start-preview', hasStartedPreview: false, completed: false,
+    })
+  ));
+  const lesson = renderLesson({
+    ...entranceDocument,
+    statements: [...entranceDocument.statements, {
+      id: 'focus', time: cameraTime, type: 'camera',
+      params: { mode: 'focus', target: 'anon', targetPart: 'head' },
+    }],
+  }, currentTime);
+  lesson.setPlaying(playing);
+  await openLayoutChooser();
+  fireEvent.click(screen.getByRole('button', { name: '使用此布局，继续教程' }));
+  return lesson;
 }
 
 beforeEach(() => {
@@ -110,6 +143,52 @@ afterEach(() => {
 });
 
 describe('FirstLessonController regressions', () => {
+  it.each([0, 5])('checks the actual CTI against camera focus at %s seconds', async (cameraTime) => {
+    const lesson = await openPreviewLesson(cameraTime, cameraTime + 2);
+    expect(screen.getByText('把 CTI 移到镜头对焦之前')).toBeTruthy();
+    expect(screen.getByText('第 13 / 13 步')).toBeTruthy();
+    fireEvent.pointerDown(document.querySelector('.timeline-ruler')!);
+    expect(screen.getByText('把 CTI 移到镜头对焦之前')).toBeTruthy();
+    lesson.setTime(cameraTime);
+    if (cameraTime > 0) {
+      expect(screen.getByText('把 CTI 移到镜头对焦之前')).toBeTruthy();
+      lesson.setTime(cameraTime - 1);
+    }
+    expect(screen.getByText('播放你的场景')).toBeTruthy();
+    lesson.setTime(cameraTime + 1);
+    expect(screen.getByText('把 CTI 移到镜头对焦之前')).toBeTruthy();
+    expect(new FirstLessonProgressStore(localStorage).load().completed).toBe(false);
+  });
+
+  it('requires a new playback from before focus even when playback was already running', async () => {
+    const lesson = await openPreviewLesson(5, 6, true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(new FirstLessonProgressStore(localStorage).load().completed).toBe(false);
+    lesson.setPlaying(false);
+    lesson.setPlaying(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(new FirstLessonProgressStore(localStorage).load().completed).toBe(false);
+    lesson.setPlaying(false);
+    lesson.setTime(4);
+    lesson.setPlaying(true);
+    lesson.setTime(6);
+    expect(screen.getByText('播放你的场景')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(new FirstLessonProgressStore(localStorage).load().completed).toBe(true);
+  });
+
+  it('cancels completion when the valid preview is paused before one second', async () => {
+    const lesson = await openPreviewLesson(5, 4);
+    expect(screen.getByText('播放你的场景')).toBeTruthy();
+    lesson.setPlaying(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    lesson.setPlaying(false);
+    lesson.setTime(6);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText('把 CTI 移到镜头对焦之前')).toBeTruthy();
+    expect(new FirstLessonProgressStore(localStorage).load().completed).toBe(false);
+  });
+
   it('explains a failed asset check and opens the preparation guide', async () => {
     vi.mocked(checkWebGalAssetSourceReadiness).mockResolvedValue({
       status: 'needs_reselect',
@@ -197,6 +276,27 @@ describe('FirstLessonController regressions', () => {
     expect(screen.getByText('按空格播放场景')).toBeTruthy();
     lesson.setPlaying(true);
     expect(screen.getByText('放入一张环境画面')).toBeTruthy();
+  });
+
+  it('continues to the background lesson when entrance playback lasts over one second', async () => {
+    const lesson = renderLesson(entranceDocument);
+    await openLayoutChooser();
+    fireEvent.click(screen.getByRole('button', { name: '使用此布局，继续教程' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+
+    lesson.showCharacter();
+    lesson.setPlaying(true);
+    for (let tick = 0; tick < 8; tick += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    }
+
+    expect(screen.queryByText('教程已完成')).toBeNull();
+    expect(screen.getByText('放入一张环境画面')).toBeTruthy();
+    expect(new FirstLessonProgressStore(localStorage).load()).toMatchObject({
+      currentStep: 'insert-environment-background',
+      hasStartedPreview: false,
+      completed: false,
+    });
   });
 
   it('keeps model validation stable when unrelated scene statements change', async () => {

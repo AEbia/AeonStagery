@@ -72,6 +72,7 @@ export const StatementBlockLibrary: React.FC<{
   autoFocusSearch?: boolean;
   hideSearch?: boolean;
   hideDescriptions?: boolean;
+  freezeRecentItems?: boolean;
   hiddenStatementBlockIds?: ReadonlySet<string>;
   search?: string;
   onSearchChange?: (value: string) => void;
@@ -86,6 +87,7 @@ export const StatementBlockLibrary: React.FC<{
   autoFocusSearch = false,
   hideSearch = false,
   hideDescriptions = false,
+  freezeRecentItems = false,
   hiddenStatementBlockIds,
   search,
   onSearchChange,
@@ -95,6 +97,7 @@ export const StatementBlockLibrary: React.FC<{
 }) => {
   const [internalSearch, setInternalSearch] = useState('');
   const [recentItems, setRecentItems] = useState<RecentLibraryItem[]>(() => readRecentItems());
+  const initialRecentItemsRef = useRef(recentItems);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const app = useOptionalApp();
   const isOffline = app?.collaboration?.status === 'offline' || app?.collaboration?.status === 'reconnecting';
@@ -196,7 +199,7 @@ export const StatementBlockLibrary: React.FC<{
     if (onSelectAction) onSelectAction(type, data);
   };
 
-  const recentEntries = recentItems
+  const recentEntries = (freezeRecentItems ? initialRecentItemsRef.current : recentItems)
     .map(item => {
       if (item.type === 'template') {
         const template = availableTemplates.find(t => t.id === item.id);
