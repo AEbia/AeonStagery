@@ -1,9 +1,38 @@
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { replaceFileWithPlatformCompatibility } from '../file-replacement';
+import { createWindowSenderGuards, type IpcWindowContext } from './windows';
 
-export function registerFileSystemHandlers() {
+export function registerFileSystemHandlers(windows?: IpcWindowContext) {
+  const guards = windows ? createWindowSenderGuards(windows) : undefined;
+  ipcMain.handle('fs:showItemInFolder', async (event, filePath: unknown) => {
+    try {
+      if (!guards?.isMainWindowFrameSender(event)) throw new Error('无法从此窗口定位文件。');
+      if (typeof filePath !== 'string' || !filePath.trim()
+        || /[\u0000-\u001f]/.test(filePath)
+        || !path.isAbsolute(filePath)
+        || filePath.startsWith('//') || filePath.startsWith('\\\\')
+        || (/^[a-z][a-z\d+.-]*:/i.test(filePath) && !/^[a-z]:[\\/]/i.test(filePath))) {
+        throw new Error('只能定位本机的绝对文件路径。');
+      }
+      const absolutePath = await fs.promises.realpath(filePath);
+      if (absolutePath.startsWith('//') || absolutePath.startsWith('\\\\')) {
+        throw new Error('只能定位本机的文件。');
+      }
+      if (/\.asar[\\/]/i.test(absolutePath)) {
+        throw new Error('此资源位于应用安装包中，请先导入项目再定位。');
+      }
+      shell.showItemInFolder(absolutePath);
+      return { success: true };
+    } catch (error: unknown) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { success: false, error: '文件不存在或已移动，请检查路径后重试。' };
+      }
+      return { success: false, error: error instanceof Error ? error.message : '文件定位失败，请检查文件是否存在。' };
+    }
+  });
+
   function resolveFileSystemPath(filePath: string): string {
     if (typeof filePath !== 'string' || filePath.trim().length === 0) {
       throw new Error('File path must be a non-empty string');

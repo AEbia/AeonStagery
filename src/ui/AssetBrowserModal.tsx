@@ -6,6 +6,7 @@ import { useSceneAssetService } from './context/AppContext';
 import type { ResourceImportKind } from '../api/types/project';
 import { useModalDialog } from './hooks/useModalDialog';
 import { getTemplateResourceFileService, useTemplateResourceDirectoryRefresh } from './TemplateResourceFiles';
+import { FileRevealButton, FileRevealContext } from './FileRevealActions';
 
 interface AssetBrowserModalProps {
   value: string;
@@ -26,6 +27,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
   const [search, setSearch] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const loadSequence = useRef(0);
   useEffect(() => () => { loadSequence.current += 1; }, []);
   const loadMergedDir = useCallback(async (subDir: string) => {
@@ -34,6 +36,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
     setLoading(true);
     setLoadError(null);
     setSelectionError(null);
+    setRevealError(null);
     try {
       const merged = await readMergedDirectory(subDir);
       if (sequence !== loadSequence.current) return;
@@ -256,6 +259,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
               }}><IconRefresh width={14} height={14} /></button>
             </div>
 
+            {revealError && <div role="alert" style={{ padding: '8px 16px', color: 'var(--error)', overflowWrap: 'anywhere' }}>{revealError}</div>}
             <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 16, willChange: 'transform', transform: 'translateZ(0)' }}>
               {loading ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>加载中…</div>
@@ -279,14 +283,15 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
               ) : (
                 <div role="list" aria-label={`${currentSubDir || '根目录'}中的资源`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(120px, 100%), 1fr))', gap: 16 }}>
                   {filteredEntries.map((entry, i) => (
-                    <div role="listitem" key={entry.path || `${entry.name}-${i}`} style={{ minWidth: 0 }}>
+                    <FileRevealContext key={entry.path || `${entry.name}-${i}`} path={entry.path} name={entry.name} templateResource={!!entry.templateResource} enabled={!entry.isDirectory} onRevealError={setRevealError}>
+                    <div role="listitem" style={{ minWidth: 0 }}>
                       <button
                         type="button"
                         onClick={() => { void handleSelect(entry); }}
                         aria-label={`${entry.name}，${entry.path}，${entry.isDirectory ? '目录，可打开' : '已发现，待校验'}`}
                         title={entry.path}
                         style={{
-                          width: '100%', height: '100%', color: 'inherit', background: 'transparent',
+                          width: '100%', color: 'inherit', background: 'transparent',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
@@ -335,7 +340,9 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
                           </div>
                         )}
                       </button>
+                      {!entry.isDirectory && <FileRevealButton path={entry.path} name={entry.name} templateResource={!!entry.templateResource} onRevealError={setRevealError} />}
                     </div>
+                    </FileRevealContext>
                   ))}
                 </div>
               )}

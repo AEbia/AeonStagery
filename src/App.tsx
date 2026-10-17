@@ -32,6 +32,7 @@ import {
 } from './ui/store/storeHooks';
 import { removeRecentProject, useSettings } from './ui/SettingsStore';
 import { useViewport } from './ui/hooks/useViewport';
+import { ProjectFileActions } from './ui/ProjectFileActions';
 import { StatusBar } from './ui/StatusBar';
 import { ToastContainer } from './ui/Toast';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -233,6 +234,7 @@ function AppContent({ contextValue, sessionBindings }: {
             </span>
           </button>
           {currentProject && (
+            <>
             <button
               type="button"
               className="top-bar__project-name"
@@ -243,6 +245,8 @@ function AppContent({ contextValue, sessionBindings }: {
               <span>{currentProject.metadata.name}</span>
               <IconPencil width={12} height={12} />
             </button>
+            <ProjectFileActions project={currentProject} />
+            </>
           )}
           <button
             className="btn btn--icon top-bar__project-action"
