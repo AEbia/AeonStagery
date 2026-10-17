@@ -32,6 +32,7 @@ import {
 } from './ui/store/storeHooks';
 import { removeRecentProject, useSettings } from './ui/SettingsStore';
 import { useViewport } from './ui/hooks/useViewport';
+import { useDetailsDismissal } from './ui/hooks/useDetailsDismissal';
 import { StatusBar } from './ui/StatusBar';
 import { ToastContainer } from './ui/Toast';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -172,6 +173,7 @@ function AppContent({ contextValue, sessionBindings }: {
     contextValue, semanticDocument, currentProject, layout,
   );
   const showProjectHome = initialized && !initError && (!currentProject || isCollaborationJoinHomeLocked);
+  const moreMenuRef = useDetailsDismissal();
   const stageRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
   const {
@@ -329,7 +331,7 @@ function AppContent({ contextValue, sessionBindings }: {
               <IconFilm width={14} height={14} /> 导出
             </button>
           </div>
-          <details className="top-bar__more">
+          <details className="top-bar__more" ref={moreMenuRef}>
             <summary className="btn btn--icon" title="更多操作" aria-label="更多操作">
               <span aria-hidden="true">•••</span>
               {hasUnreadChangelog && <span className="top-bar__unread-badge" aria-label="有未读更新" />}
