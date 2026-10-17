@@ -103,9 +103,9 @@ export function createEditorProjectAgentService(
     writePorts: context.writePorts,
     ...(context.authoring ? { authoring: context.authoring } : {}),
     systemPrompt: buildProjectAgentSystemPrompt({ baseSystemPrompt: context.baseSystemPrompt }),
-    // Capability-aware prompt: the effective system prompt per start/continue
-    // includes readImage guidance only when imageInput is explicitly
-    // supported, keeping the vision-less tool fully hidden (ADR0023).
+    // Capability-aware prompt: follow each request's current model selection
+    // and include readImage guidance only when imageInput is explicitly
+    // supported (ADR0023).
     buildSystemPrompt: (imageInputAvailable) => buildProjectAgentSystemPrompt({
       baseSystemPrompt: context.baseSystemPrompt,
       imageInputAvailable,

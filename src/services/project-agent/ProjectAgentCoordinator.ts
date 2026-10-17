@@ -414,6 +414,8 @@ export type ProjectAgentPerRequestSettingsResult =
       readonly model: string;
       readonly contextWindow?: number;
       readonly imageInputSupported?: boolean;
+      /** Effective prompt for the resolved model's current capabilities. */
+      readonly systemPrompt?: string;
     }
   | {
       readonly ok: false;
@@ -1383,6 +1385,16 @@ export class ProjectAgentCoordinator {
     return this.systemMessageText || this.systemPrompt;
   }
 
+  private updateSystemPrompt(systemPrompt: string): void {
+    if (systemPrompt === this.systemPrompt) return;
+    this.systemPrompt = systemPrompt;
+    this.systemMessageText = systemPrompt;
+    // Force the catalog to be injected into the new base prompt on this
+    // request. If refresh fails, the new capability-aware base prompt remains.
+    this.catalogFingerprint = null;
+    this.syncSystemMessage();
+  }
+
   /** Keep the assembled model context in sync with the injected catalog. */
   private syncSystemMessage(): void {
     this.messages = this.buildRequestMessages();
@@ -1443,7 +1455,17 @@ export class ProjectAgentCoordinator {
       return { status: 'suspended', task: this.task.snapshot() };
     }
 
-    if (resolvedSettings.imageInputSupported === false
+    // The active model can change between requests while this execution round
+    // remains running. Update both model-facing surfaces from that request's
+    // exact capability result before estimating or building the request.
+    if (this.resolvePerRequestSettings) {
+      this.toolRegistry.setReadImageEligible(resolvedSettings.imageInputSupported === true);
+    }
+    if (resolvedSettings.systemPrompt !== undefined) {
+      this.updateSystemPrompt(resolvedSettings.systemPrompt);
+    }
+
+    if (this.resolvePerRequestSettings && resolvedSettings.imageInputSupported !== true
       && (this.messages.some((message) => message.content.some((block) => block.type === 'image'))
         || this.task.peekPendingSupplements().some((s) => s.image))) {
       await this.pause('provider_configuration_required', {

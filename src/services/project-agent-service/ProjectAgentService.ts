@@ -125,7 +125,7 @@ export interface ProjectAgentServiceOptions {
   /**
    * Optional capability-aware prompt builder. When provided, the effective
    * system prompt follows the CURRENT model's imageInput capability on every
-   * start/continue (readImage guidance is only included when vision is
+   * request (readImage guidance is only included when vision is
    * explicitly supported, ADR0023). Falls back to `systemPrompt` when absent.
    */
   readonly buildSystemPrompt?: (imageInputAvailable: boolean) => string;
@@ -866,6 +866,7 @@ export class ProjectAgentService {
           endpoint: admission.endpoint,
           model: admission.model,
           imageInputSupported: admission.imageInputSupported === true,
+          systemPrompt: this.effectiveSystemPrompt(admission.imageInputSupported === true),
           ...(admission.contextWindow !== undefined
             ? { contextWindow: admission.contextWindow }
             : {}),

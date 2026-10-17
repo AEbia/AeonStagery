@@ -662,6 +662,82 @@ describe('ProjectAgentCoordinator', () => {
     expect(secondNames).toContain('applyAuthoringTransaction');
   });
 
+  it.each([
+    { initialVision: true, nextVision: false },
+    { initialVision: false, nextVision: true },
+  ])('updates readImage and the system prompt when the active model changes capability ($initialVision -> $nextVision)', async ({
+    initialVision,
+    nextVision,
+  }) => {
+    const requests: AiConversationRequest[] = [];
+    const responses: AiConversationResponse[] = [
+      {
+        message: assistantWithTools([
+          { status: 'ready', toolCallId: 'read-1', name: 'readScene', arguments: {} },
+        ]),
+      },
+      { message: assistantText('finished') },
+    ];
+    let responseIndex = 0;
+    let currentVision = initialVision;
+    const imagePort: NonNullable<ProjectAgentReadPorts['image']> = {
+      readImage: () => ({
+        mimeType: 'image/png',
+        bytes: new Uint8Array([0]),
+        originalWidth: 1,
+        originalHeight: 1,
+        deliveredWidth: 1,
+        deliveredHeight: 1,
+        scaled: false,
+        contentFingerprint: 'image-fingerprint',
+      }),
+    };
+    const registry = createRegistry({ imagePort, registerReadImage: initialVision });
+    const coordinator = new ProjectAgentCoordinator({
+      transport: {
+        async complete(request) {
+          requests.push(request);
+          return responses[responseIndex++]!;
+        },
+      },
+      toolRegistry: registry,
+      resolvePerRequestSettings: () => ({
+        ok: true,
+        endpoint: 'https://example.test',
+        model: currentVision ? 'vision-model' : 'text-model',
+        imageInputSupported: currentVision,
+        systemPrompt: currentVision ? 'System prompt with readImage guidance.' : 'System prompt without readImage guidance.',
+      }),
+    });
+    await coordinator.start({
+      projectId: 'proj',
+      targetSceneIdentity: 'scene_coord',
+      originalTaskText: 'Inspect this scene',
+      systemPrompt: initialVision ? 'System prompt with readImage guidance.' : 'System prompt without readImage guidance.',
+      endpoint: 'https://example.test',
+      model: initialVision ? 'vision-model' : 'text-model',
+      taskId: `model-switch-${initialVision}-${nextVision}`,
+    });
+
+    expect((await coordinator.runModelTurn()).status).toBe('tools_executed');
+    currentVision = nextVision;
+    expect((await coordinator.runModelTurn()).status).toBe('settled');
+
+    expect(requests[0]?.tools?.some((tool) => tool.name === 'readImage')).toBe(initialVision);
+    expect(requests[1]?.tools?.some((tool) => tool.name === 'readImage')).toBe(nextVision);
+    expect(requests[1]?.model).toBe(nextVision ? 'vision-model' : 'text-model');
+    expect(requests[1]?.messages[0]).toMatchObject({
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: nextVision
+          ? 'System prompt with readImage guidance.'
+          : 'System prompt without readImage guidance.',
+      }],
+    });
+    expect(registry.has('readImage')).toBe(nextVision);
+  });
+
   it('does not treat completeTask as a lifecycle/control tool', async () => {
     const coordinator = await startCoordinator(transportFromResponses([]));
     await coordinator.runToolCallsForTest([
