@@ -58,9 +58,14 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    // Include the PixiJS 8 Live2D runtime so Vite pre-bundles each runtime entry.
+    // Bundle Pixi, its side-effect entries, filters, and Live2D together.
+    // Discovering an entry later can re-split shared chunks while startup is
+    // importing them, duplicating Pixi instances or extension registrations.
     include: [
       'pixi.js',
+      'pixi.js/unsafe-eval',
+      'pixi.js/advanced-blend-modes',
+      'pixi-filters',
       'gsap',
       'untitled-pixi-live2d-engine/cubism-legacy',
       'untitled-pixi-live2d-engine/cubism',
