@@ -110,6 +110,26 @@ describe('file reveal resolution and interactions', () => {
     expect(resolveResource).not.toHaveBeenCalled();
   });
 
+  it('dismisses the project file menu on outside pointer and Escape', () => {
+    const project = {
+      rootPath: '/project', projectFilePath: '/project/project.json',
+      metadata: { name: '演出', scenes: [{ id: 'a', name: '开场', path: 'scenes/a.json' }] },
+    } as ProjectState;
+    const { container } = render(<ProjectFileActions project={project} />);
+    const summary = screen.getByText('文件位置');
+    const details = container.querySelector('details');
+    if (!details) throw new Error('Project file menu details element was not rendered');
+
+    details.open = true;
+    fireEvent.pointerDown(document.body);
+    expect(details.open).toBe(false);
+
+    details.open = true;
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(details.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+  });
+
   it('keeps a missing scene bound to its project root even if a global same-named file exists', async () => {
     resolveResource.mockResolvedValue({ status: 'ready', source: 'global-mount', path: '/outside/scenes/missing.json', relativePath: 'scenes/missing.json' });
     reveal.mockResolvedValue({ success: false, error: '文件不存在或已移动' });
