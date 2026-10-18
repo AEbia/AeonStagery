@@ -79,8 +79,63 @@ describe('collaborative text draft inputs', () => {
     fireEvent.mouseMove(document, { clientX: 20, clientY: 10, movementX: 10 });
     fireEvent.mouseUp(document, { clientX: 20, clientY: 10 });
 
-    expect(onChange).toHaveBeenNthCalledWith(1, 2, true);
-    expect(onChange).toHaveBeenNthCalledWith(2, 2, false);
+    expect(onChange).toHaveBeenNthCalledWith(1, 2, true, expect.objectContaining({ signal: expect.any(AbortSignal), cancel: expect.any(Function) }));
+    expect(onChange).toHaveBeenNthCalledWith(2, 2, false, expect.objectContaining({ signal: expect.any(AbortSignal), cancel: expect.any(Function) }));
+  });
+
+  it('detaches an active numeric scrub when its editor scope is cancelled', () => {
+    const onChange = vi.fn();
+    const registeredGestures = new Set<AbortSignal>();
+    const { container } = render(<InlineNumericInput
+      dragLabel="Scale" value={1} step="0.1" onChange={onChange}
+      onGestureStart={(gesture) => {
+        registeredGestures.add(gesture.signal);
+        return () => { registeredGestures.delete(gesture.signal); };
+      }}
+    />);
+    const scrubber = container.querySelector('.scrubbable-badge') as HTMLElement;
+    fireEvent.mouseDown(scrubber, { clientX: 0, clientY: 0, button: 0 });
+    expect(registeredGestures.size).toBe(1);
+    fireEvent.mouseMove(document, { clientX: 20 });
+    const gesture = onChange.mock.calls[0][2];
+
+    act(() => gesture.cancel());
+    expect(gesture.signal.aborted).toBe(true);
+    expect(registeredGestures.size).toBe(0);
+    fireEvent.mouseMove(document, { clientX: 30 });
+    fireEvent.mouseUp(document, { clientX: 30 });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a popover pointer gesture and allows a fresh gesture on the same control', async () => {
+    const onChange = vi.fn();
+    render(<InlineNumericInput ariaLabel="Scale" value={1} step="0.1" min="0" max="2" onChange={onChange} />);
+    const control = screen.getByRole('spinbutton', { name: 'Scale' });
+    fireEvent.mouseEnter(control);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 275)); });
+
+    const track = screen.getByTestId('scrubbable-popover-track');
+    Object.defineProperty(track, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 0, right: 200, top: 0, bottom: 20, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    Object.defineProperty(track, 'setPointerCapture', { configurable: true, value: vi.fn() });
+    Object.defineProperty(track, 'releasePointerCapture', { configurable: true, value: vi.fn() });
+
+    fireEvent.pointerDown(track, { pointerId: 1, clientX: 100, button: 0 });
+    const cancelledGesture = onChange.mock.calls[0][2];
+    expect(cancelledGesture.signal.aborted).toBe(false);
+    fireEvent.pointerMove(track, { pointerId: 1, clientX: 120 });
+    fireEvent.pointerCancel(track, { pointerId: 1 });
+    expect(cancelledGesture.signal.aborted).toBe(true);
+    fireEvent.pointerUp(track, { pointerId: 1, clientX: 130 });
+    expect(onChange.mock.calls.some(([, isTransient]) => isTransient === false)).toBe(false);
+
+    fireEvent.pointerDown(track, { pointerId: 2, clientX: 100, button: 0 });
+    const freshGesture = onChange.mock.calls.at(-1)?.[2];
+    expect(freshGesture.signal.aborted).toBe(false);
+    fireEvent.pointerUp(track, { pointerId: 2, clientX: 120 });
+    expect(onChange.mock.calls.at(-1)?.[1]).toBe(false);
   });
 
   it('blocks mouse and keyboard adjustments on a disabled numeric scrubber', () => {
@@ -151,10 +206,10 @@ describe('collaborative text draft inputs', () => {
     // Second tiny movement reaches 2px cumulative: triggers drag immediately!
     fireEvent.mouseMove(document, { clientX: 12, clientY: 10 });
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenLastCalledWith(expect.any(Number), true);
+    expect(onChange).toHaveBeenLastCalledWith(expect.any(Number), true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.mouseUp(document, { clientX: 12, clientY: 10 });
-    expect(onChange).toHaveBeenLastCalledWith(expect.any(Number), false);
+    expect(onChange).toHaveBeenLastCalledWith(expect.any(Number), false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('clamps numeric values strictly within min and max during drag', () => {
@@ -167,14 +222,14 @@ describe('collaborative text draft inputs', () => {
     fireEvent.mouseDown(scrubber, { clientX: 10, clientY: 10, button: 0 });
     // Huge drag to the right
     fireEvent.mouseMove(document, { clientX: 1000, clientY: 10 });
-    expect(onChange).toHaveBeenLastCalledWith(1, true);
+    expect(onChange).toHaveBeenLastCalledWith(1, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     // Huge drag to the left
     fireEvent.mouseMove(document, { clientX: -1000, clientY: 10 });
-    expect(onChange).toHaveBeenLastCalledWith(0, true);
+    expect(onChange).toHaveBeenLastCalledWith(0, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.mouseUp(document, { clientX: -1000, clientY: 10 });
-    expect(onChange).toHaveBeenLastCalledWith(0, false);
+    expect(onChange).toHaveBeenLastCalledWith(0, false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('clamps direct input on blur and supports Escape to cancel', () => {
@@ -265,13 +320,13 @@ describe('collaborative text draft inputs', () => {
     });
 
     fireEvent.pointerDown(trackContainer, { clientX: 180, pointerId: 1 });
-    expect(onChange).toHaveBeenLastCalledWith(0.8, true);
+    expect(onChange).toHaveBeenLastCalledWith(0.8, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.pointerMove(trackContainer, { clientX: 150, pointerId: 1 });
-    expect(onChange).toHaveBeenLastCalledWith(0.5, true);
+    expect(onChange).toHaveBeenLastCalledWith(0.5, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.pointerUp(trackContainer, { clientX: 150, pointerId: 1 });
-    expect(onChange).toHaveBeenLastCalledWith(0.5, false);
+    expect(onChange).toHaveBeenLastCalledWith(0.5, false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.mouseLeave(scrubber);
     act(() => {
@@ -313,7 +368,7 @@ describe('collaborative text draft inputs', () => {
     // 75% tick is at clientX = 175. clientX = 174 is 1px away (within SNAP_THRESHOLD_PX 4.5px)
     fireEvent.pointerDown(trackContainer, { clientX: 174, pointerId: 1 });
     // Magnetic snap activates: snaps to 0.75 instead of 0.74
-    expect(onChange).toHaveBeenLastCalledWith(0.75, true);
+    expect(onChange).toHaveBeenLastCalledWith(0.75, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     const thumb = document.querySelector('.scrubbable-popover__thumb') as HTMLElement;
     expect(thumb.className).toContain('is-snapped');
 
@@ -322,17 +377,17 @@ describe('collaborative text draft inputs', () => {
 
     // Holding Alt key bypasses magnetic snapping
     fireEvent.pointerMove(trackContainer, { clientX: 174, pointerId: 1, altKey: true });
-    expect(onChange).toHaveBeenLastCalledWith(0.74, true);
+    expect(onChange).toHaveBeenLastCalledWith(0.74, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(thumb.className).not.toContain('is-snapped');
 
     // Releasing Alt key re-enables magnetic snapping
     fireEvent.pointerMove(trackContainer, { clientX: 174, pointerId: 1, altKey: false });
-    expect(onChange).toHaveBeenLastCalledWith(0.75, true);
+    expect(onChange).toHaveBeenLastCalledWith(0.75, true, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(thumb.className).toContain('is-snapped');
 
     // Pointer up commits the snapped value and clears is-snapped
     fireEvent.pointerUp(trackContainer, { clientX: 174, pointerId: 1 });
-    expect(onChange).toHaveBeenLastCalledWith(0.75, false);
+    expect(onChange).toHaveBeenLastCalledWith(0.75, false, expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     fireEvent.mouseLeave(scrubber);
     act(() => {

@@ -8,6 +8,18 @@ export const DEFAULT_CHARACTER_ENTER_EASE = 'power2.out';
 export const DEFAULT_CHARACTER_TRANSFORM_EASE = 'power2.inOut';
 export const DEFAULT_CHARACTER_EXIT_EASE = 'power2.in';
 
+/** The character remains in its current lifetime until its exit finishes. */
+export function resolveCharacterExitDuration(params: {
+  exit?: unknown;
+  duration?: unknown;
+  exitDuration?: unknown;
+}): number {
+  if (!params.exit || params.exit === 'none') return 0;
+  const value = params.duration ?? params.exitDuration;
+  const duration = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0.6;
+  return params.exit === 'dissolve' ? duration * 1.5 : duration;
+}
+
 const SEMANTIC_EASE_ALIASES: Readonly<Record<string, string>> = {
   smooth: 'power2.inOut',
   linear: 'none',

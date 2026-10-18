@@ -740,9 +740,9 @@ class Live2DManager {
   }
 
   /**
-   * Add a directional rim light to a character using a drop shadow approach.
+   * Add a directional highlight along the character's inner contour.
    */
-  setRimLight(id: string, color: string | number = 0xFFFFFF, intensity: number = 1.0, thickness: number = 10, angle: number = 45, softness: number = 2, duration: number = 1.0, sceneTime?: number): void {
+  setRimLight(id: string, color: string | number = 0xFFFFFF, intensity: number = 1.0, thickness: number = 6, angle: number = 45, softness: number = 2, duration: number = 1.0, sceneTime?: number): void {
     this.rimLights.setRimLight(id, { color, intensity, thickness, angle, softness, duration }, sceneTime);
   }
 

@@ -93,6 +93,8 @@ npm run build
 npm run dist:win
 ```
 
+Tests that load a real Cubism 3+ model share `AEON_CUBISM_TEST_MODEL` for the local `model3.json` fixture and `LIVE2D_CUBISM_CORE` for `live2dcubismcore.min.js`. The real-runtime unit test also accepts `AEON_CUBISM_TEST_MOTION` to select a motion group. The rim-light E2E test skips when its model or Core fixture is unavailable.
+
 ---
 
 ## Collaboration Server
