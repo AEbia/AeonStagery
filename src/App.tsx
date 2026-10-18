@@ -177,9 +177,12 @@ function AppContent({ contextValue, sessionBindings }: {
   const stageRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
   const {
-    viewport, handleStageMouseDown, handleStageReset, handleResetZoom,
+    viewport, actualScale, handleStageMouseDown, handleStageReset, handleResetZoom,
     handleRecenter, handleZoomIn, handleZoomOut, isPanning,
-  } = useViewport(stageRef, !showProjectHome);
+  } = useViewport(stageRef, !showProjectHome, {
+    width: contextValue.adapters.stage.getWidth(),
+    height: contextValue.adapters.stage.getHeight(),
+  });
   useAppShortcuts({
     contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
@@ -440,9 +443,9 @@ function AppContent({ contextValue, sessionBindings }: {
                     type="button"
                     className="stage-viewport-hud__btn stage-viewport-hud__btn--zoom-pill"
                     onClick={handleResetZoom}
-                    title="点击重置缩放至 100%（渲染器始终完整显示舞台，100% 即适配窗口基准）"
+                    title="当前缩放相对舞台实际像素；点击适配窗口（100% 表示 1 个舞台像素对应 1 个界面像素）"
                   >
-                    {Math.round(viewport.zoom * 100)}%
+                    {Math.round(actualScale * 100)}%
                   </button>
                   <button
                     type="button"
