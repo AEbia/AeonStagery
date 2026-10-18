@@ -1,5 +1,6 @@
 import type { PlaybackStore } from '../../ui/store/PlaybackStore';
 import type { IPlaybackAdapter } from '../../api/interfaces';
+import type { TransformPreviewUpdates } from '../interfaces/IPlaybackAdapter';
 
 interface PlaybackEngine {
   play(): void;
@@ -11,7 +12,8 @@ interface PlaybackEngine {
   setLoopEnabled(v: boolean): void;
   setSpeed(s: number): void;
   getCurrentTime(): number;
-  previewTransform?(id: string, updates: Partial<any>): void;
+  previewTransform?(id: string, updates: TransformPreviewUpdates): void;
+  previewEnvironmentLayerTransform?(layerId: string, updates: TransformPreviewUpdates): void;
   getDuration(): number;
   setSilentMode(v: boolean): void;
   getBasePath(): string;
@@ -80,10 +82,14 @@ export class PlaybackAdapter implements IPlaybackAdapter {
     this.engine.setSpeed(s);
   }
 
-  previewTransform(id: string, updates: Partial<any>): void {
+  previewTransform(id: string, updates: TransformPreviewUpdates): void {
     if (this.engine.previewTransform) {
       this.engine.previewTransform(id, updates);
     }
+  }
+
+  previewEnvironmentLayerTransform(layerId: string, updates: TransformPreviewUpdates): void {
+    this.engine.previewEnvironmentLayerTransform?.(layerId, updates);
   }
 
   dispatchTimeUpdate(time: number): void {

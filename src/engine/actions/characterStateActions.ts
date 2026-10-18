@@ -131,7 +131,7 @@ export function scheduleSetCharacterRimLight(ctx: SchedulerContext, action: { ti
       params.id, 
       params.color ?? '#ffffff', 
       params.intensity ?? 1.0, 
-      params.thickness ?? 10, 
+      params.thickness ?? 6, 
       params.angle ?? 45, 
       params.softness ?? 2,
       params.duration ?? 0

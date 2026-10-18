@@ -74,6 +74,7 @@ export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, 
         label="眨眼间隔（秒）"
         value={intervalMs / 1000}
         dataTestId={base.paramTestId}
+        onGestureStart={ctx.registerNumericGesture}
         onChange={(seconds, isTransient) => ctx.updateParam(ctx.actionId, key, Math.max(0, seconds) * 1000, isTransient)}
       />
     );
@@ -87,6 +88,7 @@ export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, 
         min="0"
         value={rangeVal}
         dataTestId={base.paramTestId}
+        onGestureStart={ctx.registerNumericGesture}
         onChange={(seconds, isTransient) => ctx.updateParam(ctx.actionId, key, Math.max(0, seconds), isTransient)}
       />
     );

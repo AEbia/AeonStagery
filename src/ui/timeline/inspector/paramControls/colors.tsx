@@ -100,6 +100,7 @@ export function resolveColorAndOverrideParam(ctx: InspectorParamContext, key: st
                   popoverMin={overrideConfig.popoverMin}
                   popoverMax={overrideConfig.popoverMax}
                   value={typeof overrideValue === 'number' ? overrideValue : 0}
+                  onGestureStart={ctx.registerNumericGesture}
                   onChange={(value, isTransient) => ctx.updateVisualSemanticOverride(overrideKey, value, isTransient)}
                 />
               </div>

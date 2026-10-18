@@ -1,28 +1,24 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useOutsidePointerDown } from './useOutsidePointerDown';
 
-/** Closes a native details dropdown when interaction moves outside it or Escape is pressed. */
+/** Keep native details menus dismissible without taking focus on outside clicks. */
 export function useDetailsDismissal() {
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const dismiss = useCallback(() => {
-    if (detailsRef.current) detailsRef.current.open = false;
-  }, []);
-
-  useOutsidePointerDown(detailsRef, dismiss);
+  useOutsidePointerDown(detailsRef, () => {
+    if (detailsRef.current?.open) detailsRef.current.open = false;
+  });
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       const details = detailsRef.current;
-      if (event.key !== 'Escape' || !details?.open) return;
-
+      if (event.key !== 'Escape' || event.defaultPrevented || !details?.open) return;
       event.preventDefault();
-      dismiss();
+      details.open = false;
       details.querySelector('summary')?.focus();
     };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [dismiss]);
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   return detailsRef;
 }

@@ -282,10 +282,13 @@ describe('semantic Inspector field catalog contracts', () => {
     expect(rimLightFields.find((field) => field.key === 'thickness')?.valueType).toBe('number');
     expect(rimLightFields.find((field) => field.key === 'angle')?.valueType).toBe('number');
     expect(rimLightFields.find((field) => field.key === 'softness')?.valueType).toBe('number');
+    expect(rimLightFields.find((field) => field.key === 'softness')).toMatchObject({
+      min: '0', popoverMax: '20', step: '0.5',
+    });
     expect(materialized).toMatchObject({
       intensity: 1,
       color: '#ffffff',
-      thickness: 10,
+      thickness: 6,
       angle: 45,
       softness: 2,
       durationSeconds: 0,

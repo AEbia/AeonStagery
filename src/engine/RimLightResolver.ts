@@ -1,11 +1,12 @@
 import type { RuntimeTimelineAction, RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { RimLightStyleState } from '../api/types/visual';
 import { evaluateGsapEase } from './RuntimeSceneState';
+import { resolveCharacterExitDuration } from './CharacterAnimationContract';
 
 const NEUTRAL_RIM_LIGHT: RimLightStyleState = {
   color: '#ffffff',
   intensity: 0,
-  thickness: 10,
+  thickness: 6,
   angle: 45,
   softness: 2,
 };
@@ -23,6 +24,55 @@ export function resolveRimLightStateAtTime(
 ): Map<string, ResolvedRimLightState> {
   const states = collectBaselines(scene);
   const latched = new Map<string, ResolvedRimLightState>();
+  const lifetimeStarts = new Map<string, number>();
+  const lifecycleEvents = scene.timeline
+    .map((action, index) => ({ action, index, time: action.time ?? 0 }))
+    .filter(({ action }) => action.action === 'addCharacter' || action.action === 'removeCharacter')
+    .sort((left, right) => left.time - right.time || left.index - right.index);
+  const pendingExitEnds = new Map<string, number>();
+  const present = new Set<string>();
+
+  for (const { action, time: eventTime } of lifecycleEvents) {
+    if (eventTime > time) break;
+    const id = action.params?.id;
+    if (typeof id !== 'string') continue;
+
+    const pendingExitEnd = pendingExitEnds.get(id);
+    if (pendingExitEnd !== undefined && pendingExitEnd <= eventTime) {
+      lifetimeStarts.set(id, Math.max(lifetimeStarts.get(id) ?? -Infinity, pendingExitEnd));
+      pendingExitEnds.delete(id);
+      present.delete(id);
+    }
+
+    if (action.action === 'addCharacter') {
+      // A new entrance supersedes an older exit that has not completed yet.
+      lifetimeStarts.set(id, eventTime);
+      pendingExitEnds.delete(id);
+      present.add(id);
+      continue;
+    }
+
+    // A remove without a prior add can still close a scene's initial character.
+    if (present.has(id) || !lifetimeStarts.has(id)) {
+      const exitEnd = eventTime + resolveCharacterExitDuration(action.params ?? {});
+      if (exitEnd <= eventTime) {
+        lifetimeStarts.set(id, Math.max(lifetimeStarts.get(id) ?? -Infinity, eventTime));
+        pendingExitEnds.delete(id);
+        present.delete(id);
+      } else {
+        pendingExitEnds.set(id, Math.min(pendingExitEnd ?? Infinity, exitEnd));
+        present.add(id);
+      }
+    }
+  }
+
+  for (const [id, exitEnd] of pendingExitEnds) {
+    if (exitEnd <= time) {
+      lifetimeStarts.set(id, Math.max(lifetimeStarts.get(id) ?? -Infinity, exitEnd));
+      pendingExitEnds.delete(id);
+      present.delete(id);
+    }
+  }
   const events = scene.timeline
     .map((action, index) => ({ action, index, time: action.time ?? 0 }))
     .filter((event) => event.time <= time && event.action.action === 'setCharacterRimLight')
@@ -32,6 +82,10 @@ export function resolveRimLightStateAtTime(
     const params = action.params ?? {};
     const characterId = typeof params.id === 'string' ? params.id : undefined;
     if (!characterId) continue;
+    // Reconstruct only this lifetime's cues. Scene baselines survive re-entry;
+    // a cue at the exact entrance time belongs to the new lifetime, even when
+    // the author placed that cue before addCharacter in the same-time order.
+    if (actionTime < (lifetimeStarts.get(characterId) ?? -Infinity)) continue;
 
     const mode = params.mode === 'modulate' || params.mode === 'reset' ? params.mode : 'set';
     if (mode === 'reset') {
@@ -131,7 +185,7 @@ function resolveCue(
   return {
     color: typeof params.color === 'string' ? params.color : '#ffffff',
     intensity,
-    thickness: finiteNumber(params.thickness, 10),
+    thickness: finiteNumber(params.thickness, 6),
     angle: finiteNumber(params.angle, 45),
     softness: finiteNumber(params.softness, 2),
     alpha: intensity,
