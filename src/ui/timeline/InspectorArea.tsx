@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from './FormComponents';
 import { TimelineListView } from './TimelineListView';
 import { useMemo, useSyncExternalStore } from 'react';
 import {
@@ -18,7 +19,7 @@ export interface InspectorAreaProps {
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
   updateAction: (id: string, updates: any) => void;
-  updateParam: (id: string, key: string, val: any) => void;
+  updateParam: (id: string, key: string, val: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
   addAction: () => void;
   handleSave: () => void | Promise<SaveResult | undefined>;

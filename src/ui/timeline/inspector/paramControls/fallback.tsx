@@ -18,7 +18,7 @@ export function resolveFallbackParam(ctx: InspectorParamContext, key: string, ba
         popoverMax={base.catalogField?.popoverMax}
         step={base.catalogField?.step}
         dataTestId={base.paramTestId}
-        onChange={(v, isTransient) => ctx.updateAuthoringParam(key, v, isTransient)}
+        onChange={(v, isTransient, gesture) => ctx.updateAuthoringParam(key, v, isTransient, gesture)}
       />
     );
   }

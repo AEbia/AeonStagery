@@ -197,10 +197,16 @@ function getNextSuggestionIndex(key: string, currentIndex: number, optionCount: 
   return null;
 }
 
+/** Each pointer gesture owns its callbacks until release or explicit cancellation. */
+export interface NumericInputGesture {
+  readonly signal: AbortSignal;
+  cancel(): void;
+}
+
 export interface NumericInputProps {
   label: string;
   value: number;
-  onChange: (val: number, isTransient?: boolean) => void;
+  onChange: (val: number, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   step?: string;
   min?: string;
   max?: string;
@@ -212,7 +218,7 @@ export interface NumericInputProps {
 export interface InlineNumericInputProps {
   value: number;
   disabled?: boolean;
-  onChange: (val: number, isTransient?: boolean) => void;
+  onChange: (val: number, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   step?: string;
   min?: string;
   max?: string;
@@ -243,6 +249,41 @@ function getTickInterval(span: number): number {
 
 export const InlineNumericInput = React.memo(({ value, disabled = false, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
   const safeValue = value ?? 0;
+  const canonicalValueRef = useRef(safeValue);
+  canonicalValueRef.current = safeValue;
+  const numericGestureRef = useRef<NumericInputGesture | null>(null);
+  useEffect(() => () => numericGestureRef.current?.cancel(), []);
+
+  const startNumericGesture = (cleanup: () => void) => {
+    numericGestureRef.current?.cancel();
+    const controller = new AbortController();
+    let finished = false;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') gesture.cancel(); };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', gesture.cancel);
+      if (numericGestureRef.current === gesture) numericGestureRef.current = null;
+    };
+    const gesture: NumericInputGesture = {
+      signal: controller.signal,
+      cancel: () => {
+        if (finished) return;
+        finish();
+        controller.abort();
+        setLocalValue(canonicalValueRef.current.toString());
+        setIsDraggingState(false);
+        setIsSnappedState(false);
+      },
+    };
+    numericGestureRef.current = gesture;
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', gesture.cancel);
+    return { gesture, finish };
+  };
+
   const [localValue, setLocalValue] = useState(safeValue.toString());
   const [isEditing, setIsEditing] = useState(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
@@ -512,6 +553,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
     e.stopPropagation();
     const trackEl = trackRef.current;
     if (!trackEl || !hasPopoverRange) return;
+    numericGestureRef.current?.cancel();
 
     if (hoverEdgeDwellTimerRef.current !== null) {
       clearTimeout(hoverEdgeDwellTimerRef.current);
@@ -591,10 +633,9 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       if (!Number.isFinite(rounded)) return;
 
       setLocalValue(rounded.toString());
-      onChange(rounded, isTransient);
+      onChange(rounded, isTransient, interaction.gesture);
     };
 
-    updateFromPointer(e.clientX, true, e.altKey);
 
     const EDGE_DRAG_THRESHOLD = 0.075;
 
@@ -653,7 +694,6 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       scrollAnimRef.current = requestAnimationFrame(loop);
     };
 
-    startAutoScrollIfNeeded();
 
     const onPointerMove = (moveEvt: PointerEvent) => {
       pointerClientXRef.current = moveEvt.clientX;
@@ -661,6 +701,12 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
     };
 
     const onPointerUp = (upEvt: PointerEvent) => {
+      interaction.finish();
+      updateFromPointer(upEvt.clientX, false, upEvt.altKey);
+      setIsSnappedState(false);
+    };
+    const onPointerCancel = () => interaction.gesture.cancel();
+    const interaction = startNumericGesture(() => {
       isPointerDraggingTrackRef.current = false;
       if (scrollAnimRef.current !== null) {
         cancelAnimationFrame(scrollAnimRef.current);
@@ -669,19 +715,19 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       setScrollDirection(null);
       target.removeEventListener('pointermove', onPointerMove);
       target.removeEventListener('pointerup', onPointerUp);
-      target.removeEventListener('pointercancel', onPointerUp);
+      target.removeEventListener('pointercancel', onPointerCancel);
       try {
-        target.releasePointerCapture?.(upEvt.pointerId);
+        target.releasePointerCapture?.(e.pointerId);
       } catch {
-        // ignore
+        // Capture may already have been released by cancellation.
       }
-      updateFromPointer(upEvt.clientX, false, upEvt.altKey);
-      setIsSnappedState(false);
-    };
+    });
+    updateFromPointer(e.clientX, true, e.altKey);
+    startAutoScrollIfNeeded();
 
     target.addEventListener('pointermove', onPointerMove);
     target.addEventListener('pointerup', onPointerUp);
-    target.addEventListener('pointercancel', onPointerUp);
+    target.addEventListener('pointercancel', onPointerCancel);
   };
 
   const handleTrackMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -827,6 +873,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
     if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
     setShowPopover(false);
 
+    numericGestureRef.current?.cancel();
     const startX = e.clientX;
     const startY = e.clientY;
     const startValue = parseFloat(localValue) || 0;
@@ -886,17 +933,13 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       const rounded = Math.round(nextValue * factor) / factor;
 
       setLocalValue(rounded.toString());
-      onChange(rounded, true); // transient
+      onChange(rounded, true, interaction.gesture); // transient
     };
 
     const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      if (document.pointerLockElement === document.body) {
-        document.exitPointerLock();
-      }
-      setIsDraggingState(false);
       const wasDragging = dragRef.current.isDragging;
+      interaction.finish();
+      setIsDraggingState(false);
       dragRef.current.isDragging = false;
 
       if (!wasDragging && !hasMoved) {
@@ -911,10 +954,16 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
         const factor = Math.pow(10, Math.min(basePrecision, 6));
         const rounded = Math.round(finalValue * factor) / factor;
         setLocalValue(rounded.toString());
-        onChange(rounded, false); // final
+        onChange(rounded, false, interaction.gesture); // final
       }
     };
 
+    const interaction = startNumericGesture(() => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      dragRef.current.isDragging = false;
+      if (document.pointerLockElement === document.body) document.exitPointerLock();
+    });
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   };

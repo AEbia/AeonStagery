@@ -69,7 +69,7 @@ describe('inspector transform drag preview', () => {
     fireEvent.mouseDown(screen.getByRole('spinbutton', { name: axis }), { button: 0, clientX: 0 });
     fireEvent.mouseMove(document, { clientX: 20 });
     fireEvent.mouseMove(document, { clientX: 30 });
-    expect(numericUpdate).toHaveBeenCalledWith(expect.any(String), 'position', axis === 'X' ? [expect.any(Number), 0.8] : [0.5, expect.any(Number)], true);
+    expect(numericUpdate).toHaveBeenCalledWith(expect.any(String), 'position', axis === 'X' ? [expect.any(Number), 0.8] : [0.5, expect.any(Number)], true, expect.objectContaining({ signal: expect.any(AbortSignal), cancel: expect.any(Function) }));
     expect(inspector.semanticSnapshot!.actions[0]).toMatchObject({ action: 'transformCharacter', params: { id: 'alice' } });
     expect(previewTransform).toHaveBeenCalledWith('alice', axis === 'X' ? { x: expect.any(Number), y: 864 } : { x: 960, y: expect.any(Number) });
     expect(context.adapters.playback.pause).toHaveBeenCalledTimes(1);
@@ -178,6 +178,47 @@ describe('inspector transform drag preview', () => {
     await act(async () => fireEvent.mouseUp(document));
     expect(context.services!.semanticAuthoring!.authorTransaction).toHaveBeenCalledTimes(1);
     expect(context.adapters.playback.seek).toHaveBeenCalledWith(0, true);
+  });
+
+  it.each(['Escape', 'blur', 'selection', 'unmount'])('starts a fresh same-action gesture after %s without receiving the old mouseup', async (reason) => {
+    const { context, editor, previewTransform } = setup();
+    let view = render(<AppProvider {...context}><TimelineEditor mode="inspector" /></AppProvider>);
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 20 });
+    if (reason === 'Escape') fireEvent.keyDown(window, { key: 'Escape' });
+    else if (reason === 'blur') fireEvent.blur(window);
+    else if (reason === 'selection') act(() => editor.setSelectedIds({ different: true }));
+    else {
+      view.unmount();
+      view = render(<AppProvider {...context}><TimelineEditor mode="inspector" /></AppProvider>);
+    }
+    previewTransform.mockClear();
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 30 });
+    expect(previewTransform).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.mouseUp(document));
+    expect(context.services!.semanticAuthoring!.authorTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('reapplies the latest active preview after an older deferred reconstruction finishes', async () => {
+    const { context, previewTransform } = setup();
+    let visibleX = 0;
+    let finishRestore = () => {};
+    previewTransform.mockImplementation((_id: string, updates: { x: number }) => { visibleX = updates.x; });
+    context.adapters.playback.seek.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishRestore = () => { visibleX = 0; resolve(); };
+    }));
+    render(<AppProvider {...context}><TimelineEditor mode="inspector" /></AppProvider>);
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 20 });
+    await act(async () => fireEvent.mouseUp(document));
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 30 });
+    const expectedX = visibleX;
+    expect(expectedX).toBeGreaterThan(0);
+    await act(async () => finishRestore());
+    expect(visibleX).toBe(expectedX);
+    await act(async () => fireEvent.mouseUp(document));
   });
 
 });

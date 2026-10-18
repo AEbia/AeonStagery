@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from './FormComponents';
 import { useCallback, useEffect, useRef } from 'react';
 import type { IPlaybackAdapter } from '../../api/interfaces';
 import type { TransformPreviewUpdates } from '../../api/interfaces/IPlaybackAdapter';
@@ -26,20 +27,36 @@ export function inspectorTransformPreview(action: TimelineAction, patch: Readonl
   return { id, environment, updates };
 }
 
+interface TransformPreviewSession {
+  readonly actionId: string;
+  readonly gesture?: NumericInputGesture;
+  readonly apply: () => void;
+  readonly detach: () => void;
+  input: NonNullable<ReturnType<typeof inspectorTransformPreview>>;
+}
+
 /** A drag owns runtime state until its single source commit or cancellation. */
 export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: unknown) {
-  const active = useRef<string | null>(null);
-  const cancelled = useRef<string | null>(null);
+  const active = useRef<TransformPreviewSession | null>(null);
+  const cancelledLegacy = useRef<string | null>(null);
+  const generation = useRef(0);
   const mounted = useRef(false);
   const restore = useCallback(() => {
-    // A hard reconstruction clears previewed opacity/geometry as well as the
-    // GSAP proxy cache, including when authoring rejected the final value.
-    void playback.seek(playback.getCurrentTime(), true).catch(() => {});
+    const reapply = () => {
+      // A reconstruction can await model/path work while another drag starts.
+      // Its eventual proxy writes must not erase that newer temporary pose.
+      const latest = active.current;
+      if (mounted.current && latest && !latest.gesture?.signal.aborted) latest.apply();
+    };
+    void playback.seek(playback.getCurrentTime(), true).then(reapply, reapply);
   }, [playback]);
   const cancel = useCallback(() => {
-    if (active.current === null) return;
-    cancelled.current = active.current;
+    const session = active.current;
+    if (!session) return;
     active.current = null;
+    session.detach();
+    if (!session.gesture) cancelledLegacy.current = session.actionId;
+    session.gesture?.cancel();
     restore();
   }, [restore]);
   useEffect(() => {
@@ -54,28 +71,51 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
       cancel();
     };
   }, [cancel, scope]);
-  const preview = useCallback((action: TimelineAction, patch: Readonly<Record<string, unknown>>) => {
-    if (!mounted.current || !action._id || cancelled.current === action._id) return;
+  const preview = useCallback((action: TimelineAction, patch: Readonly<Record<string, unknown>>, gesture?: NumericInputGesture) => {
+    if (!mounted.current || !action._id || gesture?.signal.aborted) return;
+    if (!gesture && cancelledLegacy.current === action._id) return;
     const input = inspectorTransformPreview(action, patch);
     if (!input) return;
-    const apply = input.environment ? playback.previewEnvironmentLayerTransform : playback.previewTransform;
-    if (!apply) return;
-    if (active.current === null) playback.pause();
-    active.current = action._id;
-    apply.call(playback, input.id, input.updates);
-  }, [playback]);
-  const commit = useCallback(async (id: string, author: () => unknown) => {
-    if (!mounted.current) return;
-    if (cancelled.current === id) {
-      cancelled.current = null;
+    const project = input.environment ? playback.previewEnvironmentLayerTransform : playback.previewTransform;
+    if (!project) return;
+    let session = active.current;
+    if (session && (session.actionId !== action._id || session.gesture?.signal !== gesture?.signal)) {
+      cancel();
+      session = null;
+    }
+    if (!session) {
+      generation.current += 1;
+      const next: TransformPreviewSession = {
+        actionId: action._id, gesture, input,
+        apply: () => project.call(playback, next.input.id, next.input.updates),
+        detach: () => gesture?.signal.removeEventListener('abort', onAbort),
+      };
+      const onAbort = () => { if (active.current === next) cancel(); };
+      gesture?.signal.addEventListener('abort', onAbort, { once: true });
+      active.current = next;
+      session = next;
+      playback.pause();
+    } else {
+      session.input = { ...input, updates: { ...session.input.updates, ...input.updates } };
+    }
+    session.apply();
+  }, [playback, cancel]);
+  const commit = useCallback(async (id: string, author: () => unknown, gesture?: NumericInputGesture) => {
+    if (!mounted.current || gesture?.signal.aborted) return;
+    if (!gesture && cancelledLegacy.current === id) {
+      cancelledLegacy.current = null;
       return;
     }
-    const wasPreviewing = active.current === id;
-    if (wasPreviewing) active.current = null;
+    const session = active.current?.actionId === id ? active.current : null;
+    const commitGeneration = generation.current;
+    if (session) {
+      active.current = null;
+      session.detach();
+    }
     try {
       return await author();
     } finally {
-      if (wasPreviewing && active.current === null) restore();
+      if (session && active.current === null && generation.current === commitGeneration) restore();
     }
   }, [restore]);
   return { preview, commit };

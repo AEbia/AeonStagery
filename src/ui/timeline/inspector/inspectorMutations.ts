@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from '../FormComponents';
 // All param-mutating callbacks + dialogue-template presentation derivations
 // the inspector passes down through InspectorParamContext and the panels.
 // Move-only extraction from ActionInspector's component body.
@@ -56,9 +57,10 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     updateParam(actionId, key, value);
   };
 
-  const updateSemanticSourceParam = (key: string, value: unknown, isTransient?: boolean) => {
+  const updateSemanticSourceParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
+    if (gesture?.signal.aborted) return;
     if (isTransient) {
-      updateParam(actionId, key, value, true);
+      updateParam(actionId, key, value, true, gesture);
       return;
     }
     const nextParams = { ...sourceParams };
@@ -70,12 +72,13 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     replaceSourceParams(actionId, nextParams);
   };
 
-  const updateAuthoringParam = (key: string, value: unknown, isTransient?: boolean) => {
+  const updateAuthoringParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
+    if (gesture?.signal.aborted) return;
     if (usesSourceParamForm && action.semanticType) {
-      updateSemanticSourceParam(key, value, isTransient);
+      updateSemanticSourceParam(key, value, isTransient, gesture);
       return;
     }
-    updateParam(actionId, key, value, isTransient);
+    updateParam(actionId, key, value, isTransient, gesture);
   };
 
   const canRemoveCharacterPerformanceField = (field: 'lookAt' | 'blink'): boolean => {

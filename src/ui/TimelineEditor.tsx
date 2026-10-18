@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from './timeline/FormComponents';
 /**
  * AeonStagery — Visual Timeline Editor
  *
@@ -337,18 +338,19 @@ export function TimelineEditor({
       : commands.updateTimelineParams(id, runtimePatch));
   }, [blockOfflineEdit, commands, documentStore, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch, timelineReadModelActionById, previewInspectorTransform, commitInspectorTransform]);
 
-  const updateParam = useCallback((id: string, key: string, value: unknown, isTransient?: boolean) => {
+  const updateParam = useCallback((id: string, key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
+    if (gesture?.signal.aborted) return;
     if (blockOfflineEdit()) return;
     if (!semanticDocument || !semanticAuthoring) return;
     const paramPatch = { [key]: value };
     if (isTransient) {
       const action = timelineReadModelActionById.get(id);
-      if (action) previewInspectorTransform(action, paramPatch);
+      if (action) previewInspectorTransform(action, paramPatch, gesture);
       return;
     }
     void commitInspectorTransform(id, () => shouldUseSourceParamPatch(id, paramPatch)
       ? commands.updateSourceParams(id, paramPatch)
-      : commands.updateTimelineParams(id, paramPatch));
+      : commands.updateTimelineParams(id, paramPatch), gesture);
   }, [blockOfflineEdit, commands, semanticAuthoring, semanticDocument, shouldUseSourceParamPatch, timelineReadModelActionById, previewInspectorTransform, commitInspectorTransform]);
 
   const addActionAt = useCallback(async (time: number) => {

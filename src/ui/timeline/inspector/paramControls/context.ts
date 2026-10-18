@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from '../../FormComponents';
 // Shared context + resolver contract for the inspector param-control dispatch chain.
 // The chain that used to live inline in ActionInspector.renderParam is split into
 // ordered resolvers; each returns:
@@ -85,8 +86,8 @@ export interface InspectorParamContext {
   updateParam: ActionInspectorProps['updateParam'];
   replaceSourceParams: ActionInspectorProps['replaceSourceParams'];
   updateResourceParam: (key: string, value: string) => void;
-  updateSemanticSourceParam: (key: string, value: unknown, isTransient?: boolean) => void;
-  updateAuthoringParam: (key: string, value: unknown, isTransient?: boolean) => void;
+  updateSemanticSourceParam: (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  updateAuthoringParam: (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   updateDialogueSpeaker: (value: string) => void;
   updateDialogueTemplate: (value: string) => Promise<void>;
   updateVisualSemanticOverride: (key: string, value: unknown, isTransient?: boolean) => void;
