@@ -13,6 +13,8 @@ import type {
   Live2DRuntimeAdapter,
 } from './Live2DRuntimeContracts';
 import { Cubism2PixiLive2DModelControls } from './Cubism2PixiLive2DModelControls';
+import { installLive2DRenderPreparation } from '../live2d/runtime/Live2DRenderPreparation';
+import { guardExternalGl } from '../live2d/runtime/Cubism2RenderGuardSeam';
 
 type Cubism2Module = {
   Live2DModel?: any;
@@ -113,7 +115,16 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     if (!this.modelClass?.from) {
       throw new Error('Cubism 2 Live2DModel class is not available.');
     }
-    return this.modelClass.from(modelUrl, options);
+    const model = await this.modelClass.from(modelUrl, options);
+    const prepare = model.prepareForRender?.bind(model);
+    if (prepare) {
+      this.bakeCore.installInternalModelGuard(model.internalModel);
+      installLive2DRenderPreparation(model, (renderer) => {
+        this.bakeCore.ensureBakeContextBound(model, renderer);
+        guardExternalGl(renderer, prepare);
+      });
+    }
+    return model;
   }
 
   getUnsupportedMessage(modelPath: string): string | null {
