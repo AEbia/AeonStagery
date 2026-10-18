@@ -11,10 +11,16 @@ export interface Cubism2Config {
   cubism2?: { maskSize?: number };
 }
 
+/** Only the native instance surface the Cubism 2 adapter uses during rendering. */
+export interface Cubism2ModelInstance extends Live2DModelDisplayObject {
+  prepareForRender?: () => void;
+  internalModel?: unknown;
+}
+
 /** Only the legacy constructor's static surface used by the adapter. */
 export interface Cubism2ModelClass {
   config?: unknown;
-  from?: (url: string, options: Live2DModelCreateOptions) => Promise<Live2DModelDisplayObject>;
+  from?: (url: string, options: Live2DModelCreateOptions) => Promise<Cubism2ModelInstance>;
 }
 
 function isPropertyContainer(value: unknown): value is Record<string, unknown> {
