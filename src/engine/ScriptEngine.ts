@@ -178,6 +178,13 @@ class ScriptEngine {
     }
   }
 
+  previewEnvironmentLayerTransform(layerId: string, updates: Partial<TransformationProxy>): void {
+    const proxy = this.environmentLayerProxies.get(layerId);
+    if (!proxy) return;
+    Object.assign(proxy, updates);
+    stageManager.applyEnvironmentLayerTransform(layerId, proxy, cameraController.getState());
+  }
+
   setLoopRegion(start: number, end: number): void {
     const dur = this.getDuration();
     this.loopStart = Math.max(0, Math.min(start, dur));

@@ -18,6 +18,7 @@ import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './us
 import { resolveMatchingTimelineAction } from './selectionHygiene';
 import { useApp } from '../context/AppContext';
 import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
+import type { NumericInputGesture, NumericInputGestureRegistrar } from './FormComponents';
 
 const RawScriptTab = React.lazy(async () => {
   const module = await import('./RawScriptTab');
@@ -30,7 +31,8 @@ export interface PropertyInspectorShellProps {
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
   updateAction: (id: string, updates: any) => void;
-  updateParam: (id: string, key: string, val: any) => void;
+  updateParam: (id: string, key: string, val: any, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  onNumericGestureStart?: NumericInputGestureRegistrar;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
   handleSave: () => void | Promise<SaveResult | undefined>;
   onDetailClose?: () => void;

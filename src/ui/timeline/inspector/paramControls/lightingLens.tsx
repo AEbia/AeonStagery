@@ -56,6 +56,7 @@ export function resolveLightingLensParam(ctx: InspectorParamContext, key: string
         max={base.catalogField?.max ?? '1'}
         step={base.catalogField?.step ?? '0.05'}
         dataTestId={base.paramTestId}
+        onGestureStart={ctx.registerNumericGesture}
         onChange={(nextValue, isTransient) => ctx.updateAuthoringParam(key, nextValue, isTransient)}
       />
     );
@@ -83,6 +84,7 @@ export function resolveLightingLensParam(ctx: InspectorParamContext, key: string
           dragLabel="秒"
           ariaLabel="过渡时长（秒）"
           dataTestId={base.paramTestId}
+          onGestureStart={ctx.registerNumericGesture}
           onChange={(nextValue, isTransient) => ctx.updateParam(ctx.actionId, key, Math.max(0, nextValue), isTransient)}
         />
       </div>
