@@ -45,6 +45,8 @@ import type { WebGalScssImportInstallRequest } from '../src/api/types/template-p
 const electronAPI = {
   // ─── File System ───────────────────────────────────────
   fs: {
+    showItemInFolder: (filePath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('fs:showItemInFolder', filePath),
     readFile: (filePath: string) =>
       ipcRenderer.invoke('fs:readFile', filePath),
     readTextFile: (filePath: string) =>

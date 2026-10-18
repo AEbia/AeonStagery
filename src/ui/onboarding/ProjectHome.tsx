@@ -11,6 +11,7 @@ import type {
 import type { CollaborationAssetHandshakeState } from '../../services/collaboration/CollaborationAssetHandshake';
 import type { TemplatePackageSummary } from '../../services/template-package';
 import type { RecentProjectEntry } from '../SettingsStore';
+import { FileRevealButton, FileRevealContext } from '../FileRevealActions';
 import { CollaborationAssetHandshakePanel } from '../CollaborationAssetHandshakePanel';
 import {
   buildAvailableCharacterPresets,
@@ -1605,6 +1606,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                 {recentProjects.length > 0 ? (
                   <div className="ph-recent-list">
                     {recentProjects.slice(0, MAX_RECENT_PROJECTS).map((project) => (
+                      <FileRevealContext key={`${project.projectFilePath}:${project.lastOpenedAt}`} path={project.projectFilePath} name={project.name}>
                       <div
                         key={`${project.projectFilePath}:${project.lastOpenedAt}`}
                         className="ph-recent-item"
@@ -1625,6 +1627,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           <span className="ph-recent-time">{formatRecentTime(project.lastOpenedAt)}</span>
                         </button>
                         <div className="ph-recent-actions">
+                          <FileRevealButton path={project.projectFilePath} name={project.name} compact />
                           <button
                             type="button"
                             className="btn btn--icon"
@@ -1646,6 +1649,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           </button>
                         </div>
                       </div>
+                      </FileRevealContext>
                     ))}
                   </div>
                 ) : (

@@ -22,6 +22,10 @@ beforeAll(async () => {
 });
 
 describe('Electron preload bridge contracts', () => {
+  it('exposes only a file reveal request with the selected local path', async () => {
+    await bridge.fs.showItemInFolder?.('/project/scene.json');
+    expect(ipc.invoke).toHaveBeenLastCalledWith('fs:showItemInFolder', '/project/scene.json');
+  });
   it('forwards typed dialog, voice and export requests unchanged', async () => {
     const dialog = { title: 'Save', filters: [{ name: 'Video', extensions: ['mp4'] }] };
     await bridge.dialog.showSave(dialog);

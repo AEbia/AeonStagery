@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { IconFolder, IconChevronUp, IconChevronDown } from './icons';
 import { readMergedDirectory, type DirEntry } from './ResourceLibrary';
 import { getTemplateResourceFileService, useTemplateResourceDirectoryRefresh } from './TemplateResourceFiles';
+import { FileRevealButton, FileRevealContext } from './FileRevealActions';
 
 const STD_DIRS = ['animation', 'background', 'bgm', 'figure', 'images', 'project', 'sfx', 'template', 'vocal'];
 
@@ -142,7 +143,8 @@ export const ResourceFileBrowser: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <div key={entry.path || entry.name}
+                <FileRevealContext key={entry.path || entry.name} path={entry.path} name={entry.name} templateResource={!!entry.templateResource}>
+                <div
                   role="listitem"
                   tabIndex={0}
                   draggable={!entry.isDirectory}
@@ -167,7 +169,9 @@ export const ResourceFileBrowser: React.FC = () => {
                       {entry.source ? `来源：${entry.source}` : '来源：项目'} · 已发现 · 待校验
                     </span>
                   </span>
+                  <FileRevealButton path={entry.path} name={entry.name} templateResource={!!entry.templateResource} compact />
                 </div>
+                </FileRevealContext>
               ))
             )}
           </div>
