@@ -42,9 +42,11 @@ export default tseslint.config(
     },
     plugins: {
       'react-hooks': reactHooks,
+      '@typescript-eslint': tseslint.plugin,
     },
     rules: {
       'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
       'react-hooks/rules-of-hooks': 'error',
     },
   },
