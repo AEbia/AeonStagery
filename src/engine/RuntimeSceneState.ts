@@ -11,6 +11,7 @@ import {
   DEFAULT_CHARACTER_TRANSFORM_EASE,
   characterSlideEntranceOffsetNormalized,
   evaluateCharacterEase,
+  resolveCharacterExitDuration,
 } from './CharacterAnimationContract';
 
 const STAGE_HEIGHT = CHARACTER_STAGE_HEIGHT;
@@ -386,10 +387,6 @@ export function computeSceneStateAtTime(
       }
       case 'removeCharacter': {
         const startTime = action.time || 0;
-        const duration = normalizeDuration(
-          p.duration ?? p.exitDuration,
-          DEFAULT_ENTER_DURATION_SECONDS,
-        );
         const preset = normalizeExitPreset(p.exit);
 
         if (p.exit === 'none' || !p.exit) {
@@ -397,7 +394,7 @@ export function computeSceneStateAtTime(
           break;
         }
 
-        const effectiveDuration = preset === 'dissolve' ? duration * 1.5 : duration;
+        const effectiveDuration = resolveCharacterExitDuration(p);
         if (time >= startTime + effectiveDuration) {
           characters.delete(p.id);
           break;

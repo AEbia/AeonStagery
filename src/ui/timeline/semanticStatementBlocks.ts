@@ -540,7 +540,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
         mode: 'set',
         intensity: 1,
         color: '#ffffff',
-        thickness: 10,
+        thickness: 6,
         angle: 45,
         softness: 2,
         durationSeconds: 0,

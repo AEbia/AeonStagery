@@ -69,7 +69,9 @@ npm start
 | 运行时版本 | 环境变量 | 默认读取路径 |
 | :--- | :--- | :--- |
 | Cubism 2.1 核心（`live2d.min.js`） | `LIVE2D_CUBISM2_CORE`（文件或目录） | `.local/live2d/live2d.min.js` |
-| Cubism Web 3/4/5（`live2dcubismcore.min.js` + Framework + Shaders） | `CUBISM_WEB_SDK_DIR`（SDK 源码根目录） | `.local/cubism-web-sdk` |
+| Cubism Web 3/4/5 Core（`live2dcubismcore.min.js`） | `LIVE2D_CUBISM_CORE`（文件或目录） | `.local/live2d/live2dcubismcore.min.js` |
+
+旧配置 `CUBISM_WEB_SDK_DIR/Core/live2dcubismcore.min.js` 仍可作为兼容来源。
 
 ---
 
@@ -88,6 +90,8 @@ npm run build
 # 打包 Windows 安装包
 npm run dist:win
 ```
+
+需要加载真实 Cubism 3+ 模型的测试统一使用 `AEON_CUBISM_TEST_MODEL` 指定本地 `model3.json`，并使用 `LIVE2D_CUBISM_CORE` 指定 `live2dcubismcore.min.js`。真实运行时单元测试还可通过 `AEON_CUBISM_TEST_MOTION` 选择动作组。缺少模型或 Core 文件时，rim-light E2E 测试会跳过。
 
 ---
 
