@@ -215,6 +215,7 @@ export interface NumericInputProps {
   popoverMin?: string;
   popoverMax?: string;
   dataTestId?: string;
+  onGestureStart?: NumericInputGestureRegistrar;
 }
 
 export interface InlineNumericInputProps {
@@ -1489,16 +1490,16 @@ export const FileInput = React.memo(({
   );
 });
 
-export const NumericInput = React.memo(({ label, value, onChange, step = "0.1", min, max, popoverMin, popoverMax, dataTestId }: NumericInputProps) => {
+export const NumericInput = React.memo(({ label, value, onChange, step = "0.1", min, max, popoverMin, popoverMax, dataTestId, onGestureStart }: NumericInputProps) => {
   const labelId = useId();
   if (!label) {
-    return <InlineNumericInput value={value} onChange={onChange} step={step} min={min} max={max} popoverMin={popoverMin} popoverMax={popoverMax} dataTestId={dataTestId} />;
+    return <InlineNumericInput value={value} onChange={onChange} step={step} min={min} max={max} popoverMin={popoverMin} popoverMax={popoverMax} dataTestId={dataTestId} onGestureStart={onGestureStart} />;
   }
 
   return (
     <div className="inspector-row">
       <span id={labelId} className="inspector-label">{label}</span>
-      <InlineNumericInput value={value} onChange={onChange} step={step} min={min} max={max} popoverMin={popoverMin} popoverMax={popoverMax} ariaLabelledBy={labelId} dataTestId={dataTestId} />
+      <InlineNumericInput value={value} onChange={onChange} step={step} min={min} max={max} popoverMin={popoverMin} popoverMax={popoverMax} ariaLabelledBy={labelId} dataTestId={dataTestId} onGestureStart={onGestureStart} />
     </div>
   );
 });

@@ -12,6 +12,8 @@ import type { TimelineAction } from '../ui/timeline/semanticTimelineTypes';
 import type { InspectorAreaProps } from '../ui/timeline/InspectorArea';
 import type { InspectorParamContext } from '../ui/timeline/inspector/paramControls/context';
 import { resolveCompoundParam } from '../ui/timeline/inspector/paramControls/compounds';
+import { resolveCatalogNumberParam } from '../ui/timeline/inspector/paramControls/catalogFields';
+import { getSemanticInspectorFields } from '../ui/timeline/semanticInspectorFieldCatalog';
 
 let inspector: InspectorAreaProps;
 let numericUpdate = vi.fn();
@@ -26,18 +28,26 @@ vi.mock('../ui/timeline/InspectorArea', () => ({
       allKeys: Object.keys(action.params), updateParam: numericUpdate,
       registerNumericGesture: props.onNumericGestureStart,
     });
+    if (action.params.scale !== undefined && action.params.rotation === undefined && action.params.opacity === undefined) {
+      const semanticType = action.action === 'transformCharacter' ? 'characterTransform' : 'environmentLayer';
+      Object.assign(ctx, { action: { ...action, semanticType } });
+      const scaleField = getSemanticInspectorFields(semanticType, action.params).find((field) => field.key === 'scale');
+      return <>{scaleField && resolveCatalogNumberParam(ctx, 'scale', {
+        val: action.params.scale, label: scaleField.label, fieldId: 'scale', paramTestId: 'scale', catalogField: scaleField,
+      })}</>;
+    }
     return <>{['position' in action.params ? 'position' : 'x', 'scale'].map((key) => resolveCompoundParam(ctx, key, { val: action.params[key], label: '', fieldId: key, paramTestId: key, catalogField: undefined }))}</>;
   },
 }));
 vi.mock('../ui/timeline/TrackArea', () => ({ TrackArea: () => null }));
 
-function setup(environment = false) {
+function setup(environment = false, partialTransform = false) {
   const context = mockDeep<ComponentProps<typeof AppProvider>>();
   const document = sceneDocumentCodec.parseAndValidate({
     schemaVersion: SCENE_SCHEMA_VERSION, sceneId: 'preview-scene', meta: { title: 'Preview' },
     statements: [environment
       ? { id: 'move', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'background', image: 'backdrop.png', position: [0.5, 0.8], scale: 1, rotation: 0, opacity: 1 } }
-      : { id: 'move', time: 0, type: 'characterTransform', params: { id: 'alice', position: [0.5, 0.8], scale: 1, rotation: 0, opacity: 1 } }],
+      : { id: 'move', time: 0, type: 'characterTransform', params: partialTransform ? { id: 'alice', scale: 1 } : { id: 'alice', position: [0.5, 0.8], scale: 1, rotation: 0, opacity: 1 } }],
   });
   context.stores.document.getCurrentSceneDocumentView.mockReturnValue(document);
   context.stores.document.getCurrentSceneDocumentSnapshot.mockReturnValue(document);
@@ -187,6 +197,28 @@ describe('inspector transform drag preview', () => {
     fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
     fireEvent.mouseMove(document, { clientX: 30 });
     expect(previewTransform).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.mouseUp(document));
+    expect(context.services!.semanticAuthoring!.authorTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a partial character transform catalog scale gesture before its first sample', async () => {
+    const { context, editor, previewTransform } = setup(false, true);
+    const projectPreview = previewTransform;
+    const targetId = 'alice';
+    render(<AppProvider {...context}><TimelineEditor mode="inspector" /></AppProvider>);
+    const scaleInput = screen.getByRole('spinbutton', { name: '缩放比例' });
+
+    fireEvent.mouseDown(scaleInput, { button: 0, clientX: 0 });
+    expect(context.adapters.playback.pause).not.toHaveBeenCalled();
+    act(() => editor.setSelectedIds({ 'another-action': true }));
+    fireEvent.mouseMove(document, { clientX: 20 });
+    await act(async () => fireEvent.mouseUp(document));
+    expect(projectPreview).not.toHaveBeenCalled();
+    expect(context.services!.semanticAuthoring!.authorTransaction).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: '缩放比例' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 30 });
+    expect(projectPreview).toHaveBeenCalledWith(targetId, { scale: expect.any(Number) });
     await act(async () => fireEvent.mouseUp(document));
     expect(context.services!.semanticAuthoring!.authorTransaction).toHaveBeenCalledTimes(1);
   });

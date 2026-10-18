@@ -104,6 +104,7 @@ export function resolveCompositeVisualParam(ctx: InspectorParamContext, key: str
         min={min}
         max={max}
         dataTestId={base.paramTestId}
+        onGestureStart={ctx.registerNumericGesture}
         onChange={(nextValue, isTransient) => ctx.action.semanticType === 'visualStyle'
           ? ctx.updateSemanticSourceParam(key, nextValue, isTransient)
           : ctx.updateParam(ctx.actionId, key, nextValue, isTransient)}

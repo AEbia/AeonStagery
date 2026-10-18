@@ -66,6 +66,7 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
   }, []);
   useEffect(() => {
     mounted.current = true;
+    const scopeGestures = registeredGestures.current;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel(); };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('blur', cancel);
@@ -73,7 +74,7 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
       mounted.current = false;
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('blur', cancel);
-      for (const gesture of [...registeredGestures.current]) gesture.cancel();
+      for (const gesture of [...scopeGestures]) gesture.cancel();
       cancel();
     };
   }, [cancel, scope]);

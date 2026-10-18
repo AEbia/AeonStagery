@@ -18,6 +18,7 @@ export function resolveFallbackParam(ctx: InspectorParamContext, key: string, ba
         popoverMax={base.catalogField?.popoverMax}
         step={base.catalogField?.step}
         dataTestId={base.paramTestId}
+        onGestureStart={ctx.registerNumericGesture}
         onChange={(v, isTransient, gesture) => gesture
           ? ctx.updateAuthoringParam(key, v, isTransient, gesture)
           : ctx.updateAuthoringParam(key, v, isTransient)}
