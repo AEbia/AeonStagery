@@ -231,7 +231,7 @@ function defaultRimLightValue(key: string, params: Readonly<Record<string, unkno
   return {
     color: '#ffffff',
     intensity: 1,
-    thickness: 10,
+    thickness: 6,
     angle: 45,
     softness: 2,
   }[key];

@@ -131,7 +131,7 @@ describe('Visual Effects Authoring (Three Tiers & Usability)', () => {
         target: 'char1',
         slot: 'rim-light',
         color: '#ffffff',
-        thickness: 10,
+        thickness: 6,
         angle: 45,
         softness: 2,
       },

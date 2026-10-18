@@ -151,6 +151,7 @@ export interface RimLightStyleState {
   intensity: number;
   thickness: number;
   angle: number;
+  /** Directional mask blur radius in pixels. */
   softness: number;
 }
 
