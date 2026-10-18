@@ -6,6 +6,8 @@ export interface FileRevealTarget {
   path: string;
   /** Template browser entries already point to their package, outside project lookup. */
   templateResource?: boolean;
+  /** Scene document paths are owned by a project and must never use global resource lookup. */
+  projectRoot?: string;
 }
 
 export interface FileRevealServices {
@@ -22,11 +24,13 @@ export async function revealFileInManager(
   const resolver = new ProjectPathResolver();
   let path = target.path;
   if (!path.trim() || /[\u0000-\u001f]/.test(path)
-    || path.startsWith('//') || path.startsWith('\\\\')
     || (/^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path))) {
-    throw new Error('无法定位此路径，请选择本机文件。');
+    throw new Error('无法定位此路径，请选择文件系统路径。');
   }
-  if (!resolver.isAbsolutePath(path)) {
+  if (target.projectRoot) {
+    if (!api.path?.join) throw new Error('桌面路径服务不可用，请在桌面应用中重试。');
+    path = await api.path.join(target.projectRoot, path);
+  } else if (!resolver.isAbsolutePath(path)) {
     if (target.templateResource) {
       // The filesystem service knows the installed application root for built-in packages.
       const result = await api.fs.realpath(path);

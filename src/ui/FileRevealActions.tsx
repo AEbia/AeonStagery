@@ -16,7 +16,7 @@ async function reveal(target: FileRevealTarget, onRevealError?: RevealErrorHandl
   }
 }
 
-export function FileRevealButton({ path, templateResource, name, compact = false, className, onRevealError }: FileRevealTarget & {
+export function FileRevealButton({ path, templateResource, projectRoot, name, compact = false, className, onRevealError }: FileRevealTarget & {
   name: string;
   compact?: boolean;
   className?: string;
@@ -28,7 +28,7 @@ export function FileRevealButton({ path, templateResource, name, compact = false
     disabled={pending} onClick={(event) => {
       event.stopPropagation();
       setPending(true);
-      void reveal({ path, templateResource }, onRevealError).finally(() => setPending(false));
+      void reveal({ path, templateResource, projectRoot }, onRevealError).finally(() => setPending(false));
     }}>
     <IconFolder width={14} height={14} />
     {!compact && <span>在文件管理器中显示</span>}
@@ -36,7 +36,7 @@ export function FileRevealButton({ path, templateResource, name, compact = false
 }
 
 /** Shared contextual action for project and resource rows; visible buttons remain keyboard discoverable. */
-export function FileRevealContext({ path, templateResource, name, children, enabled = true, onRevealError }: FileRevealTarget & {
+export function FileRevealContext({ path, templateResource, projectRoot, name, children, enabled = true, onRevealError }: FileRevealTarget & {
   name: string;
   children: ReactNode;
   enabled?: boolean;
@@ -91,7 +91,7 @@ export function FileRevealContext({ path, templateResource, name, children, enab
         onClick={() => {
           setPosition(null);
           previousFocus.current?.focus();
-          void reveal({ path, templateResource }, onRevealError);
+          void reveal({ path, templateResource, projectRoot }, onRevealError);
         }}>在文件管理器中显示</button>
     </div>, document.body)}
   </div>;

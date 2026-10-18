@@ -10,10 +10,10 @@ export function ProjectFileActions({ project }: { project: ProjectState }) {
       <summary className="btn" aria-label="项目与场景文件位置">文件位置</summary>
       <div className="top-bar__menu" style={{ maxHeight: 'min(60vh, 420px)', overflowY: 'auto' }}>
         <FileRevealButton path={project.projectFilePath} name={`项目：${project.metadata.name}`} className="top-bar__menu-item" />
-        {project.metadata.scenes.map((scene) => <FileRevealContext key={scene.id} path={scene.path} name={scene.name || scene.path}>
+        {project.metadata.scenes.map((scene) => <FileRevealContext key={scene.id} path={scene.path} projectRoot={project.rootPath} name={scene.name || scene.path}>
           <div style={{ padding: '4px 8px', minWidth: 0 }}>
             <div title={scene.path} style={{ overflowWrap: 'anywhere', fontSize: 11, color: 'var(--text-muted)' }}>{scene.name || scene.path}</div>
-            <FileRevealButton path={scene.path} name={`场景：${scene.name || scene.path}`} className="top-bar__menu-item" />
+            <FileRevealButton path={scene.path} projectRoot={project.rootPath} name={`场景：${scene.name || scene.path}`} className="top-bar__menu-item" />
           </div>
         </FileRevealContext>)}
       </div>

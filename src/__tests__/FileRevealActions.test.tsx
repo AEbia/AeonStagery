@@ -16,10 +16,12 @@ describe('file reveal resolution and interactions', () => {
   const reveal = vi.fn();
   const realpath = vi.fn();
   const resolveResource = vi.fn<(path: string) => Promise<ResourceResolution>>();
-  const api = { fs: { showItemInFolder: reveal, realpath } } as unknown as AeonStageryElectronAPI;
+  const join = vi.fn<(root: string, relative: string) => Promise<string>>();
+  const api = { fs: { showItemInFolder: reveal, realpath }, path: { join } } as unknown as AeonStageryElectronAPI;
   beforeEach(() => {
     vi.clearAllMocks();
     reveal.mockResolvedValue({ success: true });
+    join.mockImplementation(async (root, relative) => `${root}/${relative}`);
     vi.stubGlobal('aeonStageryAPI', api);
     vi.stubGlobal('AeonStagery', { services: { projectResources: { resolveForReadWithStatus: resolveResource } } });
   });
@@ -51,9 +53,14 @@ describe('file reveal resolution and interactions', () => {
     await expect(revealFileInManager({ path: '/project/a' })).rejects.toThrow('文件已移动');
   });
 
-  it.each(['https://example.com', 'asset://localhost/a', 'file:///tmp/a', '\\\\server\\share', '//server/share', '/tmp/a\0b'])('rejects an unsupported path before IPC: %s', async (path) => {
-    await expect(revealFileInManager({ path })).rejects.toThrow('本机文件');
+  it.each(['https://example.com', 'asset://localhost/a', 'file:///tmp/a', '/tmp/a\0b'])('rejects an unsupported path before IPC: %s', async (path) => {
+    await expect(revealFileInManager({ path })).rejects.toThrow('文件系统路径');
     expect(reveal).not.toHaveBeenCalled();
+  });
+
+  it('forwards UNC filesystem paths to the host platform for validation and reveal', async () => {
+    await revealFileInManager({ path: '\\\\server\\share\\project.json' });
+    expect(reveal).toHaveBeenCalledExactlyOnceWith('\\\\server\\share\\project.json');
   });
 
   it('offers a contextual action and restores keyboard focus on Escape', async () => {
@@ -89,7 +96,6 @@ describe('file reveal resolution and interactions', () => {
   });
 
   it('lists the project and each scene and resolves scene paths only when requested', async () => {
-    resolveResource.mockResolvedValue({ status: 'ready', source: 'project', path: '/project/scenes/a.json', relativePath: 'scenes/a.json' });
     const project = {
       rootPath: '/project', projectFilePath: '/project/project.json',
       metadata: { name: '演出', scenes: [{ id: 'a', name: '开场', path: 'scenes/a.json' }] },
@@ -100,6 +106,21 @@ describe('file reveal resolution and interactions', () => {
     await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/project.json'));
     fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：场景：开场' }));
     await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/scenes/a.json'));
-    expect(resolveResource).toHaveBeenCalledWith('scenes/a.json');
+    expect(join).toHaveBeenCalledWith('/project', 'scenes/a.json');
+    expect(resolveResource).not.toHaveBeenCalled();
+  });
+
+  it('keeps a missing scene bound to its project root even if a global same-named file exists', async () => {
+    resolveResource.mockResolvedValue({ status: 'ready', source: 'global-mount', path: '/outside/scenes/missing.json', relativePath: 'scenes/missing.json' });
+    reveal.mockResolvedValue({ success: false, error: '文件不存在或已移动' });
+    const project = {
+      rootPath: '/project', projectFilePath: '/project/project.json',
+      metadata: { name: '演出', scenes: [{ id: 'missing', name: '缺失场景', path: 'scenes/missing.json' }] },
+    } as ProjectState;
+    render(<ProjectFileActions project={project} />);
+    fireEvent.click(screen.getByText('文件位置'));
+    fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：场景：缺失场景' }));
+    await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/scenes/missing.json'));
+    expect(resolveResource).not.toHaveBeenCalled();
   });
 });

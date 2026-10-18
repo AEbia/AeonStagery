@@ -12,14 +12,11 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       if (typeof filePath !== 'string' || !filePath.trim()
         || /[\u0000-\u001f]/.test(filePath)
         || !path.isAbsolute(filePath)
-        || filePath.startsWith('//') || filePath.startsWith('\\\\')
         || (/^[a-z][a-z\d+.-]*:/i.test(filePath) && !/^[a-z]:[\\/]/i.test(filePath))) {
-        throw new Error('只能定位本机的绝对文件路径。');
+        throw new Error('只能定位绝对文件系统路径。');
       }
       const absolutePath = await fs.promises.realpath(filePath);
-      if (absolutePath.startsWith('//') || absolutePath.startsWith('\\\\')) {
-        throw new Error('只能定位本机的文件。');
-      }
+      if (!path.isAbsolute(absolutePath)) throw new Error('无法解析为绝对文件系统路径。');
       if (/\.asar[\\/]/i.test(absolutePath)) {
         throw new Error('此资源位于应用安装包中，请先导入项目再定位。');
       }

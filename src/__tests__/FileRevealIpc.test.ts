@@ -1,4 +1,5 @@
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -44,9 +45,18 @@ describe('native file reveal IPC', () => {
     expect(await invoke(directory)).toEqual({ success: true });
   });
 
-  it.each(['', 'background/image.png', 'https://example.com', 'file:///tmp/project', 'asset://localhost/a', '//server/share', '\\\\server\\share', '/tmp/a\0b', 123, null])('rejects a non-local or invalid path: %s', async (value) => {
+  it.each(['', 'background/image.png', 'https://example.com', 'file:///tmp/project', 'asset://localhost/a', '/tmp/a\0b', 123, null])('rejects a non-local or invalid path: %s', async (value) => {
     expect(await invoke(value)).toMatchObject({ success: false });
     expect(mocks.reveal).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform !== 'win32')('accepts a UNC filesystem path when the host resolves it', async () => {
+    const sharePath = '\\\\server\\share\\project.json';
+    const realpath = vi.spyOn(fs.promises, 'realpath').mockResolvedValue(sharePath as never);
+    expect(await invoke(sharePath)).toEqual({ success: true });
+    expect(realpath).toHaveBeenCalledWith(sharePath);
+    expect(mocks.reveal).toHaveBeenCalledWith(sharePath);
+    realpath.mockRestore();
   });
 
   it('rejects an untrusted sender or child frame', async () => {
