@@ -46,6 +46,8 @@ ADR-0013 与 ADR-0018 的 bundle 决策继续有效：协作 scene 仍保存 pro
 
 Cubism 3+ 的 `CubismPixiModel` 在绘制前推进模拟，使 Seek、参数读取、快照和 Bake 不依赖下一次绘制，绘制本身不会重复推进模拟。Adapter 保留场景淡入覆盖与文件淡入恢复、动作结束姿势、命名空间动作组、表情异步取消、确定性 blink/breath、Core 更新前的参数注入，以及组合模型扩容后的内存视图刷新。
 
+两类 runtime 都在 Pixi `onRender` 阶段准备当前姿态和 drawable bounds，使角色及其祖先容器的淡入、轮廓光和其他滤镜在计算离屏范围时包含超出模型画布的动态部位。画布锚点保持稳定，已提交的模拟不重复推进；Cubism 2 的提前准备通过 Adapter 绑定 GL 上下文并使用既有 external-GL guard。
+
 ### Cubism 3+ authored performance parity
 
 Cubism 3/4/5 通过现有绑定 handle 支持眨眼、视线、表情、资源 Motion、自定义

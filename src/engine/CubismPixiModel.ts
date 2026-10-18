@@ -5,6 +5,7 @@ import type { Live2DModelCreateOptions, Live2DSeekRestoreInput, Live2DSeekRestor
 import type { Live2DPerformanceMetadata, PerformanceCompatibility, PreparedAssetRef } from './runtime/Live2DRuntimeContracts';
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
 import { manageRuntimeFocusAnimations } from './live2d/runtime/RuntimeFocus';
+import { installLive2DRenderPreparation } from './live2d/runtime/Live2DRenderPreparation';
 
 function parameterId(id: any): string {
   const value = typeof id === 'string' ? id : id?.getString?.();
@@ -131,6 +132,8 @@ function compatibilityForExternal(
  * canvas, texture upload, SDK checkout, or external shader directory.
  */
 export function installCubismPixiModelRuntime(model: any, suppliedEngine?: CubismExternalEngine): any {
+  const prepare = model.prepareForRender?.bind(model);
+  if (prepare) installLive2DRenderPreparation(model, () => prepare());
   const internal = model.internalModel;
   const core = internal.coreModel;
   const manager = internal.motionManager;
