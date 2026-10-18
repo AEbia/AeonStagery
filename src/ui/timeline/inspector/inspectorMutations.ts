@@ -60,7 +60,8 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
   const updateSemanticSourceParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
     if (gesture?.signal.aborted) return;
     if (isTransient) {
-      updateParam(actionId, key, value, true, gesture);
+      if (gesture) updateParam(actionId, key, value, true, gesture);
+      else updateParam(actionId, key, value, true);
       return;
     }
     const nextParams = { ...sourceParams };
@@ -75,10 +76,12 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
   const updateAuthoringParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
     if (gesture?.signal.aborted) return;
     if (usesSourceParamForm && action.semanticType) {
-      updateSemanticSourceParam(key, value, isTransient, gesture);
+      if (gesture) updateSemanticSourceParam(key, value, isTransient, gesture);
+      else updateSemanticSourceParam(key, value, isTransient);
       return;
     }
-    updateParam(actionId, key, value, isTransient, gesture);
+    if (gesture) updateParam(actionId, key, value, isTransient, gesture);
+    else updateParam(actionId, key, value, isTransient);
   };
 
   const canRemoveCharacterPerformanceField = (field: 'lookAt' | 'blink'): boolean => {

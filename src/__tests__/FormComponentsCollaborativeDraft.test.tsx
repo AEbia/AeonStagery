@@ -83,6 +83,30 @@ describe('collaborative text draft inputs', () => {
     expect(onChange).toHaveBeenNthCalledWith(2, 2, false, expect.objectContaining({ signal: expect.any(AbortSignal), cancel: expect.any(Function) }));
   });
 
+  it('detaches an active numeric scrub when its editor scope is cancelled', () => {
+    const onChange = vi.fn();
+    const registeredGestures = new Set<AbortSignal>();
+    const { container } = render(<InlineNumericInput
+      dragLabel="Scale" value={1} step="0.1" onChange={onChange}
+      onGestureStart={(gesture) => {
+        registeredGestures.add(gesture.signal);
+        return () => { registeredGestures.delete(gesture.signal); };
+      }}
+    />);
+    const scrubber = container.querySelector('.scrubbable-badge') as HTMLElement;
+    fireEvent.mouseDown(scrubber, { clientX: 0, clientY: 0, button: 0 });
+    expect(registeredGestures.size).toBe(1);
+    fireEvent.mouseMove(document, { clientX: 20 });
+    const gesture = onChange.mock.calls[0][2];
+
+    act(() => gesture.cancel());
+    expect(gesture.signal.aborted).toBe(true);
+    expect(registeredGestures.size).toBe(0);
+    fireEvent.mouseMove(document, { clientX: 30 });
+    fireEvent.mouseUp(document, { clientX: 30 });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
   it('cancels a popover pointer gesture and allows a fresh gesture on the same control', async () => {
     const onChange = vi.fn();
     render(<InlineNumericInput ariaLabel="Scale" value={1} step="0.1" min="0" max="2" onChange={onChange} />);

@@ -1,4 +1,4 @@
-import type { NumericInputGesture } from './FormComponents';
+import type { NumericInputGesture, NumericInputGestureRegistrar } from './FormComponents';
 import React, { useState, useEffect } from 'react';
 import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore, usePlaybackAdapter } from '../context/AppContext';
 import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
@@ -82,6 +82,7 @@ export interface ActionInspectorProps {
   setSelectedIds: (ids: Record<string, boolean>) => void;
   updateAction: (id: string, updates: any, isTransient?: boolean) => void;
   updateParam: (id: string, key: string, val: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  onNumericGestureStart?: NumericInputGestureRegistrar;
   replaceSourceParams: (id: string, params: Record<string, unknown>) => void | Promise<unknown>;
   deleteAction: (id: string) => void;
   copyActions?: (ids: readonly string[]) => void;
@@ -288,6 +289,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     customMotionValue, environmentLayers, visualTargetOptions, recipeOptions,
     modelData, isModelDataLoading, targetModelPath, currentDialogueTemplateValue, customDialogueTemplateOptions,
     updateParam, replaceSourceParams, updateResourceParam, updateSemanticSourceParam,
+    registerNumericGesture: props.onNumericGestureStart,
     updateAuthoringParam, updateDialogueSpeaker, updateDialogueTemplate,
     updateVisualSemanticOverride, characterAdapter, semanticAuthoring,
     webGalStyleImport,

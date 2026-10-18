@@ -38,6 +38,7 @@ interface TransformPreviewSession {
 /** A drag owns runtime state until its single source commit or cancellation. */
 export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: unknown) {
   const active = useRef<TransformPreviewSession | null>(null);
+  const registeredGestures = useRef(new Set<NumericInputGesture>());
   const cancelledLegacy = useRef<string | null>(null);
   const generation = useRef(0);
   const mounted = useRef(false);
@@ -59,6 +60,10 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
     session.gesture?.cancel();
     restore();
   }, [restore]);
+  const registerNumericGesture = useCallback((gesture: NumericInputGesture) => {
+    registeredGestures.current.add(gesture);
+    return () => registeredGestures.current.delete(gesture);
+  }, []);
   useEffect(() => {
     mounted.current = true;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel(); };
@@ -68,6 +73,7 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
       mounted.current = false;
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('blur', cancel);
+      for (const gesture of [...registeredGestures.current]) gesture.cancel();
       cancel();
     };
   }, [cancel, scope]);
@@ -118,5 +124,5 @@ export function useInspectorTransformPreview(playback: IPlaybackAdapter, scope: 
       if (session && active.current === null && generation.current === commitGeneration) restore();
     }
   }, [restore]);
-  return { preview, commit };
+  return { preview, commit, registerNumericGesture };
 }

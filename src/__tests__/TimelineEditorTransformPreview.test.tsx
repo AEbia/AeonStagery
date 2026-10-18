@@ -24,6 +24,7 @@ vi.mock('../ui/timeline/InspectorArea', () => ({
     Object.assign(ctx, {
       actionId: action._id, actionType: action.action, actionParams: action.params,
       allKeys: Object.keys(action.params), updateParam: numericUpdate,
+      registerNumericGesture: props.onNumericGestureStart,
     });
     return <>{['position' in action.params ? 'position' : 'x', 'scale'].map((key) => resolveCompoundParam(ctx, key, { val: action.params[key], label: '', fieldId: key, paramTestId: key, catalogField: undefined }))}</>;
   },
@@ -167,6 +168,27 @@ describe('inspector transform drag preview', () => {
     expect(context.adapters.playback.seek).toHaveBeenCalledWith(0, true);
     await act(async () => fireEvent.mouseUp(document));
     expect(context.services!.semanticAuthoring!.authorTransaction).not.toHaveBeenCalled();
+  });
+
+  it('cancels a gesture on selection change before its first sample and allows a same-action retry', async () => {
+    const { context, editor, previewTransform } = setup();
+    render(<AppProvider {...context}><TimelineEditor mode="inspector" /></AppProvider>);
+    const xInput = screen.getByRole('spinbutton', { name: 'X' });
+
+    fireEvent.mouseDown(xInput, { button: 0, clientX: 0 });
+    expect(context.adapters.playback.pause).not.toHaveBeenCalled();
+    act(() => editor.setSelectedIds({ 'another-action': true }));
+    expect(context.adapters.playback.seek).not.toHaveBeenCalled();
+    fireEvent.mouseMove(document, { clientX: 20 });
+    await act(async () => fireEvent.mouseUp(document));
+    expect(previewTransform).not.toHaveBeenCalled();
+    expect(context.services!.semanticAuthoring!.authorTransaction).not.toHaveBeenCalled();
+
+    fireEvent.mouseDown(screen.getByRole('spinbutton', { name: 'X' }), { button: 0, clientX: 0 });
+    fireEvent.mouseMove(document, { clientX: 30 });
+    expect(previewTransform).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.mouseUp(document));
+    expect(context.services!.semanticAuthoring!.authorTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('restores canonical state if the final authoring operation fails', async () => {

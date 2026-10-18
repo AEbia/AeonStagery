@@ -1,4 +1,4 @@
-import type { NumericInputGesture } from '../../FormComponents';
+import type { NumericInputGesture, NumericInputGestureRegistrar } from '../../FormComponents';
 // Shared context + resolver contract for the inspector param-control dispatch chain.
 // The chain that used to live inline in ActionInspector.renderParam is split into
 // ordered resolvers; each returns:
@@ -84,6 +84,7 @@ export interface InspectorParamContext {
   currentDialogueTemplateValue: string;
   customDialogueTemplateOptions: Array<{ value: string; label: string; disabled?: boolean }>;
   updateParam: ActionInspectorProps['updateParam'];
+  registerNumericGesture?: NumericInputGestureRegistrar;
   replaceSourceParams: ActionInspectorProps['replaceSourceParams'];
   updateResourceParam: (key: string, value: string) => void;
   updateSemanticSourceParam: (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;

@@ -158,7 +158,11 @@ export function TimelineEditor({
     selection: Object.keys(selectedActionIds).filter((id) => selectedActionIds[id]).sort().join('|'),
     mode, inspectorView, isOfflineEditingBlocked,
   }), [semanticDocument, selectedActionIds, mode, inspectorView, isOfflineEditingBlocked]);
-  const { preview: previewInspectorTransform, commit: commitInspectorTransform } = useInspectorTransformPreview(playbackAdapter, previewScope);
+  const {
+    preview: previewInspectorTransform,
+    commit: commitInspectorTransform,
+    registerNumericGesture,
+  } = useInspectorTransformPreview(playbackAdapter, previewScope);
 
   const replaceSourceParams = useCallback(async (id: string, params: Record<string, unknown>) => {
     const item = semanticSnapshot.itemById.get(id);
@@ -964,6 +968,7 @@ export function TimelineEditor({
             semanticSnapshot={semanticSnapshot}
             selectedActionIds={selectedActionIds} setSelectedIds={setSelectedIds}
             updateAction={updateAction} updateParam={updateParam} replaceSourceParams={replaceSourceParams}
+            onNumericGestureStart={registerNumericGesture}
             addAction={addAction}
             handleSelect={handleSelect} setCurrentTime={(t: number) => playbackAdapter.seek(t)}
             handleSave={handleSave}

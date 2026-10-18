@@ -203,6 +203,8 @@ export interface NumericInputGesture {
   cancel(): void;
 }
 
+export type NumericInputGestureRegistrar = (gesture: NumericInputGesture) => () => void;
+
 export interface NumericInputProps {
   label: string;
   value: number;
@@ -232,6 +234,7 @@ export interface InlineNumericInputProps {
   ariaLabel?: string;
   ariaLabelledBy?: string;
   dataTestId?: string;
+  onGestureStart?: NumericInputGestureRegistrar;
 }
 
 function getTickInterval(span: number): number {
@@ -247,7 +250,7 @@ function getTickInterval(span: number): number {
   return nice * magnitude;
 }
 
-export const InlineNumericInput = React.memo(({ value, disabled = false, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId }: InlineNumericInputProps) => {
+export const InlineNumericInput = React.memo(({ value, disabled = false, onChange, step = "0.1", min, max, inferNormalizedBounds = true, popoverMin, popoverMax, style, className, dragLabel, ariaLabel, ariaLabelledBy, dataTestId, onGestureStart }: InlineNumericInputProps) => {
   const safeValue = value ?? 0;
   const canonicalValueRef = useRef(safeValue);
   canonicalValueRef.current = safeValue;
@@ -258,6 +261,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
     numericGestureRef.current?.cancel();
     const controller = new AbortController();
     let finished = false;
+    let unregisterGesture: (() => void) | undefined;
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') gesture.cancel(); };
     const finish = () => {
       if (finished) return;
@@ -265,6 +269,8 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       cleanup();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('blur', gesture.cancel);
+      unregisterGesture?.();
+      unregisterGesture = undefined;
       if (numericGestureRef.current === gesture) numericGestureRef.current = null;
     };
     const gesture: NumericInputGesture = {
@@ -279,6 +285,7 @@ export const InlineNumericInput = React.memo(({ value, disabled = false, onChang
       },
     };
     numericGestureRef.current = gesture;
+    unregisterGesture = onGestureStart?.(gesture);
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('blur', gesture.cancel);
     return { gesture, finish };

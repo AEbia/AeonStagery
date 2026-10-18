@@ -36,8 +36,11 @@ export function resolveCatalogNumberParam(ctx: InspectorParamContext, key: strin
         step={base.catalogField?.step}
         dataTestId={base.paramTestId}
         onChange={(nextValue, isTransient, gesture) => {
-          if (ctx.action.semanticType === 'lighting' || ctx.action.semanticType === 'visualStyle') ctx.updateSemanticSourceParam(key, nextValue, isTransient, gesture);
-          else ctx.updateParam(ctx.actionId, key, nextValue, isTransient, gesture);
+          if (ctx.action.semanticType === 'lighting' || ctx.action.semanticType === 'visualStyle') {
+            if (gesture) ctx.updateSemanticSourceParam(key, nextValue, isTransient, gesture);
+            else ctx.updateSemanticSourceParam(key, nextValue, isTransient);
+          } else if (gesture) ctx.updateParam(ctx.actionId, key, nextValue, isTransient, gesture);
+          else ctx.updateParam(ctx.actionId, key, nextValue, isTransient);
         }}
       />
     );
