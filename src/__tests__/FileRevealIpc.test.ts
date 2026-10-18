@@ -41,7 +41,7 @@ describe('native file reveal IPC', () => {
     const file = join(directory, '角色 image.png');
     await writeFile(file, 'image');
     expect(await invoke(file)).toEqual({ success: true });
-    expect(mocks.reveal).toHaveBeenCalledWith(file);
+    expect(mocks.reveal).toHaveBeenCalledWith(await fs.promises.realpath(file));
     expect(await invoke(directory)).toEqual({ success: true });
   });
 
