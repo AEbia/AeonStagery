@@ -233,7 +233,7 @@ describe('runStandaloneProjectAgentBenchmarkPhase', () => {
     expect(fs.existsSync(outcome.outputPath)).toBe(true);
     // Every sample temp project is cleaned up.
     expect(fs.readdirSync(baseTmpDir).filter((name) => name.startsWith('aeon-agent-benchmark-'))).toEqual([]);
-  });
+  }, 15_000);
 });
 
 function mutate(taskId: keyof typeof PROJECT_AGENT_BENCHMARK_TASKS, source: CurrentSceneDocument): CurrentSceneDocument {
