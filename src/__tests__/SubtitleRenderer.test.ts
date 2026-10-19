@@ -319,8 +319,18 @@ describe('SubtitleRenderer', () => {
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
     const content = '调整字号应当更新文本测量并保持对白在舞台内自动换行'.repeat(3);
     const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === 'pink-nameplate')!;
-    const config = { _id: 'live-font-reflow', speaker: '角色', text: content, style: 'typewriter' as const, duration: 4,
-      presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any };
+    const config: DialogueConfig = {
+      _id: 'live-font-reflow', speaker: '角色', text: content, style: 'typewriter', duration: 4,
+      presentation: sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+        text: content, durationSeconds: 4,
+        presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id },
+      }, 'font-reflow-test').presentation,
+    };
+    const authoredTextStyle = config.presentation!.text;
+    const updatedFontSize = 72;
+    const expectedLineHeight = Math.round(
+      authoredTextStyle.lineHeight! * updatedFontSize / authoredTextStyle.fontSize!,
+    );
     const renderer = new SubtitleRenderer();
     const original = renderer.showDialogue(config);
     const master = gsap.timeline({ paused: true }).add(original, 2);
@@ -333,13 +343,13 @@ describe('SubtitleRenderer', () => {
     const before = stageState.subtitleLayer.children[0] as PIXI.Container;
     const firstLines = before.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 32);
     expect(firstLines.length).toBeGreaterThan(1);
-    fontSize = 72;
+    fontSize = updatedFontSize;
     renderer.forceUpdate();
     const after = stageState.subtitleLayer.children[0] as PIXI.Container;
-    const lines = after.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 72) as PIXI.Text[];
+    const lines = after.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === updatedFontSize) as PIXI.Text[];
     expect(lines.length).toBeGreaterThan(firstLines.length);
     expect(lines.map((line) => line.text).join('')).toBe(content);
-    expect(lines[0].style.lineHeight).toBe(94);
+    expect(lines[0].style.lineHeight).toBe(expectedLineHeight);
     const replacement = renderer.getCurrentTimeline()!;
     expect(replacement).not.toBe(original);
     expect(replacement.parent).toBe(master);
@@ -350,7 +360,7 @@ describe('SubtitleRenderer', () => {
     expect(box.y + box.height).toBeCloseTo(1040);
     expect(namebox.y - box.y).toBe(-78);
     expect(lines[0].y - box.y).toBe(38);
-    expect(lines.at(-1)!.y + 93).toBeLessThanOrEqual(1040);
+    expect(lines.at(-1)!.y + expectedLineHeight - 1).toBeLessThanOrEqual(1040);
     sync(0.15);
     expect(lines.map((line) => line.text).join('')).toBe(content.slice(0, 15));
     sync(3);
