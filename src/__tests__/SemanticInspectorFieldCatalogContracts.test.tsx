@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../ui/context/AppContext', () => ({
+  useOptionalApp: () => null,
   useApp: () => ({
     stores: { editor: { setCopyBuffer: vi.fn() } },
     services: { semanticAuthoring: state.semanticAuthoring },
