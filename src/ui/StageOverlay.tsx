@@ -1,3 +1,5 @@
+import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
+import { getLogicalStageSize } from '../api/types/video-format';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   useStageAdapter,
@@ -19,6 +21,7 @@ function createStageOverlayCorrelationId(): string {
 }
 
 export default function StageOverlay() {
+  const { width: stageWidth, height: stageHeight } = getLogicalStageSize(useProjectVideoFormat());
   const { gizmosVisible } = useEditorSettings();
   const stageAdapter = useStageAdapter();
   const characterAdapter = useCharacterAdapter();
@@ -182,20 +185,20 @@ export default function StageOverlay() {
           const headCircle = group.querySelector('.head-marker') as SVGCircleElement;
           const headText = group.querySelector('.head-text') as SVGTextElement;
           if (headCircle) {
-            headCircle.setAttribute('cx', String(head.x * 1920));
-            headCircle.setAttribute('cy', String(head.y * 1080));
+            headCircle.setAttribute('cx', String(head.x * stageWidth));
+            headCircle.setAttribute('cy', String(head.y * stageHeight));
             headCircle.setAttribute('visibility', 'visible');
           }
           if (headText) {
-            headText.setAttribute('x', String(head.x * 1920));
-            headText.setAttribute('y', String(head.y * 1080 - 15));
+            headText.setAttribute('x', String(head.x * stageWidth));
+            headText.setAttribute('y', String(head.y * stageHeight - 15));
             headText.setAttribute('visibility', 'visible');
           }
 
           const chestCircle = group.querySelector('.chest-marker') as SVGCircleElement;
           if (chestCircle) {
-            chestCircle.setAttribute('cx', String(chest.x * 1920));
-            chestCircle.setAttribute('cy', String(chest.y * 1080));
+            chestCircle.setAttribute('cx', String(chest.x * stageWidth));
+            chestCircle.setAttribute('cy', String(chest.y * stageHeight));
             chestCircle.setAttribute('visibility', 'visible');
           }
 
@@ -203,14 +206,14 @@ export default function StageOverlay() {
           if (focusGroup) {
             const focusX = parseFloat(focusGroup.getAttribute('data-focus-x') || '0');
             const focusY = parseFloat(focusGroup.getAttribute('data-focus-y') || '0');
-            const targetX = (head.x + focusX * 0.1) * 1920;
-            const targetY = (head.y - focusY * 0.1) * 1080;
+            const targetX = (head.x + focusX * 0.1) * stageWidth;
+            const targetY = (head.y - focusY * 0.1) * stageHeight;
             
             const line = focusGroup.querySelector('line');
             const circle = focusGroup.querySelector('circle');
             if (line) {
-              line.setAttribute('x1', String(head.x * 1920));
-              line.setAttribute('y1', String(head.y * 1080));
+              line.setAttribute('x1', String(head.x * stageWidth));
+              line.setAttribute('y1', String(head.y * stageHeight));
               line.setAttribute('x2', String(targetX));
               line.setAttribute('y2', String(targetY));
             }
@@ -225,7 +228,7 @@ export default function StageOverlay() {
 
     frameId = requestAnimationFrame(updatePositions);
     return () => cancelAnimationFrame(frameId);
-  }, [activeCharacters, characterAdapter, gizmosVisible, selectedAction]);
+  }, [activeCharacters, characterAdapter, gizmosVisible, selectedAction, stageWidth, stageHeight]);
 
   if (!gizmosVisible) return null;
 
@@ -306,7 +309,7 @@ export default function StageOverlay() {
           pointerEvents: 'none',
           overflow: 'visible' 
         }} 
-        viewBox="0 0 1920 1080" 
+        viewBox={`0 0 ${stageWidth} ${stageHeight}`}
         preserveAspectRatio="xMidYMid meet"
       >
         <g ref={markersContainerRef}>
@@ -324,8 +327,8 @@ export default function StageOverlay() {
 
         {selectedAction?.action === 'cameraMove' && (
           <g className="camera-group"
-             data-tx={(selectedAction.params.target?.x ?? selectedAction.params.target?.[0] ?? selectedAction.params.position?.x ?? 0.5) * 1920}
-             data-ty={(selectedAction.params.target?.y ?? selectedAction.params.target?.[1] ?? selectedAction.params.position?.y ?? 0.5) * 1080}
+             data-tx={(selectedAction.params.target?.x ?? selectedAction.params.target?.[0] ?? selectedAction.params.position?.x ?? 0.5) * stageWidth}
+             data-ty={(selectedAction.params.target?.y ?? selectedAction.params.target?.[1] ?? selectedAction.params.position?.y ?? 0.5) * stageHeight}
           >
             <circle r="15" fill="none" stroke="var(--color-camera)" strokeWidth="3" />
             <line stroke="var(--color-camera)" strokeWidth="2" />
@@ -338,8 +341,8 @@ export default function StageOverlay() {
           const keyframes: any[] = selectedAction?.params?.keyframes || [];
           if (keyframes.length < 2) return null;
 
-          const stageW = 1920;
-          const stageH = 1080;
+          const stageW = stageWidth;
+          const stageH = stageHeight;
 
           // Build positioned keyframe points, preserving original array index
           const points = keyframes

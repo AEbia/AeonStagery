@@ -4,7 +4,6 @@ import type { EnvironmentLayerRenderState } from './environmentLayerModel';
 import { reconstructEnvironmentAtTime } from './EnvironmentLayerRuntime';
 import { resolveLookAtFocus, type LookAtPointLookup } from './lookAtFocus';
 import {
-  CHARACTER_STAGE_HEIGHT,
   DEFAULT_CHARACTER_ENTER_EASE,
   DEFAULT_CHARACTER_EXIT_EASE,
   DEFAULT_CHARACTER_MODEL_HEIGHT,
@@ -14,7 +13,7 @@ import {
   resolveCharacterExitDuration,
 } from './CharacterAnimationContract';
 
-const STAGE_HEIGHT = CHARACTER_STAGE_HEIGHT;
+import { STAGE_HEIGHT } from './StageDimensions';
 const DEFAULT_CHARACTER_POSITION: [number, number] = [0.5, 0.5];
 const DEFAULT_CHARACTER_SCALE = 1;
 const DEFAULT_CHARACTER_ROTATION = 0;

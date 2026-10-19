@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * AeonStagery — Bake Engine
  *
@@ -371,7 +372,7 @@ export class BakeEngine {
 
               if (state.position) {
                 const pos = resolveVec2(state.position);
-                entry.displayObject.position.set(pos.x * 1920, pos.y * 1080);
+                entry.displayObject.position.set(pos.x * STAGE_WIDTH, pos.y * STAGE_HEIGHT);
               }
               if (state.scale !== undefined) entry.displayObject.scale.set(state.scale, state.scale);
               if (state.rotation !== undefined) entry.displayObject.rotation = state.rotation;

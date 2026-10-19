@@ -9,6 +9,7 @@ import { ProjectResourceService } from '../../services/io/ProjectResourceService
 import { createPreparedFrameCaptureVisualRuntime } from '../../engine/export/PreparedFrameCaptureVisualRuntime';
 import { ExportVoiceLipSync } from '../../engine/export/ExportVoiceLipSync';
 import { lipSyncEngine } from '../../engine/LipSyncEngine';
+import { validateVideoFormat } from '../types/video-format';
 
 export class ExportAdapter implements IExportAdapter {
   private captureEngine: FrameCaptureEngine;
@@ -56,6 +57,9 @@ export class ExportAdapter implements IExportAdapter {
   }
 
   async export(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal): Promise<ExportResult> {
+    if (signal?.aborted) return { success: false, cancelled: true };
+    const formatError = validateVideoFormat(config);
+    if (formatError) return { success: false, error: formatError };
     let temporaryVideoPath: string | undefined;
     let directCaptureOutputStarted = false;
     let backendOutputStarted = false;
@@ -167,6 +171,7 @@ export class ExportAdapter implements IExportAdapter {
         rangeEnd,
         width,
         height,
+        fit: config.fit,
         bitrateBps,
         outputPath: videoPath,
         codec,

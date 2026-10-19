@@ -51,6 +51,7 @@ export interface CustomMotionConversionReceipt {
 }
 
 export interface CustomMotionConversionPorts {
+  getFps?: () => number;
   /** Existing atomic authoring service; the converted motion commits through it. */
   authoring: SemanticAuthoringApplicationService;
   /** Preferred bound-runtime sampling behavior. */
@@ -141,7 +142,7 @@ export class CustomMotionConversionCommand {
     try {
       if (this.ports.sampleMotion) {
         const sampled = await this.ports.sampleMotion(characterId, motionKey, {
-          fps: document.meta.fps ?? DEFAULT_SCENE_FPS,
+          fps: this.ports.getFps?.() ?? document.meta.fps ?? DEFAULT_SCENE_FPS,
           zeroSourceFades: true,
         });
         if (sampled.status !== 'sampled' || !sampled.metadata) {
@@ -158,7 +159,7 @@ export class CustomMotionConversionCommand {
         const sampler = this.samplerImpl!;
         meta = await sampler.resolveMeta(characterId, motionKey);
         merged = await sampler.sample(characterId, motionKey, {
-          fps: document.meta.fps ?? DEFAULT_SCENE_FPS,
+          fps: this.ports.getFps?.() ?? document.meta.fps ?? DEFAULT_SCENE_FPS,
           zeroSourceFades: true,
         });
       }

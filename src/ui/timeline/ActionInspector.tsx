@@ -4,6 +4,7 @@ import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore
 import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
+import { useProjectVideoFormat } from '../hooks/useProjectVideoFormat';
 
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import {
@@ -105,6 +106,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
   const playbackAdapter = usePlaybackAdapter();
   const appContext = useApp();
   const documentStore = useDocumentStore();
+  const { fps: projectFps } = useProjectVideoFormat();
   const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
   const { document: semanticDocument } = semanticSnapshot;
   const { peers: collaborationPeers } = useCollaborationPresence();
@@ -138,7 +140,6 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     filterTemplateOptions,
     activeFilterTemplateOptions,
   } = useInspectorOptions({ sceneData, action, timelineActions, semanticDocument, semanticItem });
-  const sceneFps = semanticDocument?.meta?.fps ?? documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
   const {
     customMotionConversion,
     customMotionTarget,
@@ -147,7 +148,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     isConverting,
     setIsConverting,
     estimateKeyframesForDensity,
-  } = useCustomMotionAuthoring({ semanticItem, fps: sceneFps });
+  } = useCustomMotionAuthoring({ semanticItem, fps: projectFps });
 
   const [showVisualAdvanced, setShowVisualAdvanced] = useState(false);
   const [isAutoMatchingVisual, setIsAutoMatchingVisual] = useState(false);

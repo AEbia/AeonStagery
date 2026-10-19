@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * Live2D Stage Runtime
  *
@@ -189,8 +190,8 @@ export class Live2DStageRuntime {
           const pos = config.position ? resolveVec2(config.position) : { x: 0.5, y: 1.15 };
           const container = this.getContainer(id);
           staging.container = container;
-          container.x = pos.x * 1920;
-          container.y = pos.y * 1080;
+          container.x = pos.x * STAGE_WIDTH;
+          container.y = pos.y * STAGE_HEIGHT;
           container.angle = config.rotation ?? 0;
 
           model.x = 0;
@@ -201,7 +202,7 @@ export class Live2DStageRuntime {
           const baseHeight = model.height || 1000;
           Reflect.set(model, '_baseHeight', baseHeight);
 
-          const targetHeight = 1080 * (config.scale ?? 1.3);
+          const targetHeight = STAGE_HEIGHT * (config.scale ?? 1.3);
           const modelScale = targetHeight / baseHeight;
           model.scale.set(modelScale);
           const baseWidth = (model.width && modelScale !== 0)

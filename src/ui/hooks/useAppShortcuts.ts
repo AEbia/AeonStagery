@@ -1,3 +1,4 @@
+import { DEFAULT_VIDEO_FORMAT } from '../../api/types/video-format';
 import { useCallback } from 'react';
 import type { BootstrapContext } from '../../engine/Bootstrapper';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
@@ -35,7 +36,8 @@ export function useAppShortcuts({
     if (showProjectHome || !hasLoadedScene) return;
     const playback = contextValue.adapters.playback;
     const t = playback.getCurrentTime();
-    playback.seek(Math.max(0, t + dir * (1 / 60)));
+    const fps = contextValue.services.projectWorkspace?.getCurrentProject()?.metadata.videoFormat?.fps ?? DEFAULT_VIDEO_FORMAT.fps;
+    playback.seek(Math.max(0, Math.min(playback.getDuration(), t + dir / fps)));
   }, [contextValue, hasLoadedScene, showProjectHome]);
 
   const handleUndo = useCallback(() => {

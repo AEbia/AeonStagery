@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * AeonStagery — Lighting System
  *
@@ -280,8 +281,8 @@ class LightingSystem {
     this.removeVignette();
 
     const layer = stageManager.getLayer('overlay');
-    const w = 1920;
-    const h = 1080;
+    const w = STAGE_WIDTH;
+    const h = STAGE_HEIGHT;
 
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -336,7 +337,7 @@ class LightingSystem {
     const layer = stageManager.getLayer('overlay');
     const flash = new PIXI.Graphics();
     flash.beginFill(color, intensity);
-    flash.drawRect(0, 0, 1920, 1080);
+    flash.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     flash.endFill();
     flash.alpha = 0;
     layer.addChild(flash);
@@ -705,7 +706,7 @@ class LightingSystem {
       const overlay = new PIXI.Graphics();
       const hex = parseInt(entry.color.replace('#', '0x'));
       overlay.beginFill(hex, 1.0);
-      overlay.drawRect(0, 0, 1920, 1080);
+      overlay.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
       overlay.endFill();
       overlay.alpha = entry.intensity;
       overlay.blendMode = entry.mode;
@@ -752,7 +753,7 @@ class LightingSystem {
     const overlay = new PIXI.Graphics();
     const hex = typeof color === 'string' ? parseInt(color.replace('#', '0x')) : color;
     overlay.beginFill(hex, 1.0);
-    overlay.drawRect(0, 0, 1920, 1080);
+    overlay.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     overlay.endFill();
     overlay.alpha = 0;
     overlay.blendMode = mode;
@@ -872,9 +873,9 @@ class LightingSystem {
       let light = this.authoredPointLights.get(id);
       if (!light || light.destroyed) {
         if (light) this.authoredPointLights.delete(id);
-        light = this.createPointLight(id, entry.x, entry.y, entry.color, entry.radius, this.authoredPointLights);
+        light = this.createPointLight(id, entry.x * STAGE_WIDTH / 1920, entry.y * STAGE_HEIGHT / 1080, entry.color, entry.radius, this.authoredPointLights);
       } else {
-        this.updatePointLight(light, entry.x, entry.y, entry.color, entry.radius);
+        this.updatePointLight(light, entry.x * STAGE_WIDTH / 1920, entry.y * STAGE_HEIGHT / 1080, entry.color, entry.radius);
       }
       light.alpha = entry.alpha;
     });

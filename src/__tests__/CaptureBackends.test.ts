@@ -195,6 +195,40 @@ describe('capture backend stream cleanup', () => {
     });
   });
 
+  it.each([
+    [1920, 1080, 60, 12_000_000, '2A'],
+    [2560, 1440, 30, 12_000_000, '32'],
+    [2560, 1440, 60, 12_000_000, '33'],
+    [1440, 2560, 60, 12_000_000, '33'],
+    [3840, 2160, 30, 40_000_000, '33'],
+    [3840, 2160, 60, 40_000_000, '34'],
+    [3840, 2160, 120, 40_000_000, '3C'],
+    [7680, 4320, 60, 40_000_000, '3D'],
+    [7680, 4320, 120, 40_000_000, '3E'],
+    [1920, 1080, 60, 60_000_000, '32'],
+    [8192, 16, 30, 12_000_000, '33'],
+  ])('selects a compatible H.264 level for %ix%i at %i fps and %i bps', async (width, height, fps, bitrate, level) => {
+    await withMockWebCodecs(async () => {
+      const backend = new WebCodecsBackend(createExportApi());
+      await backend.init({ ...createInitConfig(), width, height, fps, bitrate });
+      expect(MockVideoEncoder.instances[0].configuredWith).toEqual(expect.objectContaining({
+        codec: `avc1.4D00${level}`, width, height, framerate: fps, bitrate,
+      }));
+      await backend.abort();
+    });
+  });
+
+  it('rejects output beyond H.264 level limits before starting the stream', async () => {
+    await withMockWebCodecs(async () => {
+      const api = createExportApi();
+      const backend = new WebCodecsBackend(api);
+      await expect(backend.init({ ...createInitConfig(), width: 8192, height: 8192 }))
+        .rejects.toThrow('H.264 level');
+      expect(api.startStreamExport).not.toHaveBeenCalled();
+      expect(MockVideoEncoder.instances).toHaveLength(0);
+    });
+  });
+
   it('WebCodecsBackend encodes canvas frames as Annex B chunks and closes frame handles', async () => {
     await withMockWebCodecs(async () => {
       const api = createExportApi();

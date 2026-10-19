@@ -16,6 +16,7 @@ export interface IProjectWorkspaceService {
   createProjectAt(rootPath: string, name?: string, options?: CreateProjectOptions): Promise<ProjectResult>;
   openProjectAt(projectPathOrRoot: string): Promise<ProjectResult>;
   renameProjectAt(projectFilePath: string, name: string): Promise<RenameProjectResult>;
+  updateVideoFormat(format: import('../types/video-format').ProjectVideoFormat): Promise<RenameProjectResult>;
   prepareCollaborationProjectAt(rootPath: string, name?: string): Promise<ProjectResult>;
   updateTemplateConfiguration(templates: ProjectTemplateConfiguration): Promise<ProjectResult>;
   updateVoiceGenerationConfiguration(voiceGeneration: ProjectVoiceGenerationConfiguration): Promise<ProjectResult>;

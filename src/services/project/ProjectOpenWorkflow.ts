@@ -32,7 +32,7 @@ export class ProjectOpenWorkflow implements IProjectOpenWorkflow {
     const result = await this.projectWorkspace.createProjectAt(
       input.rootPath,
       input.name || 'AeonStagery Project',
-      { templates: input.templates, webgal: input.webgal },
+      { templates: input.templates, webgal: input.webgal, videoFormat: input.videoFormat },
     );
     if (!result.success) {
       return {

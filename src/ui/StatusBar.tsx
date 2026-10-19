@@ -1,3 +1,4 @@
+import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
 import React from 'react';
 import { useCollaborationPresence, useCollaborationStatus, usePlaybackAdapter } from './context/AppContext';
 import { IconClock, IconLayers, IconActivity, IconUsers, IconError, IconWarning } from './icons';
@@ -23,6 +24,7 @@ const formatTime = (t: number) => {
 };
 
 export const StatusBar = () => {
+  const videoFormat = useProjectVideoFormat();
   const playbackAdapter = usePlaybackAdapter();
   const timeRef = React.useRef<HTMLSpanElement>(null);
   const initialTime = playbackAdapter.getCurrentTime();
@@ -209,7 +211,7 @@ export const StatusBar = () => {
           </div>
         )}
         <Tooltip title="场景画布规格" content="标准演出渲染分辨率与帧率">
-          <span className="status-bar__spec tabular-nums">1920×1080 · 60fps</span>
+          <span className="status-bar__spec tabular-nums">{videoFormat.width}×{videoFormat.height} · {videoFormat.fps}fps</span>
         </Tooltip>
       </div>
     </div>

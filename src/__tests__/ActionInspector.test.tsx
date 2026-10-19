@@ -31,6 +31,12 @@ const testState = vi.hoisted(() => {
     prepareDialogueStyle,
     getModelDataFromPath,
     semanticAuthoring: { author: vi.fn(async () => ({ createdStatementIds: ['created-dependency'] })) },
+    customMotionConversion: { convert: vi.fn() },
+    projectWorkspace: {
+      getCurrentProject: () => testState.currentProject,
+      subscribe: vi.fn(() => () => {}),
+      prepareDialogueStyle,
+    },
     playbackAdapter: {
       getCurrentTime: vi.fn(() => 4),
       seek: vi.fn(),
@@ -40,6 +46,7 @@ const testState = vi.hoisted(() => {
       getModelDataFromPath,
       hasCharacter: vi.fn(() => true),
       playMotion: vi.fn(),
+      sampleMotion: vi.fn(async () => ({})),
       stopAllMotions: vi.fn(),
       setExpression: vi.fn(),
     },
@@ -51,10 +58,8 @@ vi.mock('../ui/context/AppContext', () => ({
     stores: { editor: { setCopyBuffer: vi.fn() } },
     services: {
       semanticAuthoring: testState.semanticAuthoring,
-      projectWorkspace: {
-        getCurrentProject: () => testState.currentProject,
-        prepareDialogueStyle: testState.prepareDialogueStyle,
-      },
+      projectWorkspace: testState.projectWorkspace,
+      customMotionConversion: testState.customMotionConversion,
       templatePackages: {
         getSummaries: () => [{
           id: 'aeonstagery.default',
@@ -77,6 +82,7 @@ vi.mock('../ui/context/AppContext', () => ({
       },
     },
   }),
+  useOptionalApp: () => ({ services: { projectWorkspace: testState.projectWorkspace } }),
   useCharacterAdapter: () => testState.characterAdapter,
   useCollaborationPresence: () => ({ peers: [] }),
   useDocumentStore: () => ({
@@ -100,6 +106,8 @@ describe('ActionInspector', () => {
     testState.compiledScene = null;
     testState.currentProject = null;
     testState.prepareDialogueStyle.mockReset();
+    testState.characterAdapter.sampleMotion.mockReset().mockResolvedValue({});
+    testState.customMotionConversion.convert.mockReset();
     testState.semanticAuthoring.author.mockClear();
     testState.playbackAdapter.getCurrentTime.mockReturnValue(4);
   });
@@ -682,6 +690,59 @@ describe('ActionInspector', () => {
     fireEvent.mouseLeave(screen.getByRole('listbox', { name: '可选项' }));
     expect(testState.characterAdapter.stopAllMotions).toHaveBeenCalledWith('sakiko');
     expect(testState.characterAdapter.playMotion).toHaveBeenCalledTimes(1);
+  });
+
+  it('samples and estimates conversion at project FPS when the scene has no FPS', async () => {
+    const motion = {
+      kind: 'custom',
+      durationSeconds: 2,
+      fadeInSeconds: 0,
+      derivedFrom: { key: 'wave.mtn' },
+      tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 0 }] }],
+    };
+    testState.currentProject = { metadata: { videoFormat: { width: 1920, height: 1080, fps: 30 } } };
+    testState.semanticDocument = {
+      schemaVersion: 4,
+      sceneId: 'scene_1',
+      meta: { title: 'Motion FPS', characters: [{ id: 'sakiko', name: 'Sakiko', model: 'models/sakiko.model3.json' }] },
+      statements: [{ id: 'motion_1', time: 2, type: 'characterPerformance', params: { target: 'sakiko', motion } }],
+    };
+    testState.compiledScene = {
+      sceneId: 'scene_1',
+      meta: testState.semanticDocument.meta,
+      actions: [{
+        id: 'compiled_motion_1',
+        time: 2,
+        action: 'playMotion',
+        params: { id: 'sakiko' },
+        sourceParams: testState.semanticDocument.statements[0].params,
+        semanticType: 'characterPerformance',
+        source: { statementId: 'motion_1', outputKey: 'primary' },
+      }],
+    };
+
+    render(
+      <ActionInspector
+        sceneData={{ sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] }}
+        selectedActionIds={{ compiled_motion_1: true }}
+        setSelectedIds={vi.fn()}
+        updateAction={vi.fn()}
+        updateParam={vi.fn()}
+        replaceSourceParams={vi.fn()}
+        deleteAction={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新转换…' }));
+
+    await waitFor(() => {
+      expect(testState.characterAdapter.sampleMotion).toHaveBeenCalledWith('sakiko', 'wave.mtn', {
+        fps: 30,
+        zeroSourceFades: true,
+      });
+    });
+    expect(screen.getByText('约 60 帧')).toBeTruthy();
   });
 
   it('does not offer narrator option for character action id select', async () => {

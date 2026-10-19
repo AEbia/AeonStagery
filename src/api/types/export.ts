@@ -5,6 +5,8 @@ export interface ExportConfig {
   fps: number;
   width: number;
   height: number;
+  /** Different output aspect ratios preserve proportions, using bars or crop. */
+  fit?: import('./video-format').OutputFit;
   rangeStart: number;
   rangeEnd: number;
   includeAudio: boolean;

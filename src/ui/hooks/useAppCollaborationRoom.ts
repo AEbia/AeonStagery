@@ -122,6 +122,7 @@ export function useAppCollaborationRoom(
   const handleHostNewCollaboration = useCallback(async ({
     name,
     rootPath,
+    videoFormat,
     displayName,
     port,
     allowNetwork,
@@ -129,13 +130,14 @@ export function useAppCollaborationRoom(
   }: {
     name: string;
     rootPath: string;
+    videoFormat?: import('../../api/types/video-format').ProjectVideoFormat;
     displayName: string;
     port: number;
     allowNetwork?: boolean;
     password?: string;
   }) => {
     setIsCollaborationJoinHomeLocked(true);
-    const workflowResult = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({ name, rootPath });
+    const workflowResult = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({ name, rootPath, videoFormat });
     showProjectWorkflowResult(workflowResult, 'create', false);
     if (!workflowResult.success || !workflowResult.project) {
       setIsCollaborationJoinHomeLocked(false);

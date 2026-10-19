@@ -4,8 +4,7 @@ import { stageManager } from './StageManager';
 import { settingsManager } from '../ui/SettingsStore';
 import type { TextLayerConfig, TextLayerTransformConfig } from '../api/types/textLayer';
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 class TextLayerManager {
   // Mapping of active layers and their visual containers

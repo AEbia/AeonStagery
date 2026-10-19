@@ -24,6 +24,7 @@ import {
   PROJECT_SCHEMA_VERSION_V2,
 } from '../../api/types/project';
 import { ProjectPathResolver } from './ProjectPathResolver';
+import { validateVideoFormat } from '../../api/types/video-format';
 import { CompatibleProjectSession } from '../project/CompatibleProjectSession';
 import { ProjectCompatibilityEnvelopeService } from '../project/ProjectCompatibilityEnvelopeService';
 import {
@@ -77,6 +78,7 @@ export interface ImportedResource {
 }
 
 export interface CreateProjectMetadataOptions {
+  videoFormat?: import('../../api/types/video-format').ProjectVideoFormat;
   templates?: ProjectTemplateConfiguration;
 }
 
@@ -136,6 +138,10 @@ export class ProjectResourceService {
     scenePath: string,
     options: CreateProjectMetadataOptions = {},
   ): Promise<ProjectMetadata> {
+    if (options.videoFormat) {
+      const error = validateVideoFormat(options.videoFormat);
+      if (error) throw new Error(error);
+    }
     const now = new Date().toISOString();
     return {
       projectId: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -146,6 +152,7 @@ export class ProjectResourceService {
       defaultSceneId: 'main',
       scenes: [{ id: 'main', name: 'Main Scene', path: scenePath }],
       assetRoots: { ...DEFAULT_PROJECT_ASSET_ROOTS },
+      ...(options.videoFormat ? { videoFormat: options.videoFormat } : {}),
       templates: normalizeProjectTemplateConfiguration(options.templates),
       voiceGeneration: normalizeProjectVoiceGenerationConfiguration(),
     };

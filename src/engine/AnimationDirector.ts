@@ -11,8 +11,6 @@ import { live2DManager } from './Live2DManager';
 import type { Vec2 } from '../api/types/common';
 import { resolveVec2 } from './utils/math';
 import {
-  CHARACTER_STAGE_HEIGHT,
-  CHARACTER_STAGE_WIDTH,
   DEFAULT_CHARACTER_ENTER_EASE,
   DEFAULT_CHARACTER_EXIT_EASE,
   characterSlideEntranceOffsetPixels,
@@ -20,8 +18,7 @@ import {
   resolveCharacterModelHeight,
 } from './CharacterAnimationContract';
 
-const STAGE_WIDTH = CHARACTER_STAGE_WIDTH;
-const STAGE_HEIGHT = CHARACTER_STAGE_HEIGHT;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 /** Built-in enter animation presets */
 type EnterPreset = 'fadeIn' | 'slideFromLeft' | 'slideFromRight' | 'slideFromBottom' |

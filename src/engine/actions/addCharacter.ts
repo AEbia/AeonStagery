@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import { live2DManager } from '../Live2DManager';
 import { animationDirector } from '../AnimationDirector';
 import { resolveVec2 } from '../utils/math';
@@ -36,7 +37,7 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
     const initVals: any = {};
     if (params.position) {
       const pos = resolveVec2(params.position);
-      initVals.x = pos.x * 1920; initVals.y = pos.y * 1080;
+      initVals.x = pos.x * STAGE_WIDTH; initVals.y = pos.y * STAGE_HEIGHT;
     }
     if (params.scale !== undefined) initVals.scale = params.scale;
     if (params.rotation !== undefined) initVals.rotation = params.rotation;

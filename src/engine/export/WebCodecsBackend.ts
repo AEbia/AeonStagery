@@ -8,6 +8,35 @@ interface ElectronExportAPI {
   endStreamExport(): Promise<{ success: boolean; error?: string }>;
 }
 
+// H.264 Table A-1 limits for Main profile. Keep level 4.2 as the minimum
+// to preserve the existing 1080p configuration; larger output needs higher levels.
+// https://chromium.googlesource.com/chromium/src/+/lkgr/media/parsers/h264_level_limits.cc
+const H264_MAIN_LEVELS = [
+  { level: 42, maxFrameMbs: 8704, maxMbsPerSecond: 522240, maxBitrate: 50_000_000 },
+  { level: 50, maxFrameMbs: 22080, maxMbsPerSecond: 589824, maxBitrate: 135_000_000 },
+  { level: 51, maxFrameMbs: 36864, maxMbsPerSecond: 983040, maxBitrate: 240_000_000 },
+  { level: 52, maxFrameMbs: 36864, maxMbsPerSecond: 2073600, maxBitrate: 240_000_000 },
+  { level: 60, maxFrameMbs: 139264, maxMbsPerSecond: 4177920, maxBitrate: 240_000_000 },
+  { level: 61, maxFrameMbs: 139264, maxMbsPerSecond: 8355840, maxBitrate: 480_000_000 },
+  { level: 62, maxFrameMbs: 139264, maxMbsPerSecond: 16711680, maxBitrate: 800_000_000 },
+] as const;
+
+function selectH264Codec(config: BackendInit): string {
+  const widthMbs = Math.ceil(config.width / 16);
+  const heightMbs = Math.ceil(config.height / 16);
+  const frameMbs = widthMbs * heightMbs;
+  const limits = H264_MAIN_LEVELS.find(candidate => (
+    frameMbs <= candidate.maxFrameMbs
+    && frameMbs * config.fps <= candidate.maxMbsPerSecond
+    && Math.max(widthMbs, heightMbs) ** 2 <= candidate.maxFrameMbs * 8
+    && config.bitrate <= candidate.maxBitrate
+  ));
+  if (!limits) {
+    throw new Error(`Output ${config.width}×${config.height} at ${config.fps} fps and ${config.bitrate} bps exceeds H.264 level limits.`);
+  }
+  return `avc1.4D00${limits.level.toString(16).toUpperCase()}`;
+}
+
 export class WebCodecsBackend implements ICaptureBackend {
   private encoder: VideoEncoder | null = null;
   private encoderQueue = new ExportWriteQueue(8 * 1024 * 1024, 32);
@@ -22,6 +51,7 @@ export class WebCodecsBackend implements ICaptureBackend {
   }
 
   async init(config: BackendInit): Promise<void> {
+    const codec = selectH264Codec(config);
     // Start the backend FFmpeg stream for muxing Annex B data
     const result = await this.electronAPI.startStreamExport(config.outputPath, {
       fps: config.fps,
@@ -66,7 +96,7 @@ export class WebCodecsBackend implements ICaptureBackend {
       });
 
       this.encoder.configure({
-        codec: 'avc1.4D002A',
+        codec,
         width: config.width,
         height: config.height,
         bitrate: config.bitrate,

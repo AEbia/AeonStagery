@@ -56,6 +56,31 @@ describe('ProjectWorkspaceService', () => {
     );
   });
 
+  it('saves project format, publishes it, and reads it back when reopening', async () => {
+    const created = await service.createProjectAt('/projects/video', 'Video');
+    if (!created.success) throw new Error(created.error);
+    const changed = vi.fn();
+    const unsubscribe = service.subscribe(changed);
+    const result = await service.updateVideoFormat({ width: 1080, height: 1920, fps: 30 });
+    if (!result.success) throw new Error(result.error);
+    expect(service.getCurrentProject()?.metadata.videoFormat).toEqual({ width: 1080, height: 1920, fps: 30 });
+    expect(changed).toHaveBeenCalledTimes(1);
+    const written = fileAccess.writeFile.mock.calls.findLast(([path]: [string]) => path === '/projects/video/project.json');
+    fileAccess.readFile.mockResolvedValue({ path: '/projects/video/project.json', data: written[1] });
+    const reopened = await service.openProjectAt('/projects/video/project.json');
+    if (!reopened.success) throw new Error(reopened.error);
+    expect(reopened.project.metadata.videoFormat).toEqual({ width: 1080, height: 1920, fps: 30 });
+    unsubscribe();
+  });
+
+  it('rejects invalid project format without saving', async () => {
+    await service.createProjectAt('/projects/video', 'Video');
+    fileAccess.writeFile.mockClear();
+    expect((await service.updateVideoFormat({ width: 1921, height: 1080, fps: 60 })).success).toBe(false);
+    expect(fileAccess.writeFile).not.toHaveBeenCalled();
+    expect(service.getCurrentProject()?.metadata.videoFormat).toBeUndefined();
+  });
+
   it.each(['pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'])('materializes builtin dialogue style %s into portable project assets', async (styleId) => {
     projectResources = new ProjectResourceService(
       fileAccess as unknown as IFileAccess,

@@ -15,6 +15,9 @@ import { InfoTip } from './Tooltip';
 import type { ExportProgress } from '../api/types/export';
 import { useModalDialog } from './hooks/useModalDialog';
 import { ExportEtaEstimator } from './ExportEtaEstimator';
+import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
+import { VideoFormatFields } from './VideoFormatFields';
+import { validateVideoFormat, type OutputFit } from '../api/types/video-format';
 
 interface Props {
   onClose: () => void;
@@ -70,6 +73,13 @@ export default function ExportDialog({ onClose }: Props) {
 
   const playbackAdapter = usePlaybackAdapter();
   const exportAdapter = useExportAdapter();
+
+  const projectFormat = useProjectVideoFormat();
+  const [followProject, setFollowProject] = useState(true);
+  const [customFormat, setCustomFormat] = useState(projectFormat);
+  const [fit, setFit] = useState<OutputFit>('contain');
+  const videoFormat = followProject ? projectFormat : customFormat;
+  const formatError = validateVideoFormat(videoFormat);
 
   // Export config state
   const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>('mp4');
@@ -133,6 +143,7 @@ export default function ExportDialog({ onClose }: Props) {
   }, [updateProgress]);
 
   const handleExport = useCallback(async () => {
+    if (formatError) return;
     try {
       const saveResult = await window.aeonStageryAPI.dialog.showSave({
         title: '导出视频',
@@ -162,16 +173,15 @@ export default function ExportDialog({ onClose }: Props) {
 
       const rangeStart = exportStart > 0 || exportEnd < fullDuration ? exportStart : 0;
       const rangeEnd = exportStart > 0 || exportEnd < fullDuration ? exportEnd : fullDuration;
-      totalFramesRef.current = Math.ceil((rangeEnd - rangeStart) * 60);
+      totalFramesRef.current = Math.ceil(rangeEnd * videoFormat.fps) - Math.floor(rangeStart * videoFormat.fps);
 
       const result = await exportAdapter.export(
         {
           format,
           codec,
           bitrateMbps: bitrate,
-          fps: 60,
-          width: 1920,
-          height: 1080,
+          ...videoFormat,
+          fit,
           rangeStart,
           rangeEnd,
           includeAudio,
@@ -245,30 +255,39 @@ export default function ExportDialog({ onClose }: Props) {
       setCancelling(false);
     }
   }, [
-    format, codec, bitrate, exportStart, exportEnd, includeAudio,
+    format, codec, bitrate, exportStart, exportEnd, includeAudio, videoFormat, fit, formatError,
     subtitleExportMode, exportMode, fullDuration, exportAdapter, ffmpegLogCallback, updateProgress,
   ]);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title" tabIndex={-1}>
+      <div ref={dialogRef} className="modal export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title" tabIndex={-1}>
         <div id="export-dialog-title" className="modal__header">
           <IconFilm width={20} height={20} style={{ color: 'var(--accent-primary)' }} /> 导出视频
         </div>
 
         {uiState === 'idle' && (
           <div className="form-grid">
-            <div className="form-group">
-              <div id="export-resolution-label" className="form-label">
-                分辨率 & 帧率
-                <InfoTip
-                  title="分辨率与帧率"
-                  content="标准 1080P (1920×1080) 60 帧每秒渲染，保证 Live2D 物理摆动、粒子与视线动作的极致平滑度。"
-                />
-              </div>
-              <div aria-labelledby="export-resolution-label" style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                1920 × 1080 @ 60fps
-              </div>
+            <div className="form-group video-format__export">
+              <label className="form-label">
+                <input type="checkbox" checked={followProject} onChange={event => {
+                  setFollowProject(event.target.checked);
+                  if (!event.target.checked) setCustomFormat(projectFormat);
+                }} /> 跟随项目分辨率与帧率
+              </label>
+              {followProject ? <p className="video-format__message">{projectFormat.width} × {projectFormat.height} · {projectFormat.fps} fps</p>
+                : <VideoFormatFields value={customFormat} onChange={setCustomFormat} idPrefix="export-video" />}
+              <p className="video-format__message">按目标分辨率重新渲染，不受编辑预览清晰度影响。</p>
+              {!followProject && videoFormat.width * projectFormat.height !== videoFormat.height * projectFormat.width && (
+                <>
+                  <label className="form-label" htmlFor="export-fit">画面比例适配</label>
+                  <FormSelect id="export-fit" value={fit} options={[
+                    { value: 'contain', label: '完整画面 · 留边' },
+                    { value: 'cover', label: '填满画面 · 居中裁切' },
+                  ]} onChange={value => setFit(value === 'cover' ? 'cover' : 'contain')} />
+                </>
+              )}
+              {formatError && <p role="alert" className="video-format__error">{formatError}</p>}
             </div>
             <div className="form-group">
               <label className="form-label" htmlFor="export-format">
@@ -333,7 +352,7 @@ export default function ExportDialog({ onClose }: Props) {
                 视频码率 (Mbps)
                 <InfoTip
                   title="视频码率 (Bitrate)"
-                  content="控制视频每秒数据流大小。1080P 60fps 推荐设为 12~24 Mbps。码率越高画质越清晰细腻，导出的视频体积也成比例增大。"
+                  content="控制视频每秒数据流大小。更高分辨率和帧率通常需要更高码率。码率越高，文件通常越大；素材本身的细节也会影响画质。"
                 />
               </label>
               <input
@@ -553,7 +572,7 @@ export default function ExportDialog({ onClose }: Props) {
           {uiState === 'idle' && (
             <>
               <button className="btn" onClick={onClose}>取消</button>
-              <button className="btn btn--primary" onClick={handleExport}>开始导出</button>
+              <button className="btn btn--primary" disabled={!!formatError} onClick={handleExport}>开始导出</button>
             </>
           )}
           {(uiState === 'done' || uiState === 'error' || uiState === 'cancelled') && (

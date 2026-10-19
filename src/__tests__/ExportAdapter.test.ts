@@ -163,7 +163,7 @@ describe('ExportAdapter', () => {
     const controller = new AbortController();
     const config = {
       format: 'mp4' as const, codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1,
       includeAudio: true, backend: 'rawpixels' as const, outputPath: '/output/test.mp4',
     };
     electronAPI.export.pushFrame.mockImplementationOnce(async () => {
@@ -198,7 +198,7 @@ describe('ExportAdapter', () => {
 
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: false, backend: 'rawpixels', outputPath: '/output/direct.mp4',
     }, vi.fn(), controller.signal);
 
@@ -228,7 +228,7 @@ describe('ExportAdapter', () => {
     const progress = vi.fn();
     const result = await adapter.export({
       format: 'mp4', codec: 'libx265', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'webcodecs', outputPath: '/output/test.mp4',
     }, progress, controller.signal);
     expect(result).toEqual({ success: false, cancelled: true });
@@ -260,7 +260,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 1,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 1,
         includeAudio: false, backend: 'rawpixels', outputPath: '/output/voice.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -294,7 +294,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 0.5,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 0.5,
         includeAudio: true, backend: 'rawpixels', outputPath: '/output/missing-voice.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -326,7 +326,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 0.75,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 0.75,
         includeAudio: false, backend: 'rawpixels', outputPath: '/output/handoff.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -533,7 +533,7 @@ describe('ExportAdapter', () => {
     documentStore.setPreparedScene(createPreparedScene());
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/direct.mp4',
     }, vi.fn());
     expect(result).toEqual({ success: true, outputPath: '/output/direct.mp4' });
@@ -554,7 +554,7 @@ describe('ExportAdapter', () => {
     electronAPI.export.convert.mockResolvedValue({ success });
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
     }, vi.fn());
     expect(result.success).toBe(success);
@@ -576,7 +576,7 @@ describe('ExportAdapter', () => {
     electronAPI.fs.removeFile.mockRejectedValue(new Error('cleanup failed'));
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
     }, vi.fn());
     expect(result.success).toBe(true);
@@ -605,7 +605,7 @@ describe('ExportAdapter', () => {
     });
     const exporting = adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/test.mp4',
     }, vi.fn(), controller.signal);
     await cleanupStarted;

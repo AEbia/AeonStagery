@@ -1,7 +1,7 @@
 import gsap from 'gsap';
 
-export const CHARACTER_STAGE_WIDTH = 1920;
-export const CHARACTER_STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH as CHARACTER_STAGE_WIDTH } from './StageDimensions';
+export { STAGE_WIDTH as CHARACTER_STAGE_WIDTH, STAGE_HEIGHT as CHARACTER_STAGE_HEIGHT } from './StageDimensions';
 export const DEFAULT_CHARACTER_MODEL_WIDTH = 600;
 export const DEFAULT_CHARACTER_MODEL_HEIGHT = 1000;
 export const DEFAULT_CHARACTER_ENTER_EASE = 'power2.out';

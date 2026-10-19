@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../../engine/StageDimensions';
 import { reconstructEnvironmentAtTime } from '../../engine/EnvironmentLayerRuntime';
 import type { EnvironmentLayerRenderImage } from '../../engine/environmentLayerModel';
 import type { TimelineScene } from './semanticTimelineTypes';
@@ -667,8 +668,8 @@ function createTextLayerExclusion(params: Record<string, any>): SamplingExclusio
   const position = Array.isArray(params.position) ? params.position : [0.5, 0.5];
   const scale = typeof params.scale === 'number' ? params.scale : 1;
   const fontSize = typeof params.fontSize === 'number' ? params.fontSize : 48;
-  const width = clamp(((params.wordWrapWidth ?? 720) / 1920) * scale, 0.14, 0.72);
-  const height = clamp((fontSize * 3.2 * scale) / 1080, 0.08, 0.3);
+  const width = clamp(((params.wordWrapWidth ?? 720) / STAGE_WIDTH) * scale, 0.14, 0.72);
+  const height = clamp((fontSize * 3.2 * scale) / STAGE_HEIGHT, 0.08, 0.3);
   return clampRect({
     xMax: position[0] + width * 0.5,
     xMin: position[0] - width * 0.5,

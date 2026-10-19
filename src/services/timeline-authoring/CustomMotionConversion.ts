@@ -61,6 +61,7 @@ export class CustomMotionConversion {
     const authority = this.options.editing.getAuthority();
     const command = new CustomMotionConversionCommand({
       authoring: this.options.authoring,
+      getFps: this.options.getFps,
       ...(this.options.sampleMotion ? { sampleMotion: this.options.sampleMotion } : {}),
       ...(this.options.sampler ? { sampler: this.options.sampler } : {}), authority,
     });

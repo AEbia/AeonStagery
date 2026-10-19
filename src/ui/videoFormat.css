@@ -1,0 +1,54 @@
+.video-format {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.export-dialog {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
+.video-format__dimensions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.video-format input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.video-format__message {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.video-format__error {
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.video-format__export {
+  grid-column: 1 / -1;
+}
+
+.project-settings-dialog {
+  width: min(540px, calc(100vw - 48px));
+  padding: 20px;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
+.project-settings-dialog .modal__header {
+  justify-content: space-between;
+}
+
+.project-settings-dialog__body {
+  min-width: 0;
+}
