@@ -117,7 +117,9 @@
 }
 
 /* ─── Inputs & Forms ────────────────────────────────────────── */
-input, textarea, select.form-multi-select {
+/* Native checkboxes must not inherit text-field padding or shadow transitions:
+   Chromium can briefly apply that box model while animating their focus. */
+input:where(:not([type="checkbox"])), textarea, select.form-multi-select {
   font-family: inherit;
   color: var(--text-primary);
   background: var(--bg-tertiary);
@@ -133,13 +135,14 @@ input, textarea, select.form-multi-select {
     color var(--transition-fast);
 }
 
-input:focus, textarea:focus, select.form-multi-select:focus {
+input:where(:not([type="checkbox"])):focus, textarea:focus, select.form-multi-select:focus {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
 :where(
   button,
+  input[type="checkbox"],
   a[href],
   [role="button"],
   [role="slider"],
