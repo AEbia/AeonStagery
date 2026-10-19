@@ -55,7 +55,7 @@ class MockVideoFrame {
 class MockEncodedVideoChunk {
   readonly byteLength: number;
 
-  constructor(private readonly bytes: Uint8Array) {
+  constructor(private readonly bytes: Uint8Array, readonly timestamp: number) {
     this.byteLength = bytes.byteLength;
   }
 
@@ -65,6 +65,7 @@ class MockEncodedVideoChunk {
 }
 
 class MockVideoEncoder {
+  static isConfigSupported = vi.fn(async (config: VideoEncoderConfig) => ({ supported: true, config }));
   static instances: MockVideoEncoder[] = [];
   state = 'configured';
   encodeQueueSize = 0;
@@ -81,7 +82,7 @@ class MockVideoEncoder {
 
   encode(frame: MockVideoFrame, options: unknown): void {
     this.encodedFrames.push({ frame, options });
-    const chunk = new MockEncodedVideoChunk(new Uint8Array([0, 0, 0, 2, 0xaa, 0xbb]));
+    const chunk = new MockEncodedVideoChunk(new Uint8Array([0, 0, 0, 2, 0xaa, 0xbb]), frame.timestamp);
     const metadata = {
       decoderConfig: {
         description: new Uint8Array([
@@ -237,8 +238,8 @@ describe('capture backend stream cleanup', () => {
       await backend.init(createInitConfig());
       await backend.encodeFrame({
         canvas: {} as HTMLCanvasElement,
-        frameIndex: 60,
-        fps: 30,
+        frameIndex: 0,
+        fps: 60,
       });
       await backend.finish();
 
@@ -250,7 +251,7 @@ describe('capture backend stream cleanup', () => {
         framerate: 60,
       }));
       expect(encoder.encodedFrames[0].options).toEqual({ keyFrame: true });
-      expect(encoder.encodedFrames[0].frame.timestamp).toBeCloseTo(2_000_000);
+      expect(encoder.encodedFrames[0].frame.timestamp).toBe(0);
       expect(encoder.encodedFrames[0].frame.closed).toBe(true);
       expect(api.pushEncodedChunk).toHaveBeenCalledWith(new Uint8Array([
         0, 0, 0, 1, 0x67, 0x64,

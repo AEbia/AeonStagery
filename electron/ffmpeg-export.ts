@@ -1,15 +1,17 @@
 /**
  * AeonStagery — FFmpeg Video Export Module (Electron Main Process)
  *
- * Handles converting captured WebM video to MP4 using bundled FFmpeg.
- * Also supports audio muxing for BGM + voice tracks.
+ * Encodes pixel streams, muxes native bitstreams, and transcodes video with
+ * timeline audio using bundled FFmpeg.
  */
 
 import { ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process';
-import { buildFFmpegConvertArgs, type FFmpegAudioSource } from './ffmpeg-args';
+import { buildFFmpegConvertArgs, buildFFmpegStreamArgs } from './ffmpeg-args';
+import type { FFmpegConvertOptions, FFmpegStreamOptions } from '../src/api/types/export';
+import { classifyExportFailure } from '../src/api/exportEncoding';
 
 export function resolveFfmpegExecutablePath(candidate: string): string {
   // electron-builder unpacks executable files beside app.asar. ffmpeg-static
@@ -45,6 +47,7 @@ interface StreamState {
   endRequested: boolean;
   closed: boolean;
   failure?: string;
+  stderr: string;
   pendingWrites: Set<PendingWrite>;
   drainWaiters: Set<() => void>;
   onDrain: () => void;
@@ -63,6 +66,7 @@ function createStreamState(child: ChildProcessWithoutNullStreams, expectedFrameS
   return {
     child,
     expectedFrameSize,
+    stderr: '',
     endRequested: false,
     closed: false,
     pendingWrites: new Set(),
@@ -82,7 +86,7 @@ function settleCompletion(state: StreamState, result: StreamCompletion): void {
 
 function rejectPendingWrites(state: StreamState): void {
   if (!state.failure) return;
-  const error = new Error(state.failure);
+  const error = streamFailure(state, state.failure);
   for (const pending of state.pendingWrites) {
     if (pending.settled) continue;
     pending.settled = true;
@@ -108,7 +112,7 @@ function recordStreamFailure(state: StreamState, message: string, terminate = fa
 }
 
 function streamFailure(state: StreamState, fallback: string): Error {
-  return new Error(state.failure || fallback);
+  return new Error([state.failure || fallback, state.stderr].filter(Boolean).join('\n'));
 }
 
 function emitFFmpegLog(message: string): void {
@@ -219,7 +223,7 @@ async function finishStream(state: StreamState): Promise<{ success: true; code: 
   }
 
   const completion = await state.completion;
-  if (!completion.success) throw new Error(completion.error || 'FFmpeg stream export failed');
+  if (!completion.success) throw streamFailure(state, completion.error || 'FFmpeg stream export failed');
   return { success: true, code: completion.code };
 }
 
@@ -227,6 +231,20 @@ async function finishStream(state: StreamState): Promise<{ success: true; code: 
  * Register all FFmpeg-related IPC handlers.
  */
 export function registerFFmpegHandlers(): void {
+  let encoderCapabilities: Promise<{ success: boolean; encoders: string[]; error?: string }> | undefined;
+  ipcMain.handle('ffmpeg:getEncodingCapabilities', () => {
+    encoderCapabilities ??= new Promise((resolve) => {
+      execFile(ffmpegPath, ['-hide_banner', '-encoders'], { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+        if (error) { encoderCapabilities = undefined; resolve({ success: false, encoders: [], error: error.message }); return; }
+        const encoders = stdout.split('\n').flatMap((line) => {
+          const match = /^\s*V[.A-Z]{5}\s+(\S+)/.exec(line);
+          return match ? [match[1]] : [];
+        });
+        resolve({ success: true, encoders });
+      });
+    });
+    return encoderCapabilities;
+  });
   let activeStreamState: StreamState | null = null;
   const conversions = new Set<{ child: ChildProcessWithoutNullStreams; outputPath: string; cancelled: boolean; closed: Promise<void> }>();
   let streamOutputPath: string | null = null;
@@ -266,18 +284,7 @@ export function registerFFmpegHandlers(): void {
     _event,
     inputPath: string,
     outputPath: string,
-    options: {
-      fps?: number;
-      width?: number;
-      height?: number;
-      audioPaths?: string[];  // legacy: flat path array
-      audioSources?: FFmpegAudioSource[];  // new: with timing
-      audioCodec?: string;
-      crf?: number;
-      codec?: string;
-      bitrate?: number;
-      totalFrames?: number;
-    } = {}
+    options: FFmpegConvertOptions = {}
   ) => {
     return new Promise((resolve) => {
       const args = buildFFmpegConvertArgs(inputPath, outputPath, options, fs.existsSync);
@@ -288,7 +295,7 @@ export function registerFFmpegHandlers(): void {
       let child: ChildProcessWithoutNullStreams;
       let stderrAccum = '';
       let settled = false;
-      const finish = (result: { success: boolean; error?: string; stderr?: string; path?: string }) => {
+      const finish = (result: { success: boolean; error?: string; stderr?: string; path?: string; failureKind?: 'encoder' | 'output' | 'process' }) => {
         if (settled) return;
         settled = true;
         resolve(result);
@@ -299,14 +306,14 @@ export function registerFFmpegHandlers(): void {
       } catch (error) {
         const message = `FFmpeg process error: ${errorText(error)}`;
         console.error(`[FFmpeg Convert] ${message}`);
-        finish({ success: false, error: message, stderr: stderrAccum });
+        finish({ success: false, error: message, stderr: stderrAccum, failureKind: classifyExportFailure(message + '\n' + stderrAccum) });
         return;
       }
 
       if (!child || typeof child.on !== 'function') {
         const message = 'FFmpeg process did not return an evented child process';
         console.error(`[FFmpeg Convert] ${message}`);
-        finish({ success: false, error: message, stderr: stderrAccum });
+        finish({ success: false, error: message, stderr: stderrAccum, failureKind: classifyExportFailure(message + '\n' + stderrAccum) });
         return;
       }
 
@@ -318,7 +325,7 @@ export function registerFFmpegHandlers(): void {
 
       child.stderr?.on('data', (data: Buffer) => {
         const msg = data.toString();
-        stderrAccum += msg;
+        stderrAccum = (stderrAccum + msg).slice(-16000);
         console.error(`[FFmpeg Convert] ${msg}`);
         emitFFmpegLog(msg);
       });
@@ -326,14 +333,14 @@ export function registerFFmpegHandlers(): void {
       child.stderr?.on('error', (error: unknown) => {
         const message = `FFmpeg stderr stream error: ${errorText(error)}`;
         console.error(`[FFmpeg Convert] ${message}`);
-        finish({ success: false, error: message, stderr: stderrAccum });
+        finish({ success: false, error: message, stderr: stderrAccum, failureKind: classifyExportFailure(message + '\n' + stderrAccum) });
         try { child.kill(); } catch { /* process may already be closed */ }
       });
 
       child.on('error', (error: unknown) => {
         const message = `FFmpeg process error: ${errorText(error)}`;
         console.error(`[FFmpeg Convert] ${message}`);
-        finish({ success: false, error: message, stderr: stderrAccum });
+        finish({ success: false, error: message, stderr: stderrAccum, failureKind: classifyExportFailure(message + '\n' + stderrAccum) });
       });
 
       child.on('close', (code: number | null, signal?: string | null) => {
@@ -344,7 +351,7 @@ export function registerFFmpegHandlers(): void {
           const suffix = signal ? ` (${signal})` : '';
           const message = `转码失败 (Code ${code ?? 'unknown'}${suffix})`;
           console.error(`[FFmpeg Convert] ${message}`);
-          finish({ success: false, error: message, stderr: stderrAccum });
+          finish({ success: false, error: message, stderr: stderrAccum, failureKind: classifyExportFailure(message + '\n' + stderrAccum) });
         } else if (!settled) {
           console.log('[FFmpeg] Conversion complete:', outputPath);
           finish({ success: true, path: outputPath });
@@ -391,28 +398,15 @@ export function registerFFmpegHandlers(): void {
   ipcMain.handle('ffmpeg:startStreamExport', async (
     _event,
     outputPath: string,
-    options: {
-      fps?: number;
-      width?: number;
-      height?: number;
-      codec?: string;
-      crf?: number;
-      vflip?: boolean;
-      isEncoded?: boolean; // New flag for WebCodecs path
-      bitrate?: number;
-      transparent?: boolean; // Preserve alpha (yuva420p) — subtitle-only exports
-    } = {}
+    options: FFmpegStreamOptions = {}
   ) => {
-    const {
-      fps = 60,
-      width = 1920,
-      height = 1080,
-      codec = 'libx264',
-      vflip = false,
-      isEncoded = false,
-      bitrate = 12,
-      transparent = false,
-    } = options;
+    const { width = 1920, height = 1080 } = options;
+    let args: string[];
+    try {
+      args = buildFFmpegStreamArgs(outputPath, options);
+    } catch (error) {
+      return { success: false, error: errorText(error), failureKind: classifyExportFailure(errorText(error)) };
+    }
 
     if (activeStreamState) {
       recordStreamFailure(activeStreamState, 'FFmpeg stream export superseded', true);
@@ -425,76 +419,6 @@ export function registerFFmpegHandlers(): void {
       try { activeStreamState.child.stdin?.end(); } catch { /* already closed */ }
       activeStreamState = null;
     }
-
-    let args: string[] = [];
-
-    if (isEncoded) {
-      // --- WebCodecs Muxing Mode ---
-      // We expect a raw H.264 bitstream (Annex B) from the renderer.
-      args = [
-        '-y',
-        '-fflags', '+genpts',  // Force FFmpeg to generate missing timestamps
-        '-f', 'h264',          // Input format is raw H.264 bitstream
-        '-r', String(fps),     // Input frame rate
-        '-i', '-',             // Read from stdin
-        // The raw H.264 demuxer has no packet timestamps. setts assigns the
-        // packet index as PTS/DTS in the input frame-rate time base so the
-        // MP4 muxer receives valid timestamps while keeping the encoded video.
-        '-bsf:v', 'setts=pts=N:dts=N',
-        '-c:v', 'copy',        // Just copy (no re-encoding)
-      ];
-    } else {
-      // --- Raw Pixels Encoding Mode ---
-      args = [
-        '-y',
-        '-f', 'rawvideo',
-        '-pixel_format', 'rgba',
-        '-video_size', `${width}x${height}`,
-        '-framerate', String(fps),
-        '-i', '-',
-      ];
-
-      if (vflip) {
-        args.push('-vf', 'vflip');
-      }
-
-      args.push('-c:v', codec);
-      const isHWEncoder = codec.includes('nvenc') || codec.includes('amf') || codec.includes('qsv') || codec.includes('mf');
-      if (transparent) {
-        // Apple ProRes 4444 — 10-bit 4:4:4 with alpha plane. Quality-driven
-        // encode; 4444 profile is required for the alpha channel. The
-        // renderer only requests transparent with prores_ks.
-        args.push(
-          '-profile:v', '4444',
-          '-q:v', '6',
-          '-pix_fmt', 'yuva444p10le',
-        );
-      } else if (codec === 'libaom-av1') {
-        args.push('-cpu-used', '8');
-        args.push(
-          '-b:v', `${bitrate}M`,
-          '-pix_fmt', 'yuv420p'
-        );
-      } else if (isHWEncoder) {
-        // GPU hardware encoders: require nv12 pixel format and target bitrate instead of -preset/-crf
-        args.push(
-          '-b:v', `${bitrate}M`,
-          '-pix_fmt', 'nv12'
-        );
-      } else {
-        args.push(
-          '-preset', 'ultrafast',
-          '-b:v', `${bitrate}M`,
-          '-pix_fmt', 'yuv420p'
-        );
-      }
-    }
-
-    if ((codec.includes('265') || codec.includes('hevc')) && !isEncoded) {
-      args.push('-tag:v', 'hvc1');
-    }
-
-    args.push(outputPath);
 
     console.log(`[FFmpeg Stream] Starting with args: ${args.join(' ')}`);
 
@@ -527,6 +451,7 @@ export function registerFFmpegHandlers(): void {
 
     child.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString();
+      state.stderr = (state.stderr + msg).slice(-8000);
       console.error(`[FFmpeg Stream] ${msg}`);
       emitFFmpegLog(msg);
     });

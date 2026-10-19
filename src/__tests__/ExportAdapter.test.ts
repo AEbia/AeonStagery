@@ -3,13 +3,16 @@
  *
  * ExportAdapter tests
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ExportAdapter } from '../api/adapters/ExportAdapter';
+import type { ExportConfig } from '../api/types/export';
+import { installMockExportEncoder, MockExportEncoder } from './helpers/MockExportEncoder';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
 
 function createMockStageAdapter() {
   return {
     getApp: vi.fn().mockReturnValue({
+      canvas: document.createElement('canvas'),
       renderer: {
         width: 1280,
         height: 720,
@@ -116,6 +119,7 @@ function createMockElectronAPI() {
 }
 
 describe('ExportAdapter', () => {
+  afterEach(() => vi.unstubAllGlobals());
   let adapter: ExportAdapter;
   let stageAdapter: ReturnType<typeof createMockStageAdapter>;
   let playbackAdapter: ReturnType<typeof createMockPlaybackAdapter>;
@@ -147,6 +151,103 @@ describe('ExportAdapter', () => {
 
   it('constructor requires all dependencies', () => {
     expect(adapter).toBeDefined();
+  });
+
+  function nativeConfig(overrides: Partial<ExportConfig> = {}): ExportConfig {
+    return {
+      format: 'mp4', codec: 'libx265', bitrateMbps: 8, fps: 30, width: 16, height: 16,
+      rangeStart: 0, rangeEnd: 2 / 30, includeAudio: false, backend: 'webcodecs', outputPath: '/output/native.mp4',
+      encoding: { videoCodec: 'hevc', implementation: 'auto', quality: 'balanced' }, ...overrides,
+    };
+  }
+
+  it('encodes the selected standard natively without a second video encode', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(MockExportEncoder.configurations[0].codec).toMatch(/^hvc1\./);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({ inputFormat: 'hevc' }));
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it('uses high-bitrate H.264 in MP4 before a CRF-controlled VP9 fallback', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = config => config.codec.startsWith('avc1.');
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({ format: 'webm', outputPath: '/output/final.webm', codec: 'libvpx-vp9', bitrateMbps: 2,
+      encoding: { videoCodec: 'vp9', implementation: 'auto', quality: 'balanced', intermediateBitrateMbps: 40, rateControl: { mode: 'crf', crf: 29 } } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith(expect.stringMatching(/\.mp4$/), expect.objectContaining({ inputFormat: 'h264', bitrate: 40 }));
+    expect(electronAPI.export.convert).toHaveBeenCalledWith(expect.stringMatching(/\.mp4$/), '/output/final.webm', expect.objectContaining({ codec: 'libvpx-vp9', crf: 29 }));
+    expect(result.encoding?.implementation).toBe('webcodecs-transcode');
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(electronAPI.export.startStreamExport.mock.calls[0][0]);
+  });
+
+  it('skips the H.264 intermediate for high quality and passes CRF to raw-pixel encoding', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = () => false;
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({ encoding: { videoCodec: 'hevc', implementation: 'auto', quality: 'high' } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({ isEncoded: false, codec: 'libx265', crf: 20 }));
+    expect(MockExportEncoder.configurations).toHaveLength(0);
+  });
+
+  it('restarts capture with H.264 after a target encoder fails at runtime', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.failCodec = 'hvc1.';
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(MockExportEncoder.configurations.map(config => config.codec.split('.')[0])).toEqual(['hvc1', 'avc1']);
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(playbackAdapter.seek.mock.calls.filter(([time]) => time === 0).length).toBeGreaterThanOrEqual(2);
+    expect(result.encoding?.attempt).toBe(2);
+  });
+
+  it('does not retry an output write failure as an encoder compatibility failure', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.pushEncodedChunk.mockResolvedValue({ success: false, error: 'disk full' });
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('disk full');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes an opened direct output when encoder configuration fails before capture', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.failConfigureCodec = 'hvc1.';
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith('/output/native.mp4');
+    expect(result.encoding?.implementation).toBe('webcodecs-transcode');
+  });
+
+  it('falls back to raw pixels once when neither native standard is supported', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = () => false;
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding?.implementation).toBe('ffmpeg');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it('copies the native target video when adding audio', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0, params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    }] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    const result = await adapter.export(nativeConfig({ includeAudio: true }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.convert).toHaveBeenCalledWith(expect.any(String), '/output/native.mp4', expect.objectContaining({ codec: 'copy' }));
   });
 
   it('does not start an export when the signal is already aborted', async () => {

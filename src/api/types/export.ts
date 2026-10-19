@@ -1,7 +1,38 @@
+export type ExportVideoCodec = 'h264' | 'hevc' | 'vp9' | 'av1' | 'prores';
+export type ExportEncodingSpeed = 'fast' | 'balanced' | 'quality';
+export type ExportRateControl = { mode: 'crf'; crf: number } | { mode: 'bitrate'; bitrateMbps: number };
+
+export interface ExportEncodingSettings {
+  videoCodec: ExportVideoCodec;
+  implementation: 'auto' | 'webcodecs' | 'ffmpeg';
+  quality: 'balanced' | 'high' | 'custom';
+  ffmpegEncoder?: string;
+  rateControl?: ExportRateControl;
+  speed?: ExportEncodingSpeed;
+  allowH264Intermediate?: boolean;
+  intermediateBitrateMbps?: number;
+}
+
+export interface ExportEncodingInfo {
+  implementation: 'webcodecs' | 'ffmpeg' | 'webcodecs-transcode';
+  encoder: string;
+  attempt: number;
+  fallbackReason?: string;
+}
+
+export interface ExportOperationResult {
+  success: boolean;
+  error?: string;
+  stderr?: string;
+  failureKind?: 'encoder' | 'output' | 'process';
+}
+
 export interface ExportConfig {
   format: 'mp4' | 'webm' | 'mov';
   codec: string;
   bitrateMbps: number;
+  /** When present, takes precedence over legacy codec/backend options. */
+  encoding?: ExportEncodingSettings;
   fps: number;
   width: number;
   height: number;
@@ -37,6 +68,7 @@ export interface ExportProgress {
   frame?: number;
   totalFrames?: number;
   audioSourceCount?: number;
+  encoding?: ExportEncodingInfo;
 }
 
 export interface ExportResult {
@@ -44,6 +76,7 @@ export interface ExportResult {
   cancelled?: boolean;
   outputPath?: string;
   error?: string;
+  encoding?: ExportEncodingInfo;
 }
 
 export interface FFmpegAudioSource {
@@ -59,16 +92,31 @@ export interface FFmpegAudioSource {
   loop?: boolean;
 }
 
-export interface FFmpegConvertOptions {
+export interface FFmpegVideoOptions {
+  codec?: string;
+  /** Target bitrate in Mbps; only used when crf is absent. */
+  bitrate?: number;
+  crf?: number;
+  speed?: ExportEncodingSpeed;
+  transparent?: boolean;
+}
+
+export interface FFmpegStreamOptions extends FFmpegVideoOptions {
+  fps?: number;
+  width?: number;
+  height?: number;
+  inputFormat?: 'rgba' | 'h264' | 'hevc' | 'ivf';
+  vflip?: boolean;
+  /** Legacy encoded input defaults to H.264 Annex B. */
+  isEncoded?: boolean;
+}
+
+export interface FFmpegConvertOptions extends FFmpegVideoOptions {
   fps?: number;
   width?: number;
   height?: number;
   audioPaths?: string[];
   audioSources?: FFmpegAudioSource[];
   audioCodec?: string;
-  codec?: string;
-  bitrate?: number;
   totalFrames?: number;
-  /** Preserve the alpha channel (yuva420p) when re-encoding — subtitle-only exports. */
-  transparent?: boolean;
 }

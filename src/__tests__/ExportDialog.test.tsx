@@ -18,6 +18,31 @@ vi.mock('../ui/context/AppContext', () => ({
 import ExportDialog from '../ui/ExportDialog';
 
 describe('ExportDialog cancellation', () => {
+  it('applies high quality without opening advanced settings', async () => {
+    mocks.export.mockResolvedValue({ success: true });
+    const view = render(<ExportDialog onClose={vi.fn()} />);
+    expect(view.container.querySelector('details')?.open).toBe(false);
+    fireEvent.click(screen.getByRole('combobox', { name: '编码质量' }));
+    fireEvent.click(screen.getByRole('option', { name: '高画质' }));
+    expect(Number((screen.getByLabelText('目标码率 (Mbps)') as HTMLInputElement).value)).toBe(20);
+    fireEvent.click(screen.getByRole('button', { name: '开始导出' }));
+    await screen.findByRole('button', { name: '关闭' });
+    expect(mocks.export).toHaveBeenCalledWith(expect.objectContaining({ encoding: expect.objectContaining({ quality: 'high', allowH264Intermediate: false }) }), expect.any(Function), expect.any(AbortSignal));
+  });
+
+  it('passes custom CRF and intermediate bitrate to the exporter', async () => {
+    mocks.export.mockResolvedValue({ success: true });
+    render(<ExportDialog onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('combobox', { name: '编码标准' }));
+    fireEvent.click(screen.getByRole('option', { name: 'H.265 / HEVC' }));
+    fireEvent.click(screen.getByText('高级编码设置'));
+    fireEvent.change(screen.getByLabelText('CRF'), { target: { value: '17' } });
+    fireEvent.change(screen.getByLabelText('中间流码率 (Mbps)'), { target: { value: '42.5' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始导出' }));
+    await screen.findByRole('button', { name: '关闭' });
+    expect(mocks.export).toHaveBeenCalledWith(expect.objectContaining({ encoding: expect.objectContaining({ quality: 'custom', rateControl: { mode: 'crf', crf: 17 }, intermediateBitrateMbps: 42.5 }) }), expect.any(Function), expect.any(AbortSignal));
+  });
+
   beforeEach(() => {
     mocks.export.mockReset();
     mocks.project = null;
@@ -82,5 +107,65 @@ describe('ExportDialog cancellation', () => {
     expect(screen.getByRole('status').textContent).toBe('导出已取消');
     expect(screen.queryByText('导出失败')).toBeNull();
     expect(screen.getByRole('button', { name: '关闭' })).toBeDefined();
+  });
+
+  it('renders success actions, displays file size, and supports revealing file in manager', async () => {
+    const showItemInFolder = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('aeonStageryAPI', {
+      dialog: { showSave: vi.fn().mockResolvedValue({ canceled: false, filePath: '/output/test.mp4' }) },
+      fs: {
+        showItemInFolder,
+        stat: vi.fn().mockResolvedValue({ success: true, data: { sizeBytes: 15 * 1024 * 1024 } }),
+      },
+    });
+
+    mocks.export.mockResolvedValue({ success: true });
+    render(<ExportDialog onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '开始导出' }));
+    await screen.findByRole('status');
+    expect(screen.getByText('导出完成！')).toBeDefined();
+    expect(await screen.findByText('15.0 MB')).toBeDefined();
+
+    const revealBtn = screen.getByRole('button', { name: '打开所在文件夹' });
+    fireEvent.click(revealBtn);
+    expect(showItemInFolder).toHaveBeenCalledWith('/output/test.mp4');
+
+    const againBtn = screen.getByRole('button', { name: '再导出一份' });
+    fireEvent.click(againBtn);
+    expect(screen.getByRole('button', { name: '开始导出' })).toBeDefined();
+  });
+
+  it('closes dialog when header close button is clicked', () => {
+    const onClose = vi.fn();
+    render(<ExportDialog onClose={onClose} />);
+    const closeBtn = screen.getByRole('button', { name: '关闭窗口' });
+    fireEvent.click(closeBtn);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('adapts recommended bitrate when resolution and codec change', () => {
+    render(<ExportDialog onClose={vi.fn()} />);
+
+    // Default 1080p @ 60fps project format with H.264 recommends 14 Mbps
+    const bitrateInput = screen.getByLabelText('目标码率 (Mbps)') as HTMLInputElement;
+    expect(Number(bitrateInput.value)).toBe(14);
+
+    // Switch to custom 4K resolution
+    fireEvent.click(screen.getByRole('checkbox', { name: '跟随项目分辨率与帧率' }));
+    fireEvent.change(screen.getByLabelText('宽度 (px)'), { target: { value: '3840' } });
+    fireEvent.change(screen.getByLabelText('高度 (px)'), { target: { value: '2160' } });
+
+    // Bitrate automatically adapts to 4K recommendation (~40 Mbps)
+    expect(Number(bitrateInput.value)).toBe(40);
+
+    // User manual override
+    fireEvent.change(bitrateInput, { target: { value: '25' } });
+    expect(Number(bitrateInput.value)).toBe(25);
+
+    // Changing resolution further does not override user's manual value
+    fireEvent.change(screen.getByLabelText('宽度 (px)'), { target: { value: '1920' } });
+    fireEvent.change(screen.getByLabelText('高度 (px)'), { target: { value: '1080' } });
+    expect(Number(bitrateInput.value)).toBe(25);
   });
 });

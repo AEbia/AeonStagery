@@ -3,6 +3,8 @@
  * specific capture mechanism (WebCodecs encoder vs raw-pixel extraction).
  */
 
+import type { ExportVideoCodec, FFmpegVideoOptions } from '../../api/types/export';
+
 export interface BackendInit {
   width: number;
   height: number;
@@ -11,8 +13,11 @@ export interface BackendInit {
   outputPath: string;
   codec: string;   // FFmpeg codec for the stream export
   isEncoded: boolean;
-  /** Preserve the alpha channel through the FFmpeg encode (yuva420p, subtitle-only exports). */
+  /** Preserve alpha through ProRes 4444 subtitle exports. */
   transparent?: boolean;
+  videoCodec?: ExportVideoCodec;
+  encoding?: FFmpegVideoOptions;
+  onStarted?: () => void;
 }
 
 export interface BackendFrame {
@@ -34,4 +39,5 @@ export interface ICaptureBackend {
 
   /** Flush remaining encoder frames, close stream, return the video path */
   finish(): Promise<void>;
+  abort?(cancelled?: boolean): Promise<void>;
 }

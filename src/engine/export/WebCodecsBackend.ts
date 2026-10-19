@@ -1,46 +1,20 @@
 import type { ICaptureBackend, BackendInit, BackendFrame } from './ICaptureBackend';
 import { ExportWriteQueue } from './ExportWriteQueue';
-import { avccToAnnexB } from './avccToAnnexB';
+import { EncodedVideoStreamWriter, resolveNativeEncoderConfig } from './WebCodecsEncoding';
+import { assertExportOperation, ExportEncodingError, getExportVideoCodec } from '../../api/exportEncoding';
+import type { ExportOperationResult, FFmpegStreamOptions } from '../../api/types/export';
 
 interface ElectronExportAPI {
-  startStreamExport(outputPath: string, options: Record<string, unknown>): Promise<{ success: boolean; error?: string }>;
-  pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
-  endStreamExport(): Promise<{ success: boolean; error?: string }>;
-}
-
-// H.264 Table A-1 limits for Main profile. Keep level 4.2 as the minimum
-// to preserve the existing 1080p configuration; larger output needs higher levels.
-// https://chromium.googlesource.com/chromium/src/+/lkgr/media/parsers/h264_level_limits.cc
-const H264_MAIN_LEVELS = [
-  { level: 42, maxFrameMbs: 8704, maxMbsPerSecond: 522240, maxBitrate: 50_000_000 },
-  { level: 50, maxFrameMbs: 22080, maxMbsPerSecond: 589824, maxBitrate: 135_000_000 },
-  { level: 51, maxFrameMbs: 36864, maxMbsPerSecond: 983040, maxBitrate: 240_000_000 },
-  { level: 52, maxFrameMbs: 36864, maxMbsPerSecond: 2073600, maxBitrate: 240_000_000 },
-  { level: 60, maxFrameMbs: 139264, maxMbsPerSecond: 4177920, maxBitrate: 240_000_000 },
-  { level: 61, maxFrameMbs: 139264, maxMbsPerSecond: 8355840, maxBitrate: 480_000_000 },
-  { level: 62, maxFrameMbs: 139264, maxMbsPerSecond: 16711680, maxBitrate: 800_000_000 },
-] as const;
-
-function selectH264Codec(config: BackendInit): string {
-  const widthMbs = Math.ceil(config.width / 16);
-  const heightMbs = Math.ceil(config.height / 16);
-  const frameMbs = widthMbs * heightMbs;
-  const limits = H264_MAIN_LEVELS.find(candidate => (
-    frameMbs <= candidate.maxFrameMbs
-    && frameMbs * config.fps <= candidate.maxMbsPerSecond
-    && Math.max(widthMbs, heightMbs) ** 2 <= candidate.maxFrameMbs * 8
-    && config.bitrate <= candidate.maxBitrate
-  ));
-  if (!limits) {
-    throw new Error(`Output ${config.width}×${config.height} at ${config.fps} fps and ${config.bitrate} bps exceeds H.264 level limits.`);
-  }
-  return `avc1.4D00${limits.level.toString(16).toUpperCase()}`;
+  startStreamExport(outputPath: string, options: FFmpegStreamOptions): Promise<ExportOperationResult>;
+  pushEncodedChunk(chunkData: Uint8Array): Promise<ExportOperationResult>;
+  endStreamExport(): Promise<ExportOperationResult>;
 }
 
 export class WebCodecsBackend implements ICaptureBackend {
   private encoder: VideoEncoder | null = null;
   private encoderQueue = new ExportWriteQueue(8 * 1024 * 1024, 32);
-  private isFirstChunk = true;
+  private writer: EncodedVideoStreamWriter | null = null;
+  private submittedFrames = 0;
   private electronAPI: ElectronExportAPI;
   private encoderFailure: Error | null = null;
   private streamStarted = false;
@@ -51,62 +25,54 @@ export class WebCodecsBackend implements ICaptureBackend {
   }
 
   async init(config: BackendInit): Promise<void> {
-    const codec = selectH264Codec(config);
-    // Start the backend FFmpeg stream for muxing Annex B data
+    const encoderConfig = await resolveNativeEncoderConfig(config);
+    const writer = new EncodedVideoStreamWriter(config.videoCodec ?? getExportVideoCodec(config.codec), config.width, config.height, config.fps);
+    this.writer = writer;
+    this.submittedFrames = 0;
+    // FFmpeg only muxes the encoded Annex B / IVF stream.
     const result = await this.electronAPI.startStreamExport(config.outputPath, {
       fps: config.fps,
       codec: config.codec,
       width: config.width,
       height: config.height,
-      crf: 18,
       isEncoded: true,
-      bitrate: Math.round(config.bitrate / 1_000_000),
+      inputFormat: writer.inputFormat,
+      bitrate: config.bitrate / 1_000_000,
     });
-    assertExportSuccess(result, 'FFmpeg stream start');
+    assertExportOperation(result, 'FFmpeg stream start');
 
-    this.isFirstChunk = true;
     this.encoderQueue = new ExportWriteQueue(8 * 1024 * 1024, 32);
     this.encoderFailure = null;
     this.streamStarted = true;
     this.streamFinished = false;
+    config.onStarted?.();
 
     try {
       this.encoder = new VideoEncoder({
         output: (chunk: EncodedVideoChunk, metadata?: EncodedVideoChunkMetadata) => {
           try {
-            const chunkData = new Uint8Array(chunk.byteLength);
-            chunk.copyTo(chunkData);
-            const description = this.isFirstChunk ? metadata?.decoderConfig?.description : undefined;
-            const annexB = avccToAnnexB(chunkData, description);
-            if (description) this.isFirstChunk = false;
+            const annexB = writer.write(chunk, metadata);
             this.encoderQueue.enqueue(annexB.byteLength, async () => {
               const pushResult = await this.electronAPI.pushEncodedChunk(annexB);
-              assertExportSuccess(pushResult, 'FFmpeg encoded chunk push');
+              assertExportOperation(pushResult, 'FFmpeg encoded chunk push');
             });
           } catch (error) {
-            this.encoderFailure = toError(error);
+            this.encoderFailure = new ExportEncodingError(toError(error).message);
             this.encoderQueue.abort(this.encoderFailure);
           }
         },
         error: (e: Error) => {
-          this.encoderFailure = e;
-          this.encoderQueue.abort(e);
+          this.encoderFailure = new ExportEncodingError(e.message);
+          this.encoderQueue.abort(this.encoderFailure);
           console.error('[WebCodecs] Encoder error:', e);
         },
       });
 
-      this.encoder.configure({
-        codec,
-        width: config.width,
-        height: config.height,
-        bitrate: config.bitrate,
-        framerate: config.fps,
-        latencyMode: 'quality',
-        hardwareAcceleration: 'no-preference',
-      });
+      try { this.encoder.configure(encoderConfig); }
+      catch (error) { throw new ExportEncodingError(toError(error).message); }
     } catch (error) {
       await this.abort();
-      throw error;
+      throw error instanceof ExportEncodingError ? error : new ExportEncodingError(toError(error).message);
     }
   }
 
@@ -125,16 +91,20 @@ export class WebCodecsBackend implements ICaptureBackend {
       }
 
       if (this.encoder.state === 'closed') {
-        throw new Error('VideoEncoder unexpectedly closed');
+        throw new ExportEncodingError('VideoEncoder unexpectedly closed');
       }
 
       const videoFrame = new VideoFrame(frame.canvas, {
-        timestamp: frame.frameIndex * (1_000_000 / frame.fps),
+        timestamp: Math.round(frame.frameIndex * (1_000_000 / frame.fps)),
+        duration: Math.round((frame.frameIndex + 1) * 1_000_000 / frame.fps) - Math.round(frame.frameIndex * 1_000_000 / frame.fps),
       });
       try {
         this.encoder.encode(videoFrame, {
-          keyFrame: frame.frameIndex % 60 === 0,
+          keyFrame: frame.frameIndex % Math.max(1, Math.round(frame.fps * 2)) === 0,
         });
+        this.submittedFrames++;
+      } catch (error) {
+        throw new ExportEncodingError(toError(error).message);
       } finally {
         videoFrame.close();
       }
@@ -154,8 +124,10 @@ export class WebCodecsBackend implements ICaptureBackend {
     try {
       if (!this.encoder) throw new Error('WebCodecsBackend not initialized');
       if (this.encoderFailure) throw this.encoderFailure;
-      await this.encoder.flush();
+      try { await this.encoder.flush(); }
+      catch (error) { throw new ExportEncodingError(toError(error).message); }
       await this.encoderQueue.drain();
+      if (this.writer?.frameCount !== this.submittedFrames) throw new ExportEncodingError('WebCodecs 输出帧数不完整');
       if (this.encoderFailure) throw this.encoderFailure;
 
       if (this.encoder.state !== 'closed') {
@@ -164,7 +136,7 @@ export class WebCodecsBackend implements ICaptureBackend {
 
       const result = await this.electronAPI.endStreamExport();
       this.streamFinished = true;
-      assertExportSuccess(result, 'FFmpeg stream finish');
+      assertExportOperation(result, 'FFmpeg stream finish');
     } catch (error) {
       await this.abort();
       throw error;
@@ -187,11 +159,6 @@ export class WebCodecsBackend implements ICaptureBackend {
       // Preserve the original capture failure while still attempting cleanup.
     }
   }
-}
-
-function assertExportSuccess(result: { success: boolean; error?: string } | undefined, operation: string): void {
-  if (result?.success === true) return;
-  throw new Error(result?.error || `${operation} failed`);
 }
 
 function toError(error: unknown): Error {

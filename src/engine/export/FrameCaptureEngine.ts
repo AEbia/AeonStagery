@@ -1,5 +1,5 @@
 import type { ICaptureBackend } from './ICaptureBackend';
-import type { ExportProgress } from '../../api/types/export';
+import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions } from '../../api/types/export';
 import type { VisualLightingOverlay } from '../visual-runtime/VisualRuntimeResolver';
 import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
@@ -68,6 +68,8 @@ interface FrameCaptureConfig {
   outputPath: string;
   codec: string;
   backend: ICaptureBackend;
+  videoCodec?: ExportVideoCodec;
+  encoding?: FFmpegVideoOptions;
   onProgress: (p: ExportProgress) => void;
   visualRuntime?: FrameCaptureVisualRuntime;
   voiceLipSync?: { beforeSeek(time: number): void; applyAtTime(time: number): void; dispose(): void };
@@ -229,8 +231,14 @@ export class FrameCaptureEngine {
       : null;
     let backendFinished = false;
     const signal = config.signal;
-    const abortBackend = (backend as ICaptureBackend & { abort?: (cancelled?: boolean) => Promise<void> }).abort;
+    const abortBackend = backend.abort;
     let backendReady = false;
+    let backendStarted = false;
+    const markBackendStarted = () => {
+      if (backendStarted) return;
+      backendStarted = true;
+      config.onBackendStarted?.();
+    };
     const cancelBackend = () => {
       if (backendReady && !backendFinished && abortBackend) {
         void abortBackend.call(backend, true).catch((error) => console.error('[FrameCapture] Cancellation cleanup failed:', error));
@@ -292,9 +300,12 @@ export class FrameCaptureEngine {
         codec,
         isEncoded: true,
         transparent: subtitleOnly,
+        videoCodec: config.videoCodec,
+        encoding: config.encoding,
+        ...(config.onBackendStarted ? { onStarted: markBackendStarted } : {}),
       });
       backendReady = true;
-      config.onBackendStarted?.();
+      markBackendStarted();
       signal?.throwIfAborted();
 
       // ── Deterministic Lockdown ──

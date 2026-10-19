@@ -16,7 +16,7 @@ vi.mock('../engine/CustomAnimHost', () => ({ customAnimHost: customAnimMocks }))
 vi.mock('../engine/TextLayerManager', () => ({ textLayerManager: textLayerMocks }));
 
 import { FrameCaptureEngine } from '../engine/export/FrameCaptureEngine';
-import { Container, Text, Graphics } from 'pixi.js';
+import { AlphaFilter, ColorMatrixFilter, Container, Text, Graphics } from 'pixi.js';
 
 function createMockStage() {
   return {
@@ -144,6 +144,9 @@ describe('FrameCaptureEngine', () => {
     automaticText._resolution = 0.25;
     expect(automaticText._autoResolution).toBe(true);
     const fixedText = root.addChild(new Text({ text: 'Explicit density', resolution: 0.5 }));
+    const inheritedFilter = new AlphaFilter({ alpha: 0.5, resolution: 'inherit' });
+    const fixedFilter = new ColorMatrixFilter();
+    root.filters = [inheritedFilter, fixedFilter];
     stage.getApp().stage = root;
     const capture = new FrameCaptureEngine(
       { ...stage, getLayer: () => null, getWidth: () => 1920, getHeight: () => 1080 },
@@ -154,6 +157,8 @@ describe('FrameCaptureEngine', () => {
     backend.encodeFrame.mockImplementation(async () => {
       expect(automaticText.resolution).toBe(2);
       expect(fixedText.resolution).toBe(2);
+      expect(inheritedFilter.resolution).toBe('inherit');
+      expect(fixedFilter.resolution).toBe(2);
       if (outcome === 'failure') throw new Error('capture failed');
       if (outcome === 'cancellation') controller.abort();
     });
@@ -170,6 +175,8 @@ describe('FrameCaptureEngine', () => {
     expect(automaticText.resolution).toBeNull();
     expect(fixedText._autoResolution).toBe(false);
     expect(fixedText.resolution).toBe(0.5);
+    expect(inheritedFilter.resolution).toBe('inherit');
+    expect(fixedFilter.resolution).toBe(1);
     root.destroy({ children: true });
   });
 

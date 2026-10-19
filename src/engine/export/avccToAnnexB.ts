@@ -1,5 +1,5 @@
-/** Converts four-byte AVCC lengths to Annex B with a single payload allocation. */
-export function avccToAnnexB(chunk: Uint8Array, description?: AllowSharedBufferSource): Uint8Array {
+/** Converts length-prefixed AVC NALs to Annex B with a single payload allocation. */
+export function avccToAnnexB(chunk: Uint8Array, description?: AllowSharedBufferSource, lengthSize = 4): Uint8Array {
   const nals: Uint8Array[] = [];
   let totalSize = 0;
   const append = (bytes: Uint8Array, offset: number, length: number): void => {
@@ -29,11 +29,11 @@ export function avccToAnnexB(chunk: Uint8Array, description?: AllowSharedBufferS
     appendParameters(ppsCount);
   }
 
-  const lengths = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  if (lengthSize < 1 || lengthSize > 4) throw new Error('Invalid AVCC NAL length size');
   for (let offset = 0; offset < chunk.byteLength;) {
-    if (offset + 4 > chunk.byteLength) throw new Error('Incomplete AVCC NAL length');
-    const length = lengths.getUint32(offset);
-    offset += 4;
+    if (offset + lengthSize > chunk.byteLength) throw new Error('Incomplete AVCC NAL length');
+    let length = 0;
+    for (let index = 0; index < lengthSize; index++) length = length * 256 + chunk[offset++];
     append(chunk, offset, length);
     offset += length;
   }

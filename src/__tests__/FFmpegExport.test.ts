@@ -49,6 +49,16 @@ function handler(name: string): (...args: any[]) => any {
 }
 
 describe('FFmpeg export failure seam', () => {
+  it('honors CRF in raw-pixel encoding and defaults to medium compression', async () => {
+    ffmpegMocks.spawn.mockReturnValue(new FakeChild());
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/quality.mp4', {
+      codec: 'libx264', crf: 18, width: 16, height: 16,
+    });
+    const args = ffmpegMocks.spawn.mock.calls[0][1] as string[];
+    expect(args).toEqual(expect.arrayContaining(['-crf', '18', '-preset', 'medium']));
+    expect(args).not.toContain('-b:v');
+  });
+
   it('redirects packaged FFmpeg from app.asar to app.asar.unpacked', () => {
     expect(resolveFfmpegExecutablePath(
       String.raw`C:\Users\23275\AppData\Local\Programs\AeonStagery\resources\app.asar\node_modules\ffmpeg-static\ffmpeg.exe`,

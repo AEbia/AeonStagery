@@ -5,10 +5,6 @@
   min-width: 0;
 }
 
-.export-dialog {
-  max-height: calc(100dvh - 48px);
-  overflow-y: auto;
-}
 
 .video-format__dimensions {
   display: grid;
