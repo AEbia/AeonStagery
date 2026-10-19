@@ -80,10 +80,12 @@ class SubtitleRenderer {
     timeline: gsap.core.Timeline;
     config: DialogueConfig;
     fontSize: number;
+    fontSizeSource: 'global' | 'template';
     textSpeed: number;
   }>();
   private activeConfig: DialogueConfig | null = null;
   private activeFontSize = 48;
+  private activeFontSizeSource: 'global' | 'template' = 'global';
   private activeTextSpeed = 0.025;
   /** fontFamily → runtimeUri of dialogue fonts already registered with document.fonts. */
   private readonly loadedDialogueFonts = new Map<string, string>();
@@ -125,6 +127,7 @@ class SubtitleRenderer {
       speedKey,
       settingsManager.get('dialogueEntranceAnimation') !== false,
       this.getDialogueFontSize(),
+      this.getDialogueFontSizeSource(),
     ].join('_');
     return config._id ? `${config._id}_${textHash}` : textHash;
   }
@@ -132,6 +135,10 @@ class SubtitleRenderer {
   private getDialogueFontSize(): number {
     const size = settingsManager.get('dialogueFontSize');
     return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 48;
+  }
+
+  private getDialogueFontSizeSource(): 'global' | 'template' {
+    return settingsManager.get('dialogueFontSizeSource') === 'template' ? 'template' : 'global';
   }
 
   private getCachedMetrics(text: string, style: PIXI.TextStyle): PIXI.CanvasTextMetrics {
@@ -183,6 +190,7 @@ class SubtitleRenderer {
     }
 
     const globalFontSize = this.getDialogueFontSize();
+    const fontSizeSource = this.getDialogueFontSizeSource();
     const container = new PIXI.Container();
 
     const template = config.presentation?.renderer === 'image-dialogue-v1'
@@ -216,7 +224,9 @@ class SubtitleRenderer {
     if (config.presentation?.renderer === 'image-dialogue-v1') {
       const presentation = config.presentation;
       const originalFontSize = Number(textStyle.fontSize);
-      textStyle.fontSize = fontSize + 4;
+      if (fontSizeSource === 'global' || config.fontSize !== undefined) {
+        textStyle.fontSize = fontSize + 4;
+      }
       textStyle.lineHeight = Math.round(textStyle.lineHeight * Number(textStyle.fontSize) / originalFontSize);
       const inset = Math.max(0, presentation.text.x - presentation.textbox.x);
       textStyle.wordWrapWidth = Math.max(1, Math.min(
@@ -272,6 +282,7 @@ class SubtitleRenderer {
         this.currentTimeline = tl;
         this.activeConfig = config;
         this.activeFontSize = globalFontSize;
+        this.activeFontSizeSource = fontSizeSource;
         const layer = stageManager.getLayer('subtitle');
         if (layer && !layer.destroyed) {
           if (container.parent !== layer) {
@@ -487,6 +498,7 @@ class SubtitleRenderer {
       timeline: tl,
       config,
       fontSize: globalFontSize,
+      fontSizeSource,
       textSpeed: dialogueTextSpeed,
     });
     return tl;
@@ -512,6 +524,7 @@ class SubtitleRenderer {
     if (!cached) return;
 
     if (cached.fontSize !== this.getDialogueFontSize()
+      || cached.fontSizeSource !== this.getDialogueFontSizeSource()
       || ((cached.config.style ?? 'typewriter') === 'typewriter'
         && cached.textSpeed !== settingsManager.get('dialogueTextSpeed'))) {
       // Keep the scheduled position and parent when changing a local dialogue
@@ -541,6 +554,7 @@ class SubtitleRenderer {
     this.currentTimeline = timeline;
     this.activeConfig = cached.config;
     this.activeFontSize = cached.fontSize;
+    this.activeFontSizeSource = cached.fontSizeSource;
     this.activeTextSpeed = cached.textSpeed;
 
     const layer = stageManager.getLayer('subtitle');
@@ -736,6 +750,7 @@ class SubtitleRenderer {
   public forceUpdate(): void {
     if (this.activeConfig && this.currentTimeline && (
       this.activeFontSize !== this.getDialogueFontSize()
+      || this.activeFontSizeSource !== this.getDialogueFontSizeSource()
       || ((this.activeConfig.style ?? 'typewriter') === 'typewriter'
         && this.activeTextSpeed !== settingsManager.get('dialogueTextSpeed'))
     )) {

@@ -47,6 +47,7 @@ import { SETTINGS_CATEGORIES, findSettingsCategories, type SettingsDialogTab } f
 import { formatAeonStageryVersionLabel } from '../services/product/ProductInfo';
 import './settingsNavigation.css';
 import { DialogueDefaultsSettings } from './settings/DialogueDefaultsSettings';
+import { FormSelect } from './FormSelect';
 import { UpdateSettingsPanel } from './settings/UpdateSettingsPanel';
 import { getAiProseProviderIdentity } from '../services/ai-authoring/AiProseGlobalConfiguration';
 
@@ -436,10 +437,24 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
                 </Section>
                 <Section title="文字与动画">
                   <SettingItem
-                    title="对白字体大小"
-                    description="仅调整舞台对白正文的字号（像素），说话人字号保持各样式的设定。正文按文本框可用宽度自动换行，行距随字号调整。"
-                    control={<Slider label="对白字体大小" min={DIALOGUE_FONT_SIZE_RANGE.min} max={DIALOGUE_FONT_SIZE_RANGE.max} step={DIALOGUE_FONT_SIZE_RANGE.step} value={settings.dialogueFontSize} onChange={(value) => setSetting('dialogueFontSize', value)} suffix=" 像素" />}
+                    title="字号来源"
+                    description="统一字号使用本机设定；跟随模板字号保留各样式的原始大小，模板未指定时使用统一字号。说话人字号始终跟随样式。"
+                    control={(
+                      <FormSelect
+                        aria-label="字号来源"
+                        value={settings.dialogueFontSizeSource}
+                        options={[{ value: 'global', label: '统一字号' }, { value: 'template', label: '跟随模板字号' }]}
+                        onChange={(value) => setSetting('dialogueFontSizeSource', value === 'template' ? 'template' : 'global')}
+                      />
+                    )}
                   />
+                  {settings.dialogueFontSizeSource === 'global' && (
+                    <SettingItem
+                      title="对白字体大小"
+                      description="仅调整舞台对白正文的字号（像素），说话人字号保持各样式的设定。正文按文本框可用宽度自动换行，行距随字号调整。"
+                      control={<Slider label="对白字体大小" min={DIALOGUE_FONT_SIZE_RANGE.min} max={DIALOGUE_FONT_SIZE_RANGE.max} step={DIALOGUE_FONT_SIZE_RANGE.step} value={settings.dialogueFontSize} onChange={(value) => setSetting('dialogueFontSize', value)} suffix=" 像素" />}
+                    />
+                  )}
                   <SettingItem
                     title="文本框入场动画"
                     description="控制文本框的淡入与上滑效果；文字仍按所选字幕样式展现。所有对白共用此开关。"

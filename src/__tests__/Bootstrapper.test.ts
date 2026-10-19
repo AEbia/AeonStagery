@@ -112,12 +112,12 @@ function bootstrapCtxWithEngine() {
 }
 
 describe('Bootstrapper', () => {
-  it('refreshes the active dialogue when the font size setting changes', () => {
+  it.each(['dialogueFontSize', 'dialogueFontSizeSource'] as const)('refreshes the active dialogue when %s changes', (setting) => {
     vi.mocked(settingsManager.subscribeKey).mockClear();
     vi.mocked(subtitleRenderer.forceUpdate).mockClear();
     const ctx = bootstrapCtx();
     const fontSizeSubscription = vi.mocked(settingsManager.subscribeKey).mock.calls
-      .find(([key]) => key === 'dialogueFontSize');
+      .find(([key]) => key === setting);
 
     expect(fontSizeSubscription).toBeDefined();
     fontSizeSubscription?.[1]();

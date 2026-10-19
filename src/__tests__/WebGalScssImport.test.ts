@@ -263,7 +263,7 @@ describe('WebGAL SCSS template import', () => {
     await expect(stat(templatesRoot)).rejects.toThrow();
   });
 
-  it('does not count the two bundled dialogue styles as old imports without a source record', async () => {
+  it('does not count bundled dialogue styles as old imports without a source record', async () => {
     const root = await makeRoot('aeonstagery-webgal-builtin-unverifiable-');
     const templateRoot = path.join(root, 'template');
     const templatesRoot = path.join(root, 'library');
@@ -275,7 +275,7 @@ describe('WebGAL SCSS template import', () => {
     )) as { dialogueStyles: Array<{ id: string; renderer: string }> };
     expect(bundledManifest.dialogueStyles
       .filter((style) => style.renderer === 'image-dialogue-v1')
-      .map((style) => style.id)).toEqual(['pink-nameplate', 'immersive-subtitle']);
+      .map((style) => style.id)).toEqual(['pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle']);
     const bundledPackageRoot = path.join(templatesRoot, 'aeonstagery.default');
     await mkdir(bundledPackageRoot, { recursive: true });
     await writeFile(

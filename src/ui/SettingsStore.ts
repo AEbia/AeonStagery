@@ -38,6 +38,13 @@ export interface RecentProjectEntry {
 
 export const MAX_RECENT_PROJECTS = 6;
 export type AppTheme = 'light' | 'dark' | 'system';
+export type DialogueFontSizeSource = 'global' | 'template';
+
+function normalizeDialogueFontSizeSource(value: unknown): DialogueFontSizeSource {
+  // Older settings have no source field. Keep their uniform size even when
+  // a template's authored defaults change; template sizing is an explicit opt-in.
+  return value === 'template' ? 'template' : 'global';
+}
 
 function normalizeTheme(value: unknown): AppTheme {
   return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
@@ -71,6 +78,7 @@ export interface AppSettings {
   typewriterSpeed: number;
   dialogueTextSpeed: number;
   dialogueFontSize: number;
+  dialogueFontSizeSource: DialogueFontSizeSource;
   dialogueEntranceAnimation: boolean;
   defaultDialogueDurationSeconds: number;
   scriptReadingSpeed: number;
@@ -134,6 +142,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   typewriterSpeed: 0.025,
   dialogueTextSpeed: 0.06,
   dialogueFontSize: 48,
+  dialogueFontSizeSource: 'global',
   dialogueEntranceAnimation: false,
   defaultDialogueDurationSeconds: DEFAULT_DIALOGUE_DURATION_SECONDS,
   scriptReadingSpeed: DEFAULT_SCRIPT_READING_SPEED,
@@ -291,6 +300,7 @@ class SettingsManager {
             : normalizeDialogueTextSpeed(restSettings.dialogueTextSpeed),
           dialogueEntranceAnimation: restSettings.dialogueEntranceAnimation === true,
           dialogueFontSize: normalizeDialogueFontSize(restSettings.dialogueFontSize),
+          dialogueFontSizeSource: normalizeDialogueFontSizeSource(restSettings.dialogueFontSizeSource),
           defaultDialogueDurationSeconds: normalizeDefaultDialogueDurationSeconds(
             restSettings.defaultDialogueDurationSeconds,
           ),
@@ -392,6 +402,8 @@ class SettingsManager {
         return normalizeDialogueTextSpeed(value) as AppSettings[K];
       case 'dialogueFontSize':
         return normalizeDialogueFontSize(value) as AppSettings[K];
+      case 'dialogueFontSizeSource':
+        return normalizeDialogueFontSizeSource(value) as AppSettings[K];
       case 'theme':
         return normalizeTheme(value) as AppSettings[K];
       case 'defaultDialogueDurationSeconds':
