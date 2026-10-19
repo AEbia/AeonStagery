@@ -854,6 +854,7 @@ function commitFilters(displayObject: PIXI.Container, filters: PIXI.Filter[] | n
 }
 
 function markOwnedFilter<T extends PIXI.Filter>(filter: T): T {
+  filter.resolution = 'inherit';
   (filter as any)[OWNED_FILTER] = true;
   return filter;
 }

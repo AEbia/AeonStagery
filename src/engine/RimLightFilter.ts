@@ -87,6 +87,7 @@ export class RimLightFilter extends PIXI.Filter {
 
   constructor(options: RimLightFilterOptions = {}) {
     super({
+      resolution: 'inherit',
       padding: 1,
       glProgram: PIXI.GlProgram.from({
         vertex: PIXI_V8_FILTER_VERTEX,

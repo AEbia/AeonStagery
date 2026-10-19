@@ -114,6 +114,15 @@ class LightingSystem {
 
     this.rgbSplitFilter = new RGBSplitFilter({ red: [0, 0], green: [0, 0], blue: [0, 0] });
     this.rgbSplitFilter.enabled = false;
+
+    // Parent filters rasterize their entire subtree before Live2D draws.
+    // Follow the current render target so 4K preview and capture keep detail.
+    for (const filter of [
+      this.colorFilter, this.blurFilter, this.bgBlurFilter, this.charBlurFilter,
+      this.godrayFilter, this.bloomFilter, this.adjustmentFilter, this.rgbSplitFilter,
+    ]) {
+      filter.resolution = 'inherit';
+    }
   }
 
   /**

@@ -23,6 +23,7 @@ const TARGET_POST_PROCESSING_KIND = '__targetPostProcessingKind';
 type TargetPostFilterKind = 'adjustment' | 'bloom' | 'godray' | 'rgbSplit' | 'overlay';
 
 function markOwnedFilter<T extends PIXI.Filter>(filter: T, kind: TargetPostFilterKind): T {
+  filter.resolution = 'inherit';
   (filter as any)[TARGET_POST_PROCESSING_OWNER] = true;
   (filter as any)[TARGET_POST_PROCESSING_KIND] = kind;
   return filter;

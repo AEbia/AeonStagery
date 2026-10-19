@@ -140,6 +140,9 @@ describe('ObjectCompositeRuntimeController', () => {
     expect(characterContainer.filters?.length).toBeGreaterThan(0);
     expect(textContainer.filters?.length).toBeGreaterThan(0);
     expect(imageSprite.filters?.length).toBeGreaterThan(0);
+    for (const container of [characterContainer, textContainer, imageSprite]) {
+      expect(container.filters?.every(filter => filter.resolution === 'inherit')).toBe(true);
+    }
     expect((characterContainer as any)._filtersDirty).toBe(true);
   });
 

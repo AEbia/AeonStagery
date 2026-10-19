@@ -315,7 +315,7 @@ export class Live2DCharacterGeometry {
 
           let alphaFilter = container._alphaFilter;
           if (!alphaFilter) {
-            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity });
+            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity, resolution: 'inherit' });
             alphaFilter.padding = 50;
             container._alphaFilter = alphaFilter;
           } else {
