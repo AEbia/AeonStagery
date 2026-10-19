@@ -319,8 +319,9 @@ describe('SubtitleRenderer', () => {
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
     const content = '调整字号应当更新文本测量并保持对白在舞台内自动换行'.repeat(3);
     const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === 'pink-nameplate')!;
+    const dialogueId = 'live-font-reflow';
     const config: DialogueConfig = {
-      _id: 'live-font-reflow', speaker: '角色', text: content, style: 'typewriter', duration: 4,
+      _id: dialogueId, speaker: '角色', text: content, style: 'typewriter', duration: 4,
       presentation: sceneStatementDefinitionRegistry.get('dialogue').parseParams({
         text: content, durationSeconds: 4,
         presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id },
@@ -331,13 +332,15 @@ describe('SubtitleRenderer', () => {
     const expectedLineHeight = Math.round(
       authoredTextStyle.lineHeight! * updatedFontSize / authoredTextStyle.fontSize!,
     );
+    const dialogueStartTime = 2;
     const renderer = new SubtitleRenderer();
     const original = renderer.showDialogue(config);
-    const master = gsap.timeline({ paused: true }).add(original, 2);
+    const master = gsap.timeline({ paused: true }).add(original, dialogueStartTime);
     const coordinator = new DialogueCoordinator(renderer, { stop: vi.fn(), setTextMouthAt: vi.fn(), startAudioDrivenLipSync: vi.fn() });
+    const coordinatedDialogue = { _id: dialogueId, text: content, startTime: dialogueStartTime };
     const sync = (offset: number) => {
-      master.seek(2 + offset, true);
-      coordinator.sync(2 + offset, { ...config, startTime: 2 }, false, vi.fn(), (path) => path, vi.fn());
+      master.seek(dialogueStartTime + offset, true);
+      coordinator.sync(dialogueStartTime + offset, coordinatedDialogue, false, vi.fn(), (path) => path, vi.fn());
     };
     sync(1);
     const before = stageState.subtitleLayer.children[0] as PIXI.Container;
