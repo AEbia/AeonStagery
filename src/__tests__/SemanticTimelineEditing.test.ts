@@ -401,7 +401,7 @@ describe('semantic timeline editing helpers', () => {
     const intent = buildSemanticTimelineParamUpdateIntent(
       makeStore(document, compiled),
       'compiled_lighting_post',
-      { bloomThreshold: 0.6, adjGamma: 1.15 },
+      { bloomThreshold: 0.6, bloomBlur: 20, adjGamma: 1.15 },
       'lighting-typed-fields',
     );
 
@@ -416,6 +416,7 @@ describe('semantic timeline editing helpers', () => {
           bloomBloomScale: 0.8,
           adjGamma: 1.15,
           bloomThreshold: 0.6,
+          bloomBlur: 20,
         },
       },
     }));

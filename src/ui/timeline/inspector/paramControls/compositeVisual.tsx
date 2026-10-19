@@ -94,7 +94,7 @@ export function resolveCompositeVisualParam(ctx: InspectorParamContext, key: str
     const currentValue = typeof val === 'number' ? val : defaultValue;
     const step = key === 'warmth' ? '0.05' : '0.05';
     const min = key === 'warmth' || key === 'brightness' ? '-1' : '0';
-    const max = key === 'brightness' ? '1' : undefined;
+    const max = key === 'bloom' ? '1.5' : key === 'brightness' ? '1' : undefined;
     return (
       <NumericInput
         key={key}

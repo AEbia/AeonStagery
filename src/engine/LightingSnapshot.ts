@@ -24,6 +24,7 @@ export interface LightingPostProcessingSnapshot {
   bloomThreshold: number;
   bloomBloomScale: number;
   bloomBrightness: number;
+  bloomBlur: number;
   rgbSplitX: number;
   rgbSplitY: number;
   godrayGain: number;
@@ -74,6 +75,7 @@ export const DEFAULT_POST_PROCESSING_SNAPSHOT: LightingPostProcessingSnapshot = 
   bloomThreshold: 0.5,
   bloomBloomScale: 0,
   bloomBrightness: 1,
+  bloomBlur: 8,
   rgbSplitX: 0,
   rgbSplitY: 0,
   godrayGain: 0,
@@ -208,6 +210,7 @@ function applyPartialPostProcessing(
     'bloomThreshold',
     'bloomBloomScale',
     'bloomBrightness',
+    'bloomBlur',
     'rgbSplitX',
     'rgbSplitY',
     'godrayGain',
@@ -252,6 +255,7 @@ function sanitizePostProcessingState(state: LightingPostProcessingSnapshot): Lig
     'bloomThreshold',
     'bloomBloomScale',
     'bloomBrightness',
+    'bloomBlur',
     'rgbSplitX',
     'rgbSplitY',
     'godrayGain',
@@ -271,6 +275,7 @@ function sanitizePostProcessingState(state: LightingPostProcessingSnapshot): Lig
     }
   }
   next.overlayColor = sanitizeColor(next.overlayColor, DEFAULT_POST_PROCESSING_SNAPSHOT.overlayColor);
+  next.bloomBlur = Math.max(0, next.bloomBlur);
   next.overlayBlendMode = sanitizeOverlayMode(next.overlayBlendMode);
   next.overlayIntensity = isFiniteNumber(next.overlayIntensity)
     ? clamp(next.overlayIntensity, 0, 1)

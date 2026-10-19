@@ -210,6 +210,7 @@ export const PARAM_LABELS: Record<string, string> = {
   bloomThreshold: '泛光阈值',
   bloomBloomScale: '泛光强度',
   bloomBrightness: '泛光亮度',
+  bloomBlur: '泛光扩散半径',
   rgbSplitX: '色差 X',
   rgbSplitY: '色差 Y',
   godrayGain: '体积光强度',

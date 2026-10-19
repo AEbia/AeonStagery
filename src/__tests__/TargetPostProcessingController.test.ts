@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import * as PIXI from 'pixi.js';
+import { AdvancedBloomFilter } from 'pixi-filters';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BLEND_MODES } from '../api/types/blend-mode';
 import type { LightingSnapshot } from '../engine/LightingSnapshot';
@@ -50,6 +51,35 @@ describe('target post-processing blend mode seam', () => {
   afterEach(() => {
     targetPostProcessingController.clearAll();
     state.hero = null;
+  });
+
+  it('updates bloom radius on its existing filter and clears the neutral target state', () => {
+    const hero = new PIXI.Container();
+    state.hero = hero;
+    const snapshot = snapshotForMode('normal');
+    snapshot.postProcessingTargets.hero = {
+      ...DEFAULT_POST_PROCESSING_SNAPSHOT,
+      bloomBloomScale: 0.6,
+      bloomThreshold: 0,
+      bloomBlur: 20,
+    };
+    targetPostProcessingController.applySnapshot(snapshot);
+    const bloom = (hero.filters as PIXI.Filter[]).find((filter) => filter instanceof AdvancedBloomFilter);
+    expect(bloom).toMatchObject({ bloomScale: 0.6, threshold: 0, blur: 20 });
+
+    snapshot.postProcessingTargets.hero.bloomBlur = 0;
+    targetPostProcessingController.applySnapshot(snapshot);
+    expect(hero.filters).toContain(bloom);
+    expect(bloom).toHaveProperty('blur', 0);
+
+    snapshot.postProcessingTargets.hero = { ...DEFAULT_POST_PROCESSING_SNAPSHOT, bloomBrightness: 0.8 };
+    targetPostProcessingController.applySnapshot(snapshot);
+    expect(hero.filters).toContain(bloom);
+    expect(bloom).toMatchObject({ bloomScale: 0, brightness: 0.8, blur: 8 });
+
+    snapshot.postProcessingTargets.hero = { ...DEFAULT_POST_PROCESSING_SNAPSHOT };
+    targetPostProcessingController.applySnapshot(snapshot);
+    expect(hero.filters).toBeNull();
   });
 
   it('applies each mode to its owned target filter while retaining external filters', () => {
