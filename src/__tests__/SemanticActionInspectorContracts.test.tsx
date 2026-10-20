@@ -42,6 +42,7 @@ const EXPECTED_BLEND_OPTION_LABELS = [
 ];
 
 vi.mock('../ui/context/AppContext', () => ({
+  useOptionalApp: () => null,
   useApp: () => ({
     stores: { editor: { setCopyBuffer: vi.fn(), pixelsPerSecond: 50 } },
     services: { semanticAuthoring: state.semanticAuthoring, customMotionEditing: state.customMotionEditing, customMotionConversion: state.customMotionConversion },
