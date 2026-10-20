@@ -24,10 +24,17 @@ colors:
   warm-coral: "#d88c7a"
   cool-stage-slate: "#8fa7c7"
   warm-coral-hover: "#efac98"
-  on-accent: "#ffffff"
+  light-on-accent: "#ffffff"
+  dark-on-accent: "#13151a"
   semantic-success: "#34d399"
   semantic-warning: "#f59e0b"
   semantic-error: "#ef4444"
+  light-success-text: "#34d399"
+  light-warning-text: "#f59e0b"
+  light-error-text: "#ef4444"
+  dark-success-text: "#34d399"
+  dark-warning-text: "#f59e0b"
+  dark-error-text: "#ef4444"
   track-dialogue: "#10b981"
   track-character: "#60a5fa"
   track-camera: "#f472b6"
@@ -99,13 +106,13 @@ components:
     padding: "6px 14px"
   button-primary-light:
     backgroundColor: "{colors.director-indigo}"
-    textColor: "{colors.on-accent}"
+    textColor: "{colors.light-on-accent}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "6px 14px"
   button-primary-dark:
     backgroundColor: "{colors.warm-coral}"
-    textColor: "{colors.on-accent}"
+    textColor: "{colors.dark-on-accent}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "6px 14px"
@@ -134,7 +141,7 @@ components:
     height: "44px"
   validation-pill:
     backgroundColor: "color-mix(in srgb, #f59e0b 10%, #ffffff)"
-    textColor: "{colors.semantic-warning}"
+    textColor: "{colors.light-warning-text}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "0 10px"
@@ -296,7 +303,7 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 按钮紧凑、清晰并略带触感，默认高度约 32px，内部间距为 6px 14px，圆角为 8px。
 
-- **Primary:** 使用当前主题的主强调色、白色文字和较高字重；小型工具栏版本降为 4px 10px 与 4px 圆角。
+- **Primary:** 使用当前主题的主强调色、`--on-accent` 前景色和较高字重；Light 使用白色，Dark 复用现有深墨色 `#13151a`。默认及悬停状态的文字对比度均须达到 4.5:1（§5.6），播放按钮与实心主题色工具按钮沿用该配对。小型工具栏版本降为 4px 10px 与 4px 圆角。
 - **Hover / Focus:** 悬停上移 1px，并增加轻阴影；主按钮出现主题辉光，键盘焦点使用 2px 主题色轮廓并外移 2px。
 - **Secondary:** 使用抬升中性色表面、细边框和次级文字色。
 - **Icon:** 固定 32px 方形、透明背景，熟悉操作只显示图标并通过 tooltip 或可访问名称说明。
@@ -306,6 +313,8 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 - **Style:** 验证、协作与状态徽章高度约 18–28px，使用细边框、轻语义底色和 4–8px 圆角；计数类徽章可用胶囊形。
 - **State:** 错误、警告、成功严格使用语义色；主题主色只表示选中、焦点或协作编辑状态。
+- **Validation Text:** 校验提示分别使用 `--warning-text`、`--error-text`，底色与边框沿用 `--warning`、`--error`。按项目偏好，警告和错误文字分别保留原始琥珀色 `#f59e0b` 与红色 `#ef4444`，明暗主题的文字令牌均为对应语义色的别名。
+- **Status Text:** 保存、烘焙与协作状态使用 `--success-text`、`--warning-text`、`--error-text`，文字令牌分别沿用原始绿色 `#34d399`、琥珀色 `#f59e0b` 与红色 `#ef4444`。保存成功文字保留原有 0.7 透明度。播放控制标签、总时长、状态栏元数据与检查器空态指引使用 `--text-secondary`，确保说明文字仍然可读。
 
 ### Cards / Containers
 

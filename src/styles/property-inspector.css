@@ -71,7 +71,7 @@
 
 .property-inspector-shell__tool-btn.btn--primary {
   background: var(--accent-primary);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent-primary);
 }
 
@@ -151,7 +151,8 @@
 
 .property-inspector-shell__empty-desc {
   font-size: 13px;
-  color: var(--text-muted);
+  /* §5.6: the instruction is essential to understanding the empty state. */
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
