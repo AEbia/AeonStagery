@@ -1,5 +1,5 @@
 import type { ICaptureBackend } from './ICaptureBackend';
-import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions } from '../../api/types/export';
+import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions, FFmpegStreamMuxOptions } from '../../api/types/export';
 import type { VisualLightingOverlay } from '../visual-runtime/VisualRuntimeResolver';
 import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
@@ -70,6 +70,7 @@ interface FrameCaptureConfig {
   backend: ICaptureBackend;
   videoCodec?: ExportVideoCodec;
   encoding?: FFmpegVideoOptions;
+  streamOptions?: FFmpegStreamMuxOptions;
   onProgress: (p: ExportProgress) => void;
   visualRuntime?: FrameCaptureVisualRuntime;
   voiceLipSync?: { beforeSeek(time: number): void; applyAtTime(time: number): void; dispose(): void };
@@ -230,6 +231,7 @@ export class FrameCaptureEngine {
       ? { width: canvasStyle.width, height: canvasStyle.height }
       : null;
     let backendFinished = false;
+    let backendFinalizing = false;
     const signal = config.signal;
     const abortBackend = backend.abort;
     let backendReady = false;
@@ -240,7 +242,7 @@ export class FrameCaptureEngine {
       config.onBackendStarted?.();
     };
     const cancelBackend = () => {
-      if (backendReady && !backendFinished && abortBackend) {
+      if (backendReady && !backendFinalizing && !backendFinished && abortBackend) {
         void abortBackend.call(backend, true).catch((error) => console.error('[FrameCapture] Cancellation cleanup failed:', error));
       }
     };
@@ -302,6 +304,7 @@ export class FrameCaptureEngine {
         transparent: subtitleOnly,
         videoCodec: config.videoCodec,
         encoding: config.encoding,
+        streamOptions: config.streamOptions,
         ...(config.onBackendStarted ? { onStarted: markBackendStarted } : {}),
       });
       backendReady = true;
@@ -533,8 +536,15 @@ export class FrameCaptureEngine {
       }
 
       signal?.throwIfAborted();
+      onProgress({
+        phase: 'mix',
+        percent: 90,
+        ...(config.streamOptions?.audioSources ? { audioSourceCount: config.streamOptions.audioSources.length } : {}),
+      });
+      // Once finish begins, the main process may already be atomically
+      // publishing the destination. Let it settle and report its outcome.
+      backendFinalizing = true;
       await backend.finish();
-      signal?.throwIfAborted();
       backendFinished = true;
     } catch (error) {
       if (!backendFinished && typeof abortBackend === 'function') {

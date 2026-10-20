@@ -7,6 +7,7 @@ interface ElectronExportAPI {
   startStreamExport(outputPath: string, options: FFmpegStreamOptions): Promise<ExportOperationResult>;
   pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
   endStreamExport(): Promise<{ success: boolean; error?: string }>;
+  cancelExport(): Promise<ExportOperationResult>;
 }
 
 export class RawPixelsBackend implements ICaptureBackend {
@@ -28,6 +29,7 @@ export class RawPixelsBackend implements ICaptureBackend {
       isEncoded: false,
       bitrate: config.bitrate / 1_000_000,
       ...config.encoding,
+      ...config.streamOptions,
       ...(config.transparent === true ? { transparent: true } : {}),
     });
     assertExportOperation(result, 'FFmpeg stream start');
@@ -71,7 +73,7 @@ export class RawPixelsBackend implements ICaptureBackend {
     this.pushQueue.abort();
     try {
       // User cancellation is terminated by ExportAdapter's cancelExport IPC.
-      if (!cancelled) await this.electronAPI.endStreamExport();
+      if (!cancelled) await this.electronAPI.cancelExport();
     } catch {
       // Preserve the original capture failure while still attempting cleanup.
     }

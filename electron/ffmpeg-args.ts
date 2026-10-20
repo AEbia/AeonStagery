@@ -36,14 +36,26 @@ export function buildFFmpegConvertArgs(
     '-i', inputPath,
   ];
 
-  for (const source of validSources) {
-    if (source.loop === true) args.push('-stream_loop', '-1');
-    args.push('-i', source.path);
-  }
+  appendAudioInputs(args, validSources);
 
   args.push(...buildFFmpegVideoArgs({ codec, bitrate, crf, speed, transparent }, fps));
   if (codec !== 'copy') args.push('-r', String(fps), '-s', `${width}x${height}`);
 
+  appendMuxOutput(args, outputPath, validSources, audioCodec, outputDuration);
+  return args;
+}
+
+function appendAudioInputs(args: string[], sources: FFmpegAudioSource[]): void {
+  for (const source of sources) {
+    if (source.loop === true) args.push('-stream_loop', '-1');
+    args.push('-i', source.path);
+  }
+}
+
+function appendMuxOutput(
+  args: string[], outputPath: string, validSources: FFmpegAudioSource[],
+  audioCodec: string, outputDuration?: number,
+): void {
   if (validSources.length > 0) {
     args.push('-c:a', audioCodec, '-b:a', audioCodec === 'libopus' ? '128k' : '192k');
     const filterParts: string[] = [];
@@ -70,7 +82,6 @@ export function buildFFmpegConvertArgs(
     args.push('-t', formatSeconds(outputDuration));
   }
   args.push(outputPath);
-  return args;
 }
 
 export function buildFFmpegVideoArgs(options: FFmpegVideoOptions, fps = 60): string[] {
@@ -116,24 +127,36 @@ function appendOutputFlags(args: string[], outputPath: string): void {
   if (/\.mp4$/i.test(outputPath)) args.push('-movflags', '+faststart');
 }
 
-export function buildFFmpegStreamArgs(outputPath: string, options: FFmpegStreamOptions = {}): string[] {
-  const { fps = 60, width = 1920, height = 1080 } = options;
+export function buildFFmpegStreamArgs(
+  outputPath: string, options: FFmpegStreamOptions = {},
+  sourceExists: (sourcePath: string) => boolean = () => true,
+): string[] {
+  const { fps = 60, width = 1920, height = 1080, audioCodec = 'aac', totalFrames } = options;
   const input = options.inputFormat ?? (options.isEncoded ? 'h264' : 'rgba');
+  const sources = (options.audioSources ?? []).filter(source => sourceExists(source.path));
+  const outputDuration = positiveNumber(totalFrames) && positiveNumber(fps) ? totalFrames / fps : undefined;
   let args: string[];
   if (input === 'rgba') {
     args = ['-y', '-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', `${width}x${height}`, '-framerate', String(fps), '-i', '-'];
-    if (options.vflip) args.push('-vf', 'vflip');
-    args.push(...buildFFmpegVideoArgs(options, fps));
   } else {
     if (!['h264', 'hevc', 'ivf'].includes(input)) throw new Error('Invalid encoded input format');
     args = ['-y', '-fflags', '+genpts', '-f', input];
     if (input !== 'ivf') args.push('-r', String(fps));
-    args.push('-i', '-', '-c:v', 'copy');
+    args.push('-i', '-');
+  }
+  appendAudioInputs(args, sources);
+  if (input === 'rgba') {
+    if (options.vflip) args.push('-vf', 'vflip');
+    args.push(...buildFFmpegVideoArgs(options, fps));
+  } else if (options.transcode) {
+    args.push(...buildFFmpegVideoArgs(options.transcode, fps));
+    args.push('-r', String(fps));
+  } else {
+    args.push('-c:v', 'copy');
     if (input !== 'ivf') args.push('-bsf:v', 'setts=pts=N:dts=N');
     if (input === 'hevc') args.push('-tag:v', 'hvc1');
   }
-  appendOutputFlags(args, outputPath);
-  args.push(outputPath);
+  appendMuxOutput(args, outputPath, sources, audioCodec, outputDuration);
   return args;
 }
 

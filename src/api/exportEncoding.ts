@@ -80,6 +80,10 @@ export class ExportEncodingError extends Error {
   constructor(message: string) { super(message); this.name = 'ExportEncodingError'; }
 }
 
+export class ExportOutputError extends Error {
+  constructor(message: string) { super(message); this.name = 'ExportOutputError'; }
+}
+
 export function classifyExportFailure(message: string): ExportOperationResult['failureKind'] {
   if (/ENOSPC|EACCES|EPERM|ENOENT|no space|disk full|permission denied|read-only|input\/output error|error opening output|failed to open.*output/i.test(message)) return 'output';
   if (/unknown encoder|encoder.*(?:not found|not available|not supported|failed|error)|(?:cannot|could not|failed to) (?:open|load|initialize|initialise).*|no capable devices|unsupported.*(?:codec|profile|level|format)|invalid.*(?:encoder|profile|level)|nvenc|amf|mfx|qsv|cuda/i.test(message)) return 'encoder';
@@ -89,6 +93,7 @@ export function classifyExportFailure(message: string): ExportOperationResult['f
 export function assertExportOperation(result: ExportOperationResult | undefined, operation: string): void {
   if (result?.success) return;
   const message = [result?.error || `${operation} failed`, result?.stderr].filter(Boolean).join('\n');
+  if (result?.failureKind === 'output' || classifyExportFailure(message) === 'output') throw new ExportOutputError(message);
   if (result?.failureKind === 'encoder' || classifyExportFailure(message) === 'encoder') throw new ExportEncodingError(message);
   throw new Error(message);
 }

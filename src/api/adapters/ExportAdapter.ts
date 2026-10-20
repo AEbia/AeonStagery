@@ -1,5 +1,5 @@
-import type { ExportConfig, ExportProgress, ExportResult, ExportEncodingInfo, ExportVideoCodec, FFmpegVideoOptions } from '../types/export';
-import { assertExportOperation, ExportEncodingError, getSoftwareEncoder, isHardwareEncoder, resolveExportEncoding } from '../exportEncoding';
+import type { ExportConfig, ExportProgress, ExportResult, ExportEncodingInfo, ExportVideoCodec, FFmpegVideoOptions, ExportOperationResult } from '../types/export';
+import { classifyExportFailure, ExportEncodingError, getSoftwareEncoder, isHardwareEncoder, resolveExportEncoding } from '../exportEncoding';
 import { FrameCaptureEngine } from '../../engine/export/FrameCaptureEngine';
 import { AudioMixer, AudioResourceCache } from '../../engine/export/AudioMixer';
 import { WebCodecsBackend } from '../../engine/export/WebCodecsBackend';
@@ -61,16 +61,15 @@ export class ExportAdapter implements IExportAdapter {
     if (signal?.aborted) return { success: false, cancelled: true };
     const formatError = validateVideoFormat(config);
     if (formatError) return { success: false, error: formatError };
-    const temporaryPaths = new Set<string>();
-    let directCaptureOutputStarted = false;
     let backendOutputStarted = false;
     let exportCompleted = false;
-    let cancellation: Promise<unknown> | undefined;
+    let cancellation: Promise<ExportOperationResult> | undefined;
     let removeLogListener: (() => void) | undefined;
     let encodingInfo: ExportEncodingInfo | undefined;
     const cancel = () => {
       cancellation ??= Promise.resolve().then(() => this.electronAPI.export.cancelExport());
       void cancellation.catch(() => {});
+      return cancellation;
     };
     signal?.addEventListener('abort', cancel, { once: true });
     try {
@@ -136,29 +135,26 @@ export class ExportAdapter implements IExportAdapter {
       if (canUseWebCodecs) {
         attempts.push({ native: true, intermediate: false, encoder: getSoftwareEncoder(settings.videoCodec), videoCodec: settings.videoCodec });
         if (settings.allowH264Intermediate && settings.videoCodec !== 'h264') {
-          attempts.push({ native: true, intermediate: true, encoder: 'libx264', videoCodec: 'h264' });
+          attempts.push({ native: true, intermediate: true, encoder: finalEncoder, videoCodec: 'h264' });
+          if (finalEncoder !== softwareEncoder) attempts.push({ native: true, intermediate: true, encoder: softwareEncoder, videoCodec: 'h264' });
         }
       }
       attempts.push({ native: false, intermediate: false, encoder: finalEncoder, videoCodec: settings.videoCodec });
       if (finalEncoder !== softwareEncoder) attempts.push({ native: false, intermediate: false, encoder: softwareEncoder, videoCodec: settings.videoCodec });
-      let captured: { path: string; intermediate: boolean } | undefined;
+      if (ffmpegLogCallback) removeLogListener = this.electronAPI.export.onLog(ffmpegLogCallback);
+      let captured = false;
       for (let index = 0; index < attempts.length; index++) {
         const attempt = attempts[index];
         signal?.throwIfAborted();
-        let videoPath = outputPath;
-        if (audioSources.length > 0 || attempt.intermediate) {
-          const tempDir = await this.electronAPI.export.getTempDir();
-          videoPath = await this.electronAPI.path.join(tempDir, `video_${crypto.randomUUID()}.${attempt.intermediate ? 'mp4' : format}`);
-          temporaryPaths.add(videoPath);
-        }
         const attemptReason = fallbackReason ?? (!attempt.native || attempt.intermediate ? ffmpegFallbackReason : undefined);
         encodingInfo = {
           implementation: attempt.intermediate ? 'webcodecs-transcode' : attempt.native ? 'webcodecs' : 'ffmpeg',
-          encoder: attempt.intermediate ? finalEncoder : attempt.native ? attempt.videoCodec : attempt.encoder,
+          encoder: attempt.native && !attempt.intermediate ? attempt.videoCodec : attempt.encoder,
           attempt: index + 1, ...(attemptReason ? { fallbackReason: attemptReason } : {}),
         };
         onProgress({ phase: 'capture', percent: 0, frame: 0, totalFrames, encoding: encodingInfo });
-        const backend = attempt.native ? new WebCodecsBackend(this.electronAPI.export) : new RawPixelsBackend(this.electronAPI.export);
+        const backendAPI = { ...this.electronAPI.export, cancelExport: cancel };
+        const backend = attempt.native ? new WebCodecsBackend(backendAPI) : new RawPixelsBackend(backendAPI);
         const mouthTarget = typeof this.live2DManager === 'function' ? this.live2DManager() : this.live2DManager;
         const voiceLipSync = new ExportVoiceLipSync(mouthTarget, (speaker) => lipSyncEngine.stop(speaker),
           (text, duration, offset) => lipSyncEngine.computeTextMouthOpenness(text, duration, offset));
@@ -178,53 +174,37 @@ export class ExportAdapter implements IExportAdapter {
           await this.captureEngine.capture({
             fps, rangeStart, rangeEnd, width, height, fit: config.fit,
             bitrateBps: (attempt.intermediate ? settings.intermediateBitrateMbps : settings.bitrateMbps) * 1_000_000,
-            outputPath: videoPath, codec: attempt.encoder, videoCodec: attempt.videoCodec,
+            outputPath, codec: attempt.native ? getSoftwareEncoder(attempt.videoCodec) : attempt.encoder, videoCodec: attempt.videoCodec,
             encoding: attempt.native ? undefined : videoOptions(attempt.encoder), backend,
+            streamOptions: {
+              audioSources, audioCodec: format === 'webm' ? 'libopus' : 'aac', totalFrames,
+              ...(attempt.intermediate ? { transcode: videoOptions(attempt.encoder) } : {}),
+            },
             onProgress: (progress) => onProgress({ ...progress, encoding: encodingInfo }),
             visualRuntime: createPreparedFrameCaptureVisualRuntime(preparedScene), voiceLipSync,
             includeSubtitles: includeSubtitles !== false, subtitleOnly: isSubtitleOnly, subtitleChroma: isSubtitleChroma, signal,
-            onBackendStarted: () => { backendOutputStarted = true; if (videoPath === outputPath) directCaptureOutputStarted = true; },
+            onBackendStarted: () => { backendOutputStarted = true; },
           });
-          captured = { path: videoPath, intermediate: attempt.intermediate };
+          captured = true;
           break;
         } catch (error) {
           voiceLipSync.dispose();
-          if (signal?.aborted || !(error instanceof ExportEncodingError) || index === attempts.length - 1) throw error;
+          if (signal?.aborted || !(error instanceof ExportEncodingError)
+            || classifyExportFailure(error.message) === 'output' || index === attempts.length - 1) throw error;
           // Wait for the old process and pending writes before opening the next
           // stream. A new capture reconstructs the scene from the range start.
-          await this.electronAPI.export.cancelExport();
+          if (backendOutputStarted || cancellation) await cancel();
           signal?.throwIfAborted();
+          cancellation = undefined;
+          backendOutputStarted = false;
           fallbackReason = error.message;
-          if (videoPath !== outputPath || directCaptureOutputStarted) await this.electronAPI.fs.removeFile(videoPath);
         }
       }
-      signal?.throwIfAborted();
+      // A completed capture means the backend finished publishing its output.
+      // Cancellation arriving during that final commit must not turn a
+      // successfully replaced destination into a cancelled renderer result.
+      if (!captured) signal?.throwIfAborted();
       if (!captured) throw new Error('No video was captured');
-      if (audioSources.length > 0 || captured.intermediate) {
-        onProgress({ phase: 'mix', percent: 90, audioSourceCount: audioSources.length, encoding: encodingInfo });
-        if (ffmpegLogCallback) removeLogListener = this.electronAPI.export.onLog(ffmpegLogCallback);
-        const mix = (encoder: string) => this.audioMixer.mix(captured.path, outputPath, audioSources, {
-          fps, codec: captured.intermediate ? encoder : 'copy', audioCodec: format === 'webm' ? 'libopus' : 'aac',
-          width, height, totalFrames, bitrateMbps: settings.bitrateMbps, transparent: isSubtitleOnly,
-          encoding: videoOptions(encoder),
-        }, captured.intermediate);
-        let mixResult = await mix(finalEncoder);
-        signal?.throwIfAborted();
-        if (!mixResult.success && captured.intermediate && finalEncoder !== softwareEncoder) {
-          try { assertExportOperation(mixResult, 'FFmpeg transcode'); }
-          catch (error) {
-            if (!(error instanceof ExportEncodingError)) throw error;
-            finalEncoder = softwareEncoder;
-            encodingInfo = { ...encodingInfo!, encoder: finalEncoder, fallbackReason: error.message };
-            onProgress({ phase: 'mix', percent: 90, audioSourceCount: audioSources.length, encoding: encodingInfo });
-            mixResult = await mix(finalEncoder);
-          }
-        }
-        signal?.throwIfAborted();
-        assertExportOperation(mixResult, 'FFmpeg audio/video mix');
-        onProgress({ phase: 'mix', percent: 100, encoding: encodingInfo });
-      }
-      signal?.throwIfAborted();
       onProgress({ phase: 'done', percent: 100, encoding: encodingInfo });
       exportCompleted = true;
       return { success: true, outputPath, ...(config.encoding ? { encoding: encodingInfo } : {}) };
@@ -236,13 +216,6 @@ export class ExportAdapter implements IExportAdapter {
       removeLogListener?.();
       if (!exportCompleted && backendOutputStarted) cancel();
       if (cancellation) await cancellation.catch((error: unknown) => console.error('[Export] Cancellation cleanup failed:', error));
-      const cleanupPaths = [...temporaryPaths, ...(signal?.aborted && directCaptureOutputStarted ? [config.outputPath] : [])];
-      for (const cleanupPath of cleanupPaths) {
-        try {
-          const result = await this.electronAPI.fs.removeFile(cleanupPath);
-          if (result?.success === false) console.error('[Export] File cleanup failed:', result.error);
-        } catch (error) { console.error('[Export] File cleanup failed:', error); }
-      }
     }
   }
 }

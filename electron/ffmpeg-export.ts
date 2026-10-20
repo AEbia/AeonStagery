@@ -12,6 +12,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_proc
 import { buildFFmpegConvertArgs, buildFFmpegStreamArgs } from './ffmpeg-args';
 import type { FFmpegConvertOptions, FFmpegStreamOptions } from '../src/api/types/export';
 import { classifyExportFailure } from '../src/api/exportEncoding';
+import { ExportOutputTasks, type ExportOutput } from './export-output';
 
 export function resolveFfmpegExecutablePath(candidate: string): string {
   // electron-builder unpacks executable files beside app.asar. ffmpeg-static
@@ -54,17 +55,28 @@ interface StreamState {
   completion: Promise<StreamCompletion>;
   resolveCompletion: (result: StreamCompletion) => void;
   completionSettled: boolean;
+  output: ExportOutput;
+  closedPromise: Promise<void>;
+  spaceMonitor?: ReturnType<typeof setInterval>;
+  spaceCheck?: Promise<void>;
+  publishPromise?: Promise<void>;
+  ownerId?: number;
+  detachOwner?: () => void;
+  terminationRequested?: boolean;
+  terminationTimer?: ReturnType<typeof setTimeout>;
 }
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function createStreamState(child: ChildProcessWithoutNullStreams, expectedFrameSize: number): StreamState {
+function createStreamState(child: ChildProcessWithoutNullStreams, expectedFrameSize: number, output: ExportOutput): StreamState {
   let resolveCompletion!: (result: StreamCompletion) => void;
   const drainWaiters = new Set<() => void>();
   return {
     child,
+    output,
+    closedPromise: new Promise(resolve => child.once('close', () => resolve())),
     expectedFrameSize,
     stderr: '',
     endRequested: false,
@@ -99,12 +111,22 @@ function rejectPendingWrites(state: StreamState): void {
 function recordStreamFailure(state: StreamState, message: string, terminate = false): void {
   if (!state.failure) state.failure = message;
   rejectPendingWrites(state);
-  if (terminate && !state.closed) {
+  if (terminate && !state.closed && !state.terminationRequested) {
+    state.terminationRequested = true;
     try {
+      // FFmpeg can remain blocked in a pipe read after SIGTERM. Close its
+      // input as well, and bound graceful termination before deleting output.
+      state.child.stdin?.destroy?.();
       state.child.kill();
     } catch {
       // The process may already have exited between the stream error and kill.
     }
+    state.terminationTimer = setTimeout(() => {
+      if (!state.closed) {
+        try { state.child.kill('SIGKILL'); } catch { /* already exited */ }
+      }
+    }, 3000);
+    state.terminationTimer.unref();
   }
   if (state.endRequested) {
     settleCompletion(state, { success: false, code: null, error: state.failure });
@@ -127,6 +149,8 @@ function emitFFmpegLog(message: string): void {
 
 function handleStreamClose(state: StreamState, code: number | null, signal?: string | null): void {
   state.closed = true;
+  clearInterval(state.spaceMonitor);
+  clearTimeout(state.terminationTimer);
   if (code !== 0 || signal) {
     const suffix = signal ? ` (${signal})` : '';
     recordStreamFailure(state, `FFmpeg stream exited with code ${code ?? 'unknown'}${suffix}`);
@@ -206,6 +230,16 @@ function writeStreamChunk(state: StreamState, buffer: Buffer, label: string): Pr
   return promise;
 }
 
+async function pushStreamChunk(state: StreamState, buffer: Buffer, label: string): Promise<void> {
+  try { await writeStreamChunk(state, buffer, label); }
+  catch (error) {
+    // EPIPE can arrive before the encoder diagnostic. Preserve stderr through
+    // process closure so an unavailable encoder remains eligible for fallback.
+    await state.closedPromise;
+    throw streamFailure(state, errorText(error));
+  }
+}
+
 async function finishStream(state: StreamState): Promise<{ success: true; code: number | null }> {
   if (state.failure) throw streamFailure(state, 'FFmpeg stream failed');
   if (state.closed) throw new Error('FFmpeg stream closed before export completion');
@@ -247,30 +281,35 @@ export function registerFFmpegHandlers(): void {
   });
   let activeStreamState: StreamState | null = null;
   const conversions = new Set<{ child: ChildProcessWithoutNullStreams; outputPath: string; cancelled: boolean; closed: Promise<void> }>();
-  let streamOutputPath: string | null = null;
-  let streamClosed: Promise<void> | null = null;
+  const outputTasks = new ExportOutputTasks();
+  const recovery = outputTasks.recover().catch(error => console.error('[Export] Startup cleanup failed:', error));
+  let starting: Promise<void> | undefined;
+  let abortStart = false;
+  let startingOwnerId: number | undefined;
 
   // Wait for process handles to close before removing incomplete output files.
-  ipcMain.handle('ffmpeg:cancelExport', async () => {
+  ipcMain.handle('ffmpeg:cancelExport', async (event) => {
+    const ownerId = activeStreamState?.ownerId ?? startingOwnerId;
+    if (ownerId !== undefined && event?.sender?.id !== ownerId) return { success: false, error: 'Export belongs to another window' };
+    abortStart = true;
+    if (starting) await starting;
     const state = activeStreamState;
-    const outputPath = streamOutputPath;
-    const closed = streamClosed;
     const runningConversions = [...conversions];
-    if (state && !state.closed) {
+    if (state?.publishPromise) await state.publishPromise.catch(() => {});
+    else if (state) {
       recordStreamFailure(state, 'Export cancelled', true);
     }
     for (const conversion of runningConversions) {
       conversion.cancelled = true;
       conversion.child.kill();
     }
-    await Promise.all([closed, ...runningConversions.map((conversion) => conversion.closed)]);
+    await Promise.all([state?.closedPromise, ...runningConversions.map((conversion) => conversion.closed)]);
+    if (state) await state.output.cleanup();
+    state?.detachOwner?.();
     if (activeStreamState === state) {
       activeStreamState = null;
-      streamOutputPath = null;
-      streamClosed = null;
     }
     const outputs = new Set([
-      ...(state && outputPath ? [outputPath] : []),
       ...runningConversions.map((conversion) => conversion.outputPath),
     ]);
     for (const output of outputs) {
@@ -400,114 +439,158 @@ export function registerFFmpegHandlers(): void {
     outputPath: string,
     options: FFmpegStreamOptions = {}
   ) => {
-    const { width = 1920, height = 1080 } = options;
-    let args: string[];
+    if (starting || activeStreamState) return { success: false, error: 'Another video export is active', failureKind: 'process' };
+    let releaseStart!: () => void;
+    starting = new Promise<void>(resolve => { releaseStart = resolve; });
+    startingOwnerId = _event?.sender?.id;
+    abortStart = false;
+    const owner = _event?.sender;
+    const onStartingOwnerGone = () => { abortStart = true; };
+    owner?.once('destroyed', onStartingOwnerGone);
+    owner?.once('render-process-gone', onStartingOwnerGone);
     try {
-      args = buildFFmpegStreamArgs(outputPath, options);
-    } catch (error) {
-      return { success: false, error: errorText(error), failureKind: classifyExportFailure(errorText(error)) };
-    }
+      await recovery;
+      const { width = 1920, height = 1080 } = options;
+      let output: ExportOutput;
+      try { output = await outputTasks.create(outputPath, options); }
+      catch (error) { return { success: false, error: errorText(error), failureKind: 'output' }; }
+      if (abortStart) { await output.cleanup(); return { success: false, error: 'Export cancelled' }; }
+      let args: string[];
+      try {
+        args = buildFFmpegStreamArgs(output.partialPath, options, fs.existsSync);
+      } catch (error) {
+        await output.cleanup();
+        return { success: false, error: errorText(error), failureKind: classifyExportFailure(errorText(error)) };
+      }
 
-    if (activeStreamState) {
-      recordStreamFailure(activeStreamState, 'FFmpeg stream export superseded', true);
-      activeStreamState.endRequested = true;
-      settleCompletion(activeStreamState, {
-        success: false,
-        code: null,
-        error: activeStreamState.failure,
+      console.log(`[FFmpeg Stream] Starting with args: ${args.join(' ')}`);
+
+      let child: ChildProcessWithoutNullStreams;
+      try {
+        child = spawn(ffmpegPath, args);
+      } catch (error) {
+        const message = `FFmpeg process error: ${errorText(error)}`;
+        console.error(`[FFmpeg Stream] ${message}`);
+        await output.cleanup();
+        return { success: false, error: message };
+      }
+
+      if (
+        !child
+        || typeof child.on !== 'function'
+        || !child.stdin
+        || typeof child.stdin.write !== 'function'
+        || typeof child.stdin.on !== 'function'
+      ) {
+        const message = 'FFmpeg process started without a writable stdin stream';
+        console.error(`[FFmpeg Stream] ${message}`);
+        try { child?.kill?.(); } catch { /* process may not have started */ }
+        await output.cleanup();
+        return { success: false, error: message };
+      }
+
+      const state = createStreamState(child, width * height * 4, output);
+      state.ownerId = _event?.sender?.id;
+      activeStreamState = state;
+      const onOwnerDestroyed = () => {
+        if (!state.publishPromise) recordStreamFailure(state, 'Export window closed', true);
+        void state.closedPromise.then(async () => {
+          await state.publishPromise?.catch(() => {});
+          await output.cleanup();
+          state.detachOwner?.();
+          if (activeStreamState === state) activeStreamState = null;
+        });
+      };
+      owner?.once('destroyed', onOwnerDestroyed);
+      owner?.once('render-process-gone', onOwnerDestroyed);
+      state.detachOwner = () => {
+        owner?.removeListener('destroyed', onOwnerDestroyed);
+        owner?.removeListener('render-process-gone', onOwnerDestroyed);
+      };
+
+      child.stderr?.on('data', (data: Buffer) => {
+        const msg = data.toString();
+        state.stderr = (state.stderr + msg).slice(-8000);
+        console.error(`[FFmpeg Stream] ${msg}`);
+        emitFFmpegLog(msg);
       });
-      try { activeStreamState.child.stdin?.end(); } catch { /* already closed */ }
-      activeStreamState = null;
-    }
 
-    console.log(`[FFmpeg Stream] Starting with args: ${args.join(' ')}`);
-
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      child = spawn(ffmpegPath, args);
-    } catch (error) {
-      const message = `FFmpeg process error: ${errorText(error)}`;
-      console.error(`[FFmpeg Stream] ${message}`);
-      return { success: false, error: message };
-    }
-
-    if (
-      !child
-      || typeof child.on !== 'function'
-      || !child.stdin
-      || typeof child.stdin.write !== 'function'
-      || typeof child.stdin.on !== 'function'
-    ) {
-      const message = 'FFmpeg process started without a writable stdin stream';
-      console.error(`[FFmpeg Stream] ${message}`);
-      try { child?.kill?.(); } catch { /* process may not have started */ }
-      return { success: false, error: message };
-    }
-
-    const state = createStreamState(child, width * height * 4);
-    activeStreamState = state;
-    streamOutputPath = outputPath;
-    streamClosed = new Promise<void>((resolveClosed) => child.once('close', resolveClosed));
-
-    child.stderr?.on('data', (data: Buffer) => {
-      const msg = data.toString();
-      state.stderr = (state.stderr + msg).slice(-8000);
-      console.error(`[FFmpeg Stream] ${msg}`);
-      emitFFmpegLog(msg);
-    });
-
-    child.stderr?.on('error', (error: unknown) => {
-      const message = `FFmpeg stderr stream error: ${errorText(error)}`;
-      console.error(`[FFmpeg Stream] ${message}`);
-      recordStreamFailure(state, message, true);
-    });
-
-    child.stdin?.on('error', (error: unknown) => {
-      const message = `FFmpeg stdin stream error: ${errorText(error)}`;
-      console.error(`[FFmpeg Stream] ${message}`);
-      recordStreamFailure(state, message, true);
-    });
-
-    child.stdin?.on('close', () => {
-      if ((!state.endRequested || state.pendingWrites.size > 0) && !state.closed) {
-        const message = 'FFmpeg stdin closed before export completion';
+      child.stderr?.on('error', (error: unknown) => {
+        const message = `FFmpeg stderr stream error: ${errorText(error)}`;
         console.error(`[FFmpeg Stream] ${message}`);
         recordStreamFailure(state, message, true);
+      });
+
+      child.stdin?.on('error', (error: unknown) => {
+        const message = `FFmpeg stdin stream error: ${errorText(error)}`;
+        console.error(`[FFmpeg Stream] ${message}`);
+        recordStreamFailure(state, message, true);
+      });
+
+      child.stdin?.on('close', () => {
+        if ((!state.endRequested || state.pendingWrites.size > 0) && !state.closed) {
+          const message = 'FFmpeg stdin closed before export completion';
+          console.error(`[FFmpeg Stream] ${message}`);
+          recordStreamFailure(state, message, true);
+        }
+      });
+
+      child.on('error', (error: unknown) => {
+        const message = `FFmpeg process error: ${errorText(error)}`;
+        console.error(`[FFmpeg Stream] ${message}`);
+        recordStreamFailure(state, message, true);
+      });
+
+      child.on('exit', (code: number | null, signal?: string | null) => {
+        if (code !== 0 || signal) {
+          const suffix = signal ? ` (${signal})` : '';
+          recordStreamFailure(state, `FFmpeg stream exited with code ${code ?? 'unknown'}${suffix}`);
+        }
+      });
+
+      child.on('close', (code: number | null, signal?: string | null) => {
+        handleStreamClose(state, code, signal);
+      });
+
+      try { await output.recordChild(child.pid); }
+      catch (error) { recordStreamFailure(state, `Output ownership record failed: ${errorText(error)}`, true); }
+      if (abortStart) recordStreamFailure(state, 'Export cancelled', true);
+      if (state.failure) {
+        await state.closedPromise;
+        await output.cleanup();
+        state.detachOwner?.();
+        if (activeStreamState === state) activeStreamState = null;
+        return { success: false, error: state.failure, failureKind: classifyExportFailure(state.failure) };
       }
-    });
-
-    child.on('error', (error: unknown) => {
-      const message = `FFmpeg process error: ${errorText(error)}`;
-      console.error(`[FFmpeg Stream] ${message}`);
-      recordStreamFailure(state, message, true);
-    });
-
-    child.on('exit', (code: number | null, signal?: string | null) => {
-      if (code !== 0 || signal) {
-        const suffix = signal ? ` (${signal})` : '';
-        recordStreamFailure(state, `FFmpeg stream exited with code ${code ?? 'unknown'}${suffix}`);
-      }
-    });
-
-    child.on('close', (code: number | null, signal?: string | null) => {
-      handleStreamClose(state, code, signal);
-    });
-
-    if (state.failure) return { success: false, error: state.failure };
-
-    return { success: true };
+      state.spaceMonitor = setInterval(() => {
+        if (state.closed || state.spaceCheck) return;
+        state.spaceCheck = output.checkSpace().catch(error => {
+          if (!state.closed) recordStreamFailure(state, `Output disk check failed: ${errorText(error)}`, true);
+        }).finally(() => { state.spaceCheck = undefined; });
+      }, 2000);
+      state.spaceMonitor.unref();
+      return { success: true };
+    } finally {
+      starting = undefined;
+      startingOwnerId = undefined;
+      owner?.removeListener('destroyed', onStartingOwnerGone);
+      owner?.removeListener('render-process-gone', onStartingOwnerGone);
+      releaseStart();
+    }
   });
 
   // Handle compressed chunks from WebCodecs
   ipcMain.handle('ffmpeg:pushEncodedChunk', async (_event, chunkData: Uint8Array) => {
     if (!activeStreamState) throw new Error('No active FFmpeg process');
+    if (activeStreamState.ownerId !== _event?.sender?.id) throw new Error('Export belongs to another window');
     const buffer = Buffer.from(chunkData.buffer, chunkData.byteOffset, chunkData.byteLength);
-    await writeStreamChunk(activeStreamState, buffer, 'FFmpeg Chunk');
+    await pushStreamChunk(activeStreamState, buffer, 'FFmpeg Chunk');
     return { success: true };
   });
 
   ipcMain.handle('ffmpeg:pushFrame', async (_event, frameData: Uint8Array | Uint8ClampedArray) => {
     if (!activeStreamState) throw new Error('No active FFmpeg process');
+    if (activeStreamState.ownerId !== _event?.sender?.id) throw new Error('Export belongs to another window');
     const buffer = Buffer.from(frameData.buffer, frameData.byteOffset, frameData.byteLength);
 
     if (buffer.length !== activeStreamState.expectedFrameSize) {
@@ -518,17 +601,31 @@ export function registerFFmpegHandlers(): void {
       throw new Error('Buffer size mismatch');
     }
 
-    await writeStreamChunk(activeStreamState, buffer, 'FFmpeg');
+    await pushStreamChunk(activeStreamState, buffer, 'FFmpeg');
     return { success: true };
   });
 
-  ipcMain.handle('ffmpeg:endStreamExport', async () => {
+  ipcMain.handle('ffmpeg:endStreamExport', async (_event) => {
     const state = activeStreamState;
     if (!state) throw new Error('No active FFmpeg process');
+    if (state.ownerId !== _event?.sender?.id) throw new Error('Export belongs to another window');
 
     try {
-      return await finishStream(state);
+      const result = await finishStream(state);
+      await state.spaceCheck;
+      if (state.failure) throw streamFailure(state, 'FFmpeg stream failed');
+      await state.output.checkSpace();
+      if (state.failure) throw streamFailure(state, 'Export cancelled');
+      state.publishPromise = state.output.commit();
+      await state.publishPromise;
+      return result;
+    } catch (error) {
+      recordStreamFailure(state, errorText(error), true);
+      throw streamFailure(state, errorText(error));
     } finally {
+      await state.closedPromise;
+      await state.output.cleanup();
+      state.detachOwner?.();
       if (activeStreamState === state) activeStreamState = null;
     }
   });

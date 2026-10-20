@@ -45,7 +45,7 @@
 | [0034 Live2D 运行时状态清理与淡入来源权威](adr/0034-live2d-runtime-state-purge-and-fade-source.md) | current, implemented | `purgeCharacterRuntimeState` 是 Seek/编辑/角色回收的唯一清脏入口；动作/表情淡入来源必须由场景裁定，不读模型存活状态。 |
 | [0035 开源许可与 Live2D 运行时分发边界](adr/0035-open-source-licensing-and-live2d-runtime-distribution.md) | current, accepted | Apache-2.0 发布下的三方许可声明、运行时 staging（auto/none/verify）、`none`/`verify` 两套打包闸门与"更新不删除已有运行时"不变量的权威入口。 |
 | [0036 更新渠道与差分下载基线](adr/0036-update-channels-and-differential-baselines.md) | current, accepted | OSS / GitHub 渠道、差分更新基线与块图补取、安装缓存 SHA256/签名校验及禁止静默整包回退的权威入口。 |
-| [0037 项目画布与原生分辨率导出](adr/0037-project-video-format-and-native-resolution-export.md) | current, implemented | 项目输出像素、逻辑画布、独立预览质量、导出覆盖与帧率步进契约的权威入口。 |
+| [0037 项目画布与原生分辨率导出](adr/0037-project-video-format-and-native-resolution-export.md) | current, implemented | 项目输出像素、逻辑画布、独立预览质量、导出覆盖、帧率步进及流式转码混音、磁盘空间与输出生命周期契约的权威入口。 |
 
 ## Historical / Superseded
 

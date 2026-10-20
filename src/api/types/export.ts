@@ -101,7 +101,15 @@ export interface FFmpegVideoOptions {
   transparent?: boolean;
 }
 
-export interface FFmpegStreamOptions extends FFmpegVideoOptions {
+export interface FFmpegStreamMuxOptions {
+  audioSources?: FFmpegAudioSource[];
+  audioCodec?: string;
+  totalFrames?: number;
+  /** Encode the incoming compressed stream instead of copying it. */
+  transcode?: FFmpegVideoOptions;
+}
+
+export interface FFmpegStreamOptions extends FFmpegVideoOptions, FFmpegStreamMuxOptions {
   fps?: number;
   width?: number;
   height?: number;

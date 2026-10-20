@@ -23,6 +23,33 @@ function frameHashes(input: string): string[] {
 }
 
 describe('bundled FFmpeg export media', () => {
+  it.each(['raw', 'copy', 'transcode'] as const)('mixes delayed audio during %s streaming without losing fractional-rate tail frames', mode => {
+    const fps = 30000 / 1001;
+    const output = join(directory, `stream-${mode}.mp4`);
+    const audio = join(directory, `stream-${mode}.wav`);
+    run(['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1', audio]);
+    const pixels = run(['-f', 'lavfi', '-i', `testsrc2=size=64x64:rate=${fps}`, '-frames:v', '9', '-pix_fmt', 'rgba', '-threads', '1', '-f', 'rawvideo', '-']);
+    const h264 = mode === 'raw' ? undefined : run([
+      '-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', '64x64', '-framerate', String(fps), '-i', '-',
+      '-c:v', 'libx264', '-bf', '0', '-f', 'h264', '-',
+    ], pixels);
+    run(buildFFmpegStreamArgs(output, {
+      inputFormat: mode === 'raw' ? 'rgba' : 'h264', codec: 'libx264', crf: 18,
+      width: 64, height: 64, fps, totalFrames: 9,
+      audioSources: [{ path: audio, delayMs: 150, volume: 0.5, fadeIn: 0.02, fadeOut: 0.02 }],
+      ...(mode === 'transcode' ? { transcode: { codec: 'libx265', crf: 24, speed: 'fast' } } : {}),
+    }), h264 ?? pixels);
+    const hashes = frameHashes(output);
+    expect(hashes).toHaveLength(9);
+    const timestamps = run(['-i', output, '-map', '0:v', '-f', 'framemd5', '-']).toString();
+    expect(timestamps).toContain('#tb 0: 1001/30000');
+    const pcm = run(['-i', output, '-map', '0:a', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-']);
+    const amplitudes = Array.from({ length: pcm.length / 4 }, (_, i) => Math.abs(pcm.readFloatLE(i * 4)));
+    expect(Math.max(...amplitudes.slice(0, 4800))).toBeLessThan(0.001);
+    expect(Math.max(...amplitudes.slice(8500, 11000))).toBeGreaterThan(0.01);
+    expect(amplitudes.length / 48000).toBeCloseTo(9 / fps, 1);
+  });
+
   it.each([
     ['libx264', 'mp4'], ['libx265', 'mp4'], ['libvpx-vp9', 'webm'], ['libaom-av1', 'webm'], ['libaom-av1', 'mp4'],
   ] as const)('encodes RGBA with %s in %s and copies frames through audio muxing', (codec, container) => {

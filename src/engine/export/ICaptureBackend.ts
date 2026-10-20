@@ -3,7 +3,7 @@
  * specific capture mechanism (WebCodecs encoder vs raw-pixel extraction).
  */
 
-import type { ExportVideoCodec, FFmpegVideoOptions } from '../../api/types/export';
+import type { ExportVideoCodec, FFmpegVideoOptions, FFmpegStreamMuxOptions } from '../../api/types/export';
 
 export interface BackendInit {
   width: number;
@@ -17,6 +17,7 @@ export interface BackendInit {
   transparent?: boolean;
   videoCodec?: ExportVideoCodec;
   encoding?: FFmpegVideoOptions;
+  streamOptions?: FFmpegStreamMuxOptions;
   onStarted?: () => void;
 }
 

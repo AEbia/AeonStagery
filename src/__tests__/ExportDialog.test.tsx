@@ -18,6 +18,25 @@ vi.mock('../ui/context/AppContext', () => ({
 import ExportDialog from '../ui/ExportDialog';
 
 describe('ExportDialog cancellation', () => {
+  it('keeps encoding method advanced and promotes non-H.264 FFmpeg encoder', () => {
+    const view = render(<ExportDialog onClose={vi.fn()} />);
+    const advanced = view.container.querySelector('details.export-encoding-advanced');
+    const codec = screen.getByRole('combobox', { name: '编码标准' });
+
+    expect(advanced?.contains(view.container.querySelector('#export-mode'))).toBe(true);
+    expect(advanced?.contains(view.container.querySelector('#export-ffmpeg-encoder'))).toBe(true);
+
+    fireEvent.click(codec);
+    fireEvent.click(screen.getByRole('option', { name: 'H.265 / HEVC' }));
+    const ffmpegEncoder = view.container.querySelector('#export-ffmpeg-encoder');
+    expect(advanced?.contains(ffmpegEncoder)).toBe(false);
+    expect(codec.closest('.export-grid--2col')?.children[3]?.contains(ffmpegEncoder)).toBe(true);
+
+    fireEvent.click(codec);
+    fireEvent.click(screen.getByRole('option', { name: 'H.264' }));
+    expect(advanced?.contains(view.container.querySelector('#export-ffmpeg-encoder'))).toBe(true);
+  });
+
   it('applies high quality without opening advanced settings', async () => {
     mocks.export.mockResolvedValue({ success: true });
     const view = render(<ExportDialog onClose={vi.fn()} />);

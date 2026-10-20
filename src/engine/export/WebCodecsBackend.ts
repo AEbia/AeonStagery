@@ -1,13 +1,14 @@
 import type { ICaptureBackend, BackendInit, BackendFrame } from './ICaptureBackend';
 import { ExportWriteQueue } from './ExportWriteQueue';
 import { EncodedVideoStreamWriter, resolveNativeEncoderConfig } from './WebCodecsEncoding';
-import { assertExportOperation, ExportEncodingError, getExportVideoCodec } from '../../api/exportEncoding';
+import { assertExportOperation, classifyExportFailure, ExportEncodingError, ExportOutputError, getExportVideoCodec } from '../../api/exportEncoding';
 import type { ExportOperationResult, FFmpegStreamOptions } from '../../api/types/export';
 
 interface ElectronExportAPI {
   startStreamExport(outputPath: string, options: FFmpegStreamOptions): Promise<ExportOperationResult>;
   pushEncodedChunk(chunkData: Uint8Array): Promise<ExportOperationResult>;
   endStreamExport(): Promise<ExportOperationResult>;
+  cancelExport(): Promise<ExportOperationResult>;
 }
 
 export class WebCodecsBackend implements ICaptureBackend {
@@ -29,7 +30,7 @@ export class WebCodecsBackend implements ICaptureBackend {
     const writer = new EncodedVideoStreamWriter(config.videoCodec ?? getExportVideoCodec(config.codec), config.width, config.height, config.fps);
     this.writer = writer;
     this.submittedFrames = 0;
-    // FFmpeg only muxes the encoded Annex B / IVF stream.
+    // FFmpeg copies or transcodes the stream while mixing timeline audio.
     const result = await this.electronAPI.startStreamExport(config.outputPath, {
       fps: config.fps,
       codec: config.codec,
@@ -38,6 +39,7 @@ export class WebCodecsBackend implements ICaptureBackend {
       isEncoded: true,
       inputFormat: writer.inputFormat,
       bitrate: config.bitrate / 1_000_000,
+      ...config.streamOptions,
     });
     assertExportOperation(result, 'FFmpeg stream start');
 
@@ -57,12 +59,15 @@ export class WebCodecsBackend implements ICaptureBackend {
               assertExportOperation(pushResult, 'FFmpeg encoded chunk push');
             });
           } catch (error) {
-            this.encoderFailure = new ExportEncodingError(toError(error).message);
+            const cause = toError(error);
+            this.encoderFailure ??= cause instanceof ExportOutputError || classifyExportFailure(cause.message) === 'output'
+              ? new ExportOutputError(cause.message)
+              : new ExportEncodingError(cause.message);
             this.encoderQueue.abort(this.encoderFailure);
           }
         },
         error: (e: Error) => {
-          this.encoderFailure = new ExportEncodingError(e.message);
+          this.encoderFailure ??= new ExportEncodingError(e.message);
           this.encoderQueue.abort(this.encoderFailure);
           console.error('[WebCodecs] Encoder error:', e);
         },
@@ -116,7 +121,7 @@ export class WebCodecsBackend implements ICaptureBackend {
       await this.encoderQueue.ready();
     } catch (error) {
       await this.abort();
-      throw error;
+      throw classifyEncodingError(error);
     }
   }
 
@@ -139,7 +144,7 @@ export class WebCodecsBackend implements ICaptureBackend {
       assertExportOperation(result, 'FFmpeg stream finish');
     } catch (error) {
       await this.abort();
-      throw error;
+      throw classifyEncodingError(error);
     }
   }
 
@@ -154,7 +159,7 @@ export class WebCodecsBackend implements ICaptureBackend {
     }
     try {
       // User cancellation is terminated by ExportAdapter's cancelExport IPC.
-      if (!cancelled) await this.electronAPI.endStreamExport();
+      if (!cancelled) await this.electronAPI.cancelExport();
     } catch {
       // Preserve the original capture failure while still attempting cleanup.
     }
@@ -163,4 +168,13 @@ export class WebCodecsBackend implements ICaptureBackend {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function classifyEncodingError(error: unknown): unknown {
+  if (error instanceof ExportOutputError) return error;
+  if (!(error instanceof Error)) return error;
+  const failureKind = classifyExportFailure(error.message);
+  if (failureKind === 'output') return new ExportOutputError(error.message);
+  if (failureKind === 'encoder' && !(error instanceof ExportEncodingError)) return new ExportEncodingError(error.message);
+  return error;
 }

@@ -8,6 +8,7 @@ function createExportApi() {
     pushFrame: vi.fn().mockResolvedValue({ success: true }),
     pushEncodedChunk: vi.fn().mockResolvedValue({ success: true }),
     endStreamExport: vi.fn().mockResolvedValue({ success: true }),
+    cancelExport: vi.fn().mockResolvedValue({ success: true }),
   };
 }
 
@@ -113,7 +114,7 @@ describe('capture backend stream cleanup', () => {
     await backend.init(createInitConfig());
     api.endStreamExport.mockResolvedValueOnce({ success: false, error: 'stream cleanup failed' });
     await expect(backend.abort()).resolves.toBeUndefined();
-    expect(api.endStreamExport).toHaveBeenCalledTimes(1);
+    expect(api.cancelExport).toHaveBeenCalledTimes(1);
 
     const finishApi = createExportApi();
     const finishBackend = new RawPixelsBackend(finishApi);
@@ -131,7 +132,7 @@ describe('capture backend stream cleanup', () => {
       await backend.init(createInitConfig());
       api.endStreamExport.mockResolvedValueOnce({ success: false, error: 'stream cleanup failed' });
       await expect(backend.abort()).resolves.toBeUndefined();
-      expect(api.endStreamExport).toHaveBeenCalledTimes(1);
+      expect(api.cancelExport).toHaveBeenCalledTimes(1);
 
       const finishApi = createExportApi();
       const finishBackend = new WebCodecsBackend(finishApi);

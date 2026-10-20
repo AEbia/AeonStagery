@@ -15,11 +15,12 @@ interface Props {
 
 const CODEC_LABELS: Record<ExportVideoCodec, string> = { h264: 'H.264', hevc: 'H.265 / HEVC', vp9: 'VP9', av1: 'AV1', prores: 'ProRes 4444' };
 const ENCODER_LABELS: Record<string, string> = {
-  libx264: 'x264', libx265: 'x265', 'libvpx-vp9': 'libvpx VP9', 'libaom-av1': 'libaom AV1',
-  h264_nvenc: 'NVIDIA NVENC', hevc_nvenc: 'NVIDIA NVENC', av1_nvenc: 'NVIDIA NVENC',
-  h264_amf: 'AMD AMF', hevc_amf: 'AMD AMF', av1_amf: 'AMD AMF',
-  h264_qsv: 'Intel QSV', hevc_qsv: 'Intel QSV', av1_qsv: 'Intel QSV',
-  h264_mf: 'Windows Media Foundation', hevc_mf: 'Windows Media Foundation',
+  libx264: '软件编码 · x264', libx265: '软件编码 · x265', 'libvpx-vp9': '软件编码 · libvpx VP9',
+  'libaom-av1': '软件编码 · libaom AV1', prores_ks: '软件编码 · ProRes',
+  h264_nvenc: '硬件加速 · NVIDIA NVENC', hevc_nvenc: '硬件加速 ·NVIDIA NVENC', av1_nvenc: '硬件加速 ·NVIDIA NVENC',
+  h264_amf: '硬件加速 ·AMD AMF', hevc_amf: '硬件加速 ·AMD AMF', av1_amf: '硬件加速 ·AMD AMF',
+  h264_qsv: '硬件加速 ·Intel QSV', hevc_qsv: '硬件加速 ·Intel QSV', av1_qsv: '硬件加速 ·Intel QSV',
+  h264_mf: '硬件加速 ·Windows Media Foundation', hevc_mf: '硬件加速 ·Windows Media Foundation',
 };
 
 export function ExportEncodingFields({ format, value, bitrate, intermediateBitrate, onChange, onBitrateChange }: Props) {
@@ -29,7 +30,7 @@ export function ExportEncodingFields({ format, value, bitrate, intermediateBitra
     const api = window.aeonStageryAPI?.export;
     if (api?.getEncodingCapabilities) void api.getEncodingCapabilities().then(result => {
       if (active && result.success) setAvailableEncoders(result.encoders);
-    }).catch(() => {});
+    }).catch(() => { });
     return () => { active = false; };
   }, []);
   const rateControl = value.rateControl ?? { mode: 'crf' as const, crf: getDefaultCrf(value.videoCodec, value.quality) };
@@ -42,6 +43,18 @@ export function ExportEncodingFields({ format, value, bitrate, intermediateBitra
     const number = Number(text);
     if (text.trim() && Number.isFinite(number) && (allowZero ? number >= 0 : number > 0)) apply(number);
   };
+  const ffmpegEncoderField = <div className="form-group">
+    <label className="form-label" htmlFor="export-ffmpeg-encoder">FFmpeg 编码器</label>
+    <FormSelect id="export-ffmpeg-encoder" value={value.ffmpegEncoder ?? getSoftwareEncoder(value.videoCodec)}
+      options={FFMPEG_ENCODERS[value.videoCodec].map(encoder => ({
+        value: encoder,
+        label: `${ENCODER_LABELS[encoder] ?? encoder}${availableEncoders && !availableEncoders.includes(encoder) ? '（不可用）' : ''}`
+      }))}
+      onChange={ffmpegEncoder => update({
+        ffmpegEncoder,
+        rateControl: ffmpegEncoder === getSoftwareEncoder(value.videoCodec) ? rateControl : { mode: 'bitrate', bitrateMbps: bitrate }
+      })} />
+  </div>;
 
   return <>
     <div className="export-grid--2col">
@@ -54,8 +67,10 @@ export function ExportEncodingFields({ format, value, bitrate, intermediateBitra
         <label className="form-label" htmlFor="export-quality">编码质量</label>
         <FormSelect id="export-quality" value={value.quality}
           options={[{ value: 'balanced', label: '均衡' }, { value: 'high', label: '高画质' }, { value: 'custom', label: '自定义' }]}
-          onChange={quality => onChange({ ...value, quality: quality as ExportEncodingSettings['quality'], rateControl: undefined,
-            speed: 'balanced', allowH264Intermediate: quality !== 'high', intermediateBitrateMbps: undefined })} />
+          onChange={quality => onChange({
+            ...value, quality: quality as ExportEncodingSettings['quality'], rateControl: undefined,
+            speed: 'balanced', allowH264Intermediate: quality !== 'high', intermediateBitrateMbps: undefined
+          })} />
       </div>
       <div className="form-group">
         <div className="export-encoding-field-label">
@@ -65,30 +80,26 @@ export function ExportEncodingFields({ format, value, bitrate, intermediateBitra
         <input id="export-bitrate" className="form-input" type="number" min={0.1} step={0.1} value={bitrate}
           onChange={event => numberValue(event.target.value, onBitrateChange)} />
       </div>
-      <div className="form-group">
-        <label className="form-label" htmlFor="export-mode">编码方式</label>
-        <FormSelect id="export-mode" value={value.implementation}
-          options={[{ value: 'auto', label: '自动' }, { value: 'webcodecs', label: 'WebCodecs' }, { value: 'ffmpeg', label: 'FFmpeg' }]}
-          onChange={implementation => update({ implementation: implementation as ExportEncodingSettings['implementation'] })} />
-      </div>
+      {value.videoCodec !== 'h264' && ffmpegEncoderField}
     </div>
     <details className="export-encoding-advanced">
       <summary>高级编码设置</summary>
       <div className="export-grid--2col">
         <div className="form-group">
-          <label className="form-label" htmlFor="export-ffmpeg-encoder">FFmpeg 编码器</label>
-          <FormSelect id="export-ffmpeg-encoder" value={value.ffmpegEncoder ?? getSoftwareEncoder(value.videoCodec)}
-            options={FFMPEG_ENCODERS[value.videoCodec].map(encoder => ({ value: encoder,
-              label: `${ENCODER_LABELS[encoder] ?? encoder}${availableEncoders && !availableEncoders.includes(encoder) ? '（不可用）' : ''}` }))}
-            onChange={ffmpegEncoder => update({ ffmpegEncoder,
-              rateControl: ffmpegEncoder === getSoftwareEncoder(value.videoCodec) ? rateControl : { mode: 'bitrate', bitrateMbps: bitrate } })} />
+          <label className="form-label" htmlFor="export-mode">编码方式</label>
+          <FormSelect id="export-mode" value={value.implementation}
+            options={[{ value: 'auto', label: '自动' }, { value: 'webcodecs', label: 'WebCodecs' }, { value: 'ffmpeg', label: 'FFmpeg' }]}
+            onChange={implementation => update({ implementation: implementation as ExportEncodingSettings['implementation'] })} />
         </div>
+        {value.videoCodec === 'h264' && ffmpegEncoderField}
         <div className="form-group">
           <label className="form-label" htmlFor="export-rate-control">FFmpeg 质量控制</label>
           <FormSelect id="export-rate-control" value={rateControl.mode}
             options={[{ value: 'crf', label: '恒定质量 (CRF)' }, { value: 'bitrate', label: '目标码率' }]}
-            onChange={mode => update({ rateControl: mode === 'crf' ? { mode, crf: getDefaultCrf(value.videoCodec, value.quality) } : { mode: 'bitrate', bitrateMbps: bitrate },
-              ...(mode === 'crf' ? { ffmpegEncoder: getSoftwareEncoder(value.videoCodec) } : {}) })} />
+            onChange={mode => update({
+              rateControl: mode === 'crf' ? { mode, crf: getDefaultCrf(value.videoCodec, value.quality) } : { mode: 'bitrate', bitrateMbps: bitrate },
+              ...(mode === 'crf' ? { ffmpegEncoder: getSoftwareEncoder(value.videoCodec) } : {})
+            })} />
         </div>
         <div className="form-group">
           {rateControl.mode === 'crf' ? <>
@@ -113,7 +124,7 @@ export function ExportEncodingFields({ format, value, bitrate, intermediateBitra
       </div>
       {canUseIntermediate && <label className="export-encoding-toggle">
         <input type="checkbox" checked={allowIntermediate} onChange={event => update({ allowH264Intermediate: event.target.checked })} />
-        <span>允许 H.264 中转</span>
+        <span>允许 H.264 中转加速</span>
         <InfoTip title="兼容回退" content="原生编码失败时，先捕获高码率 H.264 再转码；会增加一次有损编码。" />
       </label>}
       {canUseIntermediate && allowIntermediate && <div className="form-group">

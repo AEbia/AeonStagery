@@ -22,11 +22,13 @@
 ### 编码质量与回退（2026-10-20）
 
 - 导出分离编码标准（H.264 / HEVC / VP9 / AV1）与编码实现（自动 / WebCodecs / FFmpeg）。默认均衡质量；高级设置提供 FFmpeg CRF / 目标码率、速度与中间流码率。设置只作用于本次导出，不进入项目或场景 schema。
-- WebCodecs 针对当前标准、尺寸、帧率和码率探测原生配置，采用 `latencyMode: quality`。H.264 / HEVC 输出 Annex B，VP9 / AV1 封装为带有理时间基的 IVF；最终由 FFmpeg 复制视频流封装。若帧时间戳不连续或输出帧数不完整，视为编码能力失败，不能静默产生错误时间轴。
-- 均衡模式的回退顺序为目标标准原生编码 → 高码率 H.264 捕获并转码 → RawPixels 单次编码。高画质默认跳过 H.264 中转；用户可在高级设置覆盖。H.264 中间文件使用 MP4，中间码率默认是同尺寸、帧率 H.264 高画质推荐值的两倍，独立于最终目标码率。
+- WebCodecs 针对当前标准、尺寸、帧率和码率探测原生配置，采用 `latencyMode: quality`。H.264 / HEVC 输出 Annex B，VP9 / AV1 封装为带有理时间基的 IVF；FFmpeg 在接收编码流时复制视频流并同步混音、封装。若帧时间戳不连续或输出帧数不完整，视为编码能力失败，不能静默产生错误时间轴。
+- 均衡模式的回退顺序为目标标准原生编码 → 高码率 H.264 流式捕获并转码 → RawPixels 单次编码。高画质默认跳过 H.264 中转；用户可在高级设置覆盖。H.264 中间流直接经 IPC 送入同一个 FFmpeg 进程转码与混音，不生成整段中间 MP4；中间码率默认是同尺寸、帧率 H.264 高画质推荐值的两倍，独立于最终目标码率。
 - 原生 WebCodecs 使用目标码率；FFmpeg 软件编码默认 CRF：均衡 x264 20 / x265 24 / VP9 32 / AV1 32，高画质分别为 18 / 20 / 28 / 28。CRF 只作用于执行该参数的编码阶段，不恢复中间流已丢失的信息，不同标准的数值不能直接比较。软件速度默认 x264 / x265 medium、VP9 cpu-used 2、AV1 cpu-used 6。
-- RawPixels 和文件转码共用视频参数构建逻辑；码率在后端保留小数 Mbps。硬件实现不可用时使用同标准的软件编码；CRF 请求由支持它的软件编码器执行。已有 `codec/backend/bitrateMbps` 调用仍兼容，新 `encoding` 设置优先。
-- 已完成目标编码的视频在音频合成时只复制视频流。已知帧数、帧率时通过 `-t` 限定混音长度，不同时使用 `-shortest`，避免 FFmpeg 7 在含重排或延迟包的短 MP4 中截掉尾帧。最终 MP4 启用 faststart；关键帧间隔约为两秒。
+- RawPixels、流式转码和兼容文件转码共用视频参数构建逻辑；音频滤镜与时长限定共用同一参数构建逻辑。码率在后端保留小数 Mbps。硬件实现不可用时使用同标准的软件编码；流式转码无法重放输入文件，运行中失败需要从起点重新捕获。CRF 请求由支持它的软件编码器执行。已有 `codec/backend/bitrateMbps` 调用仍兼容，新 `encoding` 设置优先。
+- 原生目标编码路径直接复制视频流并同步混音；RawPixels 同步编码与混音。三条路径均不保留整段视频中间文件。已知帧数、帧率时通过 `-t` 限定混音长度，不同时使用 `-shortest`，避免 FFmpeg 7 在含重排或延迟包的短 MP4 中截掉尾帧。最终 MP4 启用 faststart；关键帧间隔约为两秒。
+- Electron 主进程为每次捕获分配独立任务，视频写入目标目录内带随机任务标识的临时输出（保留格式扩展名以正确选择封装器），FFmpeg 正常关闭且空间复查通过后通过同目录重命名替换目标文件。失败、取消与渲染进程退出时先等待 FFmpeg 关闭，再清理任务文件；不删除原有目标文件。最终输出保留 faststart。任务归属记录位于系统临时目录的 `aeonstagery-export/tasks/<uuid>`，记录应用与 FFmpeg PID；启动时只回收两者均确认退出的合法任务，删除失败保留记录以便重试。无归属记录的历史临时文件不自动删除。
+- 开始写入前检查输出所在文件系统可用空间；有明确目标码率及帧数时，以预计视频与音频大小的 1.2 倍加 64 MiB 安全余量检查。CRF 大小不确定，仅检查 64 MiB 安全余量，不把目标码率视为确定大小。任务记录目录也检查余量。运行中每两秒检查输出卷，FFmpeg 关闭后发布前再次检查；不足时按输出错误终止，不触发编码回退。空间检查不是磁盘配额，检查间隔内的突发耗尽仍由 FFmpeg I/O 错误报告。
 - 每个编码候选只尝试一次；捕获中途失败时等待旧流关闭，恢复舞台并从导出起点重新捕获。用户取消、渲染错误和输出写入错误不触发兼容回退。透明字幕始终通过 RawPixels + ProRes 4444 保留 Alpha，不能经过 H.264 中转。
 
 ## Consequences
@@ -43,6 +45,6 @@
 - 舞台尺寸与生命周期：[`src/engine/StageDimensions.ts`](../../src/engine/StageDimensions.ts)、[`src/engine/StageManager.ts`](../../src/engine/StageManager.ts)、[`src/engine/Bootstrapper.ts`](../../src/engine/Bootstrapper.ts)
 - 舞台持有的场景光照、角色淡入与轮廓光、对象合成和目标后处理滤镜使用 `resolution: 'inherit'`，跟随当前渲染目标的像素密度；仅提高根画布分辨率会让默认密度为 1 的父容器滤镜先降采样整个子树。回归见 [`StageFilterResolution.test.ts`](../../src/__tests__/StageFilterResolution.test.ts)，通过真实 Pixi 滤镜范围计算覆盖 4K 与低清预览切换。
 - 原生像素捕获：[`src/engine/export/FrameCaptureEngine.ts`](../../src/engine/export/FrameCaptureEngine.ts)
-- 编码质量与回退：[`src/api/exportEncoding.ts`](../../src/api/exportEncoding.ts)、[`src/api/adapters/ExportAdapter.ts`](../../src/api/adapters/ExportAdapter.ts)、[`src/engine/export/WebCodecsEncoding.ts`](../../src/engine/export/WebCodecsEncoding.ts)、[`electron/ffmpeg-args.ts`](../../electron/ffmpeg-args.ts)；回归覆盖 `ExportAdapter`、`CaptureBackends`、`WebCodecsEncoding`、`FFmpegArgs`、`FFmpegExport`、`ExportMedia` 与 `ExportDialog`。
+- 编码质量与回退：[`src/api/exportEncoding.ts`](../../src/api/exportEncoding.ts)、[`src/api/adapters/ExportAdapter.ts`](../../src/api/adapters/ExportAdapter.ts)、[`src/engine/export/WebCodecsEncoding.ts`](../../src/engine/export/WebCodecsEncoding.ts)、[`electron/ffmpeg-args.ts`](../../electron/ffmpeg-args.ts)、[`electron/ffmpeg-export.ts`](../../electron/ffmpeg-export.ts)、[`electron/export-output.ts`](../../electron/export-output.ts)；回归覆盖 `ExportOutput`、`ExportAdapter`、`CaptureBackends`、`WebCodecsEncoding`、`FFmpegArgs`、`FFmpegExport`、`ExportMedia`、`StreamingExportIntegration` 与 `ExportDialog`。
 - 用户入口：创建项目、更多操作 → 项目设置；[`src/ui/onboarding/ProjectHome.tsx`](../../src/ui/onboarding/ProjectHome.tsx)、[`src/ui/ProjectSettingsDialog.tsx`](../../src/ui/ProjectSettingsDialog.tsx)、[`src/ui/settings/ProjectVideoSettings.tsx`](../../src/ui/settings/ProjectVideoSettings.tsx)、[`src/ui/ExportDialog.tsx`](../../src/ui/ExportDialog.tsx)
 - 验证：`VideoFormat`、`CompatibleProjectSession`、`ProjectWorkspaceService`、`FrameCaptureEngine`、`SubtitleFrameCapture`、`ExportDialog` 与 `StageManagerBlendModeRendererConfig` 测试。
