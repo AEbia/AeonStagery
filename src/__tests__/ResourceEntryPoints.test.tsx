@@ -9,11 +9,13 @@ import { ResourceFileBrowser } from '../ui/ResourceFileBrowser';
 
 const mocks = vi.hoisted(() => ({
   readMergedDirectory: vi.fn(),
+  getResourceDirectoryLocations: vi.fn(),
   sceneAssetService: undefined as { importAssetPath: ReturnType<typeof vi.fn> } | undefined,
 }));
 
 vi.mock('../ui/ResourceLibrary', () => ({
   readMergedDirectory: mocks.readMergedDirectory,
+  getResourceDirectoryLocations: mocks.getResourceDirectoryLocations,
 }));
 
 vi.mock('../ui/context/AppContext', () => ({
@@ -37,23 +39,25 @@ describe('Resource entry points', () => {
     fireEvent.keyDown(screen.getByRole('menuitem'), { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：room.png' }));
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole('menuitem', { name: '在文件管理器中显示' }));
     await waitFor(() => expect(showItemInFolder).toHaveBeenCalledWith('/templates/demo/assets/room.png'));
     expect(onSelect).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
 
   it('keeps file-manager errors visible inside the modal and permits retry', async () => {
-    const showItemInFolder = vi.fn().mockResolvedValue({ success: false, error: '文件已移动，请检查后重试。' });
-    vi.stubGlobal('aeonStageryAPI', { fs: { showItemInFolder } });
+    const openFolder = vi.fn().mockResolvedValue({ success: false, error: '文件已移动，请检查后重试。' });
+    vi.stubGlobal('aeonStageryAPI', { fs: { openFolder } });
     mocks.readMergedDirectory.mockResolvedValue([{ name: 'room.png', isDirectory: false, path: '/project/room.png' }]);
     render(<AssetBrowserModal value="" initialDir="background" onSelect={vi.fn()} onClose={vi.fn()} />);
-    const button = await screen.findByRole('button', { name: '在文件管理器中显示：room.png' });
+    await screen.findByRole('button', { name: /^room\.png/ });
+    const button = screen.getByRole('button', { name: '打开当前资源文件夹' });
     fireEvent.click(button);
     expect((await screen.findByRole('alert')).textContent).toContain('文件已移动');
     expect(screen.getByRole('button', { name: /^room\.png/ })).toBeTruthy();
     await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
-    showItemInFolder.mockResolvedValue({ success: true });
+    openFolder.mockResolvedValue({ success: true });
     fireEvent.click(button);
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
@@ -62,7 +66,33 @@ describe('Resource entry points', () => {
   beforeEach(() => {
     mocks.readMergedDirectory.mockReset();
     mocks.readMergedDirectory.mockResolvedValue([]);
+    mocks.getResourceDirectoryLocations.mockReset();
+    mocks.getResourceDirectoryLocations.mockResolvedValue([{ path: '/project/background', source: '项目' }]);
     mocks.sceneAssetService = undefined;
+  });
+
+  it('has one folder action for the directory and keeps single-click resource import unchanged', async () => {
+    const openFolder = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('aeonStageryAPI', { fs: { openFolder } });
+    mocks.readMergedDirectory.mockResolvedValue([
+      { name: 'room.png', isDirectory: false, path: '/project/background/room.png' },
+      { name: 'sky.png', isDirectory: false, path: '/project/background/sky.png' },
+    ]);
+    mocks.sceneAssetService = { importAssetPath: vi.fn().mockResolvedValue('background/room.png') };
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(<AssetBrowserModal value="" initialDir="background" onSelect={onSelect} onClose={onClose} />);
+    const room = await screen.findByRole('button', { name: /^room\.png/ });
+    expect(screen.getAllByRole('button', { name: '打开当前资源文件夹' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /在文件管理器中显示/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '打开当前资源文件夹' }));
+    await waitFor(() => expect(openFolder).toHaveBeenCalledExactlyOnceWith('/project/background'));
+    expect(mocks.sceneAssetService.importAssetPath).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(room);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith('background/room.png'));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('exposes images and sfx in the standard resource browser', () => {

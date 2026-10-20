@@ -26,6 +26,10 @@ describe('Electron preload bridge contracts', () => {
     await bridge.fs.showItemInFolder?.('/project/scene.json');
     expect(ipc.invoke).toHaveBeenLastCalledWith('fs:showItemInFolder', '/project/scene.json');
   });
+  it('opens a directory through the dedicated folder IPC', async () => {
+    await bridge.fs.openFolder?.('/external/background');
+    expect(ipc.invoke).toHaveBeenLastCalledWith('fs:openFolder', '/external/background');
+  });
   it('forwards typed dialog, voice and export requests unchanged', async () => {
     const dialog = { title: 'Save', filters: [{ name: 'Video', extensions: ['mp4'] }] };
     await bridge.dialog.showSave(dialog);

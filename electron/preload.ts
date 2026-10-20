@@ -47,6 +47,8 @@ const electronAPI = {
   fs: {
     showItemInFolder: (filePath: string): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('fs:showItemInFolder', filePath),
+    openFolder: (folderPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('fs:openFolder', folderPath),
     readFile: (filePath: string) =>
       ipcRenderer.invoke('fs:readFile', filePath),
     readTextFile: (filePath: string) =>

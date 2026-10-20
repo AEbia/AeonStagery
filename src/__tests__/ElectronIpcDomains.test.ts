@@ -138,11 +138,12 @@ describe('Electron IPC domain composition', () => {
   it('registers every domain once and waits for readiness before native integrations', () => {
     const channels = [...electron.handlers.keys(), ...electron.listeners.keys()];
     const counts = Object.fromEntries([
-      ['aiProse', 8], ['aiConversation', 2], ['fs', 13], ['dialog', 2], ['templates', 4],
+      ['aiProse', 8], ['aiConversation', 2], ['fs', 14], ['dialog', 2], ['templates', 4],
       ['app', 5], ['betaState', 2], ['crash', 4], ['workspaceTools', 8], ['projectAgent', 30],
       ['collaborationServer', 5], ['path', 7], ['updater', 4], ['export', 1],
     ]);
-    expect(channels).toHaveLength(95);
+    expect(channels).toHaveLength(96);
+    expect(channels).toContain('fs:openFolder');
     for (const [domain, count] of Object.entries(counts)) {
       expect(channels.filter(channel => channel.startsWith(`${domain}:`))).toHaveLength(count);
     }

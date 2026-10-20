@@ -21,6 +21,28 @@ export async function revealFileInManager(
   services: FileRevealServices | undefined = window.AeonStagery?.services as FileRevealServices | undefined,
 ): Promise<void> {
   if (!api?.fs?.showItemInFolder) throw new Error('当前环境不支持文件定位，请在桌面应用中重试。');
+  const path = await resolveTargetPath(target, api, services);
+  const result = await api.fs.showItemInFolder(path);
+  if (!result.success) throw new Error(result.error || '文件定位失败，请检查文件是否存在后重试。');
+}
+
+/** Open a directory itself, rather than selecting it in its parent directory. */
+export async function openFolderInManager(
+  target: FileRevealTarget,
+  api: AeonStageryElectronAPI | undefined = window.aeonStageryAPI,
+  services: FileRevealServices | undefined = window.AeonStagery?.services as FileRevealServices | undefined,
+): Promise<void> {
+  if (!api?.fs?.openFolder) throw new Error('当前环境不支持打开文件夹，请在桌面应用中重试。');
+  const path = await resolveTargetPath(target, api, services);
+  const result = await api.fs.openFolder(path);
+  if (!result.success) throw new Error(result.error || '文件夹打开失败，请检查路径后重试。');
+}
+
+async function resolveTargetPath(
+  target: FileRevealTarget,
+  api: AeonStageryElectronAPI,
+  services: FileRevealServices | undefined,
+): Promise<string> {
   const resolver = new ProjectPathResolver();
   let path = target.path;
   if (!path.trim() || /[\u0000-\u001f]/.test(path)
@@ -48,6 +70,5 @@ export async function revealFileInManager(
       path = resolution.path;
     }
   }
-  const result = await api.fs.showItemInFolder(path);
-  if (!result.success) throw new Error(result.error || '文件定位失败，请检查文件是否存在后重试。');
+  return path;
 }

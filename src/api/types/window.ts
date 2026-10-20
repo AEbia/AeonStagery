@@ -105,6 +105,7 @@ export interface CollaborationSessionSummary {
 export interface AeonStageryElectronAPI {
   fs: {
     showItemInFolder?(path: string): Promise<{ success: boolean; error?: string }>;
+    openFolder?(path: string): Promise<{ success: boolean; error?: string }>;
     readFile(path: string): Promise<{ success: boolean; data?: ArrayBuffer; error?: string }>;
     readTextFile(path: string): Promise<{ success: boolean; data?: string; error?: string }>;
     readDir(path: string): Promise<{

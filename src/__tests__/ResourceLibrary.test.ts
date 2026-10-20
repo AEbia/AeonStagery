@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readMergedDirectory, readRootDirectories } from '../ui/ResourceLibrary';
+import { getResourceDirectoryLocations, readMergedDirectory, readRootDirectories } from '../ui/ResourceLibrary';
 
 vi.mock('../ui/SettingsStore', () => ({ settingsManager: { get: () => [{ path: '/external' }] } }));
 
@@ -49,4 +49,46 @@ describe('merged resource file directories', () => {
       { name: 'figure', isDirectory: true, path: 'figure' },
     ]);
   });
+  it('offers only project and external folders while keeping template assets browsable', async () => {
+    const readDir = vi.fn(async (path: string) => ({ success: path !== '/external/background/missing', data: [] }));
+    vi.stubGlobal('AeonStagery', { services: {
+      projectWorkspace: { getCurrentProject: () => ({ rootPath: '/project' }) },
+      templateResourceFiles: { readDirectory: vi.fn().mockResolvedValue([
+        { name: 'room.png', isDirectory: false, path: '/templates/demo/content/background/room.png', source: '模板：Demo' },
+      ]) },
+    } });
+    vi.stubGlobal('aeonStageryAPI', { fs: { readDir } });
+    expect(await getResourceDirectoryLocations('background')).toEqual([
+      { path: '/project/background', source: '项目目录' },
+      { path: '/external/background', source: '外部库目录 · external' },
+    ]);
+    expect(await readMergedDirectory('background')).toContainEqual(expect.objectContaining({
+      path: '/templates/demo/content/background/room.png', source: '模板：Demo',
+    }));
+    expect(await getResourceDirectoryLocations('background/missing')).not.toContainEqual(expect.objectContaining({ path: '/external/background/missing' }));
+  });
+
+  it('preserves UNC paths when listing and opening external-style roots', async () => {
+    vi.stubGlobal('AeonStagery', { services: {
+      projectWorkspace: { getCurrentProject: () => ({ rootPath: '//server/share' }) },
+    } });
+    const readDir = vi.fn().mockResolvedValue({ success: true, data: [] });
+    vi.stubGlobal('aeonStageryAPI', { fs: { readDir } });
+    await readMergedDirectory('figure/actor');
+    expect(readDir).toHaveBeenCalledWith('//server/share/figure/actor');
+    expect(await getResourceDirectoryLocations('figure/actor')).toContainEqual({
+      path: '//server/share/figure/actor', source: '项目目录',
+    });
+  });
+
+  it('skips disconnected libraries and deduplicates the same physical source', async () => {
+    vi.stubGlobal('AeonStagery', { services: {
+      projectWorkspace: { getCurrentProject: () => ({ rootPath: '/external' }) },
+    } });
+    const readDir = vi.fn().mockRejectedValue(new Error('Disconnected'));
+    vi.stubGlobal('aeonStageryAPI', { fs: { readDir } });
+    expect(await getResourceDirectoryLocations('background')).toEqual([]);
+    expect(readDir).toHaveBeenCalledExactlyOnceWith('/external/background');
+  });
+
 });
