@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { IconFolder, IconChevronUp, IconChevronDown } from './icons';
 import { readMergedDirectory, type DirEntry } from './ResourceLibrary';
 import { getTemplateResourceFileService, useTemplateResourceDirectoryRefresh } from './TemplateResourceFiles';
-import { FileRevealButton, FileRevealContext } from './FileRevealActions';
+import { FileRevealContext } from './FileRevealActions';
+import { ResourceFolderButton } from './ResourceFolderButton';
 
 const STD_DIRS = ['animation', 'background', 'bgm', 'figure', 'images', 'project', 'sfx', 'template', 'vocal'];
 
@@ -100,6 +101,7 @@ export const ResourceFileBrowser: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+            <ResourceFolderButton key={activeDir} directory={activeDir ?? ''} disabled={loading} />
             {activeDir?.includes('/') && (
               <button type="button" className="btn btn--sm" onClick={() => { void loadDirectory(activeDir.split('/').slice(0, -1).join('/')); }}>
                 返回上级目录
@@ -169,7 +171,6 @@ export const ResourceFileBrowser: React.FC = () => {
                       {entry.source ? `来源：${entry.source}` : '来源：项目'} · 已发现 · 待校验
                     </span>
                   </span>
-                  <FileRevealButton path={entry.path} name={entry.name} templateResource={!!entry.templateResource} compact />
                 </div>
                 </FileRevealContext>
               ))

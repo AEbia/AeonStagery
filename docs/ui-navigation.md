@@ -80,7 +80,7 @@ flowchart TD
 | 视觉区域 / 控件 | 职责描述 | 相关文件与组件 |
 | --- | --- | --- |
 | **标题与项目状态** | Logo 与品牌名（打开项目后悬停或键盘聚焦时变为“返回主页”入口）、软件版本 Badge、当前打开项目名称（点击重命名，与首页最近项目共用重命名对话框） | [`src/App.tsx`](../src/App.tsx)、[`src/ui/ProjectRenameDialog.tsx`](../src/ui/ProjectRenameDialog.tsx) |
-| **快速操作按钮** | 返回主页（保存并关闭项目、退出当前协作会话）；切换/打开项目 (`IconFolder`)；场景更改始终自动保存，保存快捷键（默认 Ctrl+S）可立即保存并显示成功提示 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/hooks/useAppProjectClose.ts`](../src/ui/hooks/useAppProjectClose.ts)、[`src/ui/hooks/useAppShortcuts.ts`](../src/ui/hooks/useAppShortcuts.ts) |
+| **快速操作按钮** | 返回主页（保存并关闭项目、退出当前协作会话）；编辑器的文件夹图标打开当前项目目录（主页仍用于打开项目，Ctrl+O 仍可切换项目）；场景更改始终自动保存，保存快捷键（默认 Ctrl+S）可立即保存并显示成功提示 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/ProjectFileActions.tsx`](../src/ui/ProjectFileActions.tsx)、[`src/ui/hooks/useAppProjectClose.ts`](../src/ui/hooks/useAppProjectClose.ts)、[`src/ui/hooks/useAppShortcuts.ts`](../src/ui/hooks/useAppShortcuts.ts) |
 | **校验指示器 (Validation Pill)** | 显示场景语法与校验错误/警告数量，点击定位问题 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/store/ValidationStore.ts`](../src/ui/store/ValidationStore.ts) |
 | **协作连接面板** | 房间连接状态指示器、在线用户头像列表、连接配置浮窗 | [`src/ui/CollaborationConnectPanel.tsx`](../src/ui/CollaborationConnectPanel.tsx) |
 | **视图与构图辅助** | 构图九宫格/辅助线开关 (`IconTarget`) | [`src/App.tsx`](../src/App.tsx) (`gizmosVisible`) |
@@ -173,7 +173,7 @@ flowchart TD
 | **软件更新 (Software Updates)** | 全局设置 → 关于 | [`src/ui/settings/UpdateSettingsPanel.tsx`](../src/ui/settings/UpdateSettingsPanel.tsx) | OSS / GitHub 增量下载渠道选择、检查、下载与重启安装；GitHub 缺少块图时尝试从 OSS 补取，更新策略见 [ADR-0036](adr/0036-update-channels-and-differential-baselines.md) |
 | **项目主页与新手引导** | 首次启动或关闭项目后全屏呈现 | [`src/ui/onboarding/ProjectHome.tsx`](../src/ui/onboarding/ProjectHome.tsx) | 欢迎页、最近项目、模板 ZIP 导入（`onImportTemplate`）、[`src/ui/onboarding/FirstLessonController.tsx`](../src/ui/onboarding/FirstLessonController.tsx)、[`src/ui/onboarding/SetupWizard.tsx`](../src/ui/onboarding/SetupWizard.tsx)、[`src/ui/onboarding/SpotlightOverlay.tsx`](../src/ui/onboarding/SpotlightOverlay.tsx) |
 | **视频导出对话框** | 顶栏「导出」按钮 | [`src/ui/ExportDialog.tsx`](../src/ui/ExportDialog.tsx) | 场景渲染为视频的分辨率、码率与编码进度 |
-| **资源库与文件选择** | 各种动作选择图片/音频/模型时 | [`src/ui/AssetBrowserModal.tsx`](../src/ui/AssetBrowserModal.tsx) | [`src/ui/ResourceFileBrowser.tsx`](../src/ui/ResourceFileBrowser.tsx)、[`src/ui/ResourcePanel.tsx`](../src/ui/ResourcePanel.tsx) |
+| **资源库与文件选择** | 各种动作选择图片/音频/模型时；单击文件仍直接导入，工具栏统一打开当前资源目录；文件夹入口仅提供项目目录与外部库目录，多个来源时选择实际位置；模板资源仍可浏览和选择 | [`src/ui/AssetBrowserModal.tsx`](../src/ui/AssetBrowserModal.tsx)、[`src/ui/ResourceFolderButton.tsx`](../src/ui/ResourceFolderButton.tsx) | [`src/ui/ResourceFileBrowser.tsx`](../src/ui/ResourceFileBrowser.tsx)、[`src/ui/ResourceLibrary.ts`](../src/ui/ResourceLibrary.ts)、[`src/ui/ResourcePanel.tsx`](../src/ui/ResourcePanel.tsx) |
 | **WebGal 重生成** | 顶栏「重新生成」按钮 | [`src/ui/WebGalRegenerateDialog.tsx`](../src/ui/WebGalRegenerateDialog.tsx) | WebGal 单文件场景重新解析确认 |
 | **场景迁移确认** | 打开旧版本场景（如 v3/v4 自动迁移至 Scene v5）时触发 | [`src/ui/SceneMigrationConfirmationDialog.tsx`](../src/ui/SceneMigrationConfirmationDialog.tsx) | [`src/ui/hooks/useSceneMigrationDialog.ts`](../src/ui/hooks/useSceneMigrationDialog.ts) |
 | **更新日志与公告** | 顶栏「公告」按钮 / 更多菜单 | [`src/ui/changelog/ChangelogDialog.tsx`](../src/ui/changelog/ChangelogDialog.tsx) | [`src/ui/changelog/changelog.css`](../src/ui/changelog/changelog.css) |

@@ -6,7 +6,8 @@ import { useSceneAssetService } from './context/AppContext';
 import type { ResourceImportKind } from '../api/types/project';
 import { useModalDialog } from './hooks/useModalDialog';
 import { getTemplateResourceFileService, useTemplateResourceDirectoryRefresh } from './TemplateResourceFiles';
-import { FileRevealButton, FileRevealContext } from './FileRevealActions';
+import { FileRevealContext } from './FileRevealActions';
+import { ResourceFolderButton } from './ResourceFolderButton';
 
 interface AssetBrowserModalProps {
   value: string;
@@ -190,14 +191,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-          <div style={{ minWidth: 0 }}>
-            <div id="asset-browser-title" style={{ fontWeight: 600, fontSize: 14 }}>资源浏览器</div>
-            {value && (
-              <div title={value} style={{ marginTop: 3, maxWidth: 'min(70vw, 720px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, opacity: 0.62 }}>
-                当前引用：{value} · 路径状态待确认
-              </div>
-            )}
-          </div>
+          <div id="asset-browser-title" style={{ minWidth: 0, fontWeight: 600, fontSize: 14 }}>资源浏览器</div>
           <button type="button" className="btn btn--icon" onClick={onClose} aria-label="关闭资源浏览器"><IconX width={16} height={16} /></button>
         </div>
 
@@ -252,6 +246,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
                   inputStyle={{ padding: '6px 12px 6px 32px', borderRadius: 'var(--radius-full)' }}
                 />
               </div>
+              <ResourceFolderButton key={currentSubDir} directory={currentSubDir} disabled={loading} onError={setRevealError} />
               <button type="button" className="btn btn--icon" title="刷新文件资源" aria-label="刷新文件资源" onClick={() => {
                   const templates = getTemplateResourceFileService();
                   if (templates) templates.invalidate();
@@ -340,7 +335,6 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
                           </div>
                         )}
                       </button>
-                      {!entry.isDirectory && <FileRevealButton path={entry.path} name={entry.name} templateResource={!!entry.templateResource} onRevealError={setRevealError} />}
                     </div>
                     </FileRevealContext>
                   ))}

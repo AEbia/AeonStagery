@@ -6,7 +6,7 @@ import type { ProjectState, ResourceResolution } from '../api/types/project';
 import { FileRevealButton, FileRevealContext } from '../ui/FileRevealActions';
 import { ProjectFileActions } from '../ui/ProjectFileActions';
 import { ResourceFileBrowser } from '../ui/ResourceFileBrowser';
-import { revealFileInManager } from '../ui/fileReveal';
+import { openFolderInManager, revealFileInManager } from '../ui/fileReveal';
 
 const mocks = vi.hoisted(() => ({ toast: vi.fn(), readMergedDirectory: vi.fn() }));
 vi.mock('../ui/Toast', () => ({ showToast: mocks.toast }));
@@ -15,12 +15,14 @@ vi.mock('../ui/ResourceLibrary', () => ({ readMergedDirectory: mocks.readMergedD
 describe('file reveal resolution and interactions', () => {
   const reveal = vi.fn();
   const realpath = vi.fn();
+  const openFolder = vi.fn();
   const resolveResource = vi.fn<(path: string) => Promise<ResourceResolution>>();
   const join = vi.fn<(root: string, relative: string) => Promise<string>>();
-  const api = { fs: { showItemInFolder: reveal, realpath }, path: { join } } as unknown as AeonStageryElectronAPI;
+  const api = { fs: { showItemInFolder: reveal, openFolder, realpath }, path: { join } } as unknown as AeonStageryElectronAPI;
   beforeEach(() => {
     vi.clearAllMocks();
     reveal.mockResolvedValue({ success: true });
+    openFolder.mockResolvedValue({ success: true });
     join.mockImplementation(async (root, relative) => `${root}/${relative}`);
     vi.stubGlobal('aeonStageryAPI', api);
     vi.stubGlobal('AeonStagery', { services: { projectResources: { resolveForReadWithStatus: resolveResource } } });
@@ -89,58 +91,53 @@ describe('file reveal resolution and interactions', () => {
     mocks.readMergedDirectory.mockResolvedValue([{ name: 'a.png', path: '/project/a.png', isDirectory: false }]);
     render(<ResourceFileBrowser />);
     fireEvent.click(screen.getByRole('button', { name: '文件资源' }));
-    fireEvent.click(await screen.findByRole('button', { name: '在文件管理器中显示：a.png' }));
+    const row = await screen.findByRole('listitem', { name: /a\.png/ });
+    expect(screen.queryByRole('button', { name: '在文件管理器中显示：a.png' })).toBeNull();
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole('menuitem'));
     await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/a.png'));
-    fireEvent.contextMenu(screen.getByRole('listitem', { name: /a\.png/ }));
-    expect(screen.getByRole('menuitem')).toBeTruthy();
   });
 
-  it('lists the project and each scene and resolves scene paths only when requested', async () => {
+  it('opens the project directory through the existing folder icon without listing scene actions', async () => {
     const project = {
       rootPath: '/project', projectFilePath: '/project/project.json',
       metadata: { name: '演出', scenes: [{ id: 'a', name: '开场', path: 'scenes/a.json' }] },
     } as ProjectState;
     render(<ProjectFileActions project={project} />);
-    fireEvent.click(screen.getByText('文件位置'));
-    fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：项目：演出' }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/project.json'));
-    fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：场景：开场' }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/scenes/a.json'));
-    expect(join).toHaveBeenCalledWith('/project', 'scenes/a.json');
-    expect(resolveResource).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '打开当前项目文件夹' }));
+    await waitFor(() => expect(openFolder).toHaveBeenCalledExactlyOnceWith('/project'));
+    expect(screen.queryByText('文件位置')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(reveal).not.toHaveBeenCalled();
   });
 
-  it('dismisses the project file menu on outside pointer and Escape', () => {
-    const project = {
-      rootPath: '/project', projectFilePath: '/project/project.json',
-      metadata: { name: '演出', scenes: [{ id: 'a', name: '开场', path: 'scenes/a.json' }] },
-    } as ProjectState;
-    const { container } = render(<ProjectFileActions project={project} />);
-    const summary = screen.getByText('文件位置');
-    const details = container.querySelector('details');
-    if (!details) throw new Error('Project file menu details element was not rendered');
+  it('reports project folder errors and permits retry', async () => {
+    const project = { rootPath: '/project' } as ProjectState;
+    openFolder.mockResolvedValueOnce({ success: false, error: '文件夹已移动' });
+    render(<ProjectFileActions project={project} />);
+    const button = screen.getByRole('button', { name: '打开当前项目文件夹' });
+    fireEvent.click(button);
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('文件夹已移动', 'error'));
+    await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(openFolder).toHaveBeenCalledTimes(2));
+  });
 
-    details.open = true;
-    fireEvent.pointerDown(document.body);
-    expect(details.open).toBe(false);
-
-    details.open = true;
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(details.open).toBe(false);
-    expect(document.activeElement).toBe(summary);
+  it('opens an exact mounted folder and resolves relative installed template folders without importing', async () => {
+    resolveResource.mockResolvedValue({ status: 'ready', source: 'global-mount', path: '/external/background', relativePath: 'background' });
+    await openFolderInManager({ path: '@mount/external/background' });
+    expect(openFolder).toHaveBeenLastCalledWith('/external/background');
+    realpath.mockResolvedValue({ success: true, data: '/app/src/templates/demo/assets' });
+    await openFolderInManager({ path: 'src/templates/demo/assets', templateResource: true });
+    expect(openFolder).toHaveBeenLastCalledWith('/app/src/templates/demo/assets');
+    expect(reveal).not.toHaveBeenCalled();
   });
 
   it('keeps a missing scene bound to its project root even if a global same-named file exists', async () => {
     resolveResource.mockResolvedValue({ status: 'ready', source: 'global-mount', path: '/outside/scenes/missing.json', relativePath: 'scenes/missing.json' });
     reveal.mockResolvedValue({ success: false, error: '文件不存在或已移动' });
-    const project = {
-      rootPath: '/project', projectFilePath: '/project/project.json',
-      metadata: { name: '演出', scenes: [{ id: 'missing', name: '缺失场景', path: 'scenes/missing.json' }] },
-    } as ProjectState;
-    render(<ProjectFileActions project={project} />);
-    fireEvent.click(screen.getByText('文件位置'));
-    fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：场景：缺失场景' }));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/scenes/missing.json'));
+    await expect(revealFileInManager({ path: 'scenes/missing.json', projectRoot: '/project' })).rejects.toThrow('文件不存在或已移动');
+    expect(reveal).toHaveBeenCalledWith('/project/scenes/missing.json');
     expect(resolveResource).not.toHaveBeenCalled();
   });
 });

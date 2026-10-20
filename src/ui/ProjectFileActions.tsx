@@ -1,22 +1,20 @@
+import { useState } from 'react';
 import type { ProjectState } from '../api/types/project';
-import { FileRevealButton, FileRevealContext } from './FileRevealActions';
-import { useDetailsDismissal } from './hooks/useDetailsDismissal';
+import { openFolderInManager } from './fileReveal';
+import { IconFolder } from './icons';
+import { showToast } from './Toast';
 
-/** File locations for the loaded project and all persisted scene entries. */
-export function ProjectFileActions({ project }: { project: ProjectState }) {
-  const detailsRef = useDetailsDismissal();
-  return <FileRevealContext path={project.projectFilePath} name={project.metadata.name}>
-    <details className="top-bar__more" ref={detailsRef}>
-      <summary className="btn" aria-label="项目与场景文件位置">文件位置</summary>
-      <div className="top-bar__menu" style={{ maxHeight: 'min(60vh, 420px)', overflowY: 'auto' }}>
-        <FileRevealButton path={project.projectFilePath} name={`项目：${project.metadata.name}`} className="top-bar__menu-item" />
-        {project.metadata.scenes.map((scene) => <FileRevealContext key={scene.id} path={scene.path} projectRoot={project.rootPath} name={scene.name || scene.path}>
-          <div style={{ padding: '4px 8px', minWidth: 0 }}>
-            <div title={scene.path} style={{ overflowWrap: 'anywhere', fontSize: 11, color: 'var(--text-muted)' }}>{scene.name || scene.path}</div>
-            <FileRevealButton path={scene.path} projectRoot={project.rootPath} name={`场景：${scene.name || scene.path}`} className="top-bar__menu-item" />
-          </div>
-        </FileRevealContext>)}
-      </div>
-    </details>
-  </FileRevealContext>;
+/** The editor's folder icon opens the current project, without switching projects. */
+export function ProjectFileActions({ project, disabled = false }: { project: ProjectState; disabled?: boolean }) {
+  const [pending, setPending] = useState(false);
+  return <button type="button" className="btn btn--icon top-bar__project-action"
+    disabled={disabled || pending} aria-busy={pending} aria-label="打开当前项目文件夹"
+    title={`打开当前项目文件夹：${project.rootPath}`} onClick={() => {
+      setPending(true);
+      void openFolderInManager({ path: project.rootPath }).catch((error: unknown) => {
+        showToast(error instanceof Error ? error.message : '项目文件夹打开失败，请重试。', 'error');
+      }).finally(() => setPending(false));
+    }}>
+    <IconFolder width={15} height={15} />
+  </button>;
 }

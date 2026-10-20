@@ -250,10 +250,10 @@ function AppContent({ contextValue, sessionBindings }: {
               <span>{currentProject.metadata.name}</span>
               <IconPencil width={12} height={12} />
             </button>
-            <ProjectFileActions project={currentProject} />
+            <ProjectFileActions project={currentProject} disabled={isClosingProject} />
             </>
           )}
-          <button
+          {!currentProject && <button
             className="btn btn--icon top-bar__project-action"
             onClick={() => void handleOpenProject()}
             disabled={isClosingProject}
@@ -261,7 +261,7 @@ function AppContent({ contextValue, sessionBindings }: {
             aria-label="打开项目"
           >
             <IconFolder width={15} height={15} />
-          </button>
+          </button>}
         </div>
         <div className="top-bar__actions">
           <div className="top-bar__group top-bar__group--status" aria-label="状态">
