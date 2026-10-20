@@ -74,6 +74,10 @@
   --success: #34d399;
   --warning: #f59e0b;
   --error: #ef4444;
+  /* Project preference: semantic text retains the original status colors. */
+  --success-text: var(--success);
+  --warning-text: var(--warning);
+  --error-text: var(--error);
   --success-surface: color-mix(in srgb, var(--success) 10%, var(--bg-surface));
   --warning-surface: color-mix(in srgb, var(--warning) 10%, var(--bg-surface));
   --error-surface: color-mix(in srgb, var(--error) 10%, var(--bg-surface));
@@ -102,6 +106,8 @@
   --accent-secondary: #6366f1;
   --accent-glow: rgba(79, 70, 229, 0.15);
   --accent-hover: #4338ca;
+  /* §5.6: foreground paired with accent-primary and accent-hover fills. */
+  --on-accent: #ffffff;
 
   --border-subtle: rgba(0, 0, 0, 0.04);
   --border-default: rgba(0, 0, 0, 0.07);
@@ -134,11 +140,15 @@
   --text-secondary: #aaa4b4;
   --text-muted: #706b7a;
   --text-accent: #d88c7a;
+  --success-text: var(--success);
+  --warning-text: var(--warning);
+  --error-text: var(--error);
 
   --accent-primary: #d88c7a;
   --accent-secondary: #8fa7c7;
   --accent-glow: rgba(216, 140, 122, 0.22);
   --accent-hover: #efac98;
+  --on-accent: #13151a;
 
   --border-subtle: rgba(241, 238, 233, 0.05);
   --border-default: rgba(198, 190, 210, 0.1);
