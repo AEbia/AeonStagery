@@ -13,6 +13,7 @@ import {
 } from '../services/semantic-scene';
 import { convertWebGalToSceneDocument, joinWebGalScriptTexts } from '../services/import/webgal/WebGalToSceneConverter';
 import { resolveRimLightStateAtTime } from '../engine/RimLightResolver';
+import { deriveLightingSnapshotAtTime } from '../engine/LightingSnapshot';
 
 const SAMPLE_SCRIPT = readFileSync(join(process.cwd(), 'src/__tests__/fixtures/webgal-sample-script.txt'), 'utf8');
 
@@ -836,14 +837,60 @@ describe('convertWebGalToSceneDocument', () => {
       + '-transform={"bloom":1,"bloomThreshold":0.8,"rgbFilm":1,"godrayFilm":1};',
     );
     const lighting = statementsOf(document, 'lighting');
-    const post = lighting.find((statement) => paramsOf(statement, 'lighting').effect === 'post');
+    const post = lighting.filter((statement) => paramsOf(statement, 'lighting').effect === 'post').at(-1);
     const postParams = paramsOf(post!, 'lighting');
     if (postParams.effect !== 'post') throw new Error('expected post');
     expect(postParams.bloomThreshold).toBe(0.8);
     expect(postParams.bloomBrightness).toBe(1);
+    expect(postParams).toMatchObject({ target: 'soyo', bloomBloomScale: 1, bloomBlur: 0 });
     expect(postParams.rgbSplitX).toBeGreaterThan(0);
     const godrays = lighting.find((statement) => paramsOf(statement, 'lighting').effect === 'godrays');
     expect(godrays).toBeDefined();
+  });
+
+  it('preserves all four bloom controls and sticky partial updates independently per target', () => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bloom":0.7,"bloomBrightness":1.1,"bloomBlur":20,"bloomThreshold":0.6};'
+      + 'changeFigure:anon/model.json -id=2 -transform={"bloom":0.3};'
+      + 'changeBg:room.png -transform={"bloomBlur":12};'
+      + 'setTransform:{"bloomBlur":30} -target=1;'
+      + 'setTransform:{"bloom":0,"bloomBrightness":1,"bloomBlur":0,"bloomThreshold":0} -target=1;',
+    );
+    const posts = statementsOf(document, 'lighting')
+      .map((statement) => paramsOf(statement, 'lighting'))
+      .filter((params) => params.effect === 'post' && params.durationSeconds !== 0);
+    expect(posts).toHaveLength(5);
+    expect(posts[0]).toMatchObject({ target: 'soyo', bloomBloomScale: 0.7, bloomBrightness: 1.1, bloomBlur: 20, bloomThreshold: 0.6 });
+    expect(posts[1]).toMatchObject({ target: 'anon', bloomBloomScale: 0.3, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0 });
+    expect(posts[2]).toMatchObject({ target: 'background', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 12, bloomThreshold: 0 });
+    expect(posts[3]).toMatchObject({ target: 'soyo', bloomBloomScale: 0.7, bloomBrightness: 1.1, bloomBlur: 30, bloomThreshold: 0.6 });
+    expect(posts[4]).toMatchObject({ target: 'soyo', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0 });
+  });
+
+  it('starts imported bloom transitions from WebGAL defaults without changing panorama state', () => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -duration=1000 -transform={"bloom":1,"bloomBlur":20,"bloomThreshold":0.6};',
+    );
+    const compiled = sceneStatementCompiler.compile(document);
+    const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
+    const snapshot = deriveLightingSnapshotAtTime(0.5, timeline);
+    expect(snapshot.postProcessingTargets.soyo).toMatchObject({
+      bloomBloomScale: 0.5, bloomBrightness: 1, bloomBlur: 10, bloomThreshold: 0.3,
+    });
+    expect(snapshot.postProcessing).toMatchObject({ bloomBloomScale: 0, bloomBlur: 8, bloomThreshold: 0.5 });
+  });
+
+  it.each(['changeFigure:none -id=1;', 'chapterBreak:none;'])('clears bloom when a figure re-enters after %s', (exit) => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bloom":1,"bloomBlur":20};'
+      + exit + 'changeFigure:soyo/model.json -id=1;',
+    );
+    const posts = statementsOf(document, 'lighting')
+      .map((statement) => paramsOf(statement, 'lighting'))
+      .filter((params) => params.effect === 'post');
+    expect(posts.at(-1)).toMatchObject({
+      target: 'soyo', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0, durationSeconds: 0,
+    });
   });
 
   it('reports dropped filters instead of silently losing them', () => {

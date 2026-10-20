@@ -623,7 +623,10 @@ class LightingSystem {
     this.bloomFilter.threshold = effective.bloomThreshold;
     this.bloomFilter.bloomScale = effective.bloomBloomScale;
     this.bloomFilter.brightness = effective.bloomBrightness;
-    this.bloomFilter.enabled = !suspendSceneFilters && effective.bloomBloomScale > 0.01;
+    this.bloomFilter.blur = effective.bloomBlur;
+    this.bloomFilter.enabled = !suspendSceneFilters && (
+      effective.bloomBloomScale > 0 || effective.bloomBrightness !== 1
+    );
 
     this.rgbSplitFilter.red = [effective.rgbSplitX, effective.rgbSplitY];
     this.rgbSplitFilter.blue = [-effective.rgbSplitX, -effective.rgbSplitY];

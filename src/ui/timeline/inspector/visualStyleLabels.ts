@@ -85,8 +85,9 @@ export function getVisualStyleOverrideConfig(key: string): { min?: string; max?:
     case 'shadowSoftness':
       return { min: '0', popoverMin: '0', popoverMax: '50', step: '1' };
     case 'intensity':
-    case 'bloom':
       return { min: '0', popoverMin: '0', popoverMax: '2', step: '0.05' };
+    case 'bloom':
+      return { min: '0', max: '1.5', popoverMin: '0', popoverMax: '1.5', step: '0.05' };
     case 'rgbSplit':
       return { min: '0', popoverMin: '0', popoverMax: '20', step: '0.5' };
     default:

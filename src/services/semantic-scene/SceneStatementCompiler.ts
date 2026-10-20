@@ -866,6 +866,7 @@ function lowerLighting(params: LightingParams): LoweredAction[] {
             bloomThreshold: params.bloomThreshold,
             bloomBloomScale: params.bloomBloomScale,
             bloomBrightness: params.bloomBrightness,
+            bloomBlur: params.bloomBlur,
             rgbSplitX: params.rgbSplitX,
             rgbSplitY: params.rgbSplitY,
             godrayGain: params.godrayGain,

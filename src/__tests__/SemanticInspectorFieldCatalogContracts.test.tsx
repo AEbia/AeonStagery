@@ -242,13 +242,14 @@ describe('semantic Inspector field catalog contracts', () => {
     expect(visualResetKeys).toEqual(['scope', 'target', 'slot', 'mode', 'durationSeconds']);
     expect(postKeys).toEqual(expect.arrayContaining([
       'target',
-      'bloomThreshold', 'bloomBloomScale', 'bloomBrightness', 'rgbSplitX', 'rgbSplitY',
+      'bloomThreshold', 'bloomBloomScale', 'bloomBrightness', 'bloomBlur', 'rgbSplitX', 'rgbSplitY',
       'godrayGain', 'godrayLacunarity', 'godrayAngle', 'adjGamma', 'adjContrast',
       'adjSaturation', 'adjBrightness', 'adjRed', 'adjGreen', 'adjBlue',
       'overlayColor', 'overlayBlendMode', 'overlayIntensity', 'durationSeconds',
     ]));
     expect(materializeSemanticInspectorParams('lighting', { effect: 'post', mode: 'set' })).toMatchObject({
       target: 'panorama',
+      bloomBlur: 8,
       overlayBlendMode: 'multiply',
       overlayIntensity: 0,
     });

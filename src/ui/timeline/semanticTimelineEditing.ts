@@ -1011,6 +1011,7 @@ function applyLightingTimelineParam(params: Record<string, unknown>, key: string
     'bloomThreshold',
     'bloomBloomScale',
     'bloomBrightness',
+    'bloomBlur',
     'rgbSplitX',
     'rgbSplitY',
     'godrayGain',

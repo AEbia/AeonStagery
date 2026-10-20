@@ -287,6 +287,17 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
 - **对象视觉风格 (`visualStyle`)**：作用于单个角色或物体本身的视觉属性，例如边缘光（Rim-light）、色调调和与融入度。
 - **场景光照 (`lighting`)**：提供全局光照预设（Preset）、色彩覆盖层（Overlay）以及点光源（PointLight），具备独立的启停与调制生命周期。
 
+“设置后期处理”使用 `lighting` 的 `effect: "post"`，目标可选全景（`panorama`）、角色 ID 或环境层 ID。Bloom 的四项控制独立生效，支持过渡、Seek 和导出：
+
+| 参数 | 含义 | 新建“设置后期处理”的值 | WebGAL 对应参数 |
+| --- | --- | --- | --- |
+| `bloomBloomScale` | 泛光强度 | `0` | `bloom` |
+| `bloomBrightness` | 原图亮度倍率 | `1` | `bloomBrightness` |
+| `bloomBlur` | 泛光扩散半径 | `0` | `bloomBlur` |
+| `bloomThreshold` | 参与泛光的亮部阈值 | `0` | `bloomThreshold` |
+
+新建语句显式采用 WebGAL 的 Bloom 默认值。旧语句未指定 `bloomBlur` 时，仍沿用半径 `8`；未指定阈值时沿用原有初值 `0.5`。后续语句省略的参数继承该目标已有状态，重置后期处理恢复原有运行时默认值。全景后期处理作用于场景内容，字幕保持清晰。WebGAL 导入会保留四参数、作用目标和部分更新，并以 WebGAL 初值作为首次过渡的起点。
+
 ### 需要注意的规则与兼容性提示
 
 - **废弃的镜头滤镜 (`filterAdd`, `filterChange`, `filterReset`)**：旧版本滤镜语句仅保留回放与加载兼容性，新制作场景中不再提供入口，统一由 `visualStyle` 与 `lighting` 取代。

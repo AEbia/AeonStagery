@@ -612,6 +612,8 @@ export interface LightingPostProcessingParams {
   bloomThreshold?: number;
   bloomBloomScale?: number;
   bloomBrightness?: number;
+  /** Bloom diffusion radius; omitted values retain the legacy radius of 8. */
+  bloomBlur?: number;
   rgbSplitX?: number;
   rgbSplitY?: number;
   godrayGain?: number;

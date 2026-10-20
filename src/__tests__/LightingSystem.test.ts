@@ -50,6 +50,7 @@ const pixiMocks = vi.hoisted(() => {
     enabled = false;
     threshold = 0;
     bloomScale = 0;
+    blur = 0;
     brightness = 1;
     red: [number, number] = [0, 0];
     blue: [number, number] = [0, 0];
@@ -202,6 +203,26 @@ describe('LightingSystem transient effect rebuilds', () => {
     });
   });
 
+  it('applies bloom diffusion and keeps brightness-only processing active', () => {
+    lightingSystem.init();
+    const bloom = sceneContainer.filters[4] as InstanceType<typeof pixiMocks.MockGenericFilter>;
+    const timeline = [{
+      _id: 'bloom', action: 'setPostProcessing' as const, time: 0,
+      params: { bloomBloomScale: 0.6, bloomBlur: 20, bloomThreshold: 0, duration: 0 },
+    }];
+    lightingSystem.reconcile(0, timeline);
+    expect(bloom).toMatchObject({ bloomScale: 0.6, blur: 20, threshold: 0, enabled: true });
+
+    lightingSystem.reconcile(0, [{
+      _id: 'brightness', action: 'setPostProcessing', time: 0,
+      params: { bloomBloomScale: 0, bloomBrightness: 0.8, bloomBlur: 0, duration: 0 },
+    }]);
+    expect(bloom).toMatchObject({ bloomScale: 0, blur: 0, brightness: 0.8, enabled: true });
+
+    lightingSystem.reconcile(0, []);
+    expect(bloom).toMatchObject({ blur: 8, brightness: 1, enabled: false });
+  });
+
   it('keeps the panorama overlay inside the scene container', () => {
     lightingSystem.init();
     lightingSystem.applySnapshot({
@@ -212,6 +233,7 @@ describe('LightingSystem transient effect rebuilds', () => {
         bloomThreshold: 0.5,
         bloomBloomScale: 0,
         bloomBrightness: 1,
+        bloomBlur: 8,
         rgbSplitX: 0,
         rgbSplitY: 0,
         godrayGain: 0,

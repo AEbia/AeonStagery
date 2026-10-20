@@ -114,6 +114,7 @@ function isDefaultPostProcessing(state: LightingPostProcessingSnapshot): boolean
     state.bloomThreshold === defaults.bloomThreshold &&
     state.bloomBloomScale === defaults.bloomBloomScale &&
     state.bloomBrightness === defaults.bloomBrightness &&
+    state.bloomBlur === defaults.bloomBlur &&
     state.rgbSplitX === defaults.rgbSplitX &&
     state.rgbSplitY === defaults.rgbSplitY &&
     state.godrayGain === defaults.godrayGain &&
@@ -244,7 +245,7 @@ class TargetPostProcessingController {
         nextOwned.push(adjustment);
       }
 
-      if (state.bloomBloomScale > 0.001 || Math.abs(state.bloomBrightness - 1) > 0.001 || Math.abs(state.bloomThreshold - 0.5) > 0.001) {
+      if (state.bloomBloomScale > 0 || state.bloomBrightness !== 1) {
         const bloom = take<AdvancedBloomFilter>('bloom') ?? markOwnedFilter(new AdvancedBloomFilter({
           threshold: DEFAULT_POST_PROCESSING_SNAPSHOT.bloomThreshold,
           bloomScale: 0,
@@ -255,6 +256,7 @@ class TargetPostProcessingController {
         bloom.threshold = state.bloomThreshold;
         bloom.bloomScale = state.bloomBloomScale;
         bloom.brightness = state.bloomBrightness;
+        bloom.blur = state.bloomBlur;
         bloom.enabled = true;
         nextOwned.push(bloom);
       }
