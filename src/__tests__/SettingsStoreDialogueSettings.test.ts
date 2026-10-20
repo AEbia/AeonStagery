@@ -10,6 +10,41 @@ afterEach(() => {
 });
 
 describe('dialogue settings persistence', () => {
+  it.each([undefined, 32, 48, 72])('upgrades legacy settings with font size %s to persisted uniform sizing', async (fontSize) => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueFontSize: fontSize }));
+
+    const { settingsManager } = await import('../ui/SettingsStore');
+    const expectedSize = fontSize ?? 48;
+    expect(settingsManager.get('dialogueFontSizeSource')).toBe('global');
+    expect(settingsManager.get('dialogueFontSize')).toBe(expectedSize);
+    expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}')).toMatchObject({
+      dialogueFontSizeSource: 'global',
+      dialogueFontSize: expectedSize,
+    });
+
+    vi.resetModules();
+    const reloaded = await import('../ui/SettingsStore');
+    expect(reloaded.settingsManager.get('dialogueFontSizeSource')).toBe('global');
+    expect(reloaded.settingsManager.get('dialogueFontSize')).toBe(expectedSize);
+  });
+
+  it('keeps uniform font sizing as the default and persists the template choice', async () => {
+    const { settingsManager } = await import('../ui/SettingsStore');
+    expect(settingsManager.get('dialogueFontSizeSource')).toBe('global');
+    settingsManager.update({ dialogueFontSizeSource: 'template', dialogueFontSize: 64 });
+    vi.resetModules();
+    const reloaded = await import('../ui/SettingsStore');
+    expect(reloaded.settingsManager.get('dialogueFontSizeSource')).toBe('template');
+    expect(reloaded.settingsManager.get('dialogueFontSize')).toBe(64);
+
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueFontSizeSource: 'invalid' }));
+    vi.resetModules();
+    const invalid = await import('../ui/SettingsStore');
+    expect(invalid.settingsManager.get('dialogueFontSizeSource')).toBe('global');
+    invalid.settingsManager.set('dialogueFontSizeSource', 'invalid' as never);
+    expect(invalid.settingsManager.get('dialogueFontSizeSource')).toBe('global');
+  });
+
   it('defaults, clamps and persists dialogue font size', async () => {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ dialogueFontSize: 'large' }));
     const { settingsManager, DEFAULT_SETTINGS, DIALOGUE_FONT_SIZE_RANGE } = await import('../ui/SettingsStore');

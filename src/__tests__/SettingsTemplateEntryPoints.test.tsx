@@ -31,6 +31,7 @@ afterEach(() => {
   cleanup();
   settingsManager.set('dialogueEntranceAnimation', DEFAULT_SETTINGS.dialogueEntranceAnimation);
   settingsManager.set('dialogueFontSize', DEFAULT_SETTINGS.dialogueFontSize);
+  settingsManager.set('dialogueFontSizeSource', DEFAULT_SETTINGS.dialogueFontSizeSource);
 });
 
 describe('settings template entry point', () => {
@@ -56,6 +57,15 @@ describe('settings template entry point', () => {
     fireEvent.change(fontSize, { target: { value: '64' } });
     expect(settingsManager.get('dialogueFontSize')).toBe(64);
     expect(fontSize.getAttribute('aria-valuetext')).toBe('64 像素');
+    fireEvent.click(screen.getByRole('combobox', { name: '字号来源' }));
+    fireEvent.click(screen.getByRole('option', { name: '跟随模板字号' }));
+    expect(settingsManager.get('dialogueFontSizeSource')).toBe('template');
+    expect(settingsManager.get('dialogueFontSize')).toBe(64);
+    expect(screen.getByRole('combobox', { name: '字号来源' }).textContent).toContain('跟随模板字号');
+    expect(screen.queryByRole('slider', { name: '对白字体大小' })).toBeNull();
+    fireEvent.click(screen.getByRole('combobox', { name: '字号来源' }));
+    fireEvent.click(screen.getByRole('option', { name: '统一字号' }));
+    expect(screen.getByRole('slider', { name: '对白字体大小' }).getAttribute('aria-valuetext')).toBe('64 像素');
     expect(findSettingsCategories('字号').map((category) => category.id)).toContain('dialogue');
     const entrance = screen.getByRole('switch', { name: '文本框入场动画' });
     expect(entrance.getAttribute('aria-checked')).toBe('false');

@@ -308,6 +308,9 @@ export function bootstrap(options?: {
   const disposeDialogueFontSize = settingsManager.subscribeKey('dialogueFontSize', () => {
     subtitleRenderer.forceUpdate();
   });
+  const disposeDialogueFontSizeSource = settingsManager.subscribeKey('dialogueFontSizeSource', () => {
+    subtitleRenderer.forceUpdate();
+  });
   const disposeDialogueTextSpeed = settingsManager.subscribeKey('dialogueTextSpeed', () => {
     subtitleRenderer.forceUpdate();
   });
@@ -1200,6 +1203,7 @@ export function bootstrap(options?: {
       const closeMotionEditing = customMotionEditing.closeActive('disposed');
       const closeMotionConversion = customMotionConversion.dispose();
       disposeDialogueFontSize();
+      disposeDialogueFontSizeSource();
       disposeDialogueTextSpeed();
       playbackAdapter.dispose();
       disposeProjectAgentSupplementRelay();
