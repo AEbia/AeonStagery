@@ -600,6 +600,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
     case 'focus':
       return [withOutput('primary', 'cameraMotion', cleanParams({
         move: cameraMoveForZoom(params.zoom, params.target ? 'focus' : 'pan'),
+        _cameraProperties: lowerCameraPropertyTracks(params),
         easing: mapEase(params.ease),
         duration: params.durationSeconds,
         focus: params.target ? {
@@ -612,6 +613,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
     case 'move':
       return [withOutput('primary', 'cameraMotion', cleanParams({
         move: cameraMoveForZoom(params.zoom, params.position || params.to ? 'pan' : 'zoom'),
+        _cameraProperties: lowerCameraPropertyTracks(params),
         easing: mapEase(params.ease),
         duration: params.durationSeconds,
         target: params.to ?? params.position,

@@ -324,6 +324,8 @@ function computeCameraStateAtTimeInternal(
 }
 
 function compiledMotionWritesX(params: Record<string, unknown>): boolean {
+  const marked = compiledMotionProperty(params, 'position');
+  if (marked !== undefined) return marked;
   const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
     ? params.focus as Record<string, unknown>
     : {};
@@ -332,19 +334,26 @@ function compiledMotionWritesX(params: Record<string, unknown>): boolean {
     || params.to !== undefined
     || params.position !== undefined
     || focus.point !== undefined
-    || (params.move === 'pan' && typeof params.strength === 'number');
+    || params.move === 'pan'
+    || params.move === 'push'
+    || params.move === 'pull'
+    || params.move === 'zoom';
 }
 
 function compiledMotionWritesY(params: Record<string, unknown>): boolean {
+  const marked = compiledMotionProperty(params, 'position');
+  if (marked !== undefined) return marked;
   const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
     ? params.focus as Record<string, unknown>
     : {};
-  return typeof focus.character === 'string'
+  if (typeof focus.character === 'string'
     || params.target !== undefined
     || params.to !== undefined
     || params.position !== undefined
-    || focus.point !== undefined
-    || (params.move === 'tilt' && (typeof params.toY === 'number' || typeof params.strength === 'number'));
+    || focus.point !== undefined) return true;
+  if (params.move === 'tilt' || params.move === 'push' || params.move === 'pull' || params.move === 'zoom') return true;
+  if (params.move === 'pan') return typeof params.strength !== 'number';
+  return false;
 }
 
 function compiledMotionWritesPosition(params: Record<string, unknown>): boolean {
@@ -352,11 +361,20 @@ function compiledMotionWritesPosition(params: Record<string, unknown>): boolean 
 }
 
 function compiledMotionWritesZoom(params: Record<string, unknown>): boolean {
-  return params.zoom !== undefined;
+  const marked = compiledMotionProperty(params, 'zoom');
+  if (marked !== undefined) return marked;
+  return params.zoom !== undefined || params.move === 'zoom' || params.move === 'push' || params.move === 'pull';
 }
 
 function compiledMotionWritesRotation(params: Record<string, unknown>): boolean {
-  return typeof params.angle === 'number' || typeof params.rotation === 'number';
+  const marked = compiledMotionProperty(params, 'rotation');
+  if (marked !== undefined) return marked;
+  return typeof params.angle === 'number' || typeof params.rotation === 'number' || params.move === 'rotate';
+}
+
+function compiledMotionProperty(params: Record<string, unknown>, property: 'position' | 'zoom' | 'rotation'): boolean | undefined {
+  if (!Array.isArray(params._cameraProperties)) return undefined;
+  return params._cameraProperties.includes(property);
 }
 
 function compiledPathWritesPosition(params: Record<string, unknown>): boolean {
@@ -574,9 +592,17 @@ function applyCompiledCameraMotion(
   const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
     ? params.focus as Record<string, unknown>
     : {};
+  const legacyDefaults = !Array.isArray(params._cameraProperties);
   const characterId = typeof focus.character === 'string' ? focus.character : undefined;
   const part = typeof focus.part === 'string' ? focus.part : DEFAULT_CAMERA_FOCUS_PART;
-  const rawPosition = params.target ?? params.to ?? params.position ?? focus.point;
+  const legacyPositionDefault = legacyDefaults
+    ? params.move === 'push'
+      ? { x: 0.5, y: 0.4 }
+      : params.move === 'pull' || params.move === 'pan' || params.move === 'zoom'
+        ? { x: 0.5, y: 0.5 }
+        : undefined
+    : undefined;
+  const rawPosition = params.target ?? params.to ?? params.position ?? focus.point ?? legacyPositionDefault;
   const point = rawPosition === undefined ? null : normalizePoint(rawPosition);
   const anchor = characterId
     ? deps.resolveCharacterPositionAtTime
@@ -587,36 +613,48 @@ function applyCompiledCameraMotion(
     ? { x: anchor.x + (Number(focus.offsetX) || 0), y: anchor.y + (Number(focus.offsetY) || 0) }
     : point;
 
-  if (params.move === 'tilt') {
+  if (params.move === 'tilt' && compiledMotionWritesY(params)) {
     const targetY = typeof params.toY === 'number'
       ? params.toY
-      : typeof params.strength === 'number' ? channels.y + params.strength : undefined;
+      : typeof params.strength === 'number' ? channels.y + params.strength : legacyDefaults ? 0.7 : undefined;
     if (targetY !== undefined) {
       channels.y += (targetY - channels.y) * weight;
       coverage.position = true;
     }
-  } else if (params.move === 'pan' && typeof params.strength === 'number') {
+  } else if (params.move === 'pan' && typeof params.strength === 'number' && compiledMotionWritesX(params)) {
     channels.x += params.strength * weight;
     coverage.position = true;
   } else if (characterId || point) {
     if (positionTarget) {
-      if (compiledMotionWritesX(params)) channels.x += (positionTarget.x - channels.x) * weight;
-      if (compiledMotionWritesY(params)) channels.y += (positionTarget.y - channels.y) * weight;
-      coverage.position = true;
+      const writesX = compiledMotionWritesX(params);
+      const writesY = compiledMotionWritesY(params);
+      if (writesX) channels.x += (positionTarget.x - channels.x) * weight;
+      if (writesY) channels.y += (positionTarget.y - channels.y) * weight;
+      if (writesX || writesY) coverage.position = true;
     }
   }
 
-  if (params.zoom !== undefined) {
-    const zoomTo = resolveZoomValue(params.zoom, channels.zoom);
+  const legacyZoomDefault = legacyDefaults
+    ? params.move === 'zoom' ? 1.5 : params.move === 'push' ? '+=0.3' : params.move === 'pull' ? '-=0.3' : undefined
+    : undefined;
+  const rawZoom = params.zoom ?? legacyZoomDefault;
+  if (compiledMotionWritesZoom(params) && rawZoom !== undefined) {
+    const zoomTo = resolveZoomValue(rawZoom, channels.zoom);
     if (zoomTo !== undefined) {
       channels.zoom += (zoomTo - channels.zoom) * weight;
       coverage.zoom = true;
     }
   }
-  const rotation = typeof params.angle === 'number'
+  let rotation = typeof params.angle === 'number'
     ? params.angle
     : typeof params.rotation === 'number' ? params.rotation : undefined;
-  if (rotation !== undefined) {
+  if (rotation === undefined && legacyDefaults && params.move === 'rotate') {
+    const direction = params.direction === 'ccw' ? -1 : 1;
+    rotation = typeof params.rotations === 'number'
+      ? params.rotations * 360 * direction
+      : 12 * direction;
+  }
+  if (compiledMotionWritesRotation(params) && rotation !== undefined) {
     channels.rotation += (rotation - channels.rotation) * weight;
     coverage.rotation = true;
   }

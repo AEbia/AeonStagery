@@ -147,7 +147,7 @@ describe('CameraCoordinator', () => {
   it('sync restores every uncovered channel baseline when seeking back out of a followed zoom-in', () => {
     const timeline = [
       { action: 'cameraFollow', time: 5, params: { characterId: 'char1' } },
-      { action: 'cameraMotion', time: 6, params: { move: 'zoom', duration: 1, easing: 'linear', zoom: 2 } },
+      { action: 'cameraMotion', time: 6, params: { move: 'zoom', duration: 1, easing: 'linear', zoom: 2, _cameraProperties: ['zoom'] } },
     ];
 
     coordinator.sync(9.0, timeline as any);

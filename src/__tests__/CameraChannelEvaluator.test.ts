@@ -143,7 +143,7 @@ describe('evaluateCameraChannels', () => {
   it('does not claim position ownership from a zoom move label alone', () => {
     const result = evaluateCameraChannels({
       timeline: [action('zoom-only', 'cameraMotion', 2, {
-        move: 'zoom', duration: 1, easing: 'linear', focus: {}, zoom: 1.8,
+        move: 'zoom', duration: 1, easing: 'linear', zoom: 1.8, _cameraProperties: ['zoom'],
       })],
       sceneTime: 2.5,
       logicalReferenceSize: referenceSize,
@@ -158,7 +158,7 @@ describe('evaluateCameraChannels', () => {
     const result = evaluateCameraChannels({
       timeline: [
         action('pan-track', 'cameraMotion', 0, { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] }),
-        action('zoom-track', 'cameraMotion', 2, { move: 'zoom', duration: 2, easing: 'linear', zoom: 2, focus: {} }),
+        action('zoom-track', 'cameraMotion', 2, { move: 'zoom', duration: 2, easing: 'linear', zoom: 2, _cameraProperties: ['zoom'] }),
       ],
       sceneTime: 3,
       logicalReferenceSize: referenceSize,

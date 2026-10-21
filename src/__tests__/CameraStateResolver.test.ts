@@ -36,6 +36,36 @@ describe('computeCameraStateAtTime', () => {
     expect(after.position).toEqual({ x: 0.3, y: 0.6 });
   });
 
+  it('preserves the legacy targetless pan default by recentering after an off-center writer', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 0, target: [0.8, 0.7] } },
+      { action: 'cameraMotion', time: 1, params: { move: 'pan', duration: 0 } },
+    ];
+
+    const resolved = computeCameraStateAtTime(timeline as any, 2);
+
+    expect(resolved.position).toEqual({ x: 0.5, y: 0.5 });
+    expect(resolved.coverage.position).toBe(true);
+  });
+
+  it('preserves legacy default target and zoom behavior for push, pull, zoom, and tilt moves', () => {
+    const cases = [
+      { move: 'push', position: { x: 0.5, y: 0.4 }, zoom: 1.3 },
+      { move: 'pull', position: { x: 0.5, y: 0.5 }, zoom: 0.7 },
+      { move: 'zoom', position: { x: 0.5, y: 0.5 }, zoom: 1.5 },
+      { move: 'tilt', position: { x: 0.8, y: 0.7 }, zoom: 1 },
+    ];
+    for (const expected of cases) {
+      const resolved = computeCameraStateAtTime([
+        { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 0, target: [0.8, 0.8] } },
+        { action: 'cameraMotion', time: 1, params: { move: expected.move, duration: 0 } },
+      ] as any, 2);
+
+      expect(resolved.position).toEqual(expected.position);
+      expect(resolved.zoom).toBeCloseTo(expected.zoom, 6);
+    }
+  });
+
   it('lets follow own the position channel until it is released', () => {
     const deps = { resolveCharacterPosition: () => ({ x: 0.7, y: 0.6 }) };
     const timeline = [
@@ -197,8 +227,8 @@ describe('computeCameraStateAtTime', () => {
   it('keeps position moving through unrelated zoom and rotation writers', () => {
     const timeline = [
       { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] } },
-      { action: 'cameraMotion', time: 2, params: { move: 'zoom', duration: 2, easing: 'linear', focus: {}, zoom: 2 } },
-      { action: 'cameraMotion', time: 2.5, params: { move: 'rotate', duration: 2, easing: 'linear', angle: 20 } },
+      { action: 'cameraMotion', time: 2, params: { move: 'zoom', duration: 2, easing: 'linear', focus: {}, zoom: 2, _cameraProperties: ['zoom'] } },
+      { action: 'cameraMotion', time: 2.5, params: { move: 'rotate', duration: 2, easing: 'linear', angle: 20, _cameraProperties: ['rotation'] } },
     ];
 
     const midway = computeCameraStateAtTime(timeline as any, 3);
@@ -241,8 +271,8 @@ describe('computeCameraStateAtTime', () => {
 
   it('resolves zoom-only, rotation-only and tilt motions on their own channels', () => {
     const timeline = [
-      { action: 'cameraMotion', time: 2, params: { move: 'zoom', duration: 1, easing: 'linear', zoom: '+=0.5' } },
-      { action: 'cameraMotion', time: 4, params: { move: 'rotate', duration: 1, easing: 'linear', angle: 12 } },
+      { action: 'cameraMotion', time: 2, params: { move: 'zoom', duration: 1, easing: 'linear', zoom: '+=0.5', _cameraProperties: ['zoom'] } },
+      { action: 'cameraMotion', time: 4, params: { move: 'rotate', duration: 1, easing: 'linear', angle: 12, _cameraProperties: ['rotation'] } },
       { action: 'cameraMotion', time: 6, params: { move: 'tilt', duration: 1, easing: 'linear', toY: 0.7 } },
     ];
 
