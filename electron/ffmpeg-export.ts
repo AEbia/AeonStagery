@@ -56,6 +56,7 @@ interface StreamState {
   resolveCompletion: (result: StreamCompletion) => void;
   completionSettled: boolean;
   output: ExportOutput;
+  measureOnly?: boolean;
   closedPromise: Promise<void>;
   spaceMonitor?: ReturnType<typeof setInterval>;
   spaceCheck?: Promise<void>;
@@ -407,6 +408,7 @@ export function registerFFmpegHandlers(): void {
       filters: [
         { name: 'MP4 Video', extensions: ['mp4'] },
         { name: 'WebM Video', extensions: ['webm'] },
+        { name: 'MKV Video', extensions: ['mkv'] },
       ],
     });
     return result;
@@ -490,6 +492,7 @@ export function registerFFmpegHandlers(): void {
       }
 
       const state = createStreamState(child, width * height * 4, output);
+      state.measureOnly = options.measureOnly === true;
       state.ownerId = _event?.sender?.id;
       activeStreamState = state;
       const onOwnerDestroyed = () => {
@@ -616,6 +619,11 @@ export function registerFFmpegHandlers(): void {
       if (state.failure) throw streamFailure(state, 'FFmpeg stream failed');
       await state.output.checkSpace();
       if (state.failure) throw streamFailure(state, 'Export cancelled');
+      if (state.measureOnly) {
+        const stat = await fs.promises.stat(state.output.partialPath);
+        if (state.failure) throw streamFailure(state, 'Export cancelled');
+        return { ...result, sizeBytes: stat.size };
+      }
       state.publishPromise = state.output.commit();
       await state.publishPromise;
       return result;

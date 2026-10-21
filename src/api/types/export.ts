@@ -6,6 +6,7 @@ export interface ExportEncodingSettings {
   videoCodec: ExportVideoCodec;
   implementation: 'auto' | 'webcodecs' | 'ffmpeg';
   quality: 'balanced' | 'high' | 'custom';
+  /** Omitted or 'auto': choose an available FFmpeg encoder, with software fallback. */
   ffmpegEncoder?: string;
   rateControl?: ExportRateControl;
   speed?: ExportEncodingSpeed;
@@ -22,13 +23,15 @@ export interface ExportEncodingInfo {
 
 export interface ExportOperationResult {
   success: boolean;
+  /** Encoded sample size, measured before main-process cleanup. */
+  sizeBytes?: number;
   error?: string;
   stderr?: string;
   failureKind?: 'encoder' | 'output' | 'process';
 }
 
 export interface ExportConfig {
-  format: 'mp4' | 'webm' | 'mov';
+  format: 'mp4' | 'webm' | 'mkv' | 'mov';
   codec: string;
   bitrateMbps: number;
   /** When present, takes precedence over legacy codec/backend options. */
@@ -73,6 +76,7 @@ export interface ExportProgress {
 
 export interface ExportResult {
   success: boolean;
+  sizeBytes?: number;
   cancelled?: boolean;
   outputPath?: string;
   error?: string;
@@ -102,6 +106,8 @@ export interface FFmpegVideoOptions {
 }
 
 export interface FFmpegStreamMuxOptions {
+  /** Measure the private task output, then remove it without publishing. */
+  measureOnly?: boolean;
   audioSources?: FFmpegAudioSource[];
   audioCodec?: string;
   totalFrames?: number;

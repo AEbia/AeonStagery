@@ -23,9 +23,12 @@ function frameHashes(input: string): string[] {
 }
 
 describe('bundled FFmpeg export media', () => {
-  it.each(['raw', 'copy', 'transcode'] as const)('mixes delayed audio during %s streaming without losing fractional-rate tail frames', mode => {
+  it.each([
+    ['raw', 'mp4'], ['copy', 'mp4'], ['transcode', 'mp4'],
+    ['raw', 'mkv'], ['copy', 'mkv'], ['transcode', 'mkv'],
+  ] as const)('mixes delayed audio during %s streaming in %s without losing fractional-rate tail frames', (mode, container) => {
     const fps = 30000 / 1001;
-    const output = join(directory, `stream-${mode}.mp4`);
+    const output = join(directory, `stream-${mode}.${container}`);
     const audio = join(directory, `stream-${mode}.wav`);
     run(['-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.1', audio]);
     const pixels = run(['-f', 'lavfi', '-i', `testsrc2=size=64x64:rate=${fps}`, '-frames:v', '9', '-pix_fmt', 'rgba', '-threads', '1', '-f', 'rawvideo', '-']);
@@ -52,6 +55,7 @@ describe('bundled FFmpeg export media', () => {
 
   it.each([
     ['libx264', 'mp4'], ['libx265', 'mp4'], ['libvpx-vp9', 'webm'], ['libaom-av1', 'webm'], ['libaom-av1', 'mp4'],
+    ['libx264', 'mkv'], ['libx265', 'mkv'], ['libvpx-vp9', 'mkv'], ['libaom-av1', 'mkv'],
   ] as const)('encodes RGBA with %s in %s and copies frames through audio muxing', (codec, container) => {
     const path = join(directory, `${codec}.${container}`), mixed = join(directory, `${codec}-mixed.${container}`);
     const pixels = run(['-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=30000/1001', '-frames:v', '3', '-pix_fmt', 'rgba', '-threads', '1', '-f', 'rawvideo', '-']);

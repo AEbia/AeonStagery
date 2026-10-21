@@ -231,15 +231,15 @@ export function FormSelect({
   }, [activeGroup, firstGroup, groupedOptions, isDualPane, selectedOption?.group]);
 
   useEffect(() => {
-    setActiveIndex((currentIndex) => {
-      const indexes = isDualPane ? visibleOptionIndexes : options.map((_, index) => index);
-      if (indexes.includes(currentIndex) && !options[currentIndex]?.disabled) {
-        return currentIndex;
-      }
-      if (indexes.includes(selectedIndex) && !options[selectedIndex]?.disabled) return selectedIndex;
-      return findEnabledIndexIn(indexes, 0, 1);
-    });
-  }, [findEnabledIndexIn, isDualPane, options, selectedIndex, visibleOptionIndexes]);
+    const indexes = isDualPane ? visibleOptionIndexes : options.map((_, index) => index);
+    if (indexes.includes(activeIndex) && !options[activeIndex]?.disabled) return;
+    const nextIndex = indexes.includes(selectedIndex) && !options[selectedIndex]?.disabled
+      ? selectedIndex
+      : findEnabledIndexIn(indexes, 0, 1);
+    // Inline options can change on every parent render. Avoid scheduling even
+    // an unchanged state update during a rapid sequence of input events.
+    if (nextIndex !== activeIndex) setActiveIndex(nextIndex);
+  }, [activeIndex, findEnabledIndexIn, isDualPane, options, selectedIndex, visibleOptionIndexes]);
 
   const openMenu = useCallback((preferredIndex?: number) => {
     const preferredOption = preferredIndex === undefined ? selectedIndex : preferredIndex;

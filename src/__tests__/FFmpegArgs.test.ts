@@ -50,6 +50,18 @@ describe('FFmpeg convert args', () => {
     expect(args).not.toContain('-b:v');
   });
 
+  it.each(['libx264', 'libx265', 'libaom-av1'])('does not use target bitrate as a cap when %s uses CRF', codec => {
+    const args = buildFFmpegVideoArgs({ codec, bitrate: 1, crf: 20 });
+    expect(args).toEqual(expect.arrayContaining(['-crf', '20']));
+    if (codec === 'libaom-av1') {
+      expect(args.slice(args.indexOf('-b:v'), args.indexOf('-b:v') + 2)).toEqual(['-b:v', '0']);
+    } else {
+      expect(args).not.toContain('-b:v');
+    }
+    expect(args).not.toContain('-maxrate');
+    expect(args).not.toContain('-bufsize');
+  });
+
   it('caps mixed audio output to the exported video duration', () => {
     const args = buildFFmpegConvertArgs('/tmp/video.mp4', '/out/final.mp4', {
       fps: 30,

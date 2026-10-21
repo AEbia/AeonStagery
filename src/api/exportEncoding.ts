@@ -1,6 +1,13 @@
 import type { ExportConfig, ExportEncodingSettings, ExportEncodingSpeed, ExportOperationResult, ExportRateControl, ExportVideoCodec } from './types/export';
 import { getRecommendedBitrate } from './videoBitrate';
 
+export const EXPORT_CONTAINER_CODECS: Record<ExportConfig['format'], readonly ExportVideoCodec[]> = {
+  mp4: ['h264', 'hevc', 'av1'],
+  webm: ['vp9', 'av1'],
+  mkv: ['h264', 'hevc', 'vp9', 'av1'],
+  mov: ['prores', 'h264', 'hevc', 'av1'],
+};
+
 const SOFTWARE_ENCODERS: Record<ExportVideoCodec, string> = {
   h264: 'libx264', hevc: 'libx265', vp9: 'libvpx-vp9', av1: 'libaom-av1', prores: 'prores_ks',
 };
@@ -34,6 +41,19 @@ export function isHardwareEncoder(encoder: string): boolean {
   return /_(nvenc|amf|qsv|mf)$/.test(encoder);
 }
 
+/** Compiled-in hardware support is advisory; export retries initialization failures. */
+export function getFFmpegEncoderCandidates(
+  settings: ResolvedExportEncoding, availableEncoders?: readonly string[],
+): string[] {
+  const software = getSoftwareEncoder(settings.videoCodec);
+  if (settings.rateControl.mode === 'crf') return [software];
+  const preferred = settings.encoder === 'auto'
+    ? FFMPEG_ENCODERS[settings.videoCodec].filter(encoder => isHardwareEncoder(encoder) && availableEncoders?.includes(encoder))
+    : settings.encoder !== software && (!availableEncoders || availableEncoders.includes(settings.encoder))
+      ? [settings.encoder] : [];
+  return [...preferred, software];
+}
+
 export interface ResolvedExportEncoding {
   videoCodec: ExportVideoCodec;
   implementation: ExportEncodingSettings['implementation'];
@@ -48,8 +68,8 @@ export interface ResolvedExportEncoding {
 export function resolveExportEncoding(config: ExportConfig): ResolvedExportEncoding {
   const settings = config.encoding;
   const videoCodec = settings?.videoCodec ?? getExportVideoCodec(config.codec);
-  const encoder = settings?.ffmpegEncoder || (settings ? getSoftwareEncoder(videoCodec) : config.codec === 'vp9' ? 'libvpx-vp9' : config.codec);
-  if (!FFMPEG_ENCODERS[videoCodec]?.includes(encoder)) throw new Error('编码标准与编码器不匹配');
+  const encoder = settings?.ffmpegEncoder || (settings ? 'auto' : config.codec === 'vp9' ? 'libvpx-vp9' : config.codec);
+  if (encoder !== 'auto' && !FFMPEG_ENCODERS[videoCodec]?.includes(encoder)) throw new Error('编码标准与编码器不匹配');
   const rateControl: ExportRateControl = settings?.rateControl ?? (settings
     ? { mode: 'crf', crf: getDefaultCrf(videoCodec, settings.quality) }
     : { mode: 'bitrate', bitrateMbps: config.bitrateMbps });

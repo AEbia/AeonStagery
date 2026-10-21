@@ -1,4 +1,4 @@
-import type { ICaptureBackend } from './ICaptureBackend';
+import type { ICaptureBackend, CaptureResult } from './ICaptureBackend';
 import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions, FFmpegStreamMuxOptions } from '../../api/types/export';
 import type { VisualLightingOverlay } from '../visual-runtime/VisualRuntimeResolver';
 import gsap from 'gsap';
@@ -56,6 +56,8 @@ export interface FrameCaptureVisualRuntime {
 }
 
 interface FrameCaptureConfig {
+  /** Sampling retains the export dialog layout while using the same pixels. */
+  isolateUI?: boolean;
   signal?: AbortSignal;
   onBackendStarted?: () => void;
   fps: number;
@@ -184,7 +186,7 @@ export class FrameCaptureEngine {
    * Owns the entire capture lifecycle:
    *  - renderer resize, engine lockdown, frame stepping, cleanup.
    */
-  async capture(config: FrameCaptureConfig): Promise<void> {
+  async capture(config: FrameCaptureConfig): Promise<CaptureResult | void> {
     const { fps, rangeStart, rangeEnd, width, height, bitrateBps, outputPath, codec, backend, onProgress } = config;
 
     // Resolve lazy-loaded subsystem singletons (dynamic getters)
@@ -383,7 +385,7 @@ export class FrameCaptureEngine {
       // ── Performance Lockdown ──
       this.stage.pauseTicker();
       this.playback.setSilentMode(true);
-      if (typeof document !== 'undefined') {
+      if (config.isolateUI !== false && typeof document !== 'undefined') {
         document.body.classList.add('is-exporting');
       }
 
@@ -544,8 +546,9 @@ export class FrameCaptureEngine {
       // Once finish begins, the main process may already be atomically
       // publishing the destination. Let it settle and report its outcome.
       backendFinalizing = true;
-      await backend.finish();
+      const result = await backend.finish();
       backendFinished = true;
+      return result;
     } catch (error) {
       if (!backendFinished && typeof abortBackend === 'function') {
         try {
@@ -587,7 +590,7 @@ export class FrameCaptureEngine {
       if (originalBackgroundColor !== undefined) {
         app.renderer.background.color = originalBackgroundColor;
       }
-      if (typeof document !== 'undefined') {
+      if (config.isolateUI !== false && typeof document !== 'undefined') {
         document.body.classList.remove('is-exporting');
       }
       gsap.globalTimeline.play();

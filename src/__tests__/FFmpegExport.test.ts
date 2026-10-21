@@ -148,6 +148,20 @@ describe('FFmpeg export failure seam', () => {
     expect(output.cleanup).toHaveBeenCalledTimes(1);
   });
 
+  it('measures samples without publishing, and cleans them before replying', async () => {
+    const child = new FakeChild();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/sample.mp4', { measureOnly: true });
+    const output = await ffmpegMocks.createOutput.mock.results[0].value;
+    vi.spyOn(fs.promises, 'stat').mockResolvedValueOnce({ size: 1234 } as fs.Stats);
+    const end = handler('ffmpeg:endStreamExport')();
+    await Promise.resolve();
+    child.emit('close', 0);
+    await expect(end).resolves.toMatchObject({ success: true, sizeBytes: 1234 });
+    expect(output.commit).not.toHaveBeenCalled();
+    expect(output.cleanup).toHaveBeenCalledOnce();
+  });
+
   it('does not publish when cancellation arrives after close during the final disk check', async () => {
     const child = new FakeChild();
     ffmpegMocks.spawn.mockReturnValue(child);
@@ -163,6 +177,40 @@ describe('FFmpeg export failure seam', () => {
     checked();
     await end;
     expect(output.commit).not.toHaveBeenCalled();
+  });
+
+  it('cleans a sample when measuring its size fails', async () => {
+    const child = new FakeChild();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/sample.mp4', { measureOnly: true });
+    const output = await ffmpegMocks.createOutput.mock.results[0].value;
+    vi.spyOn(fs.promises, 'stat').mockRejectedValueOnce(new Error('sample stat failed'));
+    const end = expect(handler('ffmpeg:endStreamExport')()).rejects.toThrow('sample stat failed');
+    await Promise.resolve();
+    child.emit('close', 0);
+    await end;
+    expect(output.commit).not.toHaveBeenCalled();
+    expect(output.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('cleans a sample if its renderer crashes while size measurement is pending', async () => {
+    const owner = Object.assign(new EventEmitter(), { id: 1 });
+    const child = new FakeChild();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    await handler('ffmpeg:startStreamExport')({ sender: owner }, '/tmp/sample.mp4', { measureOnly: true });
+    const output = await ffmpegMocks.createOutput.mock.results[0].value;
+    let measured!: (stat: fs.Stats) => void;
+    const stat = vi.spyOn(fs.promises, 'stat').mockImplementationOnce(() => new Promise(resolve => { measured = resolve; }));
+    const end = expect(handler('ffmpeg:endStreamExport')({ sender: owner })).rejects.toThrow('Export window closed');
+    await Promise.resolve();
+    child.emit('close', 0);
+    await vi.waitFor(() => expect(stat).toHaveBeenCalled());
+    owner.emit('render-process-gone');
+    measured({ size: 1234 } as fs.Stats);
+    await end;
+    expect(output.commit).not.toHaveBeenCalled();
+    expect(output.cleanup).toHaveBeenCalled();
+    expect(owner.listenerCount('destroyed')).toBe(0);
   });
 
   it('waits for an in-flight publication and reports its successful completion', async () => {

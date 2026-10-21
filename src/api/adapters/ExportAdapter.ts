@@ -1,5 +1,5 @@
 import type { ExportConfig, ExportProgress, ExportResult, ExportEncodingInfo, ExportVideoCodec, FFmpegVideoOptions, ExportOperationResult } from '../types/export';
-import { classifyExportFailure, ExportEncodingError, getSoftwareEncoder, isHardwareEncoder, resolveExportEncoding } from '../exportEncoding';
+import { classifyExportFailure, EXPORT_CONTAINER_CODECS, ExportEncodingError, getFFmpegEncoderCandidates, getSoftwareEncoder, resolveExportEncoding } from '../exportEncoding';
 import { FrameCaptureEngine } from '../../engine/export/FrameCaptureEngine';
 import { AudioMixer, AudioResourceCache } from '../../engine/export/AudioMixer';
 import { WebCodecsBackend } from '../../engine/export/WebCodecsBackend';
@@ -11,6 +11,8 @@ import { createPreparedFrameCaptureVisualRuntime } from '../../engine/export/Pre
 import { ExportVoiceLipSync } from '../../engine/export/ExportVoiceLipSync';
 import { lipSyncEngine } from '../../engine/LipSyncEngine';
 import { validateVideoFormat } from '../types/video-format';
+import { estimateExportSizeFromBitrate, planExportSizeSamples, type ExportSizeEstimateConfig } from '../exportSizeEstimate';
+import { sampleExportSize } from '../../engine/export/ExportSizeSampler';
 
 export class ExportAdapter implements IExportAdapter {
   private captureEngine: FrameCaptureEngine;
@@ -18,6 +20,7 @@ export class ExportAdapter implements IExportAdapter {
   private playbackAdapter: any;
   private documentStore: DocumentStore;
   private electronAPI: any;
+  private operationInProgress = false;
 
   /**
    * @param stageAdapter    — StageAdapter for PIXI app access and ticker control
@@ -58,6 +61,40 @@ export class ExportAdapter implements IExportAdapter {
   }
 
   async export(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal): Promise<ExportResult> {
+    if (this.operationInProgress) return { success: false, error: '正在结束上一项视频任务，请稍后重试' };
+    this.operationInProgress = true;
+    try { return await this.runExport(config, onProgress, signal); }
+    finally { this.operationInProgress = false; }
+  }
+
+  async estimateSize(config: ExportSizeEstimateConfig, signal?: AbortSignal) {
+    if (this.operationInProgress) throw new Error('正在结束上一项视频任务，请稍后重试');
+    this.operationInProgress = true;
+    try {
+      signal?.throwIfAborted();
+      if (!planExportSizeSamples(config).length) throw new Error('请先设置有效的导出规格和时间范围');
+      const settings = resolveExportEncoding({ ...config, outputPath: '' });
+      // Budget the selected native path. Codec probing and fallback belong to
+      // the real export; estimating must not start a speculative CRF capture.
+      if (!config.subtitleOnly && !config.subtitleChroma && settings.videoCodec !== 'prores' && settings.implementation !== 'ffmpeg') {
+        return estimateExportSizeFromBitrate(config, settings.bitrateMbps, {
+          implementation: 'webcodecs', encoder: settings.videoCodec, attempt: 1,
+        });
+      }
+      if (settings.videoCodec !== 'prores' && settings.rateControl.mode === 'bitrate') {
+        return estimateExportSizeFromBitrate(config, settings.rateControl.bitrateMbps, {
+          implementation: 'ffmpeg', encoder: settings.encoder, attempt: 1,
+        });
+      }
+      return await sampleExportSize(config, {
+        exportVideo: (sample, sampleSignal) => this.runExport(sample, () => {}, sampleSignal, true),
+        playback: this.playbackAdapter,
+        electron: this.electronAPI,
+      }, signal);
+    } finally { this.operationInProgress = false; }
+  }
+
+  private async runExport(config: ExportConfig, onProgress: (p: ExportProgress) => void, signal?: AbortSignal, sampleOnly = false): Promise<ExportResult> {
     if (signal?.aborted) return { success: false, cancelled: true };
     const formatError = validateVideoFormat(config);
     if (formatError) return { success: false, error: formatError };
@@ -87,27 +124,21 @@ export class ExportAdapter implements IExportAdapter {
         return { success: false, error: '绿幕字幕导出仅支持 MP4 + H.264 (libx264)，请调整格式与编码器。' };
       }
       const settings = resolveExportEncoding(config);
-      const allowed: Record<ExportConfig['format'], readonly ExportVideoCodec[]> = {
-        mp4: ['h264', 'hevc', 'av1'], webm: ['vp9', 'av1'], mov: ['prores', 'h264', 'hevc', 'av1'],
-      };
-      if (!allowed[format].includes(settings.videoCodec)) return { success: false, error: '编码标准与封装格式不兼容' };
+      if (!EXPORT_CONTAINER_CODECS[format].includes(settings.videoCodec)) return { success: false, error: '编码标准与封装格式不兼容' };
       if ((isSubtitleOnly && settings.videoCodec !== 'prores') || (isSubtitleChroma && settings.videoCodec !== 'h264')) {
         return { success: false, error: '编码设置与字幕导出模式不兼容' };
       }
-      const softwareEncoder = getSoftwareEncoder(settings.videoCodec);
-      let finalEncoder = settings.encoder;
       let fallbackReason: string | undefined;
       let ffmpegFallbackReason: string | undefined;
-      if (settings.rateControl.mode === 'crf' && isHardwareEncoder(finalEncoder)) {
-        finalEncoder = softwareEncoder;
-        ffmpegFallbackReason = 'CRF 使用软件编码';
-      }
       // Compiled-in availability is advisory; initialization can still fail on a
       // machine without the corresponding GPU/driver and is retried below.
-      const capabilities = await this.electronAPI.export.getEncodingCapabilities?.();
-      if (capabilities?.success && !capabilities.encoders.includes(finalEncoder)) {
-        ffmpegFallbackReason = `${finalEncoder} 不可用，已切换软件编码`;
-        finalEncoder = softwareEncoder;
+      const capabilities = await Promise.resolve(this.electronAPI.export.getEncodingCapabilities?.()).catch(() => undefined);
+      const ffmpegEncoders = isSubtitleOnly || isSubtitleChroma
+        ? [getSoftwareEncoder(settings.videoCodec)]
+        : getFFmpegEncoderCandidates(settings, capabilities?.success ? capabilities.encoders : undefined);
+      if (settings.encoder !== 'auto' && ffmpegEncoders[0] !== settings.encoder) {
+        ffmpegFallbackReason = settings.rateControl.mode === 'crf'
+          ? 'CRF 使用软件编码' : `${settings.encoder} 不可用，已切换软件编码`;
       }
       signal?.throwIfAborted();
       const videoOptions = (encoder: string): FFmpegVideoOptions => ({
@@ -135,14 +166,13 @@ export class ExportAdapter implements IExportAdapter {
       if (canUseWebCodecs) {
         attempts.push({ native: true, intermediate: false, encoder: getSoftwareEncoder(settings.videoCodec), videoCodec: settings.videoCodec });
         if (settings.allowH264Intermediate && settings.videoCodec !== 'h264') {
-          attempts.push({ native: true, intermediate: true, encoder: finalEncoder, videoCodec: 'h264' });
-          if (finalEncoder !== softwareEncoder) attempts.push({ native: true, intermediate: true, encoder: softwareEncoder, videoCodec: 'h264' });
+          for (const encoder of ffmpegEncoders) attempts.push({ native: true, intermediate: true, encoder, videoCodec: 'h264' });
         }
       }
-      attempts.push({ native: false, intermediate: false, encoder: finalEncoder, videoCodec: settings.videoCodec });
-      if (finalEncoder !== softwareEncoder) attempts.push({ native: false, intermediate: false, encoder: softwareEncoder, videoCodec: settings.videoCodec });
+      for (const encoder of ffmpegEncoders) attempts.push({ native: false, intermediate: false, encoder, videoCodec: settings.videoCodec });
       if (ffmpegLogCallback) removeLogListener = this.electronAPI.export.onLog(ffmpegLogCallback);
       let captured = false;
+      let sizeBytes: number | undefined;
       for (let index = 0; index < attempts.length; index++) {
         const attempt = attempts[index];
         signal?.throwIfAborted();
@@ -171,20 +201,23 @@ export class ExportAdapter implements IExportAdapter {
             });
           }
           signal?.throwIfAborted();
-          await this.captureEngine.capture({
+          const captureResult = await this.captureEngine.capture({
             fps, rangeStart, rangeEnd, width, height, fit: config.fit,
             bitrateBps: (attempt.intermediate ? settings.intermediateBitrateMbps : settings.bitrateMbps) * 1_000_000,
             outputPath, codec: attempt.native ? getSoftwareEncoder(attempt.videoCodec) : attempt.encoder, videoCodec: attempt.videoCodec,
             encoding: attempt.native ? undefined : videoOptions(attempt.encoder), backend,
             streamOptions: {
               audioSources, audioCodec: format === 'webm' ? 'libopus' : 'aac', totalFrames,
+              ...(sampleOnly ? { measureOnly: true } : {}),
               ...(attempt.intermediate ? { transcode: videoOptions(attempt.encoder) } : {}),
             },
             onProgress: (progress) => onProgress({ ...progress, encoding: encodingInfo }),
             visualRuntime: createPreparedFrameCaptureVisualRuntime(preparedScene), voiceLipSync,
             includeSubtitles: includeSubtitles !== false, subtitleOnly: isSubtitleOnly, subtitleChroma: isSubtitleChroma, signal,
+            isolateUI: !sampleOnly,
             onBackendStarted: () => { backendOutputStarted = true; },
           });
+          sizeBytes = captureResult?.sizeBytes;
           captured = true;
           break;
         } catch (error) {
@@ -207,7 +240,7 @@ export class ExportAdapter implements IExportAdapter {
       if (!captured) throw new Error('No video was captured');
       onProgress({ phase: 'done', percent: 100, encoding: encodingInfo });
       exportCompleted = true;
-      return { success: true, outputPath, ...(config.encoding ? { encoding: encodingInfo } : {}) };
+      return { success: true, ...(sampleOnly ? { sizeBytes } : { outputPath }), ...(config.encoding ? { encoding: encodingInfo } : {}) };
     } catch (error: unknown) {
       if (signal?.aborted) return { success: false, cancelled: true };
       return { success: false, error: error instanceof Error ? error.message : String(error) };
