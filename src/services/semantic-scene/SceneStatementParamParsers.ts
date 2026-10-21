@@ -652,6 +652,9 @@ function parseBlink(input: unknown, path: string): CharacterPerformanceParams['b
 
 export function parseCameraParams(input: unknown, path: string): CameraParams {
   const record = expectRecord(input, path);
+  if (record.mode === 'hitchcock') {
+    throw new Error(`Camera mode "hitchcock" has been retired at ${path}. Use focus, move, or path instead.`);
+  }
   const mode = expectOneOf(record.mode, `${path}.mode`, [
     'focus',
     'move',
@@ -707,7 +710,7 @@ export function parseCameraParams(input: unknown, path: string): CameraParams {
         durationSeconds: optionalNonNegativeNumber(record.durationSeconds, `${path}.durationSeconds`),
         ease: optionalString(record.ease, `${path}.ease`),
         loop: optionalBoolean(record.loop, `${path}.loop`),
-        repeat: optionalFiniteNumber(record.repeat, `${path}.repeat`),
+        repeat: optionalCameraRepeat(record.repeat, `${path}.repeat`),
         yoyo: optionalBoolean(record.yoyo, `${path}.yoyo`),
       });
     case 'shake':
@@ -753,6 +756,15 @@ export function parseCameraParams(input: unknown, path: string): CameraParams {
         ease: optionalString(record.ease, `${path}.ease`),
       });
   }
+}
+
+function optionalCameraRepeat(input: unknown, path: string): number | undefined {
+  if (input === undefined) return undefined;
+  const repeat = expectFiniteNumber(input, path);
+  if (!Number.isInteger(repeat) || repeat < -1) {
+    throw new Error(`Expected integer greater than or equal to -1 at ${path}`);
+  }
+  return repeat;
 }
 
 function parseCameraKeyframes(input: unknown, path: string): Extract<CameraParams, { mode: 'path' }>['keyframes'] {

@@ -16,6 +16,18 @@ function makeDocument(statements: unknown[]): CurrentSceneDocument {
 }
 
 describe('scene statement compiler — camera follow stop', () => {
+  it('releases follow when a camera statement writes position', () => {
+    const compiled = sceneStatementCompiler.compile(makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: { mode: 'follow', operation: 'start', target: 'tomori' } },
+      { id: 'position', time: 2, type: 'camera', params: { mode: 'move', to: [0.4, 0.6], durationSeconds: 1 } },
+      { id: 'follow_again', time: 3, type: 'camera', params: { mode: 'follow', operation: 'start', target: 'tomori' } },
+    ]));
+
+    expect(compiled.actions.map((action) => action.action)).toEqual([
+      'cameraFollow', 'cameraMotion', 'cameraFollow',
+    ]);
+  });
+
   it('releases follow with a dedicated unfollow action instead of resetting the whole camera', () => {
     const compiled = sceneStatementCompiler.compile(makeDocument([
       {

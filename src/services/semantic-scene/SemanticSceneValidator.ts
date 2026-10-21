@@ -10,6 +10,7 @@ import type {
 import type { ValidationIssue } from '../../api/types/validation';
 import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
 import { validateLensFilterStatements } from './LensFilterStatementValidator';
+import { lowerCameraPropertyTracks } from './CameraPropertyTracks';
 
 export interface SemanticValidationIssue extends ValidationIssue {
   readonly code?: string;
@@ -550,15 +551,7 @@ function validateCameraStatement(
 ): CameraFrameValidation {
   const params = context.statement.params as CameraParams;
 
-  if (activeFollow && params.mode !== 'follow' && cameraStatementWritesPosition(params)) {
-    appendVisualIssue(
-      issues,
-      context,
-      SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraFollowPositionConflict,
-      undefined,
-      `镜头跟随「${activeFollow.target}」仍处于活动状态，不能同时写入镜头位置。请先停止跟随。`,
-    );
-  }
+  const nextFollow = lowerCameraPropertyTracks(params).includes('position') ? undefined : activeFollow;
 
   switch (params.mode) {
     case 'focus':
@@ -577,21 +570,21 @@ function validateCameraStatement(
         validateCameraCharacterTarget(context, params.target, characterIds, issues);
       }
       return {
-        follow: activeFollow,
+        follow: nextFollow,
         zoom: applyZoomIntent(zoom, params.zoom),
         rotation: params.rotation ?? rotation,
       };
     case 'move':
       validateCameraMove(context, params, issues);
       return {
-        follow: activeFollow,
+        follow: nextFollow,
         zoom: applyZoomIntent(zoom, params.zoom),
         rotation: params.rotation ?? rotation,
       };
     case 'path':
       validateCameraPath(context, params, issues);
       return {
-        follow: activeFollow,
+        follow: nextFollow,
         zoom: lastPathFrameZoom(params, zoom),
         rotation: lastPathFrameRotation(params, rotation),
       };
@@ -612,7 +605,7 @@ function validateCameraStatement(
     case 'hitchcock':
       validateCameraCharacterTarget(context, params.target, characterIds, issues);
       return {
-        follow: activeFollow,
+        follow: nextFollow,
         zoom: params.zoomEnd,
         rotation,
       };
@@ -804,23 +797,6 @@ function validateCameraCharacterTarget(
       'target',
       `镜头目标引用了不存在的角色「${target as string}」。`,
     );
-  }
-}
-
-function cameraStatementWritesPosition(params: CameraParams): boolean {
-  switch (params.mode) {
-    case 'focus':
-      return params.target !== undefined || params.position !== undefined;
-    case 'move':
-      return params.position !== undefined || params.to !== undefined;
-    case 'path':
-      return params.keyframes.some((keyframe) => keyframe.position !== undefined);
-    case 'hitchcock':
-      return true;
-    case 'follow':
-    case 'reset':
-    case 'shake':
-      return false;
   }
 }
 

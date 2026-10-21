@@ -400,7 +400,9 @@ const definitions = {
     temporalExtent: (params) => {
       if (params.mode === 'path') {
         const lastKeyframe = params.keyframes.reduce((max, keyframe) => Math.max(max, keyframe.time), 0);
-        return Math.max(duration(params.durationSeconds), lastKeyframe);
+        if (params.loop === true || params.repeat === -1) return Math.max(duration(params.durationSeconds), lastKeyframe);
+        const repeatedExtent = lastKeyframe * (1 + (params.repeat ?? 0));
+        return Math.max(duration(params.durationSeconds), repeatedExtent);
       }
       if (params.mode === 'follow') return 0;
       return duration(params.durationSeconds);
