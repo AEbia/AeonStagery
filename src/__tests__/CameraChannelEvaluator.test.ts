@@ -68,6 +68,100 @@ describe('evaluateCameraChannels', () => {
     expect(result.position.y).toBeCloseTo(0.55, 6);
   });
 
+  it('reconstructs follow from the center trajectory through the public evaluator', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      revision: 3,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 4 }],
+      samples: [
+        { time: 0, position: { x: 0.2, y: 0.3 } },
+        { time: 4, position: { x: 0.8, y: 0.7 } },
+      ],
+      events: [],
+    };
+    const headTrajectory: CameraAnchorTrajectory = {
+      ...trajectory,
+      part: 'head',
+      samples: [{ time: 0, position: { x: 0.9, y: 0.9 } }, { time: 4, position: { x: 0.9, y: 0.9 } }],
+    };
+    const result = evaluateCameraChannels({
+      timeline: [
+        action('zoom-before-follow', 'cameraMotion', 0, { zoom: 2, _cameraProperties: ['zoom'] }),
+        action('follow-center', 'cameraFollow', 0.5, { characterId: 'hero', smoothing: 0, duration: 2 }),
+      ],
+      sceneTime: 1,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory, headTrajectory],
+    });
+
+    expect(result.position.x).toBeCloseTo(0.35, 8);
+    expect(result.position.y).toBeCloseTo(0.4, 8);
+    expect(result.follow?.characterId).toBe('hero');
+  });
+
+  it('uses the historical zoom curve when clamping pursuit and retains follow through zoom-only writes', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 4 }],
+      samples: [{ time: 0, position: { x: 0.05, y: 0.05 } }, { time: 4, position: { x: 0.05, y: 0.05 } }],
+      events: [],
+    };
+    const result = evaluateCameraChannels({
+      timeline: [
+        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 3 }),
+        action('zoom-during-follow', 'cameraMotion', 0, {
+          zoom: 4, duration: 2, easing: 'linear', _cameraProperties: ['zoom'],
+        }),
+      ],
+      sceneTime: 1,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+
+    expect(result.zoom).toBe(2.5);
+    expect(result.position.x).toBeCloseTo(0.2, 8);
+    expect(result.position.y).toBeCloseTo(0.2, 8);
+    expect(result.follow?.characterId).toBe('hero');
+  });
+
+  it('latches at a true position takeover and at a finite follow end', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 5 }],
+      samples: [{ time: 0, position: { x: 0.2, y: 0.3 } }, { time: 5, position: { x: 0.7, y: 0.8 } }],
+      events: [],
+    };
+    const takenOver = evaluateCameraChannels({
+      timeline: [
+        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 4 }),
+        action('position-takeover', 'cameraMotion', 1, { move: 'pan', duration: 0, target: [0.9, 0.8] }),
+      ],
+      sceneTime: 2,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+    const finite = evaluateCameraChannels({
+      timeline: [
+        action('finite-zoom', 'cameraMotion', 0, { zoom: 2, _cameraProperties: ['zoom'] }),
+        action('finite-follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 1 }),
+      ],
+      sceneTime: 2,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+
+    expect(takenOver.position).toEqual({ x: 0.9, y: 0.8 });
+    expect(takenOver.follow).toBeNull();
+    expect(finite.position).toEqual({ x: 0.3, y: 0.4 });
+    expect(finite.follow).toBeNull();
+  });
+
   it('does not late-capture a focus anchor that became valid after the action start', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,

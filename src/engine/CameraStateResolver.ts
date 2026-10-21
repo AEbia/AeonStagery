@@ -20,6 +20,7 @@ import type { RuntimeTimelineAction } from './RuntimeTimelineScene';
 import { evaluateCharacterEase } from './CharacterAnimationContract';
 import { resolveVec2 } from './utils/math';
 import { DEFAULT_CAMERA_FOCUS_PART } from '../api/types/camera';
+import { evaluateCameraFollowHistory, type CameraAnchorEventSide, type CameraAnchorTrajectory } from './CameraFollowHistory';
 
 export interface CameraPosition {
   x: number;
@@ -29,6 +30,7 @@ export interface CameraPosition {
 export interface ActiveFollowResolution {
   characterId: string;
   offset: CameraPosition;
+  part?: string;
   /** Authored follow smoothing carried through for the live ticker. */
   smoothing?: number;
 }
@@ -65,6 +67,12 @@ export interface CameraStateResolverDeps {
   resolveCharacterPositionAtTime?: (characterId: string, time: number, part?: string) => CameraPosition | null;
   /** Evaluate writes by their compiled property values, not legacy move labels. */
   compiledChannelOwnership?: boolean;
+  /** Immutable historical inputs used to reconstruct follow pursuit. */
+  anchorTrajectories?: readonly CameraAnchorTrajectory[];
+  /** Resolve the already-prepared zoom property curve at an arbitrary time. */
+  resolveZoomAtTime?: (time: number) => number;
+  followCacheKey?: string;
+  followEventSide?: CameraAnchorEventSide;
 }
 
 export const STAGE_DEFAULT_CAMERA_POSITION: CameraPosition = { x: 0.5, y: 0.5 };
@@ -92,9 +100,15 @@ function followTransientWeight(smoothing: number, elapsedSeconds: number): numbe
 function findFollowReleaseInstant(timeline: readonly RuntimeTimelineAction[], afterStart: number): number {
   let release = Infinity;
   for (const action of timeline) {
-    if (action.action !== 'cameraUnfollow' && action.action !== 'cameraReset') continue;
     const time = action.time ?? 0;
-    if (time > afterStart && time < release) release = time;
+    if (time <= afterStart || time >= release) continue;
+    const params = action.params ?? {};
+    const releases = action.action === 'cameraUnfollow'
+      || action.action === 'cameraReset'
+      || (action.action === 'cameraFollow' && typeof params.characterId === 'string' && params.characterId.length > 0)
+      || (action.action === 'cameraMotion' && compiledMotionWritesPosition(params))
+      || (action.action === 'cameraPath' && compiledPathWritesPosition(params));
+    if (releases) release = time;
   }
   return release;
 }
@@ -182,56 +196,82 @@ function computeCameraStateAtTimeInternal(
         ? {
             characterId: params.characterId,
             offset: normalizeOffset(params.offset),
+            ...(typeof params.focus?.part === 'string' ? { part: params.focus.part } : {}),
             smoothing: typeof params.smoothing === 'number' ? params.smoothing : undefined,
           }
         : null;
       coverage.position = true;
       if (follow) {
+        const activeFollow = follow;
         // Active follow: mirror tickFollow()'s exponential entry glide so a
         // seek into the transition presents the intermediate frame instead of
         // the settled anchor. The transient decays from the pre-follow channel
         // state toward the tracked anchor, measured against the anchor as it
         // was at the follow start.
-        const liveAnchor = deps.resolveCharacterPosition?.(follow.characterId) ?? null;
         const releaseAt = Math.min(duration === Infinity ? Infinity : start + duration, findFollowReleaseInstant(timeline, start));
-        const anchor = (releaseAt < sampleTime && deps.resolveCharacterPositionAtTime)
-          ? deps.resolveCharacterPositionAtTime(follow.characterId, releaseAt) ?? liveAnchor
-          : liveAnchor;
-        if (anchor) {
-          const startAnchor = deps.resolveCharacterPositionAtTime?.(follow.characterId, start) ?? anchor;
-          const smoothing = follow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING;
-          const elapsed = Math.max(0, Math.min(sampleTime, releaseAt) - start);
-          const weight = followTransientWeight(smoothing, elapsed);
-          const target = clampPointIntoViewport({ x: anchor.x + follow.offset.x, y: anchor.y + follow.offset.y }, channels.zoom);
-          const startTarget = clampPointIntoViewport({ x: startAnchor.x + follow.offset.x, y: startAnchor.y + follow.offset.y }, channels.zoom);
-          // Only the targets are viewport-clamped (like tickFollow()); the
-          // gliding position itself may sit outside the clamp range mid-entry,
-          // so the composed transient must not be re-clamped.
-          channels.x = target.x + (channels.x - startTarget.x) * weight;
-          channels.y = target.y + (channels.y - startTarget.y) * weight;
-          composedFollowFrame = { x: channels.x, y: channels.y };
+        const followTime = Math.min(sampleTime, releaseAt);
+        const trajectory = deps.anchorTrajectories?.find((candidate) =>
+          candidate.characterId === activeFollow.characterId && candidate.part === (activeFollow.part ?? 'center'));
+        if (trajectory) {
+          const frame = evaluateCameraFollowHistory(trajectory, {
+            startTime: start,
+            queryTime: followTime,
+            initialPosition: channels,
+            offset: activeFollow.offset,
+            smoothing: activeFollow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING,
+            zoomAt: deps.resolveZoomAtTime ?? (() => channels.zoom),
+            cacheKey: deps.followCacheKey,
+            eventSide: deps.followEventSide,
+          });
+          channels.x = frame.x;
+          channels.y = frame.y;
+          composedFollowFrame = frame;
         } else {
-          composedFollowFrame = null;
+          const anchor = deps.resolveCharacterPosition?.(activeFollow.characterId, activeFollow.part ?? 'center') ?? null;
+          if (anchor) {
+            const target = clampPointIntoViewport({ x: anchor.x + activeFollow.offset.x, y: anchor.y + activeFollow.offset.y }, channels.zoom);
+            const startAnchor = deps.resolveCharacterPositionAtTime?.(activeFollow.characterId, start, activeFollow.part ?? 'center') ?? anchor;
+            const startTarget = clampPointIntoViewport({ x: startAnchor.x + activeFollow.offset.x, y: startAnchor.y + activeFollow.offset.y }, channels.zoom);
+            const weight = followTransientWeight(activeFollow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING, Math.max(0, followTime - start));
+            channels.x = target.x + (channels.x - startTarget.x) * weight;
+            channels.y = target.y + (channels.y - startTarget.y) * weight;
+            composedFollowFrame = { x: channels.x, y: channels.y };
+          } else composedFollowFrame = null;
         }
       } else if (duration !== Infinity) {
         // Duration-expired follow: playback's auto-unfollow latches the last
         // tracked glide frame — write that through so release semantics match
         // the explicit-unfollow path instead of reverting to pre-follow values.
-        const liveAnchor = deps.resolveCharacterPosition?.(params.characterId) ?? null;
         const releaseAt = Math.min(start + duration, findFollowReleaseInstant(timeline, start));
-        const anchor = (releaseAt < time && deps.resolveCharacterPositionAtTime)
-          ? deps.resolveCharacterPositionAtTime(params.characterId, releaseAt) ?? liveAnchor
-          : liveAnchor;
-        if (anchor) {
-          const startAnchor = deps.resolveCharacterPositionAtTime?.(params.characterId, start) ?? anchor;
-          const smoothing = typeof params.smoothing === 'number' ? params.smoothing : FOLLOW_DEFAULT_SMOOTHING;
-          const elapsed = Math.max(0, releaseAt - start);
-          const weight = followTransientWeight(smoothing, elapsed);
-          const offset = normalizeOffset(params.offset);
-          const target = clampPointIntoViewport({ x: anchor.x + offset.x, y: anchor.y + offset.y }, channels.zoom);
-          const startTarget = clampPointIntoViewport({ x: startAnchor.x + offset.x, y: startAnchor.y + offset.y }, channels.zoom);
-          channels.x = target.x + (channels.x - startTarget.x) * weight;
-          channels.y = target.y + (channels.y - startTarget.y) * weight;
+        const followPart = typeof params.focus?.part === 'string' ? params.focus.part : 'center';
+        const trajectory = deps.anchorTrajectories?.find((candidate) =>
+          candidate.characterId === params.characterId && candidate.part === followPart);
+        const offset = normalizeOffset(params.offset);
+        if (trajectory) {
+          const frame = evaluateCameraFollowHistory(trajectory, {
+            startTime: start,
+            queryTime: releaseAt,
+            initialPosition: channels,
+            offset,
+            smoothing: typeof params.smoothing === 'number' ? params.smoothing : FOLLOW_DEFAULT_SMOOTHING,
+            zoomAt: deps.resolveZoomAtTime ?? (() => channels.zoom),
+            cacheKey: deps.followCacheKey,
+            eventSide: deps.followEventSide,
+          });
+          channels.x = frame.x;
+          channels.y = frame.y;
+        } else {
+          const liveAnchor = deps.resolveCharacterPosition?.(params.characterId, followPart) ?? null;
+          if (liveAnchor) {
+            const startAnchor = deps.resolveCharacterPositionAtTime?.(params.characterId, start, followPart) ?? liveAnchor;
+            const smoothing = typeof params.smoothing === 'number' ? params.smoothing : FOLLOW_DEFAULT_SMOOTHING;
+            const elapsed = Math.max(0, releaseAt - start);
+            const weight = followTransientWeight(smoothing, elapsed);
+            const target = clampPointIntoViewport({ x: liveAnchor.x + offset.x, y: liveAnchor.y + offset.y }, channels.zoom);
+            const startTarget = clampPointIntoViewport({ x: startAnchor.x + offset.x, y: startAnchor.y + offset.y }, channels.zoom);
+            channels.x = target.x + (channels.x - startTarget.x) * weight;
+            channels.y = target.y + (channels.y - startTarget.y) * weight;
+          }
         }
       }
       continue;

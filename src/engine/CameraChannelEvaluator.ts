@@ -7,40 +7,8 @@ import {
 } from './CameraStateResolver';
 import { computeCameraShakeAtTime, type CameraShakeOffset } from './CameraShake';
 
-export interface CameraAnchorValidityInterval {
-  /** Inclusive scene-time start. */
-  readonly start: number;
-  /** Exclusive scene-time end. */
-  readonly end: number;
-}
-
-export interface CameraAnchorSample {
-  readonly time: number;
-  readonly position: CameraPosition;
-}
-
-/** A known jump in an anchor trajectory, with values on both sides. */
-export interface CameraAnchorEvent {
-  readonly time: number;
-  readonly left: CameraPosition;
-  readonly right: CameraPosition;
-}
-
-/**
- * Versioned, immutable character anchor history. Samples interpolate linearly
- * only inside a declared validity interval. At an event timestamp, the caller
- * chooses the left or right value; normal camera evaluation uses the right.
- */
-export interface CameraAnchorTrajectory {
-  readonly version: 1;
-  readonly characterId: string;
-  readonly part: string;
-  readonly validity: readonly CameraAnchorValidityInterval[];
-  readonly samples: readonly CameraAnchorSample[];
-  readonly events: readonly CameraAnchorEvent[];
-}
-
-export type CameraAnchorEventSide = 'left' | 'right';
+import { sampleCameraAnchorTrajectory, type CameraAnchorEventSide, type CameraAnchorTrajectory } from './CameraFollowHistory';
+export { sampleCameraAnchorTrajectory, type CameraAnchorEvent, type CameraAnchorEventSide, type CameraAnchorSample, type CameraAnchorTrajectory, type CameraAnchorValidityInterval } from './CameraFollowHistory';
 
 export interface CameraLogicalReferenceSize {
   readonly width: number;
@@ -55,6 +23,9 @@ export interface CameraEvaluationInput {
   readonly logicalReferenceSize: CameraLogicalReferenceSize;
   readonly anchorTrajectories: readonly CameraAnchorTrajectory[];
   readonly anchorEventSide?: CameraAnchorEventSide;
+  /** Timeline content revision; distinct from trajectory schema version. */
+  readonly revision?: string | number;
+  readonly trajectoryRevision?: string | number;
 }
 
 export type CameraEvaluationDiagnosticCode =
@@ -79,40 +50,15 @@ export interface CameraEvaluationOutput {
   readonly diagnostics: readonly CameraEvaluationDiagnostic[];
 }
 
-/** Return a trajectory value without extrapolating beyond its validity. */
-export function sampleCameraAnchorTrajectory(
-  trajectory: CameraAnchorTrajectory,
-  time: number,
-  side: CameraAnchorEventSide = 'right',
-): CameraPosition | null {
-  const interval = trajectory.validity.find((candidate) => time >= candidate.start && time < candidate.end);
-  if (!interval) return null;
-  const samples = trajectory.samples.filter((sample) => sample.time >= interval.start && sample.time < interval.end);
-  const events = trajectory.events.filter((candidate) => candidate.time >= interval.start && candidate.time < interval.end);
-  const event = events.find((candidate) => candidate.time === time);
-  if (event) return { ...event[side] };
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
 
-  let before: { time: number; position: CameraPosition } | undefined;
-  let after: { time: number; position: CameraPosition } | undefined;
-  for (const sample of samples) {
-    if (sample.time <= time && (!before || sample.time > before.time)) before = sample;
-    if (sample.time >= time && (!after || sample.time < after.time)) after = sample;
-  }
-  for (const knownEvent of events) {
-    if (knownEvent.time < time && (!before || knownEvent.time >= before.time)) {
-      before = { time: knownEvent.time, position: knownEvent.right };
-    }
-    if (knownEvent.time > time && (!after || knownEvent.time <= after.time)) {
-      after = { time: knownEvent.time, position: knownEvent.left };
-    }
-  }
-  if (!before || !after) return null;
-  if (before.time === after.time) return { ...before.position };
-  const progress = (time - before.time) / (after.time - before.time);
-  return {
-    x: before.position.x + (after.position.x - before.position.x) * progress,
-    y: before.position.y + (after.position.y - before.position.y) * progress,
-  };
+function identityOf(value: object): number {
+  const known = objectIds.get(value);
+  if (known !== undefined) return known;
+  const identity = nextObjectId++;
+  objectIds.set(value, identity);
+  return identity;
 }
 
 function readString(record: Record<string, unknown>, key: string): string | undefined {
@@ -136,6 +82,11 @@ function focusPart(params: Record<string, unknown>): string {
   return (focus && readString(focus, 'part'))
     ?? readString(params, 'targetPart')
     ?? 'head';
+}
+
+function followPart(params: Record<string, unknown>): string {
+  const part = readRecord(params.focus)?.part;
+  return typeof part === 'string' && part.length > 0 ? part : 'center';
 }
 
 function getTrajectory(
@@ -173,10 +124,37 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
     const trajectory = getTrajectory(input.anchorTrajectories, characterId, part ?? 'head');
     return trajectory ? sampleCameraAnchorTrajectory(trajectory, time, side) : null;
   };
+  const zoomTimeline = input.timeline.filter((action) => action.action === 'cameraReset'
+    || (action.action === 'cameraMotion' && (action.params.zoom !== undefined || action.params.move === 'zoom'
+      || action.params.move === 'push' || action.params.move === 'pull' || action.params.move === 'rotate'))
+    || (action.action === 'cameraPath' && Array.isArray(action.params.keyframes)
+      && action.params.keyframes.some((keyframe) => readRecord(keyframe)?.zoom !== undefined)));
+  const zoomCache = new Map<number, number>();
+  const zoomAt = (time: number): number => {
+    const cached = zoomCache.get(time);
+    if (cached !== undefined) return cached;
+    const value = computeCameraStateAtTime(zoomTimeline, time, { compiledChannelOwnership: true }).zoom;
+    zoomCache.set(time, value);
+    return value;
+  };
+  const trajectoryIdentity = input.anchorTrajectories.map((trajectory) =>
+    `${identityOf(trajectory)}:${trajectory.revision ?? 'unversioned'}`).join(',');
+  const followCacheKey = [
+    `timeline:${identityOf(input.timeline)}`,
+    `timelineRevision:${input.revision ?? 'unversioned'}`,
+    `trajectoryBundle:${identityOf(input.anchorTrajectories)}`,
+    `trajectoryRevision:${input.trajectoryRevision ?? 'unversioned'}`,
+    `trajectories:${trajectoryIdentity}`,
+    `reference:${input.logicalReferenceSize.width}x${input.logicalReferenceSize.height}`,
+  ].join('|');
   const deps: CameraStateResolverDeps = {
     resolveCharacterPosition: (characterId, part) => anchorAt(characterId, input.sceneTime, part),
     resolveCharacterPositionAtTime: (characterId, time, part) => anchorAt(characterId, time, part),
     compiledChannelOwnership: true,
+    anchorTrajectories: input.anchorTrajectories,
+    resolveZoomAtTime: zoomAt,
+    followCacheKey,
+    followEventSide: side,
   };
 
   const supportedTimeline = input.timeline.filter((action) => {
@@ -196,7 +174,7 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
     if (!hasFocusWriter(action, input.sceneTime)) continue;
     const characterId = focusCharacter(action.params);
     if (!characterId) continue;
-    const part = focusPart(action.params);
+    const part = action.action === 'cameraFollow' ? followPart(action.params) : focusPart(action.params);
     const trajectory = getTrajectory(input.anchorTrajectories, characterId, part);
     const start = action.time ?? 0;
     if (!trajectory || sampleCameraAnchorTrajectory(trajectory, start, side) === null) {
