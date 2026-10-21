@@ -90,6 +90,39 @@ describe('evaluateCameraChannels', () => {
     expect(result.diagnostics).toMatchObject([{ code: 'missing-focus-anchor', actionId: 'late-focus' }]);
   });
 
+  it('does not interpolate a focus anchor across a gap between valid intervals', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      characterId: 'hero',
+      part: 'head',
+      validity: [
+        { start: 0, end: 1 },
+        { start: 2, end: 4 },
+      ],
+      samples: [
+        { time: 0, position: { x: 0.1, y: 0.2 } },
+        { time: 3, position: { x: 0.9, y: 0.8 } },
+      ],
+      events: [
+        { time: 0.5, left: { x: 0.2, y: 0.3 }, right: { x: 0.7, y: 0.6 } },
+        { time: 2.5, left: { x: 0.4, y: 0.5 }, right: { x: 0.6, y: 0.7 } },
+      ],
+    };
+    const result = evaluateCameraChannels({
+      timeline: [action('focus-gap', 'cameraMotion', 2.4, {
+        move: 'pan', duration: 1, easing: 'linear', focus: { character: 'hero', part: 'head' },
+      })],
+      sceneTime: 2.9,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+
+    // No sample on the left side exists in the selected [2, 4) interval, so
+    // the earlier interval's event cannot be used to interpolate across gap.
+    expect(result.position).toEqual({ x: 0.5, y: 0.5 });
+    expect(result.diagnostics).toMatchObject([{ code: 'missing-focus-anchor', actionId: 'focus-gap' }]);
+  });
+
   it('skips only an unresolved focus position while continuing the zoom channel', () => {
     const result = evaluateCameraChannels({
       timeline: [action('focus-2', 'cameraMotion', 2, {
@@ -182,5 +215,22 @@ describe('evaluateCameraChannels', () => {
     expect(result.zoom).toBe(1);
     expect(result.position).toEqual({ x: 0.5, y: 0.5 });
     expect(result.diagnostics).toMatchObject([{ code: 'retired-camera-channel', actionId: 'retired-hitchcock' }]);
+  });
+
+  it('resolves a modest sequence of 30 start-time channel writers', () => {
+    const timeline = Array.from({ length: 30 }, (_, index) => action(
+      `writer-${index}`,
+      'cameraMotion',
+      index,
+      { duration: 0, target: [0.2 + index * 0.01, 0.6] },
+    ));
+    const result = evaluateCameraChannels({
+      timeline,
+      sceneTime: 30,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [],
+    });
+
+    expect(result.position).toEqual({ x: 0.49, y: 0.6 });
   });
 });

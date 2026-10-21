@@ -103,7 +103,6 @@ interface TimelineEvent {
   action: RuntimeTimelineAction;
   index: number;
   time: number;
-  sampleTime: number;
 }
 
 function toOrderedEvents(timeline: readonly RuntimeTimelineAction[], time: number): TimelineEvent[] {
@@ -111,13 +110,7 @@ function toOrderedEvents(timeline: readonly RuntimeTimelineAction[], time: numbe
     .map((action, index) => ({ action, index, time: action.time ?? 0 }))
     .filter((event) => event.time <= time)
     .sort((a, b) => a.time - b.time || a.index - b.index);
-  return events.map((event, index) => ({
-    ...event,
-    // Each writer is sampled only until the next statement starts. This
-    // carries the actual takeover value into the later writer, even when the
-    // query lands before either tween has completed.
-    sampleTime: Math.min(time, events[index + 1]?.time ?? time),
-  }));
+  return events;
 }
 
 interface MotionChannels extends CameraPosition { zoom: number; rotation: number }
@@ -125,11 +118,42 @@ interface MotionChannels extends CameraPosition { zoom: number; rotation: number
 /**
  * Resolve the deterministic camera state at `time`.
  */
+interface ResolverEvaluationContext {
+  readonly actionIds: WeakMap<object, number>;
+  readonly states: Map<string, ResolvedCameraState>;
+  nextActionId: number;
+}
+
 export function computeCameraStateAtTime(
   timeline: readonly RuntimeTimelineAction[],
   time: number,
   deps: CameraStateResolverDeps = {},
 ): ResolvedCameraState {
+  const evaluationDeps: CameraStateResolverDeps = deps.compiledChannelOwnership === undefined
+    ? { ...deps, compiledChannelOwnership: true }
+    : deps;
+  const context: ResolverEvaluationContext = { actionIds: new WeakMap(), states: new Map(), nextActionId: 0 };
+  return computeCameraStateAtTimeInternal(timeline, time, evaluationDeps, context);
+}
+
+function computeCameraStateAtTimeInternal(
+  timeline: readonly RuntimeTimelineAction[],
+  time: number,
+  deps: CameraStateResolverDeps,
+  context: ResolverEvaluationContext,
+): ResolvedCameraState {
+  const timelineKey = timeline.map((action) => {
+    let id = context.actionIds.get(action);
+    if (id === undefined) {
+      id = context.nextActionId++;
+      context.actionIds.set(action, id);
+    }
+    return id;
+  }).join(',');
+  const cacheKey = `${time}|${timelineKey}`;
+  const cached = context.states.get(cacheKey);
+  if (cached) return cached;
+
   const channels: MotionChannels = {
     x: STAGE_DEFAULT_CAMERA_POSITION.x,
     y: STAGE_DEFAULT_CAMERA_POSITION.y,
@@ -144,9 +168,9 @@ export function computeCameraStateAtTime(
   const orderedEvents = toOrderedEvents(timeline, time);
   for (const [eventIndex, event] of orderedEvents.entries()) {
     const { action, time: start } = event;
-    const sampleTime = deps.compiledChannelOwnership ? time : event.sampleTime;
+    const sampleTime = time;
     if (deps.compiledChannelOwnership && action.action === 'cameraFollow') {
-      const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+      const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
       channels.x = startState.position.x;
       channels.y = startState.position.y;
     }
@@ -222,7 +246,7 @@ export function computeCameraStateAtTime(
       follow = null;
       composedFollowFrame = null;
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
         channels.x = startState.position.x;
         channels.y = startState.position.y;
         channels.zoom = startState.zoom;
@@ -234,11 +258,9 @@ export function computeCameraStateAtTime(
 
     if (action.action === 'cameraMotion') {
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
-        if (compiledMotionWritesPosition(action.params ?? {})) {
-          channels.x = startState.position.x;
-          channels.y = startState.position.y;
-        }
+        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+        if (compiledMotionWritesX(action.params ?? {})) channels.x = startState.position.x;
+        if (compiledMotionWritesY(action.params ?? {})) channels.y = startState.position.y;
         if (compiledMotionWritesZoom(action.params ?? {})) channels.zoom = startState.zoom;
         if (compiledMotionWritesRotation(action.params ?? {})) channels.rotation = startState.rotation;
       }
@@ -252,7 +274,7 @@ export function computeCameraStateAtTime(
 
     if (action.action === 'cameraPath') {
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
         if (compiledPathWritesProperty(action.params ?? {}, 'position')) {
           channels.x = startState.position.x;
           channels.y = startState.position.y;
@@ -290,16 +312,18 @@ export function computeCameraStateAtTime(
     }
   }
 
-  return {
+  const resolved: ResolvedCameraState = {
     position: { x: channels.x, y: channels.y },
     zoom: channels.zoom,
     rotation: channels.rotation,
     follow,
     coverage,
   };
+  context.states.set(cacheKey, resolved);
+  return resolved;
 }
 
-function compiledMotionWritesPosition(params: Record<string, unknown>): boolean {
+function compiledMotionWritesX(params: Record<string, unknown>): boolean {
   const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
     ? params.focus as Record<string, unknown>
     : {};
@@ -307,7 +331,24 @@ function compiledMotionWritesPosition(params: Record<string, unknown>): boolean 
     || params.target !== undefined
     || params.to !== undefined
     || params.position !== undefined
-    || focus.point !== undefined;
+    || focus.point !== undefined
+    || (params.move === 'pan' && typeof params.strength === 'number');
+}
+
+function compiledMotionWritesY(params: Record<string, unknown>): boolean {
+  const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
+    ? params.focus as Record<string, unknown>
+    : {};
+  return typeof focus.character === 'string'
+    || params.target !== undefined
+    || params.to !== undefined
+    || params.position !== undefined
+    || focus.point !== undefined
+    || (params.move === 'tilt' && (typeof params.toY === 'number' || typeof params.strength === 'number'));
+}
+
+function compiledMotionWritesPosition(params: Record<string, unknown>): boolean {
+  return compiledMotionWritesX(params) || compiledMotionWritesY(params);
 }
 
 function compiledMotionWritesZoom(params: Record<string, unknown>): boolean {
@@ -546,10 +587,21 @@ function applyCompiledCameraMotion(
     ? { x: anchor.x + (Number(focus.offsetX) || 0), y: anchor.y + (Number(focus.offsetY) || 0) }
     : point;
 
-  if (characterId || point) {
+  if (params.move === 'tilt') {
+    const targetY = typeof params.toY === 'number'
+      ? params.toY
+      : typeof params.strength === 'number' ? channels.y + params.strength : undefined;
+    if (targetY !== undefined) {
+      channels.y += (targetY - channels.y) * weight;
+      coverage.position = true;
+    }
+  } else if (params.move === 'pan' && typeof params.strength === 'number') {
+    channels.x += params.strength * weight;
+    coverage.position = true;
+  } else if (characterId || point) {
     if (positionTarget) {
-      channels.x += (positionTarget.x - channels.x) * weight;
-      channels.y += (positionTarget.y - channels.y) * weight;
+      if (compiledMotionWritesX(params)) channels.x += (positionTarget.x - channels.x) * weight;
+      if (compiledMotionWritesY(params)) channels.y += (positionTarget.y - channels.y) * weight;
       coverage.position = true;
     }
   }

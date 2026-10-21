@@ -79,27 +79,26 @@ export interface CameraEvaluationOutput {
   readonly diagnostics: readonly CameraEvaluationDiagnostic[];
 }
 
-function containsTime(intervals: readonly CameraAnchorValidityInterval[], time: number): boolean {
-  return intervals.some((interval) => time >= interval.start && time < interval.end);
-}
-
 /** Return a trajectory value without extrapolating beyond its validity. */
 export function sampleCameraAnchorTrajectory(
   trajectory: CameraAnchorTrajectory,
   time: number,
   side: CameraAnchorEventSide = 'right',
 ): CameraPosition | null {
-  if (!containsTime(trajectory.validity, time)) return null;
-  const event = trajectory.events.find((candidate) => candidate.time === time);
+  const interval = trajectory.validity.find((candidate) => time >= candidate.start && time < candidate.end);
+  if (!interval) return null;
+  const samples = trajectory.samples.filter((sample) => sample.time >= interval.start && sample.time < interval.end);
+  const events = trajectory.events.filter((candidate) => candidate.time >= interval.start && candidate.time < interval.end);
+  const event = events.find((candidate) => candidate.time === time);
   if (event) return { ...event[side] };
 
   let before: { time: number; position: CameraPosition } | undefined;
   let after: { time: number; position: CameraPosition } | undefined;
-  for (const sample of trajectory.samples) {
+  for (const sample of samples) {
     if (sample.time <= time && (!before || sample.time > before.time)) before = sample;
     if (sample.time >= time && (!after || sample.time < after.time)) after = sample;
   }
-  for (const knownEvent of trajectory.events) {
+  for (const knownEvent of events) {
     if (knownEvent.time < time && (!before || knownEvent.time >= before.time)) {
       before = { time: knownEvent.time, position: knownEvent.right };
     }

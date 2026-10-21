@@ -182,6 +182,45 @@ describe('computeCameraStateAtTime', () => {
     expect(midway.position.y).toBeCloseTo(0.575, 6);
   });
 
+  it('does not freeze an active position writer at an unrelated scene event', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] } },
+      { action: 'backgroundSet', time: 2, params: { color: '#000000' } },
+    ];
+
+    const midway = computeCameraStateAtTime(timeline as any, 3);
+
+    expect(midway.position.x).toBeCloseTo(0.275, 6);
+    expect(midway.position.y).toBeCloseTo(0.275, 6);
+  });
+
+  it('keeps position moving through unrelated zoom and rotation writers', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] } },
+      { action: 'cameraMotion', time: 2, params: { move: 'zoom', duration: 2, easing: 'linear', focus: {}, zoom: 2 } },
+      { action: 'cameraMotion', time: 2.5, params: { move: 'rotate', duration: 2, easing: 'linear', angle: 20 } },
+    ];
+
+    const midway = computeCameraStateAtTime(timeline as any, 3);
+
+    expect(midway.position.x).toBeCloseTo(0.275, 6);
+    expect(midway.position.y).toBeCloseTo(0.275, 6);
+    expect(midway.zoom).toBeCloseTo(1.5, 6);
+    expect(midway.rotation).toBeCloseTo(5, 6);
+  });
+
+  it('preserves the x axis when a later sparse tilt writer takes over only y', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] } },
+      { action: 'cameraMotion', time: 2, params: { move: 'tilt', duration: 2, easing: 'linear', toY: 0.7 } },
+    ];
+
+    const midway = computeCameraStateAtTime(timeline as any, 3);
+
+    expect(midway.position.x).toBeCloseTo(0.275, 6);
+    expect(midway.position.y).toBeCloseTo(0.525, 6);
+  });
+
   it('preserves character focus anchors without a viewport clamp at low zoom', () => {
     const timeline = [
       {
@@ -211,7 +250,7 @@ describe('computeCameraStateAtTime', () => {
     const zoomed = computeCameraStateAtTime(timeline as any, 3.5);
     expect(zoomed.zoom).toBeCloseTo(1.5, 6);
     expect(zoomed.coverage.zoom).toBe(true);
-    expect(zoomed.coverage.position).toBe(true); // zoom move still tweens position toward its target point
+    expect(zoomed.coverage.position).toBe(false); // Move labels do not create an unwritten position track.
 
     const rotated = computeCameraStateAtTime(timeline as any, 5.5);
     expect(rotated.rotation).toBeCloseTo(12, 6);
