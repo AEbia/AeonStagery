@@ -179,8 +179,10 @@ describe('Live2DManager.getPoint', () => {
     live2DStageState(manager).containers.set('hero', container);
     const proxy = { x: 1200, y: 950, scale: 0.8, rotation: 0, opacity: 1, z: 100 };
     manager.setScriptEngine({ transformationProxies: new Map([['hero', proxy]]) });
-    manager.currentCamera = { position: [0.5, 0.5], zoom: 1 };
+    const rotatedCamera = { position: [0.5, 0.5] as [number, number], zoom: 1, rotation: 90 };
+    manager.currentCamera = rotatedCamera;
     manager.applyProxyTransform('hero', proxy);
+    expect(container.angle).toBeCloseTo(-90);
     const initialHead = manager.getPoint('hero', 'head')!;
     expect(initialHead.x).toBeCloseTo(1200 / 1920);
     expect(initialHead.y).toBeCloseTo(950 / 1080 - 0.8 * 0.82);

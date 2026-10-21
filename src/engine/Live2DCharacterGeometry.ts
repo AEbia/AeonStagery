@@ -11,7 +11,7 @@ import { projectToScreen } from './Projection';
 import { resolveVec2 } from './utils/math';
 import type { TransformationProxy } from './actions/types';
 
-type CharacterCamera = { position: Vec2; zoom: number };
+type CharacterCamera = { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } };
 type CharacterPoint = 'head' | 'chest' | 'feet' | 'center';
 
 type SpatialModel = {
@@ -22,6 +22,7 @@ type SpatialModel = {
   _flipX?: boolean;
   getBounds?: () => { x: number; y: number; width: number; height: number };
   getLocalBounds?: () => { x: number; y: number; width: number; height: number };
+  toGlobal?: (point: { x: number; y: number }) => { x: number; y: number };
 };
 
 type FilterContainer = PIXI.Container & {
@@ -194,10 +195,28 @@ export class Live2DCharacterGeometry {
             // the authored stage position. Use the last APPLIED zoom: the
             // camera may already have advanced before this anchor is queried.
             const container = this.getContainer(id);
-            const local = container.toLocal({ x, y });
+            const localBounds = typeof model?.getLocalBounds === 'function' && typeof model.toGlobal === 'function'
+              ? model.getLocalBounds()
+              : null;
+            let local: { x: number; y: number };
+            if (model && localBounds && localBounds.width > 0 && localBounds.height > 0 && model.toGlobal) {
+              const localCenterX = localBounds.x + localBounds.width * 0.5;
+              const localAnchorX = pointName === 'head' && headAnchor
+                ? localBounds.x + localBounds.width * headAnchor.x
+                : localCenterX;
+              const localAnchorY = pointName === 'head' && headAnchor
+                ? localBounds.y + localBounds.height * headAnchor.y
+                : localBounds.y + localBounds.height * (pointName === 'head' ? 0.18 : pointName === 'chest' ? 0.42 : pointName === 'feet' ? 0.95 : 0.5);
+              local = container.toLocal(model.toGlobal({ x: localAnchorX, y: localAnchorY }));
+            } else {
+              local = container.toLocal({ x, y });
+            }
             const zoom = this.projectedZoom.get(container) ?? 1;
-            const cos = Math.cos(container.rotation);
-            const sin = Math.sin(container.rotation);
+            // Camera rotation is a presentation transform. Character anchor
+            // trajectories stay in authored world space.
+            const authoredRotation = (proxy.rotation ?? 0) * Math.PI / 180;
+            const cos = Math.cos(authoredRotation);
+            const sin = Math.sin(authoredRotation);
             x = proxy.x + (local.x * cos - local.y * sin) / zoom;
             y = proxy.y + (local.x * sin + local.y * cos) / zoom;
           }
@@ -259,7 +278,7 @@ export class Live2DCharacterGeometry {
 
     const projected = camera
       ? projectToScreen(
-          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, z: proxy.z ?? 0 },
+          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, rotation: proxy.rotation, parallaxDepth: proxy.z ?? 0, drawOrder: proxy.z },
           camera,
           { w: STAGE_WIDTH, h: STAGE_HEIGHT },
         )
@@ -267,6 +286,7 @@ export class Live2DCharacterGeometry {
           screenX: proxy.x,
           screenY: proxy.y,
           screenScale: effectiveScale,
+          screenRotation: proxy.rotation ?? 0,
         };
 
     const height = STAGE_HEIGHT * effectiveScale;
@@ -292,26 +312,27 @@ export class Live2DCharacterGeometry {
     if (!proxy) return;
 
     // Resolve effective camera: explicit param > stored currentCamera > null (2D fallback)
-    const cam = camera !== undefined ? camera : this.getCamera();
+    const cam: CharacterCamera | null = camera !== undefined ? camera : this.getCamera();
 
     const container = this.getContainer(id) as FilterContainer;
     if (container) {
       // ── ECS Projection (replaces old pivot-based camera) ──
       if (cam && proxy.x !== undefined && proxy.y !== undefined) {
         const projected = projectToScreen(
-          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, z: proxy.z ?? 0 },
+          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, rotation: proxy.rotation, parallaxDepth: proxy.z ?? 0, drawOrder: proxy.z },
           cam,
           { w: STAGE_WIDTH, h: STAGE_HEIGHT },
         );
         if (isFinite(projected.screenX)) container.x = projected.screenX;
         if (isFinite(projected.screenY)) container.y = projected.screenY;
+        if (isFinite(projected.screenRotation)) container.angle = projected.screenRotation;
       } else {
         // 2D fallback — no camera, use raw proxy position
         if (proxy.x !== undefined && isFinite(proxy.x)) container.x = proxy.x;
         if (proxy.y !== undefined && isFinite(proxy.y)) container.y = proxy.y;
       }
 
-      if (proxy.rotation !== undefined && isFinite(proxy.rotation)) container.angle = proxy.rotation;
+      if (!cam && proxy.rotation !== undefined && isFinite(proxy.rotation)) container.angle = proxy.rotation;
 
       // ── Z-index for depth ordering ──
       if (proxy.z !== undefined && isFinite(proxy.z)) {

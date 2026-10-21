@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { projectToScreen, DEFAULT_FOCAL_LENGTH, MAX_Z_TEXT } from '../engine/Projection';
 import type { CameraState } from '../api/types/camera';
+import { getLogicalStageSize } from '../api/types/video-format';
 
 describe('projectToScreen', () => {
   const defaultProxy = { x: 960, y: 540, scale: 1, rotation: 0, opacity: 1, z: 0 };
@@ -93,6 +94,54 @@ describe('projectToScreen', () => {
         expect(shaken.screenScale).toBe(baseline.screenScale);
       }
     }
+  });
+
+  it('rotates projected positions around the logical frame center and cancels visible orientation', () => {
+    const proxy = { ...defaultProxy, x: 1200, y: 540, rotation: 30 };
+    const camera = { ...defaultCamera, rotation: 90 };
+    const projected = projectToScreen(proxy, camera, vp);
+
+    // A positive camera angle rotates world points counter-clockwise on screen.
+    expect(projected.screenX).toBeCloseTo(960);
+    expect(projected.screenY).toBeCloseTo(300);
+    expect(projected.screenRotation).toBeCloseTo(-60);
+  });
+
+  it('adds logical-unit shake after camera rotation independent of zoom and depth', () => {
+    for (const zoom of [0.5, 1, 2]) {
+      for (const z of [-300, 0, 500]) {
+        const proxy = { ...defaultProxy, x: 1200, z };
+        const camera = { ...defaultCamera, zoom, rotation: 90 };
+        const baseline = projectToScreen(proxy, camera, vp);
+        const shaken = projectToScreen(proxy, { ...camera, shakeOffset: { x: 12, y: -8 } }, vp);
+        expect(shaken.screenX).toBeCloseTo(baseline.screenX + 12);
+        expect(shaken.screenY).toBeCloseTo(baseline.screenY - 8);
+      }
+    }
+  });
+
+  it('rotates normalized points around landscape, portrait, and square logical frames', () => {
+    for (const frame of [{ w: 1920, h: 1080 }, { w: 1080, h: 1920 }, { w: 1080, h: 1080 }]) {
+      const projected = projectToScreen(
+        { x: frame.w * 0.625, y: frame.h * 0.5, scale: 1 },
+        { position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 90 },
+        frame,
+      );
+      expect(projected.screenX).toBeCloseTo(frame.w * 0.5);
+      expect(projected.screenY).toBeCloseTo(frame.h * 0.5 - frame.w * 0.125);
+    }
+  });
+
+  it('uses the same logical projection for 1080p and 4K output formats', () => {
+    const logical1080 = getLogicalStageSize({ width: 1920, height: 1080 });
+    const logical4k = getLogicalStageSize({ width: 3840, height: 2160 });
+    const project = (frame: { width: number; height: number }) => projectToScreen(
+      { x: 1200, y: 540, scale: 1 },
+      { position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 90 },
+      { w: frame.width, h: frame.height },
+    );
+    expect(logical4k).toEqual(logical1080);
+    expect(project(logical4k)).toEqual(project(logical1080));
   });
 
   it('DEFAULT_FOCAL_LENGTH is 500', () => {
