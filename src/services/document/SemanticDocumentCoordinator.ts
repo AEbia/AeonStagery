@@ -96,7 +96,7 @@ export class SemanticDocumentCoordinator {
             if (prepared) {
               try { await this.runtime.projectPreparedScene(prepared); }
               catch (restoreError) {
-                throw new AggregateError([error, restoreError], '项目设置应用失败，场景恢复也失败，请重新打开项目。');
+                throw new AggregateError([error, restoreError], '画布设置应用失败，场景恢复也失败，请重新打开项目。');
               }
             }
             throw error;
