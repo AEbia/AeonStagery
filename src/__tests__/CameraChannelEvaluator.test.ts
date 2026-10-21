@@ -78,15 +78,18 @@ describe('evaluateCameraChannels', () => {
       events: [],
     };
     const result = evaluateCameraChannels({
-      timeline: [action('late-focus', 'cameraMotion', 2, {
-        move: 'pan', duration: 1, easing: 'linear', focus: { character: 'hero', part: 'head' },
-      })],
+      timeline: [
+        action('initial-pan', 'cameraMotion', 0, { move: 'pan', duration: 0, target: [0.8, 0.7] }),
+        action('late-focus', 'cameraMotion', 2, {
+          move: 'pan', duration: 1, easing: 'linear', focus: { character: 'hero', part: 'head' },
+        }),
+      ],
       sceneTime: 3.5,
       logicalReferenceSize: referenceSize,
       anchorTrajectories: [trajectory],
     });
 
-    expect(result.position).toEqual({ x: 0.5, y: 0.5 });
+    expect(result.position).toEqual({ x: 0.8, y: 0.7 });
     expect(result.diagnostics).toMatchObject([{ code: 'missing-focus-anchor', actionId: 'late-focus' }]);
   });
 
@@ -125,16 +128,21 @@ describe('evaluateCameraChannels', () => {
 
   it('skips only an unresolved focus position while continuing the zoom channel', () => {
     const result = evaluateCameraChannels({
-      timeline: [action('focus-2', 'cameraMotion', 2, {
-        move: 'zoom', duration: 1, easing: 'linear', focus: { character: 'missing', part: 'chest' }, zoom: 2,
-      })],
+      timeline: [
+        action('initial-pan', 'cameraMotion', 0, { move: 'pan', duration: 0, target: [0.8, 0.7] }),
+        action('focus-2', 'cameraMotion', 2, {
+          move: 'zoom', duration: 1, easing: 'linear',
+          focus: { character: 'missing', part: 'chest', point: [0.2, 0.3] }, zoom: 2, angle: 0.2,
+        }),
+      ],
       sceneTime: 2.5,
       logicalReferenceSize: referenceSize,
       anchorTrajectories: [],
     });
 
-    expect(result.position).toEqual({ x: 0.5, y: 0.5 });
+    expect(result.position).toEqual({ x: 0.8, y: 0.7 });
     expect(result.zoom).toBeCloseTo(1.5, 6);
+    expect(result.rotation).toBeCloseTo(0.1, 6);
     expect(result.diagnostics).toMatchObject([
       { code: 'missing-focus-anchor', severity: 'warning', actionId: 'focus-2' },
     ]);

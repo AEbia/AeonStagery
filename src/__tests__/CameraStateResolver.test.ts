@@ -66,6 +66,46 @@ describe('computeCameraStateAtTime', () => {
     }
   });
 
+  it('does not apply legacy position defaults when a requested character anchor is unavailable', () => {
+    for (const move of ['pan', 'push', 'zoom']) {
+      const timeline = [
+        { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 0, target: [0.8, 0.7] } },
+        { action: 'cameraMotion', time: 1, params: { move, duration: 0, characterId: 'missing' } },
+      ];
+
+      const resolved = computeCameraStateAtTime(timeline as any, 2, { resolveCharacterPosition: () => null });
+
+      expect(resolved.position).toEqual({ x: 0.8, y: 0.7 });
+      if (move === 'push') expect(resolved.zoom).toBeCloseTo(1.3, 6);
+      if (move === 'zoom') expect(resolved.zoom).toBeCloseTo(1.5, 6);
+    }
+  });
+
+  it('does not use an explicit point when a requested focus character cannot be resolved', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 0, target: [0.8, 0.7] } },
+      { action: 'cameraMotion', time: 1, params: {
+        move: 'pan', duration: 0, focus: { character: 'missing', point: [0.2, 0.3] },
+      } },
+    ];
+
+    const resolved = computeCameraStateAtTime(timeline as any, 2, { resolveCharacterPosition: () => null });
+
+    expect(resolved.position).toEqual({ x: 0.8, y: 0.7 });
+  });
+
+  it('resolves a valid legacy characterId anchor at the action start', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 1, params: { move: 'pan', duration: 0, characterId: 'hero', targetPart: 'chest' } },
+    ];
+    const resolved = computeCameraStateAtTime(timeline as any, 2, {
+      resolveCharacterPositionAtTime: (_id, _time, part) => part === 'chest' ? { x: 0.7, y: 0.4 } : null,
+      resolveCharacterPosition: () => ({ x: 0.1, y: 0.2 }),
+    });
+
+    expect(resolved.position).toEqual({ x: 0.7, y: 0.4 });
+  });
+
   it('lets follow own the position channel until it is released', () => {
     const deps = { resolveCharacterPosition: () => ({ x: 0.7, y: 0.6 }) };
     const timeline = [

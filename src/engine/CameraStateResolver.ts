@@ -593,16 +593,22 @@ function applyCompiledCameraMotion(
     ? params.focus as Record<string, unknown>
     : {};
   const legacyDefaults = !Array.isArray(params._cameraProperties);
-  const characterId = typeof focus.character === 'string' ? focus.character : undefined;
-  const part = typeof focus.part === 'string' ? focus.part : DEFAULT_CAMERA_FOCUS_PART;
-  const legacyPositionDefault = legacyDefaults
+  const characterId = typeof params.characterId === 'string'
+    ? params.characterId
+    : typeof focus.character === 'string' ? focus.character : undefined;
+  const part = typeof focus.part === 'string'
+    ? focus.part
+    : typeof params.targetPart === 'string' ? params.targetPart : DEFAULT_CAMERA_FOCUS_PART;
+  const legacyPositionDefault = legacyDefaults && !characterId
     ? params.move === 'push'
       ? { x: 0.5, y: 0.4 }
       : params.move === 'pull' || params.move === 'pan' || params.move === 'zoom'
         ? { x: 0.5, y: 0.5 }
         : undefined
     : undefined;
-  const rawPosition = params.target ?? params.to ?? params.position ?? focus.point ?? legacyPositionDefault;
+  const rawPosition = characterId
+    ? undefined
+    : params.target ?? params.to ?? params.position ?? focus.point ?? legacyPositionDefault;
   const point = rawPosition === undefined ? null : normalizePoint(rawPosition);
   const anchor = characterId
     ? deps.resolveCharacterPositionAtTime
@@ -611,7 +617,7 @@ function applyCompiledCameraMotion(
     : null;
   const positionTarget = anchor
     ? { x: anchor.x + (Number(focus.offsetX) || 0), y: anchor.y + (Number(focus.offsetY) || 0) }
-    : point;
+    : characterId ? null : point;
 
   if (params.move === 'tilt' && compiledMotionWritesY(params)) {
     const targetY = typeof params.toY === 'number'
@@ -621,7 +627,7 @@ function applyCompiledCameraMotion(
       channels.y += (targetY - channels.y) * weight;
       coverage.position = true;
     }
-  } else if (params.move === 'pan' && typeof params.strength === 'number' && compiledMotionWritesX(params)) {
+  } else if (params.move === 'pan' && !characterId && typeof params.strength === 'number' && compiledMotionWritesX(params)) {
     channels.x += params.strength * weight;
     coverage.position = true;
   } else if (characterId || point) {
