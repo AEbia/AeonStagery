@@ -6,6 +6,7 @@ import type { Vec2 } from '../api/types/common';
 import type { CharacterEntry } from './Live2DConfig';
 import { STAGE_WIDTH, STAGE_HEIGHT } from './Live2DConfig';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
+import { captureLive2DAnchorOffset } from './Live2DAnchorGeometry';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { projectToScreen } from './Projection';
 import { resolveVec2 } from './utils/math';
@@ -20,6 +21,9 @@ type SpatialModel = {
   scale: { x: number; y: number; set: (x: number, y?: number) => unknown };
   _baseHeight?: number;
   _flipX?: boolean;
+  pivot?: { x: number; y: number };
+  localTransform?: { apply: (point: { x: number; y: number }) => { x: number; y: number } };
+  updateLocalTransform?: () => void;
   getBounds?: () => { x: number; y: number; width: number; height: number };
   getLocalBounds?: () => { x: number; y: number; width: number; height: number };
   toGlobal?: (point: { x: number; y: number }) => { x: number; y: number };
@@ -145,6 +149,54 @@ export class Live2DCharacterGeometry {
 
   getPoint(id: string, pointName: CharacterPoint, out?: { x: number; y: number }): { x: number, y: number } | null {
     const entry = this.characters.get(id);
+
+    // Capture posed geometry in model-local units, then compose it with the
+    // authored proxy. Camera and editor viewport transforms never enter this
+    // trajectory, and the bounds refresh does not require a render pass.
+    const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+    if (entry?.model && proxy) {
+      try {
+        const source = this.resolvePointSourceModel(entry.model, pointName);
+        const headAnchor = pointName === 'head'
+          ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
+              entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
+            )
+          : null;
+        const logicalHeight = entry.baseHeight ?? source?._baseHeight ?? source?.height;
+        const rootModel = entry.model as SpatialModel;
+        if (source !== rootModel) source?.updateLocalTransform?.();
+        const offset = captureLive2DAnchorOffset(
+          source,
+          pointName,
+          logicalHeight,
+          headAnchor,
+          rootModel.pivot,
+          source !== rootModel ? source?.localTransform : undefined,
+        );
+        if (offset) {
+          const flipX = entry.config?.flipX ?? source?._flipX ?? false;
+          const scale = proxy.scale ?? 1;
+          const localX = offset.x * (flipX ? -1 : 1) * STAGE_HEIGHT * scale;
+          const localY = offset.y * STAGE_HEIGHT * scale;
+          const radians = (proxy.rotation ?? 0) * Math.PI / 180;
+          const cos = Math.cos(radians);
+          const sin = Math.sin(radians);
+          const point = {
+            x: (proxy.x + localX * cos - localY * sin) / STAGE_WIDTH,
+            y: (proxy.y + localX * sin + localY * cos) / STAGE_HEIGHT,
+          };
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+          if (out) {
+            out.x = point.x;
+            out.y = point.y;
+            return out;
+          }
+          return point;
+        }
+      } catch {
+        // Retain the established proxy estimate when runtime geometry is absent.
+      }
+    }
 
     // 1. Prefer model-defined head hit areas when available.
     // This gives us the semantic head anchor instead of guessing from the full container bounds.
