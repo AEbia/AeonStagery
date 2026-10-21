@@ -804,4 +804,79 @@ describe('BakeEngine runtime routing', () => {
 
     expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 0, ParamMouthOpenY: 0 });
   });
+
+  it('prepares posed historical anchors through isolated Bake and evaluates camera focus from those tracks', async () => {
+    const modelPath = 'figure/rana/rana.model3.json';
+    let posedOffset = 0;
+    const updateDrawableBounds = vi.fn();
+    const createModel = vi.fn(async () => {
+      const values = new Float32Array([0]);
+      const model = Object.assign(new PIXI.Container(), {
+        anchor: new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0),
+        internalModel: {
+          coreModel: { getParameterValues: () => values, getPartOpacities: () => values },
+          parameterValues: values,
+          partOpacities: values,
+          settings: { motions: {}, expressions: {} },
+          motionManager: { stopAllMotions: vi.fn(), state: { queue: [] as unknown[] } },
+        },
+        update: vi.fn(),
+        render: vi.fn(),
+        startMotion: vi.fn(async () => true),
+        updateDrawableBounds,
+        getLocalBounds: () => ({ x: posedOffset, y: 0, width: 100, height: 200 }),
+      });
+      return model;
+    });
+    vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
+      runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true,
+    });
+    const controls = mockControls({
+      stepBakeFrame: vi.fn(() => { posedOffset += 1; }),
+    });
+    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
+      id: 'untitled-pixi-live2d-engine-cubism',
+      createModel,
+      createTestControls: () => controls,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ FileReferences: { Moc: 'rana.moc3' } }),
+    })));
+
+    const base = createBasePreparedScene(modelPath);
+    const duration = 1 / 15;
+    const scene: PreparedCompiledScene = {
+      ...base,
+      durationSeconds: duration,
+      actions: [
+        { ...base.actions[0], params: { ...base.actions[0].params, position: [0.5, 0.5], scale: 2, rotation: 90, flipX: true, duration } },
+        {
+          id: 'focus-head', time: 0, action: 'cameraMotion',
+          params: { move: 'pan', duration: 0, focus: { character: 'rana', part: 'head' } },
+          source: { statementId: 'focus-head', outputKey: 'primary' },
+        },
+      ],
+    };
+    const engine = new BakeEngine(createApp());
+    try {
+      const result = await engine.prepareCameraAnchorsPrepared(scene, new Map([[modelPath, modelPath]]), 7);
+      const head = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'head');
+      const center = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'center');
+
+      expect(head?.version).toBe(1);
+      expect(head?.revision).toEqual(expect.any(String));
+      expect(head?.samples).toHaveLength(2);
+      expect(head?.samples[0].position).not.toEqual(head?.samples[1].position);
+      expect(center?.samples).toHaveLength(2);
+      expect(center?.samples[0].position.x).toBeCloseTo(-0.0625, 6);
+      expect(center?.samples[0].position.y).toBeLessThan(0.5);
+      expect(updateDrawableBounds).toHaveBeenCalledTimes(2);
+      expect(result.cameraStates?.[0].state.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
+      expect(result.cameraStates?.[0].state.position).toEqual(head?.samples[0].position);
+    } finally {
+      engine.destroy();
+      vi.unstubAllGlobals();
+    }
+  });
 });

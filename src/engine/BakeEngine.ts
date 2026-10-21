@@ -35,6 +35,26 @@ import type {
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeControlModule';
 import type { CustomMotionStageHandle } from './live2d/customMotionStage';
+import { evaluateCameraChannels, type CameraEvaluationOutput } from './CameraChannelEvaluator';
+import { prepareCameraAnchorTrajectories, type CameraAnchorCapture, type PreparedCameraAnchorTrajectory } from './CameraAnchorPreparation';
+import { resolveCameraAnchorPositions } from './cameraAnchorResolver';
+import { Live2DCompositeModel } from './Live2DCompositeModel';
+
+const CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS = 1 / 15;
+const CAMERA_ANCHOR_EVENT_EPSILON_SECONDS = 1e-6;
+
+function resolveAuthoredAnchorOrigin(position: readonly [number, number] | undefined): { x: number; y: number } | null {
+  if (!position || !Number.isFinite(position[0]) || !Number.isFinite(position[1])) return null;
+  return { x: position[0], y: position[1] };
+}
+
+function readBaseModelHeight(displayObject: PIXI.Container): number {
+  try {
+    const localHeight = displayObject.getLocalBounds().height;
+    if (Number.isFinite(localHeight) && localHeight > 0) return localHeight;
+  } catch { /* use the loaded display object's initial unscaled height */ }
+  return Number.isFinite(displayObject.height) && displayObject.height > 0 ? displayObject.height : 0;
+}
 
 /**
  * Mouth parameters written by the deterministic dialogue text-mouth channel.
@@ -54,6 +74,8 @@ interface BakeModel {
   isBorrowCurrent: () => boolean;
   modelPath: string;
   modelKey: string;
+  /** Local model height recorded before the scene applies its authored scale. */
+  baseHeight: number;
   runtimeHandle: Live2DModelHandle;
   adapterId: string;
   motionStartTime?: number;
@@ -66,6 +88,12 @@ interface BakeModel {
 
 export interface BakeResult {
   snapshotHistory: { time: number; models: Map<string, ModelSnapshot> }[];
+  /** Content revision shared by every track in this prepared batch. */
+  anchorRevision?: string | number;
+  /** Immutable isolated historical anchors when returned by preparation. */
+  anchorTrajectories?: readonly PreparedCameraAnchorTrajectory[];
+  /** Camera state from the shared pure evaluator at captured anchor times. */
+  cameraStates?: readonly { readonly time: number; readonly state: CameraEvaluationOutput }[];
   /** Optional Bake motion-runtime observability (cacheHit/cacheMiss/nativeStart/offsetReplayMs). */
   motionReport?: import('./BakeMotionRuntime').BakeMotionRuntimeReport;
 }
@@ -80,6 +108,7 @@ export class BakeEngine {
   private readonly modelResources: Live2DModelResources;
   private snapshotHistory: { time: number; models: Map<string, ModelSnapshot> }[] = [];
   private activeMotionLoads: Set<string> = new Set();
+  private anchorPreparationRevision = 0;
 
 
   private container: PIXI.Container;
@@ -128,6 +157,52 @@ export class BakeEngine {
     );
   }
 
+  /** Prepare immutable historical anchor tracks on a fixed cadence in isolated Bake models. */
+  async prepareCameraAnchorsPrepared(
+    scene: PreparedCompiledScene,
+    resolvedModelPaths: Map<string, string>,
+    token: number,
+  ): Promise<BakeResult> {
+    const revision = `${scene.sceneId}:${++this.anchorPreparationRevision}`;
+    const runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
+    const captures: CameraAnchorCapture[] = [];
+    const eventTimes = [...new Set(runtimeScene.timeline
+      .filter((action) => action.action === 'addCharacter' || action.action === 'removeCharacter'
+        || (action.action === 'transformCharacter' && (action.params?.duration ?? 0) <= 0))
+      .map((action) => action.time ?? 0))];
+    const expectedTaskVersion = this.taskVersion + 1;
+    const result = await this.bakeRuntimeRange(
+      runtimeScene,
+      buildPreparedBakeModelPathMap(scene, resolvedModelPaths),
+      token,
+      0,
+      scene.durationSeconds,
+      CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS,
+      undefined,
+      true,
+      buildPreparedBakeModelSourceMap(scene),
+      { captures, revision, eventTimes },
+    );
+    if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion) return result;
+    const anchorTrajectories = prepareCameraAnchorTrajectories({
+      revision,
+      cadenceSeconds: CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS,
+      captures,
+      eventTimes,
+    });
+    const cameraTimes = [...new Set(captures.map((capture) => capture.time))].sort((a, b) => a - b);
+    const cameraStates = Object.freeze(cameraTimes.map((time) => Object.freeze({
+      time,
+      state: Object.freeze(evaluateCameraChannels({
+        timeline: runtimeScene.timeline,
+        sceneTime: time,
+        logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
+        anchorTrajectories,
+      })),
+    })));
+    return { ...result, anchorRevision: revision, anchorTrajectories, cameraStates };
+  }
+
   async bakePreparedRange(
     scene: PreparedCompiledScene,
     resolvedModelPaths: Map<string, string>,
@@ -166,6 +241,7 @@ export class BakeEngine {
     seedSnapshot?: Snapshot,
     silent: boolean = false,
     modelSources: ReadonlyMap<string, string> = new Map(),
+    anchorCapture?: { captures: CameraAnchorCapture[]; revision: string | number; eventTimes: readonly number[] },
   ): Promise<BakeResult> {
     if (this.closed) return { snapshotHistory: [] };
     this.modelResources.cancelLoads();
@@ -316,6 +392,26 @@ export class BakeEngine {
     eventBus.emit(silent ? 'pb-daemon:start' : 'bake:start', { sceneId: script.sceneId, title: script.meta.title });
 
     const effectiveEnd = Math.min(rangeEnd, totalDuration);
+    const anchorTimes: number[] = [];
+    if (anchorCapture) {
+      for (let time = simStart; time <= effectiveEnd + 1e-9; time += CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS) {
+        anchorTimes.push(Math.min(time, effectiveEnd));
+      }
+      for (const time of anchorCapture.eventTimes) {
+        if (time >= simStart && time <= effectiveEnd) {
+          if (time - CAMERA_ANCHOR_EVENT_EPSILON_SECONDS >= simStart) {
+            anchorTimes.push(time - CAMERA_ANCHOR_EVENT_EPSILON_SECONDS);
+          }
+          anchorTimes.push(time);
+        }
+      }
+      anchorTimes.push(effectiveEnd);
+      anchorTimes.sort((a, b) => a - b);
+      for (let index = anchorTimes.length - 1; index > 0; index--) {
+        if (Math.abs(anchorTimes[index] - anchorTimes[index - 1]) < 1e-9) anchorTimes.splice(index, 1);
+      }
+    }
+    let anchorTimeIndex = 0;
     // Seeded characters are already on stage at rangeStart. Treating them as a
     // first addCharacter appearance would idle-reset the seed pose and restart
     // any in-flight Live2D fade-in from T-pose (ADR-0029 handoff).
@@ -437,19 +533,58 @@ export class BakeEngine {
 
           if (!isCurrent()) break;
 
-          // Capture snapshots
-          const models = new Map<string, ModelSnapshot>();
-          for (const entry of this.models.values()) {
-            if (!this.isEntryCurrent(entry, isCurrent)) continue;
-            const snap = this.captureSnapshot(entry);
-            if (snap) models.set(entry.id, snap);
-          }
-          // Only store snapshots within the requested range
-          if (models.size > 0 && simTime >= rangeStart) {
-            this.appendSnapshot(simTime, models);
+          if (anchorCapture) {
+            while (anchorTimeIndex < anchorTimes.length && anchorTimes[anchorTimeIndex] < simTime - 1e-9) anchorTimeIndex++;
+            for (const id of charModelMap.keys()) {
+              const state = characters.get(id);
+              if (!state) {
+                anchorCapture.captures.push(Object.freeze({
+                  time: simTime,
+                  characterId: id,
+                  anchors: Object.freeze({ origin: null, head: null, chest: null, feet: null, center: null }),
+                }));
+                continue;
+              }
+              if (anchorTimeIndex >= anchorTimes.length || Math.abs(anchorTimes[anchorTimeIndex] - simTime) >= 1e-7) break;
+              const entry = this.models.get(id);
+              const pointState = state as { position?: readonly [number, number]; scale?: number; rotation?: number; config?: { flipX?: boolean } };
+              const anchors = entry
+                ? resolveCameraAnchorPositions({
+                    state: pointState,
+                    displayObject: entry.runtimeHandle.displayObject,
+                    baseHeight: entry.baseHeight,
+                    headFraction: entry.runtimeHandle.character.getHeadAnchor(
+                      entry.runtimeHandle.displayObject instanceof Live2DCompositeModel ? 'head' : 'main',
+                    ),
+                  })
+                : { origin: resolveAuthoredAnchorOrigin(pointState.position), head: null, chest: null, feet: null, center: null };
+              anchorCapture.captures.push(Object.freeze({
+                time: simTime,
+                characterId: id,
+                anchors: Object.freeze({ ...anchors }),
+              }));
+            }
+            if (anchorTimeIndex < anchorTimes.length && Math.abs(anchorTimes[anchorTimeIndex] - simTime) < 1e-7) anchorTimeIndex++;
           }
 
-        simTime += step;
+          if (!anchorCapture) {
+            // Capture snapshots
+            const models = new Map<string, ModelSnapshot>();
+            for (const entry of this.models.values()) {
+              if (!this.isEntryCurrent(entry, isCurrent)) continue;
+              const snap = this.captureSnapshot(entry);
+              if (snap) models.set(entry.id, snap);
+            }
+            // Only store snapshots within the requested range
+            if (models.size > 0 && simTime >= rangeStart) {
+              this.appendSnapshot(simTime, models);
+            }
+          }
+
+        const nextAnchorTime = anchorTimes[anchorTimeIndex];
+        simTime = anchorCapture && nextAnchorTime !== undefined && nextAnchorTime > simTime
+          ? Math.min(simTime + step, nextAnchorTime)
+          : simTime + step;
         stepCount++;
 
         // Yield aggressively (time-based) to keep the UI at 60+ FPS (16ms budget)
@@ -656,7 +791,7 @@ export class BakeEngine {
         const entry: BakeModel = {
           id, displayObject: runtimeHandle.displayObject, release: releaseBorrow,
           isBorrowCurrent,
-          modelPath: absolutePath, modelKey,
+          modelPath: absolutePath, modelKey, baseHeight: readBaseModelHeight(runtimeHandle.displayObject),
           runtimeHandle, adapterId: runtime.adapterId, expressionKey: null,
           injectedParams: {},
           idleSnapshot: { params: new Float32Array(0), opacities: new Float32Array(0) },

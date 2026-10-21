@@ -35,6 +35,18 @@ export function captureLive2DAnchorOffset(
   origin: Point = { x: 0, y: 0 },
   localTransform?: LocalTransform,
 ): LogicalHeightAnchorOffset | null {
+  return captureLive2DAnchorOffsets(model, [anchor], logicalHeight, headFraction, origin, localTransform)?.[anchor] ?? null;
+}
+
+/** Refresh one posed model once, then derive every requested semantic anchor. */
+export function captureLive2DAnchorOffsets(
+  model: RefreshableModel | null | undefined,
+  anchors: readonly Live2DAnchorName[],
+  logicalHeight: number | null | undefined,
+  headFraction?: { readonly x: number; readonly y: number } | null,
+  origin: Point = { x: 0, y: 0 },
+  localTransform?: LocalTransform,
+): Partial<Record<Live2DAnchorName, LogicalHeightAnchorOffset>> | null {
   if (!model) return null;
 
   const refreshable = model as RefreshableModel;
@@ -45,21 +57,19 @@ export function captureLive2DAnchorOffset(
     const unitHeight = Number.isFinite(logicalHeight) && logicalHeight! > 0
       ? logicalHeight!
       : bounds.height;
-
-    const fractionX = anchor === 'head' && isFiniteFraction(headFraction?.x)
-      ? headFraction!.x
-      : 0.5;
-    const fractionY = anchor === 'head' && isFiniteFraction(headFraction?.y)
-      ? headFraction!.y
-      : FALLBACK_FRACTIONS[anchor];
-    const anchorPoint = {
-      x: bounds.x + bounds.width * fractionX,
-      y: bounds.y + bounds.height * fractionY,
-    };
-    const transformed = localTransform?.apply(anchorPoint) ?? anchorPoint;
-    const x = (transformed.x - origin.x) / unitHeight;
-    const y = (transformed.y - origin.y) / unitHeight;
-    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    const offsets: Partial<Record<Live2DAnchorName, LogicalHeightAnchorOffset>> = {};
+    for (const anchor of anchors) {
+      const fractionX = anchor === 'head' && isFiniteFraction(headFraction?.x) ? headFraction.x : 0.5;
+      const fractionY = anchor === 'head' && isFiniteFraction(headFraction?.y)
+        ? headFraction.y
+        : FALLBACK_FRACTIONS[anchor];
+      const anchorPoint = { x: bounds.x + bounds.width * fractionX, y: bounds.y + bounds.height * fractionY };
+      const transformed = localTransform?.apply(anchorPoint) ?? anchorPoint;
+      const x = (transformed.x - origin.x) / unitHeight;
+      const y = (transformed.y - origin.y) / unitHeight;
+      if (Number.isFinite(x) && Number.isFinite(y)) offsets[anchor] = { x, y };
+    }
+    return offsets;
   } catch {
     return null;
   }
