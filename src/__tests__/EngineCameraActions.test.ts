@@ -177,7 +177,7 @@ describe('camera action schedulers', () => {
       params: config,
     });
 
-    expect(cameraMocks.shake).toHaveBeenCalledWith(config);
+    expect(cameraMocks.shake).not.toHaveBeenCalled();
     expect(timeline.duration()).toBeCloseTo(1.4, 6);
   });
 

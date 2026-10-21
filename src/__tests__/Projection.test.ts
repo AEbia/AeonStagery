@@ -81,6 +81,20 @@ describe('projectToScreen', () => {
     expect(r.screenY).toBeCloseTo(540);
   });
 
+  it('applies shake in screen pixels uniformly across depth and zoom', () => {
+    for (const zoom of [0.5, 1, 2]) {
+      for (const z of [-300, 0, 500]) {
+        const proxy = { ...defaultProxy, z };
+        const camera = { ...defaultCamera, zoom };
+        const baseline = projectToScreen(proxy, camera, vp);
+        const shaken = projectToScreen(proxy, { ...camera, shakeOffset: { x: 12, y: -8 } }, vp);
+        expect(shaken.screenX).toBeCloseTo(baseline.screenX + 12);
+        expect(shaken.screenY).toBeCloseTo(baseline.screenY - 8);
+        expect(shaken.screenScale).toBe(baseline.screenScale);
+      }
+    }
+  });
+
   it('DEFAULT_FOCAL_LENGTH is 500', () => {
     expect(DEFAULT_FOCAL_LENGTH).toBe(500);
   });

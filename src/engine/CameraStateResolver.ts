@@ -309,16 +309,14 @@ function applyCameraMotion(
     channels[key] = from[key] + (to - from[key]) * evaluateCharacterEase(ease, progress, 'power2.inOut');
   };
 
-  // moveTo() clamps character-anchored positions into the viewport using the
-  // segment's zoom intent (falling back to the channel zoom at segment start)
-  // — the resolver must mirror that capture-time clamp or scrubbed seeks
-  // frame differently from playback.
-  const characterAnchorClampZoom = (): number =>
-    resolveZoomValue(params.zoom ?? params.zoomEnd, from.zoom) ?? from.zoom;
+  // Character focus is independent of zoom: only follow/dolly constrain
+  // framing to the viewport. Preserve the same authored offsets as moveTo().
   const anchorTarget = (raw: CameraPosition | null, isCharacterAnchored: boolean): CameraPosition | null => {
-    if (!raw) return null;
-    if (!isCharacterAnchored) return raw;
-    return clampPointIntoViewport(raw, characterAnchorClampZoom());
+    if (!raw || !isCharacterAnchored) return raw;
+    return {
+      x: raw.x + (params.focus?.offsetX ?? 0),
+      y: raw.y + (params.focus?.offsetY ?? 0),
+    };
   };
   const focusPart = params.focus?.part || params.targetPart || DEFAULT_CAMERA_FOCUS_PART;
 
@@ -598,7 +596,7 @@ function resolvePanTarget(
   return { x: STAGE_DEFAULT_CAMERA_POSITION.x, y: STAGE_DEFAULT_CAMERA_POSITION.y };
 }
 
-/** Same viewport clamp as tickFollow()/moveTo(): tracking never reveals black edges. */
+/** Same viewport clamp as tickFollow(): tracking never reveals black edges. */
 function clampPositionIntoViewport(channels: MotionChannels): void {
   const clamped = clampPointIntoViewport({ x: channels.x, y: channels.y }, channels.zoom);
   channels.x = clamped.x;

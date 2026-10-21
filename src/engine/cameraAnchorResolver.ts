@@ -8,7 +8,7 @@
  *
  * Strategy: compose the statement-derived model position (valid at any time)
  * with a part offset MEASURED from the live model — `getPoint(part) −
- * getPosition()`. Both measurements come from the same (possibly stale) model
+ * proxy origin`. Both measurements come from the same (possibly stale) model
  * state, so their delta stays valid regardless of seek staleness, while the
  * base keeps the anchor deterministic.
  */
@@ -25,6 +25,8 @@ export interface StageAnchorSource {
   desiredPosition?: (characterId: string) => StagePoint | null | undefined;
   getPoint?: (characterId: string, part: StagePartName) => StagePoint | null | undefined;
   getPosition?: (characterId: string) => StagePoint | null | undefined;
+  /** Authored proxy origin, distinct from the model's visual center. */
+  getOrigin?: (characterId: string) => StagePoint | null | undefined;
 }
 
 export type StageAnchorResolver = (characterId: string, part?: string) => StagePoint | null;
@@ -42,35 +44,27 @@ function isFinitePoint(point: StagePoint | null | undefined): point is StagePoin
 
 /**
  * Build an anchor resolver that keeps seek framing faithful to playback:
- * part queries return `statementBase + (livePart − liveBody)`, body queries
- * return the statement base, and live values fill in when no statement
- * position exists for the character.
+ * anchors return `statementBase + (liveAnchor − liveOrigin)`. When an origin
+ * is unavailable, body queries use the statement base; live anchors fill in
+ * when no statement position exists.
  */
 export function createStageAnchorResolver(source: StageAnchorSource): StageAnchorResolver {
   return (characterId: string, part?: string): StagePoint | null => {
     const base = source.desiredPosition?.(characterId) ?? null;
     const partName = normalizePart(part);
 
-    if (partName) {
-      const partPoint = isFinitePoint(source.getPoint?.(characterId, partName))
-        ? source.getPoint!(characterId, partName)!
-        : null;
-      const bodyPoint = isFinitePoint(source.getPosition?.(characterId))
-        ? source.getPosition!(characterId)!
-        : null;
+    if (partName || source.getOrigin) {
+      const measuredPart = partName
+        ? source.getPoint?.(characterId, partName)
+        : source.getPosition?.(characterId);
+      const measuredOrigin = source.getOrigin?.(characterId) ?? source.getPosition?.(characterId);
+      const partPoint = isFinitePoint(measuredPart) ? measuredPart : null;
+      const origin = isFinitePoint(measuredOrigin) ? measuredOrigin : null;
 
-      // Compose only when both sides of the delta are measurable — they are
-      // captured from the same model state so the offset is time-consistent.
-      if (partPoint && bodyPoint) {
-        const delta = { x: partPoint.x - bodyPoint.x, y: partPoint.y - bodyPoint.y };
-        if (base) {
-          return { x: base.x + delta.x, y: base.y + delta.y };
-        }
-        return partPoint;
+      if (partPoint && origin && base) {
+        return { x: base.x + (partPoint.x - origin.x), y: base.y + (partPoint.y - origin.y) };
       }
-      if (!base && partPoint) {
-        return partPoint;
-      }
+      if (!base && partPoint) return partPoint;
     }
 
     if (base) {

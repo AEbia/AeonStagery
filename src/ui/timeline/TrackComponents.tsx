@@ -409,7 +409,7 @@ export const TrackBlock = React.memo(({
 
   const MOVE_LABELS: Record<string, string> = {
     push: '推', pull: '拉', pan: '摇', tilt: '直摇',
-    zoom: '变焦', rotate: '旋转', dolly: '希区柯克', shake: '震动',
+    zoom: '变焦', rotate: '旋转', dolly: '希区柯克', shake: '晃动',
   };
 
   const EASING_LABELS: Record<string, string> = {

@@ -92,6 +92,8 @@ export interface CameraHitchcockConfig {
 }
 
 export interface CameraState {
+  /** Additive screen-space offset in stage pixels; never part of position. */
+  shakeOffset?: { x: number; y: number };
   position: Vec2;
   zoom: number;
   rotation: number;

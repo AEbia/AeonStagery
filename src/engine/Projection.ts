@@ -46,7 +46,7 @@ export interface ProjectedTransform {
  */
 export function projectToScreen(
   proxy: { x: number; y: number; scale: number; z?: number },
-  camera: { position: Vec2; zoom: number },
+  camera: { position: Vec2; zoom: number; shakeOffset?: { x: number; y: number } },
   viewport: ViewportSize,
 ): ProjectedTransform {
   const z = proxy.z ?? 0;
@@ -64,8 +64,8 @@ export function projectToScreen(
   const halfH = viewport.h / 2;
 
   return {
-    screenX: halfW + (worldX - halfW) * camera.zoom,
-    screenY: halfH + (worldY - halfH) * camera.zoom,
+    screenX: halfW + (worldX - halfW) * camera.zoom + (camera.shakeOffset?.x ?? 0),
+    screenY: halfH + (worldY - halfH) * camera.zoom + (camera.shakeOffset?.y ?? 0),
     screenScale: proxy.scale * camera.zoom,
   };
 }

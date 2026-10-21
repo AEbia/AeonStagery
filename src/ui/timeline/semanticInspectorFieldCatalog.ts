@@ -440,7 +440,7 @@ export const SEMANTIC_INSPECTOR_FIELD_CATALOG: SemanticInspectorFieldCatalog = {
       defaultValue: inspectorDefault(18),
     }),
     field('decay', '衰减', { when: modeIs('shake'), defaultValue: inspectorDefault(true) }),
-    field('direction', '震动方向', { when: modeIs('shake'), defaultValue: inspectorDefault('both') }),
+    field('direction', '晃动方向', { when: modeIs('shake'), defaultValue: inspectorDefault('both') }),
     field('screenTarget', '屏幕目标（标准化坐标）', { when: modeIs('hitchcock') }),
     field('zoomStart', '起始变焦', {
       valueType: 'number',

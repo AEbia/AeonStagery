@@ -35,6 +35,7 @@ import { SnapshotStore } from './SnapshotStore';
 import { preBakeDaemon } from './daemons/PreBakeDaemon';
 import { CameraCoordinator } from './coordinators/CameraCoordinator';
 import type { CameraStateResolverDeps } from './CameraStateResolver';
+import { computeCameraShakeAtTime } from './CameraShake';
 import { createStageAnchorResolver } from './cameraAnchorResolver';
 import { CharacterSynchronizer } from './coordinators/CharacterSynchronizer';
 import { DialogueCoordinator } from './coordinators/DialogueCoordinator';
@@ -137,6 +138,9 @@ class ScriptEngine {
     await updating;
   }
   getCurrentCamera(): CameraState {
+    cameraController.applyShakeOffset(computeCameraShakeAtTime(
+      this.currentScene?.timeline ?? [], this.masterTimeline?.time() ?? 0,
+    ));
     return cameraController.getState();
   }
   setBasePath(path: string): void { this.basePath = path; }
@@ -173,7 +177,7 @@ class ScriptEngine {
     if (!proxy) return;
     Object.assign(proxy, updates);
     if (live2DManager.hasCharacter(id)) {
-      const cam = cameraController.getState();
+      const cam = this.getCurrentCamera();
       live2DManager.currentCamera = cam;
       live2DManager.applyProxyTransform(id, proxy, undefined, cam);
     }
@@ -183,7 +187,7 @@ class ScriptEngine {
     const proxy = this.environmentLayerProxies.get(layerId);
     if (!proxy) return;
     Object.assign(proxy, updates);
-    stageManager.applyEnvironmentLayerTransform(layerId, proxy, cameraController.getState());
+    stageManager.applyEnvironmentLayerTransform(layerId, proxy, this.getCurrentCamera());
   }
 
   setLoopRegion(start: number, end: number): void {
@@ -603,8 +607,8 @@ class ScriptEngine {
     eventBus.emit('scene:pause');
   }
 
-  private syncLive2DTransformsFromTimeline(): { position: any; zoom: number } {
-    const cam = cameraController.getState();
+  private syncLive2DTransformsFromTimeline(): CameraState {
+    const cam = this.getCurrentCamera();
     live2DManager.currentCamera = cam;
 
     this.transformationProxies.forEach((proxy, id) => {
@@ -754,7 +758,7 @@ class ScriptEngine {
         // post-load synchronization pass will use.
         this.masterTimeline.seek(time, true);
         this.cameraCoordinator.sync(time, this.currentScene?.timeline ?? [], this.buildCameraResolverDeps(time));
-        live2DManager.currentCamera = cameraController.getState();
+        live2DManager.currentCamera = this.getCurrentCamera();
 
         // ─── Maginot Line: All Character asset load must completely finish first ───
         // A missing or unresolvable model resource is a SCRIPT-level defect, not a
@@ -920,9 +924,9 @@ class ScriptEngine {
    * playback without depending on model transforms being current.
    */
   private buildCameraResolverDeps(time: number): CameraStateResolverDeps {
-    const desiredCharacters = this.computeStateAtTime(time).characters;
-    return {
-      resolveCharacterPosition: createStageAnchorResolver({
+    const resolveAtTime = (atTime: number) => {
+      const desiredCharacters = this.computeStateAtTime(atTime).characters;
+      return createStageAnchorResolver({
         desiredPosition: (characterId) => {
           const desired = desiredCharacters.get(characterId);
           return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
@@ -935,14 +939,15 @@ class ScriptEngine {
           typeof live2DManager.getPosition === 'function'
             ? live2DManager.getPosition(characterId)
             : null,
-      }),
-      // Follow entry transient: capture the followed character's statement
-      // position at the follow start so seek reconstruction decays from where
-      // playback began gliding (body anchor — tickFollow() tracks getPosition).
-      resolveCharacterPositionAtTime: (characterId, atTime) => {
-        const desired = this.computeStateAtTime(atTime).characters.get(characterId);
-        return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
-      },
+        getOrigin: (characterId) => {
+          const proxy = this.transformationProxies.get(characterId);
+          return proxy ? { x: proxy.x / STAGE_WIDTH, y: proxy.y / STAGE_HEIGHT } : null;
+        },
+      });
+    };
+    return {
+      resolveCharacterPosition: resolveAtTime(time),
+      resolveCharacterPositionAtTime: (characterId, atTime) => resolveAtTime(atTime)(characterId),
     };
   }
 
@@ -1051,7 +1056,7 @@ class ScriptEngine {
     if (this.currentScene) {
       this.cameraCoordinator.sync(time, this.currentScene.timeline, this.buildCameraResolverDeps(time));
     }
-    const cam = cameraController.getState();
+    const cam = this.getCurrentCamera();
     live2DManager.currentCamera = cam;
 
     // 2. Reconcile non-character environment states
@@ -1297,7 +1302,7 @@ class ScriptEngine {
       }
     }));
 
-    stageWithImageState.updateImages?.(cameraController.getState());
+    stageWithImageState.updateImages?.(this.getCurrentCamera());
   }
 
   private resolvePath(relativePath: string): string {

@@ -31,6 +31,7 @@ import type {
 import { resolveVec2 } from './utils/math';
 import { CAMERA_EASING_MAP } from './utils/cameraEasing';
 import { MOVE_HANDLERS } from './MoveHandlers';
+import { sampleCameraShake, type CameraShakeOffset } from './CameraShake';
 import { normalizeCharacterEase } from './CharacterAnimationContract';
 
 class CameraController {
@@ -43,6 +44,7 @@ class CameraController {
 
   /** Shake offset (pixels) applied on top of state */
   private _shakeOffset = { x: 0, y: 0 };
+  private _sceneShakeOffset = { x: 0, y: 0 };
 
   /** Named presets */
   private presets: Map<string, CameraKeyframe[]> = new Map();
@@ -54,20 +56,27 @@ class CameraController {
 
   /** Active shake animation */
   private shakeTimeline: gsap.core.Timeline | null = null;
+  private readonly shakeSamples = new Map<gsap.core.Timeline, CameraShakeOffset>();
 
-  /** Exposed for CameraCoordinator — kills the shake timeline and resets offset. */
+  /** Last standalone shake timeline, for API callers. */
   getShakeTimeline(): gsap.core.Timeline | null {
     return this.shakeTimeline;
   }
 
-  /** Exposed for CameraCoordinator — replaces shakeTimeline and resets offset in one atomic operation. */
+  /** Stop standalone effects and clear both additive offsets. */
   resetShake(): void {
-    if (this.shakeTimeline) {
-      this.shakeTimeline.kill();
-      this.shakeTimeline = null;
-    }
+    for (const timeline of this.shakeSamples.keys()) timeline.kill();
+    this.shakeSamples.clear();
+    this.shakeTimeline = null;
     this._shakeOffset.x = 0;
     this._shakeOffset.y = 0;
+    this.applyShakeOffset({ x: 0, y: 0 });
+  }
+
+  /** Scene playback and seek use the same deterministic envelope resolver. */
+  applyShakeOffset(offset: CameraShakeOffset): void {
+    this._sceneShakeOffset.x = offset.x;
+    this._sceneShakeOffset.y = offset.y;
   }
 
   /**
@@ -91,8 +100,7 @@ class CameraController {
     pos.y = 0.5;
     this.state.zoom = 1;
     this.state.rotation = 0;
-    this._shakeOffset.x = 0;
-    this._shakeOffset.y = 0;
+    this.resetShake();
     this.unfollow();
     this.applyTransform();
   }
@@ -149,7 +157,7 @@ class CameraController {
 
     // ── Zoom + Rotation ────────────────────────────────────
     if (config.zoom !== undefined || config.rotation !== undefined) {
-      const anim: any = {};
+      const anim: Pick<CameraMoveConfig, 'zoom' | 'rotation'> = {};
       if (config.zoom !== undefined) anim.zoom = config.zoom;
       if (config.rotation !== undefined) anim.rotation = config.rotation;
 
@@ -167,39 +175,17 @@ class CameraController {
       const ox = config.offsetX ?? 0;
       const oy = config.offsetY ?? 0;
 
+      // Character focus must center the authored anchor at every zoom,
+      // including 1x. A viewport clamp would lock 1x focus to (0.5, 0.5).
       tl.to(this.state.position as { x: number; y: number }, {
         x: () => {
           const p = live2DManager.getPoint(charId, part);
-          if (p) {
-            let Z = this.state.zoom ?? 1;
-            if (typeof config.zoom === 'number') Z = config.zoom;
-            else if (typeof (config.zoom as any) === 'string') {
-              const zStr = config.zoom as any as string;
-              if (zStr.startsWith('+=')) Z += parseFloat(zStr.slice(2));
-              else if (zStr.startsWith('-=')) Z -= parseFloat(zStr.slice(2));
-              else Z = parseFloat(zStr);
-            }
-            if (isNaN(Z) || Z <= 0) Z = 1;
-            const halfView = 0.5 / Z;
-            return Math.max(halfView, Math.min(p.x + ox, 1 - halfView));
-          }
+          if (p) return p.x + ox;
           return (this.state.position as { x: number; y: number }).x;
         },
         y: () => {
           const p = live2DManager.getPoint(charId, part);
-          if (p) {
-            let Z = this.state.zoom ?? 1;
-            if (typeof config.zoom === 'number') Z = config.zoom;
-            else if (typeof (config.zoom as any) === 'string') {
-              const zStr = config.zoom as any as string;
-              if (zStr.startsWith('+=')) Z += parseFloat(zStr.slice(2));
-              else if (zStr.startsWith('-=')) Z -= parseFloat(zStr.slice(2));
-              else Z = parseFloat(zStr);
-            }
-            if (isNaN(Z) || Z <= 0) Z = 1;
-            const halfView = 0.5 / Z;
-            return Math.max(halfView, Math.min(p.y + oy, 1 - halfView));
-          }
+          if (p) return p.y + oy;
           return (this.state.position as { x: number; y: number }).y;
         },
         duration, ease, delay,
@@ -230,55 +216,29 @@ class CameraController {
    * Camera shake effect.
    */
   shake(config: CameraShakeConfig = {}): gsap.core.Timeline {
-    const {
-      intensity = 0.5,
-      frequency = 15,
-      duration = 0.5,
-      decay = true,
-      direction = 'both',
-    } = config;
-
-    // Kill existing shake
-    if (this.shakeTimeline) {
-      this.shakeTimeline.kill();
-    }
-
-    hookSystem.execute('camera:shake', config);
-
-    const maxOffset = intensity * 30; // pixels
-
+    const duration = Math.max(0, config.duration ?? 0.5);
+    const clock = { elapsed: 0 };
     const tl = gsap.timeline();
-    const steps = Math.ceil(frequency * duration);
-    const stepDuration = duration / steps;
-
-    for (let i = 0; i < steps; i++) {
-      const progress = i / steps;
-      const decayFactor = decay ? (1 - progress) : 1;
-      const offsetX = (direction !== 'vertical')
-        ? (Math.random() * 2 - 1) * maxOffset * decayFactor
-        : 0;
-      const offsetY = (direction !== 'horizontal')
-        ? (Math.random() * 2 - 1) * maxOffset * decayFactor
-        : 0;
-
-      tl.to(this._shakeOffset, {
-        x: offsetX,
-        y: offsetY,
-        duration: stepDuration,
-        ease: 'none',
-        onUpdate: () => this.applyTransform(),
-      });
-    }
-
-    // Return to center
-    tl.to(this._shakeOffset, {
-      x: 0,
-      y: 0,
-      duration: stepDuration,
-      ease: 'power3.out',
-      onUpdate: () => this.applyTransform(),
-    });
-
+    this.shakeSamples.set(tl, { x: 0, y: 0 });
+    tl.call(() => hookSystem.execute('camera:shake', config), undefined, 0);
+    tl.fromTo(clock, { elapsed: 0 }, {
+      elapsed: duration,
+      duration,
+      ease: 'none',
+      immediateRender: false,
+      onUpdate: () => {
+        if (clock.elapsed >= duration) this.shakeSamples.delete(tl);
+        else this.shakeSamples.set(tl, sampleCameraShake(config, clock.elapsed));
+        const offset = { x: 0, y: 0 };
+        for (const sample of this.shakeSamples.values()) {
+          offset.x += sample.x;
+          offset.y += sample.y;
+        }
+        this._shakeOffset.x = offset.x;
+        this._shakeOffset.y = offset.y;
+        this.applyTransform();
+      },
+    }, 0);
     this.shakeTimeline = tl;
     return tl;
   }
@@ -602,7 +562,7 @@ class CameraController {
 
     const currentPos = this.state.position as { x: number; y: number };
     const offset = resolveVec2(this.followConfig.offset ?? [0, 0]);
-    // Same viewport clamp as moveTo()/hitchcockZoom(): keep the view inside the
+    // Same viewport clamp as hitchcockZoom(): keep the view inside the
     // stage extent for the current zoom so tracking never reveals black edges.
     const zoom = this.state.zoom > 0 ? this.state.zoom : 1;
     const halfView = 0.5 / zoom;
@@ -703,10 +663,15 @@ class CameraController {
    */
   getState(): CameraState {
     const position = resolveVec2(this.state.position);
+    const shakeOffset = {
+      x: this._shakeOffset.x + this._sceneShakeOffset.x,
+      y: this._shakeOffset.y + this._sceneShakeOffset.y,
+    };
     return {
       position,
       zoom: this.state.zoom,
       rotation: this.state.rotation,
+      ...(shakeOffset.x !== 0 || shakeOffset.y !== 0 ? { shakeOffset } : {}),
     };
   }
 }

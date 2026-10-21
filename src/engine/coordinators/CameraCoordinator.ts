@@ -1,5 +1,7 @@
 import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
+import type { CameraFollowConfig } from '../../api/types/camera';
 import { computeCameraStateAtTime, type CameraStateResolverDeps } from '../CameraStateResolver';
+import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
 
 interface ResolvedStatePatch {
   position?: { x: number; y: number };
@@ -8,11 +10,10 @@ interface ResolvedStatePatch {
 }
 
 interface CameraMuscle {
-  follow(characterId: string, config?: { offset?: any; smoothing?: number }): void;
+  follow(characterId: string, config?: CameraFollowConfig): void;
   unfollow(): void;
   tickFollow(forceUpdate?: boolean): void;
-  resetShake(): void;
-  getShakeTimeline(): gsap.core.Timeline | null;
+  applyShakeOffset(offset: CameraShakeOffset): void;
   /** Hard-set the given camera channels (baseline restoration on seeks). */
   applyResolvedState(patch: ResolvedStatePatch): void;
 }
@@ -54,26 +55,8 @@ export class CameraCoordinator {
       this.controller.unfollow();
     }
 
-    // 2. Reconcile Camera Shake
-    let activeShake: RuntimeTimelineAction | null = null;
-    for (const action of timeline) {
-      if (action.action === 'cameraShake') {
-        const start = action.time ?? 0;
-        const duration = action.params?.duration ?? 0.5;
-        if (time >= start && time <= start + duration) {
-          activeShake = action;
-        }
-      }
-    }
-
-    // If no active shake on timeline at this time, kill any active shake timeline
-    if (!activeShake) {
-      const shakeTl = this.controller.getShakeTimeline();
-      if (shakeTl) {
-        shakeTl.kill();
-      }
-      this.controller.resetShake();
-    }
+    // 2. Reconstruct finite shake without killing any scheduled timeline.
+    this.controller.applyShakeOffset(computeCameraShakeAtTime(timeline, time));
 
     // 3. Hard-set the full reconstructed state. GSAP only re-renders tweens
     // whose window the playhead actually crosses, so a jump landing in the

@@ -63,6 +63,18 @@ describe('createStageAnchorResolver', () => {
     expect(requestedPart).toBe('center');
   });
 
+  it('uses the proxy origin rather than the visual center to reconstruct focus and follow', () => {
+    const resolve = createStageAnchorResolver({
+      desiredPosition: () => ({ x: 0.6, y: 0.8 }),
+      getOrigin: () => ({ x: 0.4, y: 0.7 }),
+      getPoint: () => ({ x: 0.4, y: 0.2 }),
+      getPosition: () => ({ x: 0.4, y: 0.4 }),
+    });
+    expect(resolve('hero', 'head')!.x).toBeCloseTo(0.6);
+    expect(resolve('hero', 'head')!.y).toBeCloseTo(0.3);
+    expect(resolve('hero')!.y).toBeCloseTo(0.5);
+  });
+
   it('returns null when nothing can resolve the character', () => {
     const resolve = createStageAnchorResolver({
       desiredPosition: () => null,

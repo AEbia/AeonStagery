@@ -184,7 +184,7 @@ function cameraTimelinePresentation(params: CameraParams): SceneStatementTimelin
     case 'path':
       return { label: '镜头路径', iconKey: 'cameraPath' };
     case 'shake':
-      return { label: '镜头震动', iconKey: 'cameraShake' };
+      return { label: '镜头晃动', iconKey: 'cameraShake' };
     case 'hitchcock':
       return { label: '希区柯克变焦', iconKey: 'cameraHitchcock' };
     case 'reset':

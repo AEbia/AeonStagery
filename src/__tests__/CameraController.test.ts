@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import gsap from 'gsap';
+import { projectToScreen } from '../engine/Projection';
+import { computeCameraStateAtTime } from '../engine/CameraStateResolver';
+import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
+import { sceneDocumentCodec } from '../services/semantic-scene';
+import type { CameraMotionConfig } from '../api/types/camera';
 
 const cameraMocks = vi.hoisted(() => ({
   tickerAdd: vi.fn(),
@@ -58,6 +63,30 @@ describe('CameraController public state', () => {
       zoom: 1,
       rotation: 0,
     });
+  });
+
+  it('projects camera shake onto the scene without changing the persistent position', () => {
+    const camera = new CameraController();
+    const timeline = camera.shake({ intensity: 1, frequency: 4, duration: 1, direction: 'horizontal' });
+    timeline.seek(0.2, false);
+    const projected = projectToScreen({ x: 960, y: 540, scale: 1 }, camera.getState(), { w: 1920, h: 1080 });
+    expect(projected.screenX).not.toBe(960);
+    expect(projected.screenY).toBe(540);
+    expect(camera.state.position).toEqual({ x: 0.5, y: 0.5 });
+    timeline.progress(1);
+    expect(projectToScreen({ x: 960, y: 540, scale: 1 }, camera.getState(), { w: 1920, h: 1080 }).screenX).toBe(960);
+  });
+
+  it('keeps the authored shake duration and previously scheduled shakes intact', () => {
+    const camera = new CameraController();
+    const master = gsap.timeline({ paused: true });
+    const first = camera.shake({ duration: 1, frequency: 4 });
+    master.add(first, 1);
+    const second = camera.shake({ duration: 1, frequency: 4 });
+    master.add(second, 3);
+    expect(first.parent).toBe(master);
+    expect(first.duration()).toBe(1);
+    expect(second.duration()).toBe(1);
   });
 
   it('stops active camera shake when the camera is reset', () => {
@@ -124,7 +153,36 @@ describe('CameraController public state', () => {
     expect(cameraMocks.tickerRemove).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves semantic focus onto the authored character part and clamps target position by zoom', () => {
+  it.each([0.8, 1, 1.2, 2])('centers character focus at zoom %s in playback and seek', (zoom) => {
+    const camera = new CameraController();
+    const head = { x: 0.72, y: 0.28 };
+    cameraMocks.getPoint.mockReturnValue(head);
+    const document = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: 4, sceneId: 'focus-at-unit-zoom',
+      meta: { title: 'Focus at unit zoom', characters: [{ id: 'hero', name: 'Hero', model: 'hero/model.json' }] },
+      statements: [{ id: 'focus', type: 'camera', time: 0, params: {
+        mode: 'focus', target: 'hero', targetPart: 'head',
+        zoom: { kind: 'absolute', value: zoom }, durationSeconds: 1, ease: 'linear',
+      } }],
+    });
+    const action = sceneStatementCompiler.compile(document).actions[0];
+    // Execute the compiler output through the public controller entry point.
+    const timeline = camera.executeMotion(action.params as unknown as CameraMotionConfig);
+    timeline.progress(1);
+    const state = camera.getState();
+    expect(state.position).toEqual(head);
+    expect(state.zoom).toBe(zoom);
+    const projectedHead = projectToScreen({ x: head.x * 1920, y: head.y * 1080, scale: 1 }, state, { w: 1920, h: 1080 });
+    expect(projectedHead.screenX).toBeCloseTo(960);
+    expect(projectedHead.screenY).toBeCloseTo(540);
+    const resolved = computeCameraStateAtTime([{
+      _id: action.id, action: action.action, time: action.time, params: action.params,
+    }], 1, { resolveCharacterPosition: () => head });
+    expect(resolved.position).toEqual(head);
+    expect(resolved.zoom).toBe(zoom);
+  });
+
+  it('resolves semantic focus onto the authored character part with offsets independently of zoom', () => {
     const camera = new CameraController();
     cameraMocks.getPoint.mockReturnValue({ x: 0.95, y: 0.1 });
 
@@ -145,7 +203,7 @@ describe('CameraController public state', () => {
 
     expect(cameraMocks.getPoint).toHaveBeenCalledWith('hero', 'head');
     expect(camera.getState()).toEqual({
-      position: { x: 0.75, y: 0.25 },
+      position: { x: 1.15, y: 0 },
       zoom: 2,
       rotation: 0,
     });

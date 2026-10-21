@@ -35,6 +35,8 @@ export type Live2DGeometrySceneContext = {
 };
 
 export class Live2DCharacterGeometry {
+  private readonly projectedZoom = new WeakMap<PIXI.Container, number>();
+
   constructor(
     private readonly characters: ReadonlyMap<string, CharacterEntry>,
     private readonly pendingConfigs: Map<string, Partial<CharacterTransformConfig>[]>,
@@ -185,6 +187,20 @@ export class Live2DCharacterGeometry {
             }
           }
 
+          const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+          if (proxy) {
+            // Bounds are global pixels, including editor viewport and camera
+            // transforms. Recover the model offset before composing it with
+            // the authored stage position. Use the last APPLIED zoom: the
+            // camera may already have advanced before this anchor is queried.
+            const container = this.getContainer(id);
+            const local = container.toLocal({ x, y });
+            const zoom = this.projectedZoom.get(container) ?? 1;
+            const cos = Math.cos(container.rotation);
+            const sin = Math.sin(container.rotation);
+            x = proxy.x + (local.x * cos - local.y * sin) / zoom;
+            y = proxy.y + (local.x * sin + local.y * cos) / zoom;
+          }
           const normalizedX = x / STAGE_WIDTH;
           const normalizedY = y / STAGE_HEIGHT;
           if (out) {
@@ -362,6 +378,7 @@ export class Live2DCharacterGeometry {
           const flipX = entry?.config?.flipX || model._flipX;
           const sign = flipX ? -1 : 1;
           model.scale.set(modelScale * sign, modelScale);
+          if (container) this.projectedZoom.set(container, cam?.zoom || 1);
         }
       }
       if (proxy.opacity !== undefined && isFinite(proxy.opacity)) {

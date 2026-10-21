@@ -190,7 +190,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = '镜头路径运动';
     typeClass = 'timeline-item--camera';
   } else if (action.action === 'cameraShake') {
-    title = '镜头震动';
+    title = '镜头晃动';
     typeClass = 'timeline-item--camera';
   } else if (action.action === 'cameraFollow') {
     const char = sceneData.meta.characters?.find(c => c.id === action.params.characterId);

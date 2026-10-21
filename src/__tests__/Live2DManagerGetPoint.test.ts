@@ -164,6 +164,38 @@ describe('Live2DManager.getPoint', () => {
     expect(manager.getPoint('missing', 'center')).toBeNull();
   });
 
+  it('keeps focus anchors in stage space after camera and editor viewport transforms', async () => {
+    const { default: Live2DManager } = await import('../engine/Live2DManager');
+    const manager = new Live2DManager();
+    const viewport = new PIXI.Container();
+    const container = new PIXI.Container();
+    const model = new PIXI.Container();
+    model.boundsArea = new PIXI.Rectangle(-150, -600, 300, 600);
+    viewport.addChild(container);
+    container.addChild(model);
+    live2DStageState(manager).characters = new Map([['hero', {
+      id: 'hero', model, config: {}, baseHeight: 600,
+    }]]);
+    live2DStageState(manager).containers.set('hero', container);
+    const proxy = { x: 1200, y: 950, scale: 0.8, rotation: 0, opacity: 1, z: 100 };
+    manager.setScriptEngine({ transformationProxies: new Map([['hero', proxy]]) });
+    manager.currentCamera = { position: [0.5, 0.5], zoom: 1 };
+    manager.applyProxyTransform('hero', proxy);
+    const initialHead = manager.getPoint('hero', 'head')!;
+    expect(initialHead.x).toBeCloseTo(1200 / 1920);
+    expect(initialHead.y).toBeCloseTo(950 / 1080 - 0.8 * 0.82);
+
+    viewport.position.set(180, 90);
+    viewport.scale.set(0.6);
+    manager.currentCamera = { position: [0.7, 0.4], zoom: 2 };
+    // The camera can advance before the next character projection pass.
+    expect(manager.getPoint('hero', 'head')!.y).toBeCloseTo(initialHead.y);
+    manager.applyProxyTransform('hero', proxy);
+    const focusedHead = manager.getPoint('hero', 'head')!;
+    expect(focusedHead.x).toBeCloseTo(initialHead.x);
+    expect(focusedHead.y).toBeCloseTo(initialHead.y);
+  });
+
   it('propagates lookAt to composite sub-models', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();

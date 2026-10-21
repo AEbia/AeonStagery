@@ -9,10 +9,10 @@ describe('List numeric draft blur', () => {
   it.each(['blank space', 'expand button'])('commits a typed value and leaves edit mode when clicking %s in its row', (target) => {
     load('camera', { mode: 'shake', intensity: 0.4, durationSeconds: 1 });
     const { container } = list();
-    const intensity = screen.getByRole('spinbutton', { name: '震动强度' });
+    const intensity = screen.getByRole('spinbutton', { name: '晃动强度' });
     fireEvent.mouseDown(intensity, { button: 0 });
     fireEvent.mouseUp(document);
-    const input = screen.getByRole('spinbutton', { name: '震动强度' }) as HTMLInputElement;
+    const input = screen.getByRole('spinbutton', { name: '晃动强度' }) as HTMLInputElement;
     expect(input.tagName).toBe('INPUT');
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: '2.5' } });

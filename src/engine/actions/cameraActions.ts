@@ -1,4 +1,6 @@
+import gsap from 'gsap';
 import { cameraController } from '../CameraController';
+import { hookSystem } from '../../api/hooks';
 import type { SchedulerContext } from './types';
 import type { CameraMotionConfig } from '../../api/types/camera';
 
@@ -38,7 +40,11 @@ export function scheduleCameraPath(ctx: SchedulerContext, action: { time?: numbe
 export function scheduleCameraShake(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
   const { tl } = ctx;
   const { time, params } = action;
-  const camTl = cameraController.shake(params);
+  // Keep timing on the master timeline; the engine samples additive shake
+  // envelopes from scene time so seek/reset never destroys scheduled effects.
+  const camTl = gsap.timeline();
+  camTl.call(() => hookSystem.execute('camera:shake', params), undefined, 0);
+  camTl.to({}, { duration: params.duration ?? 0.5 }, 0);
   tl.add(camTl, time);
 }
 

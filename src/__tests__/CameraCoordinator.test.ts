@@ -9,7 +9,7 @@ function createMockCameraController() {
     follow: vi.fn(),
     unfollow: vi.fn(),
     tickFollow: vi.fn(),
-    resetShake: vi.fn(),
+    applyShakeOffset: vi.fn(),
     resetPosition: vi.fn(),
     applyResolvedState: vi.fn(),
     getShakeTimeline: vi.fn().mockReturnValue(null),
@@ -26,10 +26,10 @@ describe('CameraCoordinator', () => {
     coordinator = new CameraCoordinator(controller as any);
   });
 
-  it('sync with no timeline calls unfollow and resetShake', () => {
+  it('sync with no timeline releases follow and clears shake', () => {
     coordinator.sync(1.0, []);
     expect(controller.unfollow).toHaveBeenCalled();
-    expect(controller.resetShake).toHaveBeenCalled();
+    expect(controller.applyShakeOffset).toHaveBeenCalledWith({ x: 0, y: 0 });
   });
 
   it('sync activates follow when time is within a cameraFollow action range', () => {
@@ -49,22 +49,22 @@ describe('CameraCoordinator', () => {
     expect(controller.unfollow).toHaveBeenCalled();
   });
 
-  it('sync with no active shake calls resetShake when a shake action has expired', () => {
+  it('sync clears shake when an envelope has expired', () => {
     const timeline = [
       { action: 'cameraShake', time: 1, params: { duration: 0.5 } },
     ];
     coordinator.sync(2.0, timeline as any);
-    expect(controller.resetShake).toHaveBeenCalled();
+    expect(controller.applyShakeOffset).toHaveBeenCalledWith({ x: 0, y: 0 });
   });
 
-  it('sync kills active shake timeline when a shake has expired', () => {
+  it('sync preserves scheduled shake timelines after an envelope has expired', () => {
     controller.getShakeTimeline.mockReturnValue(controller._mockTimeline as any);
     const timeline = [
       { action: 'cameraShake', time: 1, params: { duration: 0.5 } },
     ];
     coordinator.sync(2.0, timeline as any);
-    expect(controller._mockTimeline.kill).toHaveBeenCalled();
-    expect(controller.resetShake).toHaveBeenCalled();
+    expect(controller._mockTimeline.kill).not.toHaveBeenCalled();
+    expect(controller.applyShakeOffset).toHaveBeenCalledWith({ x: 0, y: 0 });
   });
 
   it('sync uses the last matching cameraFollow when multiple exist', () => {

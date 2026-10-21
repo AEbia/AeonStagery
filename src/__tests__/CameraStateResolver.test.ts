@@ -128,9 +128,6 @@ describe('computeCameraStateAtTime', () => {
 
   it('resolves focus-lowered pan segments against the deterministic character anchor', () => {
     const timeline = [
-      // Open the viewport first (zoom 2 → halfView 0.25) so the head anchor
-      // has room off-center, mirroring moveTo()'s capture-time clamp.
-      { action: 'cameraMotion', time: 1, params: { move: 'zoom', duration: 1, easing: 'linear', target: [0.5, 0.5], zoom: 2 } },
       {
         action: 'cameraMotion',
         time: 2,
@@ -144,12 +141,12 @@ describe('computeCameraStateAtTime', () => {
 
     const done = computeCameraStateAtTime(timeline as any, 4, deps);
     expect(done.position).toEqual({ x: 0.7, y: 0.35 });
-    expect(done.zoom).toBe(2);
+    expect(done.zoom).toBe(1);
     expect(done.coverage.position).toBe(true);
-    expect(done.coverage.zoom).toBe(true);
+    expect(done.coverage.zoom).toBe(false);
   });
 
-  it('clamps character-anchored moves into the segment zoom viewport like moveTo()', () => {
+  it('preserves character focus anchors without a viewport clamp at low zoom', () => {
     const timeline = [
       {
         action: 'cameraMotion',
@@ -162,10 +159,9 @@ describe('computeCameraStateAtTime', () => {
         part === 'head' ? { x: 0.7, y: 0.35 } : { x: 0.5, y: 0.6 },
     };
 
-    // halfView at zoom 1.2 is ≈0.41667: x clamps to 0.58333, y stays.
     const done = computeCameraStateAtTime(timeline as any, 4, deps);
-    expect(done.position.x).toBeCloseTo(0.583333, 5);
-    expect(done.position.y).toBeCloseTo(0.416667, 5);
+    expect(done.position.x).toBeCloseTo(0.7, 5);
+    expect(done.position.y).toBeCloseTo(0.35, 5);
   });
 
   it('resolves zoom-only, rotation-only and tilt motions on their own channels', () => {

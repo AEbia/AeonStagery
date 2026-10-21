@@ -33,7 +33,7 @@ export function LegacyCameraMotionSection(props: LegacyCameraMotionProps) {
     { value: 'zoom', label: '变焦' },
     ...(currentMove === 'dolly' ? [{ value: 'dolly', label: '希区柯克' }] : []),
     { value: 'rotate', label: '旋转' },
-    { value: 'shake', label: '震动' },
+    { value: 'shake', label: '晃动' },
     { value: 'follow', label: '跟随' },
   ];
 
