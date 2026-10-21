@@ -62,7 +62,9 @@ export interface CameraStateResolverDeps {
    * character's framing at the follow statement's own start so the entry
    * transient decays from where playback would have started gliding.
    */
-  resolveCharacterPositionAtTime?: (characterId: string, time: number) => CameraPosition | null;
+  resolveCharacterPositionAtTime?: (characterId: string, time: number, part?: string) => CameraPosition | null;
+  /** Evaluate writes by their compiled property values, not legacy move labels. */
+  compiledChannelOwnership?: boolean;
 }
 
 export const STAGE_DEFAULT_CAMERA_POSITION: CameraPosition = { x: 0.5, y: 0.5 };
@@ -101,13 +103,21 @@ interface TimelineEvent {
   action: RuntimeTimelineAction;
   index: number;
   time: number;
+  sampleTime: number;
 }
 
 function toOrderedEvents(timeline: readonly RuntimeTimelineAction[], time: number): TimelineEvent[] {
-  return timeline
+  const events = timeline
     .map((action, index) => ({ action, index, time: action.time ?? 0 }))
     .filter((event) => event.time <= time)
     .sort((a, b) => a.time - b.time || a.index - b.index);
+  return events.map((event, index) => ({
+    ...event,
+    // Each writer is sampled only until the next statement starts. This
+    // carries the actual takeover value into the later writer, even when the
+    // query lands before either tween has completed.
+    sampleTime: Math.min(time, events[index + 1]?.time ?? time),
+  }));
 }
 
 interface MotionChannels extends CameraPosition { zoom: number; rotation: number }
@@ -131,12 +141,20 @@ export function computeCameraStateAtTime(
   let composedFollowFrame: CameraPosition | null = null;
   const coverage: CameraChannelCoverage = { position: false, zoom: false, rotation: false };
 
-  for (const { action, time: start } of toOrderedEvents(timeline, time)) {
+  const orderedEvents = toOrderedEvents(timeline, time);
+  for (const [eventIndex, event] of orderedEvents.entries()) {
+    const { action, time: start } = event;
+    const sampleTime = deps.compiledChannelOwnership ? time : event.sampleTime;
+    if (deps.compiledChannelOwnership && action.action === 'cameraFollow') {
+      const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+      channels.x = startState.position.x;
+      channels.y = startState.position.y;
+    }
     if (action.action === 'cameraFollow') {
       const params = action.params ?? {};
       if (!params.characterId) continue;
       const duration = typeof params.duration === 'number' && params.duration > 0 ? params.duration : Infinity;
-      follow = time <= start + duration
+      follow = sampleTime <= start + duration
         ? {
             characterId: params.characterId,
             offset: normalizeOffset(params.offset),
@@ -152,13 +170,13 @@ export function computeCameraStateAtTime(
         // was at the follow start.
         const liveAnchor = deps.resolveCharacterPosition?.(follow.characterId) ?? null;
         const releaseAt = Math.min(duration === Infinity ? Infinity : start + duration, findFollowReleaseInstant(timeline, start));
-        const anchor = (releaseAt < time && deps.resolveCharacterPositionAtTime)
+        const anchor = (releaseAt < sampleTime && deps.resolveCharacterPositionAtTime)
           ? deps.resolveCharacterPositionAtTime(follow.characterId, releaseAt) ?? liveAnchor
           : liveAnchor;
         if (anchor) {
           const startAnchor = deps.resolveCharacterPositionAtTime?.(follow.characterId, start) ?? anchor;
           const smoothing = follow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING;
-          const elapsed = Math.max(0, Math.min(time, releaseAt) - start);
+          const elapsed = Math.max(0, Math.min(sampleTime, releaseAt) - start);
           const weight = followTransientWeight(smoothing, elapsed);
           const target = clampPointIntoViewport({ x: anchor.x + follow.offset.x, y: anchor.y + follow.offset.y }, channels.zoom);
           const startTarget = clampPointIntoViewport({ x: startAnchor.x + follow.offset.x, y: startAnchor.y + follow.offset.y }, channels.zoom);
@@ -203,24 +221,53 @@ export function computeCameraStateAtTime(
     if (action.action === 'cameraReset') {
       follow = null;
       composedFollowFrame = null;
-      applyCameraReset(channels, coverage, action.params ?? {}, start, time);
+      if (deps.compiledChannelOwnership) {
+        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+        channels.x = startState.position.x;
+        channels.y = startState.position.y;
+        channels.zoom = startState.zoom;
+        channels.rotation = startState.rotation;
+      }
+      applyCameraReset(channels, coverage, action.params ?? {}, start, sampleTime);
       continue;
     }
 
     if (action.action === 'cameraMotion') {
-      applyCameraMotion(channels, coverage, action.params ?? {}, start, time, deps);
+      if (deps.compiledChannelOwnership) {
+        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+        if (compiledMotionWritesPosition(action.params ?? {})) {
+          channels.x = startState.position.x;
+          channels.y = startState.position.y;
+        }
+        if (compiledMotionWritesZoom(action.params ?? {})) channels.zoom = startState.zoom;
+        if (compiledMotionWritesRotation(action.params ?? {})) channels.rotation = startState.rotation;
+      }
+      if (deps.compiledChannelOwnership && compiledMotionWritesPosition(action.params ?? {})) {
+        follow = null;
+        composedFollowFrame = null;
+      }
+      applyCameraMotion(channels, coverage, action.params ?? {}, start, sampleTime, deps);
       continue;
     }
 
     if (action.action === 'cameraPath') {
-      applyCameraPath(channels, coverage, action.params ?? {}, start, time);
+      if (deps.compiledChannelOwnership) {
+        const startState = computeCameraStateAtTime(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps);
+        if (compiledPathWritesProperty(action.params ?? {}, 'position')) {
+          channels.x = startState.position.x;
+          channels.y = startState.position.y;
+        }
+        if (compiledPathWritesProperty(action.params ?? {}, 'zoom')) channels.zoom = startState.zoom;
+        if (compiledPathWritesProperty(action.params ?? {}, 'rotation')) channels.rotation = startState.rotation;
+      }
+      if (deps.compiledChannelOwnership && compiledPathWritesPosition(action.params ?? {})) {
+        follow = null;
+        composedFollowFrame = null;
+      }
+      applyCameraPath(channels, coverage, action.params ?? {}, start, sampleTime);
       continue;
     }
 
-    if (action.action === 'cameraHitchcock') {
-      applyCameraHitchcock(channels, coverage, action.params ?? {}, start, time, deps);
-      continue;
-    }
   }
 
   if (follow) {
@@ -250,6 +297,37 @@ export function computeCameraStateAtTime(
     follow,
     coverage,
   };
+}
+
+function compiledMotionWritesPosition(params: Record<string, unknown>): boolean {
+  const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
+    ? params.focus as Record<string, unknown>
+    : {};
+  return typeof focus.character === 'string'
+    || params.target !== undefined
+    || params.to !== undefined
+    || params.position !== undefined
+    || focus.point !== undefined;
+}
+
+function compiledMotionWritesZoom(params: Record<string, unknown>): boolean {
+  return params.zoom !== undefined;
+}
+
+function compiledMotionWritesRotation(params: Record<string, unknown>): boolean {
+  return typeof params.angle === 'number' || typeof params.rotation === 'number';
+}
+
+function compiledPathWritesPosition(params: Record<string, unknown>): boolean {
+  return compiledPathWritesProperty(params, 'position');
+}
+
+function compiledPathWritesProperty(params: Record<string, unknown>, property: 'position' | 'zoom' | 'rotation'): boolean {
+  if (!Array.isArray(params.keyframes)) return false;
+  return params.keyframes.some((value: unknown) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    return (value as Record<string, unknown>)[property] !== undefined;
+  });
 }
 
 /**
@@ -299,6 +377,10 @@ function applyCameraMotion(
   time: number,
   deps: CameraStateResolverDeps,
 ): void {
+  if (deps.compiledChannelOwnership) {
+    applyCompiledCameraMotion(channels, coverage, params, start, time, deps);
+    return;
+  }
   const duration = typeof params.duration === 'number' && params.duration > 0 ? params.duration : 1;
   const progress = Math.max(0, Math.min(1, (time - start) / duration));
   if (progress <= 0 && !(start === time)) return;
@@ -311,6 +393,10 @@ function applyCameraMotion(
 
   // Character focus is independent of zoom: only follow/dolly constrain
   // framing to the viewport. Preserve the same authored offsets as moveTo().
+  const resolveFocusAnchor = (characterId: string): CameraPosition | null =>
+    deps.resolveCharacterPositionAtTime
+      ? deps.resolveCharacterPositionAtTime(characterId, start, focusPart)
+      : deps.resolveCharacterPosition?.(characterId, focusPart) ?? null;
   const anchorTarget = (raw: CameraPosition | null, isCharacterAnchored: boolean): CameraPosition | null => {
     if (!raw || !isCharacterAnchored) return raw;
     return {
@@ -324,7 +410,7 @@ function applyCameraMotion(
     case 'pan': {
       const focusCharacter = params.characterId ?? params.focus?.character;
       const target = focusCharacter
-        ? anchorTarget(deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null, true)
+        ? anchorTarget(resolveFocusAnchor(focusCharacter), true)
         : resolvePanTarget(params, from, deps);
       if (target) {
         lerp('x', target.x);
@@ -339,7 +425,7 @@ function applyCameraMotion(
       const fallbackPoint = params.move === 'push' ? { x: 0.5, y: 0.4 } : { x: 0.5, y: 0.5 };
       const focusCharacter = params.characterId ?? params.focus?.character;
       const rawTarget = focusCharacter
-        ? deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null
+        ? resolveFocusAnchor(focusCharacter)
         : normalizePoint(params.focus?.point ?? params.target ?? fallbackPoint);
       const target = anchorTarget(rawTarget, Boolean(focusCharacter));
       if (target) {
@@ -363,7 +449,7 @@ function applyCameraMotion(
       // only ever touches the y channel.
       const focusCharacter = params.characterId ?? params.focus?.character;
       const rawAnchor = focusCharacter
-        ? deps.resolveCharacterPosition?.(focusCharacter, focusPart) ?? null
+        ? resolveFocusAnchor(focusCharacter)
         : params.move === 'zoom'
           ? normalizePoint(params.focus?.point ?? params.target ?? params.position ?? { x: 0.5, y: 0.5 }) // moveTo() fallback point
           : params.focus?.point !== undefined || params.target !== undefined || params.position !== undefined
@@ -430,6 +516,60 @@ function applyCameraMotion(
   }
 }
 
+/** Camera actions lowered from semantic property tracks use independent writes. */
+function applyCompiledCameraMotion(
+  channels: MotionChannels,
+  coverage: CameraChannelCoverage,
+  params: Record<string, unknown>,
+  start: number,
+  time: number,
+  deps: CameraStateResolverDeps,
+): void {
+  const duration = typeof params.duration === 'number' && params.duration >= 0 ? params.duration : 1;
+  const progress = duration === 0 ? 1 : Math.max(0, Math.min(1, (time - start) / duration));
+  if (time < start) return;
+  const ease = typeof params.easing === 'string' ? params.easing : 'smooth';
+  const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
+  const focus = params.focus && typeof params.focus === 'object' && !Array.isArray(params.focus)
+    ? params.focus as Record<string, unknown>
+    : {};
+  const characterId = typeof focus.character === 'string' ? focus.character : undefined;
+  const part = typeof focus.part === 'string' ? focus.part : DEFAULT_CAMERA_FOCUS_PART;
+  const rawPosition = params.target ?? params.to ?? params.position ?? focus.point;
+  const point = rawPosition === undefined ? null : normalizePoint(rawPosition);
+  const anchor = characterId
+    ? deps.resolveCharacterPositionAtTime
+      ? deps.resolveCharacterPositionAtTime(characterId, start, part)
+      : deps.resolveCharacterPosition?.(characterId, part) ?? null
+    : null;
+  const positionTarget = anchor
+    ? { x: anchor.x + (Number(focus.offsetX) || 0), y: anchor.y + (Number(focus.offsetY) || 0) }
+    : point;
+
+  if (characterId || point) {
+    if (positionTarget) {
+      channels.x += (positionTarget.x - channels.x) * weight;
+      channels.y += (positionTarget.y - channels.y) * weight;
+      coverage.position = true;
+    }
+  }
+
+  if (params.zoom !== undefined) {
+    const zoomTo = resolveZoomValue(params.zoom, channels.zoom);
+    if (zoomTo !== undefined) {
+      channels.zoom += (zoomTo - channels.zoom) * weight;
+      coverage.zoom = true;
+    }
+  }
+  const rotation = typeof params.angle === 'number'
+    ? params.angle
+    : typeof params.rotation === 'number' ? params.rotation : undefined;
+  if (rotation !== undefined) {
+    channels.rotation += (rotation - channels.rotation) * weight;
+    coverage.rotation = true;
+  }
+}
+
 /**
  * Evaluate a camera path: keyframes are relative to the action start, each
  * segment animates only the fields its keyframe defines, and per-keyframe
@@ -452,110 +592,72 @@ function applyCameraPath(
   if (keyframes.some((kf) => kf.zoom !== undefined)) coverage.zoom = true;
   if (keyframes.some((kf) => kf.rotation !== undefined)) coverage.rotation = true;
 
-  const local = time - start;
-  const setFields = (target: MotionChannels, kf: Record<string, any>) => {
-    const point = kf.position !== undefined ? normalizePoint(kf.position) : null;
-    if (point) { target.x = point.x; target.y = point.y; }
-    if (Number.isFinite(kf.zoom)) target.zoom = kf.zoom;
-    if (Number.isFinite(kf.rotation)) target.rotation = kf.rotation;
+  let local = time - start;
+  const duration = Number(keyframes[keyframes.length - 1].time);
+  if (duration > 0) {
+    const repeatValue = params.repeat;
+    const infinite = params.loop === true || repeatValue === -1;
+    const repeatCount = typeof repeatValue === 'number' && Number.isInteger(repeatValue) && repeatValue > 0
+      ? repeatValue
+      : 0;
+    const plays = infinite ? Infinity : repeatCount + 1;
+    if (local >= duration && (infinite || local < duration * plays)) {
+      const cycle = Math.floor(local / duration);
+      local %= duration;
+      if (params.yoyo === true && cycle % 2 === 1) local = duration - local;
+    } else if (!infinite && local >= duration * plays) {
+      local = params.yoyo === true && plays % 2 === 0 ? 0 : duration;
+    }
+  }
+  const sampleProperty = (
+    property: 'position' | 'zoom' | 'rotation',
+    initial: number | CameraPosition,
+  ): number | CameraPosition => {
+    const track = keyframes.filter((keyframe) => {
+      if (property === 'position') return keyframe.position !== undefined;
+      return Number.isFinite(keyframe[property]);
+    });
+    let value = initial;
+    let previousTime = 0;
+    for (const keyframe of track) {
+      const keyTime = Number(keyframe.time);
+      const rawTarget = property === 'position' ? normalizePoint(keyframe.position) : Number(keyframe[property]);
+      if (rawTarget === null || (typeof rawTarget === 'number' && !Number.isFinite(rawTarget))) continue;
+      if (local >= keyTime) {
+        value = rawTarget;
+        previousTime = keyTime;
+        continue;
+      }
+      if (keyTime > previousTime) {
+        const progress = Math.max(0, Math.min(1, (local - previousTime) / (keyTime - previousTime)));
+        const ease = typeof keyframe.ease === 'string'
+          ? keyframe.ease
+          : typeof params.ease === 'string' ? params.ease : 'power2.inOut';
+        const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
+        if (typeof value === 'number' && typeof rawTarget === 'number') {
+          return value + (rawTarget - value) * weight;
+        }
+        if (typeof value !== 'number' && typeof rawTarget !== 'number') {
+          return {
+            x: value.x + (rawTarget.x - value.x) * weight,
+            y: value.y + (rawTarget.y - value.y) * weight,
+          };
+        }
+      }
+      break;
+    }
+    return value;
   };
 
-  const current: MotionChannels = { x: channels.x, y: channels.y, zoom: channels.zoom, rotation: channels.rotation };
-  setFields(current, keyframes[0]);
-
-  let prevTime = Number(keyframes[0].time);
-  for (let i = 1; i < keyframes.length; i++) {
-    const kf = keyframes[i];
-    const segmentEnd = Number(kf.time);
-    if (local >= segmentEnd) {
-      setFields(current, kf);
-      prevTime = segmentEnd;
-      continue;
-    }
-    if (local > prevTime) {
-      // Active segment: defined fields ease from the carried values.
-      const progress = (local - prevTime) / Math.max(0.000001, segmentEnd - prevTime);
-      const from: MotionChannels = { ...current };
-      const ease = typeof kf.ease === 'string'
-        ? kf.ease
-        : typeof params.ease === 'string' ? params.ease : 'power2.inOut';
-      const point = kf.position !== undefined ? normalizePoint(kf.position) : null;
-      if (point) {
-        current.x = from.x + (point.x - from.x) * evaluateCharacterEase(ease, progress, 'power2.inOut');
-        current.y = from.y + (point.y - from.y) * evaluateCharacterEase(ease, progress, 'power2.inOut');
-      }
-      if (Number.isFinite(kf.zoom)) {
-        current.zoom = from.zoom + (kf.zoom - from.zoom) * evaluateCharacterEase(ease, progress, 'power2.inOut');
-      }
-      if (Number.isFinite(kf.rotation)) {
-        current.rotation = from.rotation + (kf.rotation - from.rotation) * evaluateCharacterEase(ease, progress, 'power2.inOut');
-      }
-    }
-    break;
+  const position = sampleProperty('position', { x: channels.x, y: channels.y });
+  if (typeof position !== 'number') {
+    channels.x = position.x;
+    channels.y = position.y;
   }
-
-  channels.x = current.x;
-  channels.y = current.y;
-  channels.zoom = current.zoom;
-  channels.rotation = current.rotation;
-}
-
-/**
- * Hitchcock dolly zoom: zoom tweens zStart→zEnd while the position channel
- * keeps the focus part pinned to its screen point —
- *   S(t)·Z(t) = scaleStart·zoomStart (constant)
- *   y(t) = (Py − S(t)) + (0.5 − Sy) / Z(t)
- * mirroring CameraController.hitchcockZoom() with deterministic anchors.
- */
-function applyCameraHitchcock(
-  channels: MotionChannels,
-  coverage: CameraChannelCoverage,
-  params: Record<string, any>,
-  start: number,
-  time: number,
-  deps: CameraStateResolverDeps,
-): void {
-  const duration = typeof params.duration === 'number' && params.duration > 0 ? params.duration : 2;
-  const progress = Math.max(0, Math.min(1, (time - start) / duration));
-  if (progress <= 0 && !(start === time)) return;
-
-  const eased = evaluateCharacterEase(
-    typeof params.easing === 'string' ? params.easing : 'smooth',
-    progress,
-    'power3.inOut',
-  );
-
-  const zoomStart = Number.isFinite(params.zoomStart) ? params.zoomStart : 1;
-  const zoomEnd = Number.isFinite(params.zoomEnd) ? params.zoomEnd : 1.5;
-  const zoom = zoomStart + (zoomEnd - zoomStart) * eased;
-
-  const scaleStart = Number.isFinite(params.scaleStart) ? params.scaleStart : 1;
-  const hitchcockConstant = scaleStart * zoomStart;
-  const scale = zoom !== 0 ? hitchcockConstant / zoom : hitchcockConstant;
-  const screenTarget = normalizePoint(params.screenTarget ?? { x: 0.5, y: 0.3 }) ?? { x: 0.5, y: 0.3 };
-
-  const characterId = params.characterId ?? params.focus?.character;
-  const headAnchor = characterId
-    ? deps.resolveCharacterPosition?.(characterId, params.targetPart ?? DEFAULT_CAMERA_FOCUS_PART) ?? null
-    : null;
-  const bodyAnchor = characterId
-    ? deps.resolveCharacterPosition?.(characterId) ?? null
-    : null;
-  // The handler falls back to Py = 1.0 when the model anchor is unavailable.
-  const bodyY = bodyAnchor ? bodyAnchor.y : 1.0;
-
-  let targetY = (bodyY - scale) + (0.5 - screenTarget.y) / zoom;
-  let targetX = headAnchor ? headAnchor.x : channels.x;
-
-  channels.zoom = zoom;
-  coverage.zoom = true;
-  coverage.position = true;
-
-  const halfView = 0.5 / (zoom > 0 ? zoom : 1);
-  targetX = Math.max(halfView, Math.min(targetX, 1 - halfView));
-  targetY = Math.max(halfView, Math.min(targetY, 1 - halfView));
-  channels.x = targetX;
-  channels.y = targetY;
+  const zoom = sampleProperty('zoom', channels.zoom);
+  if (typeof zoom === 'number') channels.zoom = zoom;
+  const rotation = sampleProperty('rotation', channels.rotation);
+  if (typeof rotation === 'number') channels.rotation = rotation;
 }
 
 function normalizePoint(value: unknown): CameraPosition | null {  const point = resolveVec2(value as any);

@@ -38,11 +38,33 @@ vi.mock('../api/hooks', () => ({
 import { cameraController } from '../engine/CameraController';
 import { actionSchedulers } from '../engine/actions';
 import { CameraCoordinator } from '../engine/coordinators/CameraCoordinator';
+import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('camera reset seek parity (playback vs direct seek)', () => {
   afterEach(() => {
     gsap.globalTimeline.clear();
     vi.clearAllMocks();
+  });
+
+  it('releases earlier shake envelopes at reset and keeps later envelopes active', () => {
+    cameraController.init();
+    const timeline: RuntimeTimelineAction[] = [
+      { action: 'cameraShake', time: 0, params: { intensity: 0.8, frequency: 12, duration: 2 }, _id: 'shake-before' },
+      { action: 'cameraReset', time: 0.5, params: { duration: 0 }, _id: 'reset' },
+      { action: 'cameraShake', time: 0.75, params: { intensity: 0.8, frequency: 12, duration: 2 }, _id: 'shake-after' },
+    ];
+    const coordinator = new CameraCoordinator(cameraController);
+
+    coordinator.sync(0.25, timeline);
+    const beforeReset = cameraController.getState().shakeOffset ?? { x: 0, y: 0 };
+    expect(Math.abs(beforeReset.x) + Math.abs(beforeReset.y)).toBeGreaterThan(0);
+
+    coordinator.sync(0.6, timeline);
+    expect(cameraController.getState().shakeOffset ?? { x: 0, y: 0 }).toEqual({ x: 0, y: 0 });
+
+    coordinator.sync(1, timeline);
+    const afterReset = cameraController.getState().shakeOffset ?? { x: 0, y: 0 };
+    expect(Math.abs(afterReset.x) + Math.abs(afterReset.y)).toBeGreaterThan(0);
   });
 
   it('presents the transition state when seeking to the camera reset statement or mid-reset duration', () => {

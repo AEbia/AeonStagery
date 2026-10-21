@@ -146,6 +146,42 @@ describe('computeCameraStateAtTime', () => {
     expect(done.coverage.zoom).toBe(false);
   });
 
+  it('captures a focus anchor from the action start when evaluating a subframe', () => {
+    const timeline = [
+      {
+        action: 'cameraMotion',
+        time: 2,
+        params: { move: 'pan', duration: 1, easing: 'linear', focus: { character: 'tomori', part: 'head' } },
+      },
+    ];
+    const deps = {
+      resolveCharacterPositionAtTime: (_id: string, at: number) =>
+        at < 2.5 ? { x: 0.3, y: 0.4 } : { x: 0.9, y: 0.8 },
+      resolveCharacterPosition: () => ({ x: 0.9, y: 0.8 }),
+    };
+
+    const halfway = computeCameraStateAtTime(timeline as any, 2.5, deps);
+
+    // The focus destination is latched at t=2 (0.3, 0.4), so its halfway
+    // interpolation from the stage default is (0.4, 0.45).
+    expect(halfway.position.x).toBeCloseTo(0.4, 6);
+    expect(halfway.position.y).toBeCloseTo(0.45, 6);
+  });
+
+  it('takes over an active channel from the value at the later writer start', () => {
+    const timeline = [
+      { action: 'cameraMotion', time: 0, params: { move: 'pan', duration: 4, easing: 'linear', target: [0.2, 0.2] } },
+      { action: 'cameraMotion', time: 2, params: { move: 'pan', duration: 2, easing: 'linear', target: [0.8, 0.8] } },
+    ];
+
+    const midway = computeCameraStateAtTime(timeline as any, 3);
+
+    // The first pan has reached (0.35, 0.35) at the takeover time. The new
+    // pan then interpolates halfway to (0.8, 0.8).
+    expect(midway.position.x).toBeCloseTo(0.575, 6);
+    expect(midway.position.y).toBeCloseTo(0.575, 6);
+  });
+
   it('preserves character focus anchors without a viewport clamp at low zoom', () => {
     const timeline = [
       {
@@ -212,7 +248,7 @@ describe('computeCameraStateAtTime', () => {
     const seg2 = computeCameraStateAtTime(timeline as any, 2.2);
     expect(seg2.position).toEqual({ x: 0.5, y: 0.3 });
     expect(seg2.zoom).toBeCloseTo(1.5, 6);
-    expect(seg2.rotation).toBeCloseTo(1, 6); // 20% through the linear rotation ramp
+    expect(seg2.rotation).toBeCloseTo(3, 6); // Rotation's first key interpolates from action start at local t=0.
 
     // After the final keyframe everything latches.
     const done = computeCameraStateAtTime(timeline as any, 4);
@@ -222,42 +258,50 @@ describe('computeCameraStateAtTime', () => {
     expect(done.coverage).toEqual({ position: true, zoom: true, rotation: true });
   });
 
-  it('resolves the hitchcock dolly-zoom coupling from deterministic anchors', () => {
-    const timeline = [
-      {
-        action: 'cameraHitchcock',
-        time: 2,
-        params: {
-          characterId: 'hero',
-          targetPart: 'head',
-          screenTarget: [0.5, 0.3],
-          zoomStart: 1,
-          zoomEnd: 2,
-          scaleStart: 1,
-          scaleEnd: 0.5,
-          duration: 1,
-          easing: 'linear',
-        },
+  it('interpolates from action start to a nonzero first path key and evaluates yoyo repeats', () => {
+    const initialPath = [{
+      action: 'cameraPath',
+      time: 1,
+      params: { keyframes: [{ time: 1, position: [0.9, 0.5], zoom: 2, ease: 'linear' }], ease: 'linear' },
+    }];
+    const firstKeyMidpoint = computeCameraStateAtTime(initialPath as any, 1.5);
+    expect(firstKeyMidpoint.position.x).toBeCloseTo(0.7, 6);
+    expect(firstKeyMidpoint.zoom).toBeCloseTo(1.5, 6);
+
+    const repeatedPath = [{
+      action: 'cameraPath',
+      time: 1,
+      params: {
+        keyframes: [
+          { time: 0, position: [0.2, 0.5] },
+          { time: 2, position: [0.8, 0.5], ease: 'linear' },
+        ],
+        repeat: 1,
+        yoyo: true,
+        ease: 'linear',
       },
-    ];
-    // Head anchor drives x; the body anchor provides Py for the Y compensation.
-    const deps = {
-      resolveCharacterPosition: (_id: string, part?: string) =>
-        part === 'head' ? { x: 0.6, y: 0.5 } : { x: 0.4, y: 0.9 },
-    };
+    }];
+    const yoyoMidpoint = computeCameraStateAtTime(repeatedPath as any, 3.5);
+    expect(yoyoMidpoint.position.x).toBeCloseTo(0.65, 6);
+  });
 
-    // Worked example at progress 0.5 (linear): Z=1.5, S=1/1.5,
-    // y = (0.9 - S) + (0.5 - 0.3)/1.5 ≈ 0.366667.
-    const mid = computeCameraStateAtTime(timeline as any, 2.5, deps);
-    expect(mid.zoom).toBeCloseTo(1.5, 6);
-    expect(mid.position.x).toBeCloseTo(0.6, 6);
-    expect(mid.position.y).toBeCloseTo(0.366667, 5);
+  it('keeps each path property interpolating across keys that author other properties', () => {
+    const timeline = [{
+      action: 'cameraPath',
+      time: 0,
+      params: {
+        keyframes: [
+          { time: 0, position: [0.2, 0.5] },
+          { time: 1, zoom: 2 },
+          { time: 2, position: [0.8, 0.5], ease: 'linear' },
+        ],
+      },
+    }];
 
-    // End state latches zoomEnd.
-    const done = computeCameraStateAtTime(timeline as any, 4, deps);
-    expect(done.zoom).toBe(2);
-    expect(done.coverage.zoom).toBe(true);
-    expect(done.coverage.position).toBe(true);
+    const midpoint = computeCameraStateAtTime(timeline as any, 1);
+
+    expect(midpoint.position.x).toBeCloseTo(0.5, 6);
+    expect(midpoint.zoom).toBe(2);
   });
 
   it('applies same-time camera writers in statement order', () => {

@@ -2,8 +2,8 @@ import type { CameraShakeConfig } from '../api/types/camera';
 import type { RuntimeTimelineAction } from './RuntimeTimelineScene';
 
 export interface CameraShakeOffset {
-  x: number;
-  y: number;
+  readonly x: number;
+  readonly y: number;
 }
 
 /** A repeatable sample in stage pixels, independent of playback history. */
