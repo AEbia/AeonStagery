@@ -33,7 +33,7 @@ import type { TransformationProxy } from './actions/types';
 import type { RimLightStyleState } from '../api/types/visual';
 import { SnapshotStore } from './SnapshotStore';
 import { preBakeDaemon } from './daemons/PreBakeDaemon';
-import { CameraCoordinator } from './coordinators/CameraCoordinator';
+import { CameraCoordinator, usesUnifiedCameraChannels } from './coordinators/CameraCoordinator';
 import type { CameraStateResolverDeps } from './CameraStateResolver';
 import { computeCameraShakeAtTime } from './CameraShake';
 import { createStageAnchorResolver } from './cameraAnchorResolver';
@@ -138,6 +138,13 @@ class ScriptEngine {
     await updating;
   }
   getCurrentCamera(): CameraState {
+    const timeline = this.currentScene?.timeline;
+    if (timeline && usesUnifiedCameraChannels(timeline)) {
+      this.cameraCoordinator.sync(this.masterTimeline?.time() ?? 0, timeline, {
+        logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
+      });
+      return cameraController.getState();
+    }
     cameraController.applyShakeOffset(computeCameraShakeAtTime(
       this.currentScene?.timeline ?? [], this.masterTimeline?.time() ?? 0,
     ));
@@ -522,6 +529,7 @@ class ScriptEngine {
       backgroundProxy: this.backgroundProxy,
       isReconstructing: () => this.isReconstructing,
       environmentStateDriven: true,
+      cameraStateDriven: usesUnifiedCameraChannels(this.currentScene?.timeline ?? []),
       isPlaying: () => this.playing,
       audioElements: {
         set: (key: string, entry: { audio: HTMLAudioElement; startTime: number; duration: number }) =>

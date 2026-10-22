@@ -620,9 +620,9 @@ class CameraController {
   }
 
   /**
-   * Hard-set the given camera channels in place (CameraCoordinator baseline
-   * restoration). Only patched keys are written; object references are kept
-   * so live GSAP tweens stay connected to the state.
+   * Consume scene-time evaluation in place. Formal anchor-independent actions
+   * schedule timing/events only, so these channels have no competing tween.
+   * References are kept for the legacy role runtime and standalone previews.
    */
   applyResolvedState(patch: {
     position?: { x: number; y: number };

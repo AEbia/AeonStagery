@@ -2,6 +2,24 @@ import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
 import type { CameraFollowConfig } from '../../api/types/camera';
 import { computeCameraStateAtTime, type CameraStateResolverDeps } from '../CameraStateResolver';
 import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
+import { evaluateCameraChannels, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
+
+/** Transitional boundary: role framing still needs the live-anchor runtime. */
+export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineAction[]): boolean {
+  return !timeline.some(({ action, params }) => {
+    if (action === 'cameraFollow' || action === 'cameraUnfollow' || action === 'cameraHitchcock') return true;
+    if (action !== 'cameraMotion') return false;
+    const focus: unknown = params.focus;
+    return params.move === 'follow' || params.move === 'dolly'
+      || typeof params.characterId === 'string' || typeof params.targetCharacter === 'string'
+      || (typeof focus === 'object' && focus !== null && 'character' in focus
+        && typeof focus.character === 'string');
+  });
+}
+
+interface CameraCoordinatorDeps extends CameraStateResolverDeps {
+  logicalReferenceSize?: CameraLogicalReferenceSize;
+}
 
 interface ResolvedStatePatch {
   position?: { x: number; y: number };
@@ -29,16 +47,27 @@ export class CameraCoordinator {
    * Scan the timeline at the given time and determine the correct
    * camera follow + shake state.
    *
-   * Channel lifecycle authority is the deterministic camera state resolver
-   * (KSM-0003 runtime parity gate): channels no writer covers at/before the
-   * query time are restored to their stage baseline instead of keeping
-   * whatever a GSAP tween or the follow ticker last left behind.
+   * Anchor-independent scenes share one authority for playback and seek.
+   * Role-dependent scenes retain live focus/follow until historical anchor
+   * preparation is wired into this runtime boundary.
    */
   sync(
     time: number,
     timeline: readonly RuntimeTimelineAction[],
-    deps: CameraStateResolverDeps = {},
-  ): void {
+    deps: CameraCoordinatorDeps = {},
+  ): CameraEvaluationOutput | undefined {
+    if (usesUnifiedCameraChannels(timeline)) {
+      const resolved = evaluateCameraChannels({
+        timeline,
+        sceneTime: time,
+        logicalReferenceSize: deps.logicalReferenceSize ?? { width: 1920, height: 1080 },
+        anchorTrajectories: [],
+      });
+      this.controller.unfollow();
+      this.controller.applyShakeOffset(resolved.shake);
+      this.controller.applyResolvedState(resolved);
+      return resolved;
+    }
     const resolved = computeCameraStateAtTime(timeline, time, deps);
 
     // 1. Reconcile Camera Follow (ticker stays registered so forward playback
@@ -69,5 +98,6 @@ export class CameraCoordinator {
       zoom: resolved.zoom,
       rotation: resolved.rotation,
     });
+    return undefined;
   }
 }

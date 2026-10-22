@@ -3,6 +3,30 @@ import { cameraController } from '../CameraController';
 import { hookSystem } from '../../api/hooks';
 import type { SchedulerContext } from './types';
 import type { CameraMotionConfig } from '../../api/types/camera';
+import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
+
+/** Keep scene timing and hooks without allocating a second camera writer. */
+function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineAction): boolean {
+  if (!ctx.cameraStateDriven) return false;
+  const { params } = action;
+  let duration = typeof params.duration === 'number' ? params.duration
+    : typeof params.durationSeconds === 'number' ? params.durationSeconds : 1;
+  if (action.action === 'cameraPath' && Array.isArray(params.keyframes)) {
+    const keyframes: readonly { time?: number }[] = params.keyframes;
+    const period = keyframes.reduce((end, frame) => Math.max(end, frame.time ?? 0), 0);
+    const repeats = typeof params.repeat === 'number' && params.repeat >= 0 ? params.repeat : 0;
+    duration = Math.max(duration, period * (params.loop === true ? 1 : repeats + 1));
+  }
+  const segment = gsap.timeline();
+  if (action.action !== 'cameraReset') {
+    segment.call(() => hookSystem.execute('camera:move', action.action === 'cameraPath'
+      ? { type: 'path', keyframes: params.keyframes, config: params }
+      : { type: 'motion', config: params }), undefined, 0);
+  }
+  segment.to({}, { duration: Math.max(0, duration) }, 0);
+  ctx.tl.add(segment, action.time ?? 0);
+  return true;
+}
 
 // ── Backward-compat: route cameraFollow through executeMotion ──
 
@@ -30,7 +54,8 @@ export function scheduleCameraFollow(ctx: SchedulerContext, action: { time?: num
   tl.add(camTl, time);
 }
 
-export function scheduleCameraPath(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraPath(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time, params } = action;
   const camTl = cameraController.createPath(params.keyframes, { defaultEase: params.ease, loop: params.loop, repeat: params.repeat, yoyo: params.yoyo });
@@ -56,7 +81,8 @@ export function scheduleCameraUnfollow(ctx: SchedulerContext, action: { time?: n
   tl.add(camTl, time);
 }
 
-export function scheduleCameraReset(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraReset(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time, params } = action;
   const duration = typeof params.duration === 'number'
@@ -76,9 +102,10 @@ export function scheduleCameraHitchcock(ctx: SchedulerContext, action: { time?: 
   tl.add(camTl, time);
 }
 
-export function scheduleCameraMotion(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraMotion(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time, params } = action;
-  const camTl = cameraController.executeMotion(params as any);
+  const camTl = cameraController.executeMotion(params as CameraMotionConfig);
   tl.add(camTl, time);
 }
