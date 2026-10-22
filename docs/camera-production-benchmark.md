@@ -1,9 +1,27 @@
 # 摄像机生产精度与准备成本
 
-> 本文已保存的原始结果测量于脚部原点与 Bake 职责修正之前。它们保留为当时算法的性能和数值证据，不能证明修正后的构图或成本。当前 Bake 只产出 Live2D 快照，相机历史由独立 `CameraAnchorSampler` 准备；下面关于 Bake 输出相机状态的叙述仅描述历史测量版本。当前可复跑入口已按职责拆分，构图回归由真实 anchor→pivot 语义的正式场景测试覆盖。
+> 早期原始结果测量于脚部原点与 Bake 职责修正之前，保留为历史证据；下面关于 Bake 输出相机状态的旧叙述只描述当时版本。当前 Bake 只产出 Live2D 快照。修正后的真实 Core、实际像素与编码补充结果见本页“回归修正后的测量”，不能与旧结果混为一次测量。
 
 
 生产规则为固定 15 Hz 角色锚点准备、额外捕获角色变换起止点与精确不连续事件、960 Hz 历史积分、一秒检查点。输出 fps 不参与这些参数的选择。语义和生命周期以 [ADR-0038](adr/0038-unified-camera-evaluation.md) 为准。
+
+## 回归修正后的测量
+
+正式交互按镜头需求取样：当前时间没有角色锚点需求时不创建采样器；聚焦仅需要动作起点，跟随只准备实际持有区间，并保留姿态切换边界。跨空档的原生动作重建到自身偏移，曲线动作按绝对时间求值；不按 15 Hz 回放整段空档。模型加载与有效跟随历史仍有成本，不能把这一策略解释成任意时间首次查询都没有等待。
+
+[按需真实 Core 结果](benchmarks/camera-demand-production-node24.json) 使用十分钟场景、真实角色、资源动作、离场与重现，在第 590 秒聚焦头部。首次打开约 388 ms，前段普通 Seek 约 23 ms，晚段聚焦 Seek 约 286 ms，后者提交 17 次 Core 更新；相机与同刻可见头部的观测误差约 `3.4e-14` 创作单位。输入裁剪了动作目录、关闭物理和自动眨眼；这是单个真实模型的观测，不是其他模型、物理系统或硬件的延迟保证。
+
+```sh
+AEON_CAMERA_BENCHMARK=1 AEON_CAMERA_BENCHMARK_DEMAND_ONLY=1 \
+AEON_CAMERA_BENCHMARK_OUTPUT=.superpowers/sdd/camera-demand-production.json \
+npx vitest run --pool=forks --maxWorkers=1 src/__benchmarks__/CameraProduction.test.ts
+```
+
+[真实渲染和编码补充](benchmarks/camera-production-browser-export-regression-node24.json) 使用修正后原点及快照职责，主动准备完整十分钟轨迹，以便与早期基准使用相同输入。完整准备约 47.5 s，不代表按需初次打开的耗时，也明确显示长段跟随首次完整准备仍然昂贵。Chromium 151 / ANGLE SwiftShader 的实际播放与 Seek 同刻误差为零；640×360、24 fps 的一秒导出实际渲染、编码、解码均为 24 帧，24 个不同图像哈希。测得约 8.43 fps，包含验证、读回、复制和哈希开销；不是桌面 GPU 吞吐或原生 Electron IPC 性能承诺。复跑使用下文的 `AEON_CAMERA_BENCHMARK_SUPPLEMENT=1` 命令，不设置诊断轨迹缓存。
+
+[环境、图片和固定 UI 像素证据](benchmarks/camera-capture-pixels-node24.json) 来自正式场景加载、awaited Seek、真实 Pixi WebGL 渲染及 `RawPixelsBackend` 读回。640×360 和 1280×720 两种输出密度下，环境为绿色、投影后的图片中心为红色、独立 UI 为蓝色，图片原先未投影的位置仍为绿色；图片在捕获渲染前已挂载。没有替换渲染器，也没有浏览器视觉检查。运行 `AEON_CAMERA_PIXEL_TEST=1 npx vitest run --pool=forks --maxWorkers=1 src/__tests__/CameraCapturePixels.test.ts` 可复现；该测试替换编码接收端，不能据此报告视频编码速度。
+
+位置、旋转、跟随、reset、路径的长前缀重复计算也已收敛：只求当前属性的贡献写入者，起点仍读取完整语句前缀。[同输入前后原始结果](benchmarks/camera-writer-prefix-node24.json) 覆盖 64/128/256 个重叠写入者及七次暖查询。256 个写入者时，暖查询中位数分别从约 114/108/314/144/180 ms 降至 7.0/8.7/5.2/5.2/8.4 ms；15 组输出差均小于 `1e-10`。仍有前缀排序、切片与历史积分成本，不能称为整体线性算法。当前版本可运行 `npx tsx src/__benchmarks__/cameraWriterPrefixBenchmark.ts`；旧结果对应 `b415de2` 的求值器。
 
 ## 可重跑测量
 

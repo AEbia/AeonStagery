@@ -1,0 +1,202 @@
+{
+  "policy": "current-browser-supplement",
+  "preparationPolicy": "production",
+  "browserAlgorithmSource": "current-worktree Vite module graph; Node Vitest baseline mock is not applied",
+  "environment": {
+    "node": "v24.21.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13650HX",
+    "gc": false
+  },
+  "input": {
+    "fixture": {
+      "prunedMotionCatalog": true,
+      "physics": false,
+      "autoEyeBlink": false
+    },
+    "preparedModelReferences": [
+      {
+        "kind": "prepared-asset-reference",
+        "unavailable": false,
+        "sourceScheme": "file",
+        "runtimeUriScheme": "file"
+      },
+      {
+        "kind": "prepared-asset-reference",
+        "unavailable": false,
+        "sourceScheme": "file",
+        "runtimeUriScheme": "file"
+      }
+    ],
+    "duration": 600,
+    "motionMeta": {
+      "Duration": 4.633,
+      "Fps": 30,
+      "Loop": true,
+      "AreBeziersRestricted": true,
+      "FadeInTime": 1,
+      "FadeOutTime": 1,
+      "CurveCount": 67,
+      "TotalSegmentCount": 162,
+      "TotalPointCount": 381,
+      "UserDataCount": 0,
+      "TotalUserDataSize": 0
+    },
+    "modelCount": 3,
+    "coreFrames": 9012,
+    "trackCount": 5,
+    "samples": 44865
+  },
+  "timingsMs": {
+    "loadIncludingPreparation": 47699.856784,
+    "preparation": 47510.877621
+  },
+  "diagnosticTrackReuse": false,
+  "normalPlaybackAndEncodedExport": {
+    "playback": {
+      "sceneStartTime": 9.95,
+      "requestedSceneEndTime": 10.15,
+      "actualSceneEndTime": 10.158,
+      "elapsedMs": 156.60000000149012,
+      "updateCount": 10,
+      "maxSameTimeCompositionUnits": 0,
+      "maxSameTimeZoom": 0,
+      "maxSameTimeRotation": 0,
+      "seekParityCompositionUnits": 0,
+      "seekParityZoom": 0,
+      "seekParityRotation": 0
+    },
+    "backend": "RawPixelsBackend",
+    "renderer": "Pixi WebGL",
+    "maxCaptureClockSkewSeconds": 3.333333431498886e-08,
+    "adjacentFrameChangedPixels": {
+      "min": 29670,
+      "max": 128959
+    },
+    "firstFrameNonzeroPixelCount": 230400,
+    "firstFramePixelsDistinctFromCorner": 69394,
+    "modelState": {
+      "characterPresent": true,
+      "characterPresentBeforeCapture": true,
+      "snapshotAvailable": true,
+      "uniqueParameterSnapshots": 24,
+      "parameterCount": 186,
+      "modelReferenceKind": "string",
+      "modelReferenceUsesFixtureRoute": true,
+      "visibleModelBounds": {
+        "first": {
+          "x": 587.8622255171288,
+          "y": -536.5262224956939,
+          "width": 744.3565870421703,
+          "height": 2151.922899033766
+        },
+        "last": {
+          "x": 584.2972620491023,
+          "y": -873.9772785316023,
+          "width": 744.348129235934,
+          "height": 2152.3328946573843
+        }
+      },
+      "visibleModelBoundsIntersectStage": true
+    },
+    "frameSeekSamples": [
+      {
+        "requestedTime": 10,
+        "beforeTime": 10,
+        "afterTime": 10
+      },
+      {
+        "requestedTime": 10,
+        "beforeTime": 10,
+        "afterTime": 10
+      },
+      {
+        "requestedTime": 10.041666666666666,
+        "beforeTime": 10,
+        "afterTime": 10.0416667
+      },
+      {
+        "requestedTime": 10.875,
+        "beforeTime": 10.8333333,
+        "afterTime": 10.875
+      },
+      {
+        "requestedTime": 10.916666666666666,
+        "beforeTime": 10.875,
+        "afterTime": 10.9166667
+      },
+      {
+        "requestedTime": 10.958333333333334,
+        "beforeTime": 10.9166667,
+        "afterTime": 10.9583333
+      }
+    ],
+    "frameCount": 24,
+    "fps": 24,
+    "width": 640,
+    "height": 360,
+    "elapsedMs": 2845.2999999970198,
+    "encodedFramesPerSecond": 8.434962921317661,
+    "renderedFrameCount": 24,
+    "uniqueRenderedFrameHashes": 24,
+    "maxCameraParityCompositionUnits": 0,
+    "maxCameraParityZoom": 0,
+    "maxCameraParityRotation": 0,
+    "encodedSizeBytes": 202184,
+    "fixtureRequests": {
+      "core.js": 1,
+      "model.model3.json": 4,
+      "texture-1.png": 1,
+      "model.moc3": 2,
+      "texture-0.png": 1,
+      "motion-0.json": 1
+    },
+    "fixtureRequestSchemes": {
+      "core.js:http": 1,
+      "model.model3.json:http": 4,
+      "texture-1.png:http": 1,
+      "model.moc3:http": 2,
+      "texture-0.png:http": 1,
+      "motion-0.json:http": 1
+    },
+    "fixtureResponseStatuses": {
+      "core.js:200": 1,
+      "model.model3.json:200": 4,
+      "texture-1.png:200": 1,
+      "model.moc3:200": 2,
+      "texture-0.png:200": 1,
+      "motion-0.json:200": 1
+    },
+    "fixtureRequestFailures": {},
+    "assetTransport": {
+      "rewriteCount": 7,
+      "kinds": {
+        "fetch": 3,
+        "xhr": 4,
+        "image": 0
+      },
+      "aliases": {
+        "model.model3.json": 2,
+        "texture-1.png": 1,
+        "model.moc3": 2,
+        "texture-0.png": 1,
+        "motion-0.json": 1
+      },
+      "responses": {
+        "model.model3.json:200:json:0": 2,
+        "model.moc3:200:arraybuffer:5112192": 2
+      }
+    },
+    "missingFixtureAssets": [],
+    "modelLoadErrorCount": 0,
+    "modelLoadErrors": [],
+    "modelLoadFailureAssetAliases": [],
+    "electronModelJsonReadCount": 2,
+    "browserVersion": "151.0.7922.34",
+    "ffmpegVersion": "ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers",
+    "outputBytes": 202184,
+    "decodedFrameCount": 24,
+    "uniqueDecodedFrameHashes": 24
+  }
+}

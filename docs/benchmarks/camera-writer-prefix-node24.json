@@ -1,0 +1,447 @@
+{
+  "runtime": "Node v24.21.0 / Linux x64 / Intel Core i7-13650HX",
+  "baselineRevision": "b415de2",
+  "current": "contributing property writers with complete start prefixes",
+  "input": {
+    "counts": [
+      64,
+      128,
+      256
+    ],
+    "start": "index/count",
+    "durationSeconds": 0.35,
+    "queryTime": 1.25,
+    "zoom": 1,
+    "warmQueries": 7,
+    "statistic": "median",
+    "harnessSha256": "72e0d2546fce83c70efcfcf3c99fdba08944ce18d3592dd69b51e2f0f9feb172"
+  },
+  "before": [
+    {
+      "scenario": "position",
+      "count": 64,
+      "coldMs": 9.45,
+      "warmMedianMs": 4.152,
+      "warmMinMs": 3.674,
+      "output": {
+        "x": 0.510393378067613,
+        "y": 0.3389136217597301,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "position",
+      "count": 128,
+      "coldMs": 22.229,
+      "warmMedianMs": 20.437,
+      "warmMinMs": 18.7,
+      "output": {
+        "x": 0.506233204575267,
+        "y": 0.37730092576250124,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "position",
+      "count": 256,
+      "coldMs": 116.617,
+      "warmMedianMs": 113.595,
+      "warmMinMs": 106.963,
+      "output": {
+        "x": 0.5041440306665197,
+        "y": 0.4504395679914526,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 64,
+      "coldMs": 5.099,
+      "warmMedianMs": 3.994,
+      "warmMinMs": 3.203,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 6.79882760644057,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 128,
+      "coldMs": 22.312,
+      "warmMedianMs": 17.107,
+      "warmMinMs": 15.233,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 9.656306151050323,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 256,
+      "coldMs": 109.274,
+      "warmMedianMs": 107.701,
+      "warmMinMs": 105.883,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 15.490894796283772,
+        "following": null
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 64,
+      "coldMs": 33.756,
+      "warmMedianMs": 26.67,
+      "warmMinMs": 23.17,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 128,
+      "coldMs": 80.534,
+      "warmMedianMs": 74.52,
+      "warmMinMs": 71.386,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 256,
+      "coldMs": 301.983,
+      "warmMedianMs": 313.755,
+      "warmMinMs": 301.02,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 64,
+      "coldMs": 6.185,
+      "warmMedianMs": 2.867,
+      "warmMinMs": 2.686,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 128,
+      "coldMs": 22.727,
+      "warmMedianMs": 20.731,
+      "warmMinMs": 18.56,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 256,
+      "coldMs": 146.386,
+      "warmMedianMs": 143.595,
+      "warmMinMs": 141.893,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 64,
+      "coldMs": 12.178,
+      "warmMedianMs": 6.95,
+      "warmMinMs": 4.607,
+      "output": {
+        "x": 0.5794642857142858,
+        "y": 0.5276785714285714,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 128,
+      "coldMs": 26.416,
+      "warmMedianMs": 30.09,
+      "warmMinMs": 26.273,
+      "output": {
+        "x": 0.5683035714285714,
+        "y": 0.5209821428571428,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 256,
+      "coldMs": 175.388,
+      "warmMedianMs": 179.739,
+      "warmMinMs": 166.117,
+      "output": {
+        "x": 0.5627232142857143,
+        "y": 0.5176339285714285,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    }
+  ],
+  "after": [
+    {
+      "scenario": "position",
+      "count": 64,
+      "coldMs": 3.488,
+      "warmMedianMs": 1.025,
+      "warmMinMs": 0.588,
+      "output": {
+        "x": 0.510393378067613,
+        "y": 0.3389136217597301,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "position",
+      "count": 128,
+      "coldMs": 2.7,
+      "warmMedianMs": 1.971,
+      "warmMinMs": 1.738,
+      "output": {
+        "x": 0.506233204575267,
+        "y": 0.37730092576250124,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "position",
+      "count": 256,
+      "coldMs": 9.556,
+      "warmMedianMs": 6.998,
+      "warmMinMs": 6.254,
+      "output": {
+        "x": 0.5041440306665197,
+        "y": 0.4504395679914526,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 64,
+      "coldMs": 1.509,
+      "warmMedianMs": 0.864,
+      "warmMinMs": 0.773,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 6.79882760644057,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 128,
+      "coldMs": 2.722,
+      "warmMedianMs": 1.458,
+      "warmMinMs": 1.234,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 9.656306151050323,
+        "following": null
+      }
+    },
+    {
+      "scenario": "rotation",
+      "count": 256,
+      "coldMs": 5.463,
+      "warmMedianMs": 8.699,
+      "warmMinMs": 7.321,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 15.490894796283772,
+        "following": null
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 64,
+      "coldMs": 10.518,
+      "warmMedianMs": 1.816,
+      "warmMinMs": 1.463,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 128,
+      "coldMs": 3.167,
+      "warmMedianMs": 2.513,
+      "warmMinMs": 2.093,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "follow",
+      "count": 256,
+      "coldMs": 5.344,
+      "warmMedianMs": 5.176,
+      "warmMinMs": 4.923,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": "hero"
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 64,
+      "coldMs": 1.527,
+      "warmMedianMs": 0.444,
+      "warmMinMs": 0.352,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 128,
+      "coldMs": 1.409,
+      "warmMedianMs": 1.255,
+      "warmMinMs": 1.142,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "reset",
+      "count": 256,
+      "coldMs": 4.828,
+      "warmMedianMs": 5.163,
+      "warmMinMs": 4.24,
+      "output": {
+        "x": 0.5,
+        "y": 0.5,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 64,
+      "coldMs": 2.336,
+      "warmMedianMs": 0.931,
+      "warmMinMs": 0.73,
+      "output": {
+        "x": 0.5794642857142858,
+        "y": 0.5276785714285714,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 128,
+      "coldMs": 3.231,
+      "warmMedianMs": 2.032,
+      "warmMinMs": 1.687,
+      "output": {
+        "x": 0.5683035714285714,
+        "y": 0.5209821428571428,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    },
+    {
+      "scenario": "path",
+      "count": 256,
+      "coldMs": 11.052,
+      "warmMedianMs": 8.373,
+      "warmMinMs": 6.435,
+      "output": {
+        "x": 0.5627232142857143,
+        "y": 0.5176339285714285,
+        "zoom": 1,
+        "rotation": 0,
+        "following": null
+      }
+    }
+  ],
+  "outputComparisonTolerance": 1e-10,
+  "observedMaxOutputDifference": 0.0,
+  "checkedInHarness": "src/__benchmarks__/cameraWriterPrefixBenchmark.ts",
+  "checkedInHarnessSha256": "bd1631f61e8176a02c9cddd4d6c4fc26bded6fe9d9bdc2e0a251b12dfe0a0871"
+}

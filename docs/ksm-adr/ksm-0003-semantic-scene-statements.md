@@ -254,7 +254,7 @@ camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须�
 - 同时间 camera statements 按 statement order 执行；registry 的 overlap/state-key validator 必须给出确定结果。
 - `path` 按各属性自己的关键帧与缓动插值；非零首帧从动作起点实际值过渡，零时刻首帧立即生效。关键帧时间决定运动节奏，`durationSeconds` 不伸缩或截断运动；有限 repeat 计入编排时间，loop 优先且无限重复保持有限场景范围。基础通道与角色运镜的正式播放、seek 与逐帧导出消费统一摄像机求值；独立临时预览 API 的求值迁移仍有后续边界。
 
-正式角色轨迹生命周期由 `CameraHistoricalRuntime` 持有，使用独立 `CameraAnchorSampler.prepareCameraAnchorsPrepared` 生成带内容 revision、部位、有效性区间、不连续事件两侧值的轨迹。`ScriptEngine.loadPreparedScene` 只准备当前镜头所需的历史前缀，重载准备期间保留已提交的时间线与镜头，准备完成后安装新场景；准备期间的 seek 请求保留最新目标，不能因临时时间线为空而丢弃或回零；新加载、失败回滚和 teardown 取消旧任务，过期结果不能发布。协调器不通过活动模型的 getPoint/getPosition 推断历史，也不注册正式 follow ticker。诊断通过 `ScriptEngine.getCameraEvaluation()` 返回，由调用方呈现和去重。
+正式角色轨迹生命周期由 `CameraHistoricalRuntime` 持有，使用独立 `CameraAnchorSampler.prepareCameraAnchorsPrepared` 生成带内容 revision、部位、有效性区间、不连续事件两侧值的轨迹。`ScriptEngine.loadPreparedScene` 在当前时间不需要角色锚点时直接安装场景，不为未来镜头创建采样器；真正需要时以 `cameraOnly` 请求聚焦起点、实际跟随区间和相关姿态边界，跳过未被镜头观察的空档及未来资源预热。重载准备期间保留已提交的时间线与镜头，准备完成后安装新场景；准备期间的 seek 请求保留最新目标，不能因临时时间线为空而丢弃或回零；新加载、失败回滚和 teardown 取消旧任务，过期结果不能发布。协调器不通过活动模型的 getPoint/getPosition 推断历史，也不注册正式 follow ticker。诊断通过 `ScriptEngine.getCameraEvaluation()` 返回，由调用方呈现和去重。
 
 编排或合成参考尺寸变化触发重新准备。资源系统尚无完整内容 revision 通知，因此含角色运镜的场景每次显式重载都重新准备，覆盖语句未变但模型/姿态资源内容变化；仅基础通道仍保留相同内容跳过重载。隔离模型复用但准备任务串行，避免取消后资源加载尚未结束时共享模型。聚焦只要求动作起点的历史，跟随只要求截至查询时间或释放点的历史；统一使用固定全局采样网格和精确编排时刻，按需扩展不能改变既有样本。首次加载不扫描完整场景。播放遇到尚未准备的历史时保留最后投影帧，准备就绪后仅在播放意图和场景仍有效时继续；seek 的等待不覆盖随后发出的暂停。导出在初始化后端前准备所需区间，避免逐帧重复扩展。准备失败拒绝本次投影，不退回活动锚点或竞争写镜头的旧路径。
 

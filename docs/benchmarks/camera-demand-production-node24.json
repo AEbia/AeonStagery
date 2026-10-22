@@ -1,0 +1,20 @@
+{
+  "policy": "camera-demand-real-core",
+  "environment": {
+    "node": "v24.21.0"
+  },
+  "fixture": {
+    "durationSeconds": 600,
+    "focusTime": 590,
+    "physics": false,
+    "autoEyeBlink": false
+  },
+  "timingsMs": {
+    "open": 388.2899819999998,
+    "ordinarySeek": 23.360138000000006,
+    "lateFocusSeek": 285.88524800000005
+  },
+  "lateFocusCoreFrames": 17,
+  "focusErrorCompositionUnits": 3.372302437298913e-14,
+  "scope": "real Core; pruned motion catalog; no GPU or video encoding"
+}

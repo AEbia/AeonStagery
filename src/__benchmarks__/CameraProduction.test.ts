@@ -33,6 +33,9 @@ import { textLayerManager } from '../engine/TextLayerManager';
 import { preBakeDaemon } from '../engine/daemons/PreBakeDaemon';
 import { FrameCaptureEngine } from '../engine/export/FrameCaptureEngine';
 import { cameraController } from '../engine/CameraController';
+import { live2DManager } from '../engine/Live2DManager';
+import { resolveVec2 } from '../engine/utils/math';
+import { loadCubismEngineModule } from '../engine/Live2DEngineBridge';
 import { evaluateCameraChannels, sampleCameraAnchorTrajectory } from '../engine/CameraChannelEvaluator';
 import type { PreparedCameraAnchorTrajectory } from '../engine/CameraAnchorPreparation';
 import { getCameraFollowHistoryDiagnostics } from '../engine/CameraFollowHistory';
@@ -618,7 +621,7 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
   vm.runInThisContext(fs.readFileSync(core, 'utf8'), { filename: 'live2dcubismcore.min.js' });
   Object.assign(window, { Live2DCubismCore: (globalThis as typeof globalThis & { Live2DCubismCore?: unknown }).Live2DCubismCore });
   fs.writeSync(1, 'CAMERA_BENCHMARK stage=sdk-load\n');
-  const sdk = await import('untitled-pixi-live2d-engine/cubism');
+  const sdk = await loadCubismEngineModule();
   fs.writeSync(1, 'CAMERA_BENCHMARK stage=sdk-ready\n');
   await sdk.cubismReady();
   let modelCount = 0;
@@ -740,6 +743,43 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
   gc?.(); const heapBefore = process.memoryUsage();
   fs.writeSync(1, 'CAMERA_BENCHMARK stage=prepare\n');
   try {
+    if (process.env.AEON_CAMERA_BENCHMARK_DEMAND_ONLY === '1') {
+      const demand = new ScriptEngine(() => sampler);
+      try {
+        const lateFocus = (await new SemanticScenePipeline({ resolveAsset: value => value }).processDocument({
+          schemaVersion: 5, sceneId: 'camera-demand-production', meta: scene.meta,
+          statements: [
+            ...statements.filter(statement => statement.type !== 'camera'),
+            { id: 'move-now', type: 'camera', time: 1, params: {
+              mode: 'move', position: [0.6, 0.4], durationSeconds: 2, ease: 'linear',
+            } },
+            { id: 'focus-later', type: 'camera', time: 590, params: {
+              mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 0,
+            } },
+          ],
+        })).prepared;
+        const opening = await timed(() => demand.loadPreparedScene(lateFocus));
+        const ordinarySeek = await timed(() => demand.seek(2));
+        expect(resolveVec2(demand.getCurrentCamera().position)).toEqual({ x: 0.55, y: 0.45 });
+        const framesBeforeFocus = coreFrames;
+        const focusSeek = await timed(() => demand.seek(590));
+        const camera = resolveVec2(demand.getCurrentCamera().position);
+        const visibleHead = live2DManager.getPoint('hero', 'head');
+        expect(visibleHead).not.toBeNull();
+        const error = Math.hypot((camera.x - visibleHead!.x) * 1920, (camera.y - visibleHead!.y) * 1080);
+        expect(error).toBeLessThan(0.01);
+        expect(coreFrames - framesBeforeFocus).toBeLessThan(100);
+        const result = { policy: 'camera-demand-real-core', environment: { node: process.version },
+          fixture: { durationSeconds: 600, focusTime: 590, physics: false, autoEyeBlink: false },
+          timingsMs: { open: opening.ms, ordinarySeek: ordinarySeek.ms, lateFocusSeek: focusSeek.ms },
+          lateFocusCoreFrames: coreFrames - framesBeforeFocus, focusErrorCompositionUnits: error,
+          scope: 'real Core; pruned motion catalog; no GPU or video encoding' };
+        fs.mkdirSync(path.dirname(output), { recursive: true });
+        fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
+        fs.writeSync(1, 'CAMERA_BENCHMARK_RESULT ' + JSON.stringify(result) + '\n');
+      } finally { demand.destroy(); }
+      return;
+    }
     if (supplementaryExport && preparedTrackCachePath && fs.existsSync(preparedTrackCachePath)) {
       const cached = JSON.parse(fs.readFileSync(preparedTrackCachePath, 'utf8')) as {
         anchorRevision: string | number;

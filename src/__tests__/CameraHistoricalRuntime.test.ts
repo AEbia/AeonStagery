@@ -32,15 +32,15 @@ describe('on-demand camera history independent of snapshot Bake', () => {
     const input = await scene([{ id: 'focus', type: 'camera', time: 2,
       params: { mode: 'focus', target: 'hero', durationSeconds: 1 } }]);
     await runtime.prepare(input, true, 0);
-    expect(requests).toEqual([0]);
+    expect(requests).toEqual([]);
     await runtime.ensureAt(600);
-    expect(requests).toEqual([0, 2]);
+    expect(requests).toEqual([2]);
     expect(runtime.covers(600)).toBe(true);
     await runtime.ensureAt(3);
-    expect(requests).toEqual([0, 2]);
+    expect(requests).toEqual([2]);
     const previous = runtime.input;
     await runtime.prepare(input, true, 3);
-    expect(requests).toEqual([0, 2, 2]);
+    expect(requests).toEqual([2, 2]);
     expect(runtime.input).not.toBe(previous);
     runtime.dispose();
   });
@@ -51,7 +51,7 @@ describe('on-demand camera history independent of snapshot Bake', () => {
       params: { mode: 'follow', operation: 'start', target: 'hero', durationSeconds: duration } }]);
     await runtime.prepare(input, true, 0);
     await runtime.ensureAt(600);
-    expect(requests).toEqual([0, 1 + duration]);
+    expect(requests).toEqual([1 + duration]);
     runtime.dispose();
   });
 
@@ -66,7 +66,7 @@ describe('on-demand camera history independent of snapshot Bake', () => {
     await runtime.prepare(input, true, 0);
     await runtime.ensureAt(3);
     await runtime.ensureAt(600);
-    expect(requests).toEqual([0, 3, 4]);
+    expect(requests).toEqual([3, 4]);
     runtime.dispose();
   });
 });

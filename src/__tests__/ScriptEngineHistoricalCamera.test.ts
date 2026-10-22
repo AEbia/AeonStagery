@@ -54,8 +54,13 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
     })).prepared;
   }
 
+  async function loadWithHistory(input: Awaited<ReturnType<typeof prepare>>) {
+    await engine.loadPreparedScene(input);
+    await engine.prepareForExport(undefined, input.durationSeconds);
+  }
+
   it('captures the historical part at focus start and gives the same playback and arbitrary seek result', async () => {
-    await engine.loadPreparedScene(await prepare([{
+    await loadWithHistory(await prepare([{
       id: 'focus', type: 'camera', time: 1,
       params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 1, ease: 'linear' },
     }]));
@@ -83,7 +88,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
       cancel: () => {}, destroy: () => {},
     }));
     const loading = engine.loadPreparedScene(await prepare([{
-      id: 'focus', type: 'camera', time: 1,
+      id: 'focus', type: 'camera', time: 0,
       params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
     }]));
     await preparing;
@@ -91,6 +96,31 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
     finishPreparation({ snapshotHistory: [], anchorRevision: 'posed-v1', anchorTrajectories: tracks });
     await Promise.all([loading, seeking]);
     expect(engine.getCurrentTime()).toBe(6);
+  });
+
+  it('opens and seeks a move segment without preparing future character cameras', async () => {
+    engine.destroy();
+    const sample = vi.fn(() => new Promise<CameraAnchorPreparationResult>(() => {}));
+    engine = new ScriptEngine(() => ({
+      prepareCameraAnchorsPrepared: sample, cancel: () => {}, destroy: () => {},
+    }));
+    const input = await prepare([
+      { id: 'move', type: 'camera', time: 1, params: {
+        mode: 'move', position: [0.7, 0.3], durationSeconds: 2, ease: 'linear',
+      } },
+      { id: 'later-focus', type: 'camera', time: 7, params: {
+        mode: 'focus', target: 'hero', durationSeconds: 0,
+      } },
+    ]);
+    const opening = engine.loadPreparedScene(input);
+    const seeking = engine.seek(2);
+    expect(await Promise.race([
+      Promise.all([opening, seeking]).then(() => 'ready'),
+      new Promise<string>(resolve => setTimeout(() => resolve('blocked by camera preparation'), 100)),
+    ])).toBe('ready');
+    expect(sample).not.toHaveBeenCalled();
+    expect(engine.getCurrentTime()).toBe(2);
+    expect(engine.getCurrentCamera().position).toEqual({ x: 0.6, y: 0.4 });
   });
 
   it('keeps a user pause during on-demand history preparation after seek completes', async () => {
@@ -106,7 +136,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
       cancel: () => {}, destroy: () => {},
     }));
     await engine.loadPreparedScene(await prepare([{
-      id: 'follow', type: 'camera', time: 1,
+      id: 'follow', type: 'camera', time: 0,
       params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 0 },
     }]));
     engine.play();
@@ -129,7 +159,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
       cancel: () => {}, destroy: () => {},
     }));
     const loading = engine.loadPreparedScene(await prepare([{
-      id: 'focus', type: 'camera', time: 1, params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
+      id: 'focus', type: 'camera', time: 0, params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
     }]));
     await preparing;
     const first = engine.seek(6);
@@ -210,7 +240,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
     }));
     const point = vi.spyOn(live2DManager, 'getPoint');
     const position = vi.spyOn(live2DManager, 'getPosition');
-    await engine.loadPreparedScene(await prepare([{
+    await loadWithHistory(await prepare([{
       id: 'focus', type: 'camera', time: 1,
       params: { mode: 'focus', target: 'hero', targetPart: 'head', zoom: { kind: 'absolute', value: 2 }, rotation: 20, durationSeconds: 2, ease: 'linear' },
     }]));
@@ -302,7 +332,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
   });
 
   it('locks the actual entry value when a follow is stopped at the same instant', async () => {
-    await engine.loadPreparedScene(await prepare([
+    await loadWithHistory(await prepare([
       { id: 'zoom', type: 'camera', time: 0, params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
       { id: 'follow', type: 'camera', time: 1, params: { mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing: 0 } },
       { id: 'stop', type: 'camera', time: 1, params: { mode: 'follow', operation: 'stop', target: 'hero' } },
@@ -324,7 +354,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
         { id: 'start', type: 'camera', time: 8, params: { mode: 'follow', operation: 'start', target: 'hero' } },
         { id: 'stop', type: 'camera', time: 8, params: { mode: 'follow', operation: 'stop', target: 'hero' } },
       ]);
-      await engine.loadPreparedScene(scene);
+      await loadWithHistory(scene);
       const master = engine.getMasterTimeline()!;
 
       expect(scene.durationSeconds).toBe(8);
@@ -357,7 +387,7 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
   });
 
   it.each([0, 1])('holds on stop and resets from the actual follow value with smoothing %s', async (smoothing) => {
-    await engine.loadPreparedScene(await prepare([
+    await loadWithHistory(await prepare([
       { id: 'zoom', type: 'camera', time: 0, params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
       { id: 'follow', type: 'camera', time: 0.5, params: { mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing } },
       { id: 'stop', type: 'camera', time: 1, params: { mode: 'follow', operation: 'stop', target: 'hero' } },

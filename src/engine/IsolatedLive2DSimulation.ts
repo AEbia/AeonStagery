@@ -38,6 +38,7 @@ import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeContro
 import type { CustomMotionStageHandle } from './live2d/customMotionStage';
 import { prepareCameraAnchorTrajectories, type CameraAnchorCapture, type PreparedCameraAnchorTrajectory } from './CameraAnchorPreparation';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
+import { cameraAnchorDemand } from './CameraAnchorDemand';
 
 const CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS = 1 / 15;
 
@@ -175,6 +176,17 @@ export interface CameraAnchorPreparationResult extends Live2DSnapshotResult {
 export interface CameraAnchorSamplingOptions {
   /** Sample only the canonical history prefix needed by the caller. */
   readonly throughTime?: number;
+  /** Evaluate camera-observable poses, without simulating idle scene prefixes. */
+  readonly cameraOnly?: boolean;
+}
+
+interface AnchorCaptureRun {
+  captures: CameraAnchorCapture[];
+  revision: string | number;
+  eventTimes: readonly number[];
+  sampleTimes?: readonly number[];
+  poseTimes?: readonly number[];
+  characterIds?: ReadonlySet<string>;
 }
 
 /** Shared isolated pose execution; no active stage, camera, or editor playhead. */
@@ -234,11 +246,19 @@ export class IsolatedLive2DSimulation {
   ): Promise<CameraAnchorPreparationResult> {
     const referenceSize = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
     const revision = `${scene.sceneId}:${++this.anchorPreparationRevision}`;
-    const runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
+    let runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
     const requestedEnd = Math.max(0, Math.min(options.throughTime ?? scene.durationSeconds, scene.durationSeconds));
     // Every prefix ends on the same global grid as complete preparation. A
     // query-specific terminal frame must not change earlier integration steps.
     const throughTime = Math.min(scene.durationSeconds, Math.ceil(requestedEnd * 15 - 1e-9) / 15);
+    const demand = options.cameraOnly ? cameraAnchorDemand(runtimeScene, throughTime) : undefined;
+    if (demand) {
+      runtimeScene = { ...runtimeScene,
+        // Gaze may depend on another character's authored transform. Limit
+        // model resources below, retaining the complete semantic scene state.
+        timeline: runtimeScene.timeline.filter(action => (action.time ?? 0) <= throughTime),
+      };
+    }
     const captures: CameraAnchorCapture[] = [];
     const eventTimes = [...new Set(runtimeScene.timeline
       .filter(isCameraAnchorDiscontinuity)
@@ -261,7 +281,7 @@ export class IsolatedLive2DSimulation {
       undefined,
       true,
       buildPreparedBakeModelSourceMap(scene),
-      { captures, revision, eventTimes, sampleTimes },
+      { captures, revision, eventTimes, sampleTimes, poseTimes: demand?.times, characterIds: demand?.characterIds },
     );
     if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion
       || referenceSize.width !== STAGE_WIDTH || referenceSize.height !== STAGE_HEIGHT) return { snapshotHistory: [] };
@@ -308,7 +328,7 @@ export class IsolatedLive2DSimulation {
     seedSnapshot?: Snapshot,
     silent: boolean = false,
     modelSources: ReadonlyMap<string, string> = new Map(),
-    anchorCapture?: { captures: CameraAnchorCapture[]; revision: string | number; eventTimes: readonly number[]; sampleTimes?: readonly number[] },
+    anchorCapture?: AnchorCaptureRun,
   ): Promise<Live2DSnapshotResult> {
     if (this.closed) return { snapshotHistory: [] };
     this.modelResources.cancelLoads();
@@ -326,7 +346,7 @@ export class IsolatedLive2DSimulation {
 
     const startTime = performance.now();
 
-    const { requiredMotions } = this.scanAssets(script, modelSources);
+    const { requiredMotions } = this.scanAssets(script, modelSources, anchorCapture?.characterIds);
 
     // Load all models in parallel
     const loadPromises: Promise<void>[] = [];
@@ -335,11 +355,13 @@ export class IsolatedLive2DSimulation {
     const charModelMap = new Map<string, string>();
     for (const action of script.timeline) {
       if (action.action === 'addCharacter' && action.params?.id && action.params?.model) {
+        if (anchorCapture?.characterIds && !anchorCapture.characterIds.has(action.params.id)) continue;
         charModelMap.set(action.params.id, action.params.model);
       }
     }
     if (script.meta.characters) {
       for (const char of script.meta.characters) {
+        if (anchorCapture?.characterIds && !anchorCapture.characterIds.has(char.id)) continue;
         if (!charModelMap.has(char.id) && char.model) {
           charModelMap.set(char.id, char.model);
         }
@@ -463,7 +485,10 @@ export class IsolatedLive2DSimulation {
 
     const effectiveEnd = rangeEnd;
     const anchorTimes: number[] = [];
-    if (anchorCapture) {
+    if (anchorCapture?.poseTimes) {
+      anchorTimes.push(...anchorCapture.poseTimes);
+      simTime = anchorTimes[0] ?? effectiveEnd + 1;
+    } else if (anchorCapture) {
       for (let index = 0; simStart + index * CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS <= effectiveEnd + 1e-9; index++) {
         anchorTimes.push(Math.min(simStart + index * CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS, effectiveEnd));
       }
@@ -495,6 +520,9 @@ export class IsolatedLive2DSimulation {
       while (simTime <= effectiveEnd) {
         if (!isCurrent()) break;
 
+          const poseJump = anchorCapture?.poseTimes !== undefined
+            && (previousFrameTime === null || simTime - previousFrameTime > CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS + 1e-9);
+
           // 1. Prepare domain state before submitting one complete runtime frame.
           const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
           const isAnchorEventTime = anchorCapture?.eventTimes.some((time) => Math.abs(time - simTime) < 1e-9) ?? false;
@@ -508,6 +536,7 @@ export class IsolatedLive2DSimulation {
           const resetForPlaybackIds = new Set<string>();
           const expressionUpdates = new Map<string, Live2DSeekExpressionState & { previousKey?: string | null }>();
           for (const [id, state] of characters) {
+            if (anchorCapture?.characterIds && !anchorCapture.characterIds.has(id)) continue;
             let entry = this.models.get(id);
             const targetResolvedPath = state.model ? resolvedModelPaths.get(state.model) : undefined;
 
@@ -528,6 +557,13 @@ export class IsolatedLive2DSimulation {
                 resetForPlaybackIds.add(id);
               }
 
+              // Native motions seek to their authored offset through the
+              // clock-coordinated transition. Curve stages already evaluate
+              // absolute scene time; idle gaps need no clock advancement.
+              if (poseJump && !entry.customMotionStage) {
+                motionRuntime.releaseCharacter(id, entry.injectedParams);
+                if (!state.motion) resetForPlaybackIds.add(id);
+              }
               this.applyBakeMotionState(entry, state, dialogue, simTime, motionRuntime);
 
               const expressionKey = state.expression?.key ?? null;
@@ -596,7 +632,7 @@ export class IsolatedLive2DSimulation {
             };
             return operation;
           });
-          const frameDeltaMs = previousFrameTime === null
+          const frameDeltaMs = previousFrameTime === null || poseJump
             ? 0
             : Math.max(0, (simTime - previousFrameTime) * 1000);
           const batch = await this.submitBakeFrameBatch({
@@ -670,7 +706,8 @@ export class IsolatedLive2DSimulation {
 
         previousFrameTime = simTime;
         const nextAnchorTime = anchorTimes[anchorTimeIndex];
-        simTime = anchorCapture && nextAnchorTime !== undefined && nextAnchorTime > simTime
+        simTime = anchorCapture?.poseTimes && nextAnchorTime === undefined ? effectiveEnd + 1
+          : anchorCapture && nextAnchorTime !== undefined && nextAnchorTime > simTime
           ? nextAnchorTime
           : simTime + step;
         stepCount++;
@@ -750,7 +787,7 @@ export class IsolatedLive2DSimulation {
     await this.modelResources.waitForLoads();
   }
 
-  private scanAssets(script: RuntimeTimelineScene, modelSources: ReadonlyMap<string, string>) {
+  private scanAssets(script: RuntimeTimelineScene, modelSources: ReadonlyMap<string, string>, characterIds?: ReadonlySet<string>) {
     const requiredMotions = new Map<string, Set<string>>(); // ModelPath -> Set of motion keys
     
     // Track the active model path for each character ID as we scan the timeline
@@ -759,6 +796,7 @@ export class IsolatedLive2DSimulation {
     // Initial state from scene meta
     if (script.meta.characters) {
       for (const char of script.meta.characters) {
+        if (characterIds && !characterIds.has(char.id)) continue;
         if (char.model) {
           activeModelMap.set(char.id, modelSources.get(char.model) ?? char.model);
         }
@@ -766,6 +804,7 @@ export class IsolatedLive2DSimulation {
     }
 
     for (const action of script.timeline) {
+      if (characterIds && typeof action.params.id === 'string' && !characterIds.has(action.params.id)) continue;
       if (action.action === 'addCharacter' && action.params?.id && action.params?.model) {
         activeModelMap.set(action.params.id, modelSources.get(action.params.model) ?? action.params.model);
       }

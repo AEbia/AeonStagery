@@ -467,7 +467,7 @@ describe('ScriptEngine project asset resolution', () => {
 
   it('loads incomplete resource drafts so the inspector can repair them', async () => {
     const engine = new ScriptEngine();
-    const seek = vi.spyOn(engine as any, 'seek').mockResolvedValue(undefined);
+    const seek = vi.spyOn(engine as unknown as { seekLoadedScene(time: number, forceReconstruct: boolean): Promise<void> }, 'seekLoadedScene').mockResolvedValue(undefined);
     const prewarmModels = vi.spyOn(engine as any, 'prewarmModels').mockResolvedValue(undefined);
     const cleanup = vi.spyOn(engine as any, 'cleanup').mockImplementation(() => {});
     const initMasterTimeline = vi.spyOn(engine as any, 'initMasterTimeline').mockImplementation(() => {});

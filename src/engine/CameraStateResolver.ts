@@ -129,6 +129,36 @@ function toOrderedEvents(timeline: readonly RuntimeTimelineAction[], time: numbe
   return events;
 }
 
+/** Latest property writers suffice at a query; their starts still see the full prefix. */
+function contributingEvents(events: readonly TimelineEvent[]): Set<number> {
+  let x = -1;
+  let y = -1;
+  let zoom = -1;
+  let rotation = -1;
+  let unfollow = -1;
+  for (const [index, { action }] of events.entries()) {
+    const params = action.params ?? {};
+    if (action.action === 'cameraReset') {
+      x = y = zoom = rotation = index;
+    } else if (action.action === 'cameraFollow' && params.characterId) {
+      x = y = index;
+    } else if (action.action === 'cameraUnfollow') {
+      // A stop releases ownership without replacing the latched position.
+      unfollow = index;
+    } else if (action.action === 'cameraMotion') {
+      if (compiledMotionWritesX(params)) x = index;
+      if (compiledMotionWritesY(params)) y = index;
+      if (compiledMotionWritesZoom(params)) zoom = index;
+      if (compiledMotionWritesRotation(params)) rotation = index;
+    } else if (action.action === 'cameraPath') {
+      if (compiledPathWritesProperty(params, 'position')) x = y = index;
+      if (compiledPathWritesProperty(params, 'zoom')) zoom = index;
+      if (compiledPathWritesProperty(params, 'rotation')) rotation = index;
+    }
+  }
+  return new Set([x, y, zoom, rotation, unfollow]);
+}
+
 interface MotionChannels extends CameraPosition { zoom: number; rotation: number }
 
 /**
@@ -273,11 +303,27 @@ function computeCameraStateAtTimeInternal(
   const coverage: CameraChannelCoverage = { position: false, zoom: false, rotation: false };
 
   const orderedEvents = toOrderedEvents(timeline, time);
+  // Prepared zoom makes follow clamping independent of which earlier events
+  // remain visible. Legacy callers without that curve retain full replay.
+  const contributing = deps.compiledChannelOwnership && deps.resolveZoomAtTime
+    ? contributingEvents(orderedEvents) : null;
   for (const [eventIndex, event] of orderedEvents.entries()) {
+    if (contributing && !contributing.has(eventIndex)) continue;
     const { action, time: start } = event;
     const sampleTime = time;
+    const resolveStartState = () => {
+      const state = computeCameraStateAtTimeInternal(
+        orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context,
+      );
+      // Coverage describes all writes in the elapsed prefix, including a
+      // predecessor hidden by a later missing-anchor position writer.
+      coverage.position ||= state.coverage.position;
+      coverage.zoom ||= state.coverage.zoom;
+      coverage.rotation ||= state.coverage.rotation;
+      return state;
+    };
     if (deps.compiledChannelOwnership && action.action === 'cameraFollow') {
-      const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+      const startState = resolveStartState();
       channels.x = startState.position.x;
       channels.y = startState.position.y;
     }
@@ -379,7 +425,7 @@ function computeCameraStateAtTimeInternal(
       follow = null;
       composedFollowFrame = null;
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+        const startState = resolveStartState();
         channels.x = startState.position.x;
         channels.y = startState.position.y;
         channels.zoom = startState.zoom;
@@ -397,7 +443,7 @@ function computeCameraStateAtTimeInternal(
         const writesZoom = compiledMotionWritesZoom(params);
         const writesRotation = compiledMotionWritesRotation(params);
         if (writesX || writesY || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
-          const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+          const startState = resolveStartState();
           if (writesX) channels.x = startState.position.x;
           if (writesY) channels.y = startState.position.y;
           if (writesZoom && !deps.resolveZoomAtTime) channels.zoom = startState.zoom;
@@ -420,7 +466,7 @@ function computeCameraStateAtTimeInternal(
         const writesZoom = compiledPathWritesProperty(params, 'zoom');
         const writesRotation = compiledPathWritesProperty(params, 'rotation');
         if (writesPosition || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
-          const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+          const startState = resolveStartState();
           if (writesPosition) {
             channels.x = startState.position.x;
             channels.y = startState.position.y;

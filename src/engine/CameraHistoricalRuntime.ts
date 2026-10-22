@@ -66,9 +66,9 @@ export class CameraHistoricalRuntime {
     const scene = this.scene;
     if (!scene) return Promise.resolve(false);
     const requiredTime = this.requiredTime;
-    const throughTime = this.required ? requiredTime(time) : 0;
-    if (!this.required) {
-      this.ready = { scene, requiredTime, throughTime: Infinity, anchorTrajectories: [], trajectoryRevision: generation };
+    const throughTime = this.required ? requiredTime(time) : -Infinity;
+    if (!this.required || throughTime === -Infinity) {
+      this.ready = { scene, requiredTime, throughTime: this.required ? -Infinity : Infinity, anchorTrajectories: [], trajectoryRevision: generation };
       return Promise.resolve(true);
     }
     // Serialize isolated model access, including extensions requested by seek.
@@ -79,7 +79,7 @@ export class CameraHistoricalRuntime {
       if (generation !== this.generation) return false;
       if (reuseExisting && this.ready?.scene === scene && throughTime <= this.ready.throughTime + 1e-9) return true;
       const worker = this.worker ??= this.factory?.() ?? new CameraAnchorSampler(stageManager.getApp(), this.registry);
-      const result = await worker.prepareCameraAnchorsPrepared(scene, new Map(), generation, { throughTime });
+      const result = await worker.prepareCameraAnchorsPrepared(scene, new Map(), generation, { throughTime, cameraOnly: true });
       if (generation !== this.generation) return false;
       if (!result.anchorTrajectories || result.anchorRevision === undefined) {
         throw new Error('Historical camera anchor preparation did not publish a complete trajectory bundle.');
@@ -106,7 +106,7 @@ function historyRequirements(scene: PreparedCompiledScene): (time: number) => nu
     .sort((a, b) => (a.action.time ?? 0) - (b.action.time ?? 0) || a.index - b.index);
   return (time) => {
     time = Math.max(0, Math.min(time, scene.durationSeconds));
-    let required = 0;
+    let required = -Infinity;
     let followEnd: number | null = null;
     const finishFollow = (at: number) => {
       if (followEnd !== null) required = Math.max(required, Math.min(at, followEnd));
@@ -135,6 +135,6 @@ function historyRequirements(scene: PreparedCompiledScene): (time: number) => nu
       }
     }
     finishFollow(time);
-    return Math.max(0, required);
+    return required;
   };
 }

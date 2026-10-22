@@ -730,6 +730,7 @@ describe('SceneStatementCompiler golden output', () => {
           move: 'pan',
           easing: 'smooth',
           focus: { character: 'tomori', part: 'head' },
+          _cameraProperties: ['position'],
         },
         source: {
           statementId: 'dialogue_sparse_camera',
@@ -854,6 +855,7 @@ describe('SceneStatementCompiler golden output', () => {
           focus: { character: 'tomori', part: 'head' },
           zoom: '+=0.25',
           angle: 3,
+          _cameraProperties: ['position', 'zoom', 'rotation'],
         },
         source: { statementId: 'camera_focus', outputKey: 'primary' },
       },
@@ -868,6 +870,7 @@ describe('SceneStatementCompiler golden output', () => {
           target: [0.5, 0.6],
           zoom: 1.4,
           angle: 1,
+          _cameraProperties: ['position', 'zoom', 'rotation'],
         },
         source: { statementId: 'camera_move', outputKey: 'primary' },
       },

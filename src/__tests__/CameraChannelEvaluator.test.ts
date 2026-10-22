@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as characterAnimation from '../engine/CharacterAnimationContract';
+import { computeCameraStateAtTime } from '../engine/CameraStateResolver';
 import { evaluateCameraChannels, type CameraAnchorTrajectory } from '../engine/CameraChannelEvaluator';
 import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
@@ -14,6 +16,54 @@ function action(
 }
 
 describe('evaluateCameraChannels', () => {
+  it('matches complete prefix replay for mixed ownership, stops, missing focus and takeover', () => {
+    const trajectory: CameraAnchorTrajectory = { version: 1, revision: 1, characterId: 'hero', part: 'center',
+      validity: [{ start: 0, end: 10 }], events: [], samples: [
+        { time: 0, position: { x: 0.2, y: 0.3 } }, { time: 10, position: { x: 0.7, y: 0.6 } },
+      ] };
+    for (let variant = 0; variant < 8; variant++) {
+      const timeline: RuntimeTimelineAction[] = Array.from({ length: 20 }, (_, index) => {
+        const time = index * 0.17;
+        const kind = (index + variant) % 6;
+        if (kind === 0) return action(`follow-${index}`, 'cameraFollow', time, { characterId: 'hero', smoothing: 0.6, duration: 0.41 });
+        if (kind === 1) return action(`stop-${index}`, 'cameraUnfollow', time, {});
+        if (kind === 2) return action(`position-${index}`, 'cameraMotion', time, { target: [0.3 + (index % 4) / 10, 0.4], duration: 0.37, easing: 'linear', _cameraProperties: ['position'] });
+        if (kind === 3) return action(`rotation-${index}`, 'cameraMotion', time, { angle: index * 7, duration: 0.31, easing: 'linear', _cameraProperties: ['rotation'] });
+        if (kind === 4) return action(`missing-${index}`, 'cameraMotion', time, { focus: { character: 'absent', part: 'head' }, duration: 0.4, easing: 'linear', _cameraProperties: ['position'] });
+        return action(`reset-${index}`, 'cameraReset', time, { duration: 0.29, ease: 'linear' });
+      });
+      const trajectories = [trajectory];
+      for (const time of [3.7, 0, 0.21, 1.7, 2.33, 3.7]) {
+        const actual = evaluateCameraChannels({ timeline, sceneTime: time, logicalReferenceSize: referenceSize, anchorTrajectories: trajectories });
+        const replay = computeCameraStateAtTime(timeline, time, { anchorTrajectories: trajectories });
+        expect(actual).toMatchObject(replay);
+      }
+    }
+  });
+  it.each(['position', 'rotation', 'reset', 'path'] as const)('avoids replaying every preceding %s writer to capture start states', scenario => {
+    const count = 128;
+    const timeline = Array.from({ length: count }, (_, index) => {
+      const time = index / count;
+      if (scenario === 'reset') return action(`reset-${index}`, 'cameraReset', time, { duration: 0.35, ease: 'linear' });
+      if (scenario === 'path') return action(`path-${index}`, 'cameraPath', time, { ease: 'linear', keyframes: [
+        { time: 0, position: [0.2, 0.3] }, { time: 0.35, position: [0.7, 0.6] },
+      ] });
+      return action(`${scenario}-${index}`, 'cameraMotion', time, { duration: 0.35, easing: 'linear',
+        ...(scenario === 'position' ? { target: [0.2 + (index % 8) / 20, 0.3 + (index % 7) / 20], _cameraProperties: ['position'] }
+          : { angle: (index % 30) + 1, _cameraProperties: ['rotation'] }),
+      });
+    });
+    const ease = vi.spyOn(characterAnimation, 'evaluateCharacterEase');
+    let result;
+    try {
+      result = evaluateCameraChannels({ timeline, sceneTime: 1.25, logicalReferenceSize: referenceSize, anchorTrajectories: [] });
+      expect(ease.mock.calls.length).toBeLessThan(count * 8);
+    } finally { ease.mockRestore(); }
+    // The full replay remains available without the prepared zoom dependency,
+    // providing an independent equivalence check for the selected-writer path.
+    const replay = computeCameraStateAtTime(timeline, 1.25);
+    expect(result).toMatchObject(replay);
+  });
   it('captures the selected side of a focus discontinuity at its action start', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,

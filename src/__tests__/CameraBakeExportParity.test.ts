@@ -27,6 +27,7 @@ import { hookSystem } from '../api/hooks';
 import { resolveVec2 } from '../engine/utils/math';
 import { live2DStageState } from './helpers/live2DStageState';
 import { evaluateCameraChannels, type CameraEvaluationOutput } from '../engine/CameraChannelEvaluator';
+import { SemanticScenePipeline } from '../services/semantic-scene/SemanticScenePipeline';
 
 // Capture the SDK boundary before singleton Live2DModelResources binds it.
 vi.mock('../engine/Live2DRuntimeAdapter', async importOriginal => ({
@@ -49,7 +50,9 @@ describe('formal camera Bake/export parity', () => {
     bake = new BakeEngine({ renderer: {} } as Application);
     sampler = new CameraAnchorSampler({ renderer: {} } as Application);
   });
-  function installModelBoundary(onFrame: () => void = () => {}, onHead: () => void = () => {}, realisticAnchor = false) {
+  function installModelBoundary(onFrame: () => void = () => {}, onHead: () => void = () => {}, realisticAnchor = false,
+    onMotion: (key: string, offset: number) => void = () => {},
+    onFocus: (input: { focusX: number; focusY: number }) => void = () => {}) {
     const stageRoot = new Container();
     vi.spyOn(stageManager, 'getApp').mockReturnValue({ stage: stageRoot,
       ticker: { add: () => {}, remove: () => {} }, renderer: {},
@@ -74,6 +77,11 @@ describe('formal camera Bake/export parity', () => {
       createTestControls: () => mockControls({ captureSnapshot: () => snapshot, captureIdleSnapshot: () => snapshot,
         getHeadAnchor: () => { onHead(); return { x: 0.5, y: 0.2 }; },
         stepBakeFrame: onFrame,
+        startMotion: async (_model, key, _priority, offset) => {
+          onMotion(key, offset);
+          return { ok: true, offsetReplayMs: 0 };
+        },
+        applyFocus: (_model, input) => { onFocus(input); },
       }),
     }));
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ FileReferences: { Moc: 'hero.moc3' } }) })));
@@ -225,6 +233,63 @@ describe('formal camera Bake/export parity', () => {
     expect(frames).toBeLessThan(100);
   });
 
+  it('seeks a late focus without replaying hundreds of seconds of unrelated poses', async () => {
+    let frames = 0;
+    installModelBoundary(() => { frames++; }, () => {}, true);
+    const base = await cameraCrossEntryScene(true);
+    const scene = { ...base, durationSeconds: 600, actions: base.actions
+      .filter(action => action.action === 'addCharacter').slice(0, 1).map(action => ({ ...action, time: 0 }))
+      .concat([{ id: 'late-focus', action: 'cameraMotion' as const, time: 590,
+        params: { move: 'pan', focus: { character: 'hero', part: 'head' }, duration: 0,
+          _cameraProperties: ['position'] },
+        source: { statementId: 'late-focus', outputKey: 'primary' } }]) };
+    await engine.loadPreparedScene(scene);
+    await engine.seek(595);
+    const head = live2DManager.getPoint('hero', 'head')!;
+    expect(resolveVec2(engine.getCurrentCamera().position).x).toBeCloseTo(head.x, 6);
+    expect(resolveVec2(engine.getCurrentCamera().position).y).toBeCloseTo(head.y, 6);
+    expect(engine.getCurrentTime()).toBe(595);
+    expect(frames).toBeLessThan(30);
+  });
+
+  it('restores native motion offsets across unsampled camera gaps', async () => {
+    const starts: number[] = [];
+    installModelBoundary(() => {}, () => {}, true, (_key, offset) => { starts.push(offset); });
+    const base = await cameraCrossEntryScene(true);
+    const entry = base.actions.find(action => action.action === 'addCharacter')!;
+    await sampler.prepareCameraAnchorsPrepared({ ...base, durationSeconds: 600, actions: [
+      { ...entry, time: 0 },
+      { id: 'pose', action: 'playMotion', time: 0, params: { id: 'hero', motion: { kind: 'resource', key: 'pose' } },
+        source: { statementId: 'pose', outputKey: 'primary' } },
+      { id: 'focus', action: 'cameraMotion', time: 590, params: { move: 'pan',
+        focus: { character: 'hero', part: 'head' }, duration: 0, _cameraProperties: ['position'] },
+        source: { statementId: 'focus', outputKey: 'primary' } },
+    ] }, new Map(), 203, { throughTime: 590, cameraOnly: true });
+    expect(starts).toContain(590);
+    expect(starts.length).toBeLessThan(5);
+  });
+
+  it('retains other character transforms when resolving the focused character gaze', async () => {
+    const focuses: number[] = [];
+    installModelBoundary(() => {}, () => {}, true, () => {}, input => { focuses.push(input.focusX); });
+    const scene = (await new SemanticScenePipeline({ resolveAsset: source => source }).processDocument({
+      schemaVersion: 5, sceneId: 'camera-gaze-dependency',
+      meta: { title: 'Camera gaze dependency', durationSeconds: 600, characters: [
+        { id: 'hero', name: 'Hero', model: 'hero.model3.json' },
+        { id: 'other', name: 'Other', model: 'other.model3.json' },
+      ] },
+      statements: [
+        { id: 'hero-enter', type: 'characterPresence', time: 0, params: { mode: 'enter', id: 'hero', position: [0.4, 0.7], durationSeconds: 0 } },
+        { id: 'other-enter', type: 'characterPresence', time: 0, params: { mode: 'enter', id: 'other', position: [0.2, 0.7], durationSeconds: 0 } },
+        { id: 'gaze', type: 'characterPerformance', time: 0, params: { target: 'hero', lookAt: { target: 'other' } } },
+        { id: 'other-move', type: 'characterTransform', time: 580, params: { id: 'other', position: [0.9, 0.7], durationSeconds: 0 } },
+        { id: 'focus', type: 'camera', time: 590, params: { mode: 'focus', target: 'hero', durationSeconds: 0 } },
+      ],
+    })).prepared;
+    await sampler.prepareCameraAnchorsPrepared(scene, new Map(), 204, { throughTime: 590, cameraOnly: true });
+    expect(focuses.at(-1)).toBeGreaterThan(0);
+  });
+
   it('prepares the authored endpoint of a fast character transform between cadence samples', async () => {
     installModelBoundary();
     const base = await cameraCrossEntryScene(true);
@@ -270,7 +335,9 @@ describe('formal camera Bake/export parity', () => {
         return sampler.prepareCameraAnchorsPrepared(scene, paths, token);
       }, cancel: () => sampler.cancel(), destroy: () => {},
     }));
-    const loading = engine.loadPreparedScene(await cameraCrossEntryScene(true));
+    const input = await cameraCrossEntryScene(true);
+    const loading = engine.loadPreparedScene({ ...input, actions: input.actions.map(action =>
+      action.source.statementId === 'focus' ? { ...action, time: 0 } : action) });
     await preparing;
     let encoded = 0;
     let backendStarted = false;
@@ -301,7 +368,9 @@ describe('formal camera Bake/export parity', () => {
         return sampler.prepareCameraAnchorsPrepared(scene, paths, token);
       }, cancel: () => sampler.cancel(), destroy: () => {},
     }));
-    const loading = engine.loadPreparedScene(await cameraCrossEntryScene(true));
+    const input = await cameraCrossEntryScene(true);
+    const loading = engine.loadPreparedScene({ ...input, actions: input.actions.map(action =>
+      action.source.statementId === 'focus' ? { ...action, time: 0 } : action) });
     const loadingOutcome = loading.catch(error => error as Error);
     await preparing;
     const controller = new AbortController();
@@ -436,16 +505,14 @@ describe('formal camera Bake/export parity', () => {
   );
 
   it('captures projected environment and custom images beside fixed UI at 1x and 2x', async () => {
-    await engine.loadPreparedScene(await cameraCrossEntryScene());
+    const scene = await cameraCrossEntryScene();
+    await engine.loadPreparedScene(scene);
     await engine.seek(1.125);
     const camera = engine.getCurrentCamera();
     let capturedImage: ReturnType<typeof stageManager.addImage> = null;
     const rig = captureRig(() => {
-      capturedImage = stageManager.addImage({
-        id: 'capture-image', file: 'images/capture-image.png',
-        position: { x: 0.35, y: 0.65 }, scale: 1, rotation: -15, z: 20,
-      });
-      stageManager.updateImages(cameraController.getState());
+      capturedImage = stageManager.getImageSprite('capture-image');
+      expect(capturedImage?.parent).toBe(effectsLayer);
     });
     const backgroundLayer = new Container();
     const effectsLayer = new Container();
@@ -458,13 +525,18 @@ describe('formal camera Bake/export parity', () => {
     const assetLoadSpy = vi.spyOn(Assets, 'load').mockImplementation(async () => Texture.EMPTY as never);
 
     try {
+      vi.spyOn(stageManager, 'updateImages').mockRestore();
+      await engine.loadPreparedScene({ ...scene, actions: [...scene.actions, {
+        id: 'capture-image', action: 'addImage', time: 0,
+        params: { id: 'capture-image', file: 'images/capture-image.png', position: [0.35, 0.65], scale: 1, rotation: -15, z: 20 },
+        source: { statementId: 'capture-image', outputKey: 'primary' },
+      }] });
       await stageManager.renderEnvironmentLayer({
         layerId: 'capture-environment', x: 0.65, y: 0.4, scale: 1, rotation: 25, z: 10,
         images: [{ image: 'images/capture-environment.png', weight: 1 }],
       }, camera);
       const environment = stageManager.getEnvironmentLayerDisplayObject('capture-environment');
       if (!environment) throw new Error('Capture environment fixture was not materialized.');
-      vi.spyOn(stageManager, 'updateImages').mockRestore();
 
       const ui = rig.root.addChild(new Container());
       ui.position.set(18, 27);

@@ -1,0 +1,67 @@
+{
+  "renderer": "Pixi WebGL / ANGLE SwiftShader",
+  "browser": "151.0.7922.34",
+  "path": "formal scene -> awaited seek -> real render -> readback -> RawPixelsBackend",
+  "results": [
+    {
+      "width": 640,
+      "height": 360,
+      "byteLength": 921600,
+      "environment": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "ui": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "unprojectedImageLocation": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "imagePresentBeforeRender": true
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "byteLength": 3686400,
+      "environment": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "ui": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "image": [
+        255,
+        0,
+        0,
+        255
+      ],
+      "unprojectedImageLocation": [
+        0,
+        255,
+        0,
+        255
+      ],
+      "imagePresentBeforeRender": true
+    }
+  ]
+}
