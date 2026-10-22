@@ -26,6 +26,10 @@ npx vitest run --pool=forks --maxWorkers=1 --execArgv=--expose-gc \
 
 该模式从固定 Git 对象 `acfee6cbc5b87fe2d18dcebd401f786d9199dd20` 提取实际生产 `CameraFollowHistory.ts`，只附加只读缓存计数，写到被忽略的 `.superpowers/sdd/camera-production-baseline-runtime/`。它替换正式入口使用的历史算法；不是原型或重新实现的旧算法。新旧模式都经过同一真实角色准备、ScriptEngine 播放/seek、正式 Bake 和 FrameCaptureEngine 调度，使用相同的完整 600 秒轨迹与观察时刻。
 
+完整 baseline 命令会运行浏览器导出阶段，但它不是旧算法的浏览器对照：固定 Git 对象的 baseline mock 只作用于 Node/Vitest module graph，独立 Vite/Chromium module graph 始终加载当前 worktree 源码。结果会分别记录 Node 侧轨迹准备策略与 browser algorithm source。单独设置 `AEON_CAMERA_BENCHMARK_SUPPLEMENT=1` 时只运行 fresh 轨迹准备和当前浏览器补充，跳过长时间历史/Bake/调度分项。
+
+现有的 `camera-production-baseline-node24.json` 与原完整 baseline 日志是在加入浏览器补充前采集的历史数据，不包含这项编码测量；本次 Issue07 的 fresh browser 数值来自独立 supplement 运行。
+
 对照的轨迹准备采用相同的 tracks-only 请求：历史 runtime 只消费轨迹和版本，原先准备过程额外生成的约 9,000 个相机状态没有消费者。正式 Bake 仍在所请求范围内生成相机状态。额外运行旧式全部状态预计算的作业约 508 秒后被主动停止，只作为未完成成本下界；不拿它代替有效分项测量，也不把估计完成时间当作实测。
 
 ## 输入与正式调用边界
@@ -96,3 +100,33 @@ Bake 的正式 range 实现为 49 个输出共用一次建立的 timeline 数组
 - **SDK 私有 posed-bounds seam：当前已验证，升级仍需复测。** 基准在创建真实 SDK 模型时明确断言 `updateDrawableBounds` 存在，并以当前安装 runtime 的实际 Core 更新验证姿态变化。生产 helper 仍有结构化可选调用；若未来 SDK 删除这个方法，可能读到旧 bounds。未凭空修改 vendor 或引入未经测量的替代几何路径。
 
 完整仓库检查由最终汇总门禁在独立评审通过后执行一次；本轮只运行基准、行为/缓存/跨入口测试和 TypeScript，不进行浏览器视觉检查。
+
+## 正常播放与真实浏览器编码补充
+
+上面的 capture 调度分项仍是带空 renderer 和内存接收 backend 的调度测量，不能代表绘制或编码速度。Issue07 补充基准另在自动化 Chromium 中加载正式 `ScriptEngine`、Pixi WebGL、Cubism Core 与一个真实模型，验证正常 `play()` 时间更新、同刻 evaluator/seek 镜头一致性，并通过生产 `FrameCaptureEngine`、`RawPixelsBackend` 和注册的 FFmpeg 导出 handler 渲染、编码视频。浏览器检查全程非视觉，不保存或人工审阅截图。
+
+从 Node >=24 的项目环境安装依赖及 Playwright Chromium：
+
+```sh
+npm ci
+npx playwright install chromium
+```
+
+需按上文现有 real-runtime fixture 规则配置 `AEON_CUBISM_TEST_MODEL`、Core 与可选的 `AEON_CUBISM_TEST_MOTION`。未设置动作时仍使用真实模型可读的一个动作。补充命令不设置 `AEON_CAMERA_BENCHMARK_PREPARED_TRACKS`，每次均以真实 Core 从头准备完整 600 秒轨迹；不要用仅用于 transport 定位的 ignored diagnostic cache 代替验收：
+
+```sh
+unset AEON_CAMERA_BENCHMARK_PREPARED_TRACKS
+AEON_CAMERA_BENCHMARK=1 \
+AEON_CAMERA_BENCHMARK_SUPPLEMENT=1 \
+AEON_CAMERA_BENCHMARK_OUTPUT=.superpowers/sdd/camera-production-browser-export.json \
+npx vitest run --pool=forks --maxWorkers=1 \
+  src/__benchmarks__/CameraProduction.test.ts
+```
+
+补充场景用正式播放从 9.95 秒连续运行至 10.15 秒；逐个 time-update 在相同时间点与独立 camera-channel evaluator 对比，并将最终播放时间 seek 回查。实际导出在 10–11 秒以 24 fps、640×360 捕获 24 帧，Pixi WebGL 在 Chromium SwiftShader 上绘制真实角色和纹理；`libx264` 以 H.264/yuv420p 将真实 RGBA 像素写入临时 MP4。测量涵盖 `FrameCaptureEngine`、本机测试 WebSocket bridge 传帧及 FFmpeg 编码，结束后用 FFmpeg 解码帧数与 `framemd5` 校验，再删除临时视频。只有全部帧成功解码、输出非空、Cubism 参数快照有变化、模型 bounds 与正式舞台相交、模型绘制像素与背景角点不同且解码帧确有不同哈希时才输出吞吐结果。
+
+Chromium 没有 Electron 的 `asset://` 协议，自动化夹具只把 Electron preload 文件读取入口和有限的 fixture `asset://` 地址映射到 loopback HTTP；模型 resolver、Cubism 加载器、真实 Moc、纹理、Pixi WebGL 绘制、帧捕获和正式 FFmpeg 文件写入仍走实际实现。Pixi 的公开 `Assets.setPreferences({ preferWorkers: false })` 仅用于此 harness，使真实 `ImageBitmap` 纹理加载留在可适配的页面 transport；Electron 桌面默认 worker 配置保持不变。结果标记为 current browser source；Vitest baseline mock 不会应用到 Chromium 的独立 module graph。测试 bridge 直接调用正式 FFmpeg handlers，不测量 Electron 主进程 IPC 延迟。SwiftShader、main-thread texture fetch 和本机 WebSocket bridge 都与桌面 GPU/Electron 的实时导出条件不同；所得编码 fps 是本次自动化环境下的观测，不是跨硬件吞吐承诺。
+
+一次从头准备的补充验收在 Node v24.21.0、Chromium 151.0.7922.34、FFmpeg 7.0.2-static、Linux x64 / Intel i7-13650HX 上通过。完整 600 秒准备耗时 46,935.9 ms；正常播放观察 11 次时间更新，0.1643 秒墙钟内到达 10.162 秒，播放/evaluator/seek 的最大镜头差为 0。真实 Pixi WebGL/SwiftShader 捕获并编码 24 帧，测得 **10.14 帧/秒**，实际临时 H.264 文件 22,603 字节；FFmpeg 解码出 24 帧，其中 21 种不同的完整帧哈希。模型已加载、186 个 Cubism 参数产生 24 个不同快照，真实 Moc/纹理/动作 fixture 请求均成功。捕获时钟相对请求时刻最大偏差为 `3.34e-8` 秒；严格式播放/evaluator 与 same-time 输出 camera parity 均为 0。这里的 10.14 是 640×360、24 fps 输入和上述软件渲染条件下端到端的观测，不能与 1920×1080 composition 单位或前表的 81.32 帧/秒空 renderer 调度结果混为一谈。
+
+不含本机模型路径或动作目录的 fresh 原始结果保存在 [camera-production-browser-export-node24.json](benchmarks/camera-production-browser-export-node24.json)，其中 `diagnosticTrackReuse: false`。文件另将后续缓存轨迹的可见性守卫验证放在独立 `postFreshAcceptanceGuardVerification` 字段，标为 `diagnosticTrackReuse: true`，不混入 fresh 性能数值。
