@@ -270,6 +270,22 @@ describe('semantic visual diagnostics', () => {
       .toBeUndefined();
   });
 
+  it('rejects durationSeconds on follow stops while preserving finite starts and durationless stops', () => {
+    const validDocument = makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 2,
+      } },
+      { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
+    ]);
+
+    expect(validateSemanticSceneStructure(validDocument)).toEqual([]);
+    expect(() => makeDocument([
+      { id: 'follow_stop_with_duration', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'stop', target: 'hero', durationSeconds: 1,
+      } },
+    ])).toThrow(/durationSeconds/);
+  });
+
   it('validates post targets against declared objects without requiring active-time presence', () => {
     const document = makeDocument([
       {
