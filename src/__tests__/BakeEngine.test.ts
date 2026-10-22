@@ -808,6 +808,8 @@ describe('BakeEngine runtime routing', () => {
   it('prepares posed historical anchors through isolated Bake and evaluates camera focus from those tracks', async () => {
     const modelPath = 'figure/rana/rana.model3.json';
     let posedOffset = 0;
+    let poseTimeSeconds = 0;
+    let currentSceneTime: number | null = null;
     const posesAtBoundsRefresh: number[] = [];
     const models: PIXI.Container[] = [];
     const updateDrawableBounds = vi.fn(() => { posesAtBoundsRefresh.push(posedOffset); });
@@ -835,7 +837,12 @@ describe('BakeEngine runtime routing', () => {
       runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true,
     });
     const controls = mockControls({
-      stepBakeFrame: vi.fn(() => { posedOffset += 1; }),
+      setSceneTime: vi.fn((_model, sceneTimeSeconds) => { currentSceneTime = sceneTimeSeconds; }),
+      stepBakeFrame: vi.fn((_model, deltaMs) => {
+        if (currentSceneTime === null) return;
+        poseTimeSeconds += deltaMs / 1000;
+        posedOffset = poseTimeSeconds * 100;
+      }),
       getHeadAnchor: vi.fn(() => ({ x: 0.8, y: 0.3 })),
     });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
@@ -849,14 +856,15 @@ describe('BakeEngine runtime routing', () => {
     })));
 
     const base = createBasePreparedScene(modelPath);
-    const duration = 1 / 15;
+    const duration = 0.15;
+    const eventTime = 0.05;
     const scene: PreparedCompiledScene = {
       ...base,
       durationSeconds: duration,
       actions: [
         { ...base.actions[0], params: { ...base.actions[0].params, position: [0.5, 0.5], scale: 2, rotation: 90, flipX: true, duration } },
         {
-          id: 'instant-transform', time: duration, action: 'transformCharacter',
+          id: 'instant-transform', time: eventTime, action: 'transformCharacter',
           params: { id: 'rana', position: [0.7, 0.4], duration: 0 },
           source: { statementId: 'instant-transform', outputKey: 'primary' },
         },
@@ -872,23 +880,29 @@ describe('BakeEngine runtime routing', () => {
       const result = await engine.prepareCameraAnchorsPrepared(scene, new Map([[modelPath, modelPath]]), 7);
       const head = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'head');
       const center = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'center');
-      const transition = head?.events.find((event) => event.time === duration);
+      const transition = head?.events.find((event) => event.time === eventTime);
       const modelPivot = models[0].pivot;
       const initialHeadOffsetX = (posesAtBoundsRefresh[0] + 20 + 100 * 0.8 - modelPivot.x) / 200;
+      const eventHeadOffsetX = (posesAtBoundsRefresh[1] + 20 + 100 * 0.8 - modelPivot.x) / 200;
 
       expect(head?.version).toBe(1);
       expect(head?.revision).toEqual(expect.any(String));
-      expect(head?.samples).toHaveLength(2);
+      expect(head?.samples).toHaveLength(5);
       expect(head?.samples[0].position).not.toEqual(head?.samples[1].position);
       expect(head?.samples[0].position.y).toBeCloseTo(0.5 - 2 * initialHeadOffsetX, 6);
       expect(head?.samples[0].position.y).not.toBeCloseTo(0.5 + 2 * initialHeadOffsetX, 3);
+      expect(posesAtBoundsRefresh).toHaveLength(5);
+      expect(posesAtBoundsRefresh[0]).toBeCloseTo(0, 6);
+      expect(posesAtBoundsRefresh[1]).toBeCloseTo(eventTime * 100, 6);
       expect(transition).toBeDefined();
       expect(transition?.left.x).toBeCloseTo(transition!.right.x - 0.2, 6);
       expect(transition?.left.y).toBeCloseTo(transition!.right.y + 0.1, 6);
-      expect(center?.samples).toHaveLength(2);
+      expect(transition?.left.y).toBeCloseTo(0.5 - 2 * eventHeadOffsetX, 6);
+      expect(transition?.right.y).toBeCloseTo(0.4 - 2 * eventHeadOffsetX, 6);
+      expect(center?.samples).toHaveLength(5);
       expect(center?.samples[0].position.x).toBeCloseTo(0.05, 6);
       expect(center?.samples[0].position.y).toBeLessThan(0.5);
-      expect(updateDrawableBounds).toHaveBeenCalledTimes(2);
+      expect(updateDrawableBounds).toHaveBeenCalledTimes(5);
       expect(result.cameraStates?.[0].state.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
       expect(result.cameraStates?.[0].state.position).toEqual(head?.samples[0].position);
     } finally {

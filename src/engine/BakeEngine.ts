@@ -461,6 +461,7 @@ export class BakeEngine {
     const simStart = (seedSnapshot && rangeStart > 0) ? rangeStart : 0;
     // But we only EMIT snapshots within [rangeStart, rangeEnd]
     let simTime = simStart;
+    let previousFrameTime: number | null = null;
     const step = precision;
     let stepCount = 0;
 
@@ -595,9 +596,12 @@ export class BakeEngine {
             };
             return operation;
           });
+          const frameDeltaMs = previousFrameTime === null
+            ? 0
+            : Math.max(0, (simTime - previousFrameTime) * 1000);
           const batch = await this.submitBakeFrameBatch({
             operations,
-            deltaMs: step * 1000,
+            deltaMs: frameDeltaMs,
             isCurrent,
           });
           if (batch.status !== 'submitted') {
@@ -664,6 +668,7 @@ export class BakeEngine {
             }
           }
 
+        previousFrameTime = simTime;
         const nextAnchorTime = anchorTimes[anchorTimeIndex];
         simTime = anchorCapture && nextAnchorTime !== undefined && nextAnchorTime > simTime
           ? Math.min(simTime + step, nextAnchorTime)
