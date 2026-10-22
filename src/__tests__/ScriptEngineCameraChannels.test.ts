@@ -32,14 +32,14 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
 
   async function load(statements: CurrentSceneDocument['statements'], durationSeconds: number | null = 10) {
     const pipeline = new SemanticScenePipeline({ resolveAsset: (source) => source });
-    const { prepared } = await pipeline.processDocument({
+    const bundle = await pipeline.processDocument({
       schemaVersion: 5,
       sceneId: 'camera-channels',
       meta: { title: 'Camera channels', resolution: [1920, 1080], fps: 60, durationSeconds: durationSeconds ?? undefined },
       statements,
     });
-    await engine.loadPreparedScene(prepared);
-    return { master: engine.getMasterTimeline()! };
+    await engine.loadPreparedScene(bundle.prepared);
+    return { compiled: bundle.compiled, master: engine.getMasterTimeline()! };
   }
 
   it('plays a sparse path from the default pose before its nonzero first keyframe and seeks to the same subframe', async () => {
@@ -132,5 +132,24 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     expect(playback.zoom).toBeCloseTo(zoom, 8);
     await engine.seek(at, true);
     expect(cameraController.getState()).toEqual(playback);
+  });
+
+  it('keeps compiled and master duration aligned for a sub-second path without durationSeconds', async () => {
+    const ends: string[] = [];
+    const offEnd = hookSystem.on('scene:end', () => { ends.push('end'); });
+    try {
+      const { compiled, master } = await load([{
+        id: 'short-path', type: 'camera', time: 0,
+        params: { mode: 'path', ease: 'linear', keyframes: [{ time: 0, zoom: 2 }, { time: 0.4, zoom: 4 }] },
+      }], null);
+
+      expect(compiled.durationSeconds).toBeCloseTo(0.4, 8);
+      expect(master.duration()).toBeCloseTo(compiled.durationSeconds, 2);
+      master.seek(compiled.durationSeconds, false);
+      expect(cameraController.getState().zoom).toBeCloseTo(4, 8);
+      expect(ends).toEqual([]);
+      master.seek(master.duration(), false);
+      expect(ends).toEqual(['end']);
+    } finally { offEnd(); }
   });
 });

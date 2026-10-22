@@ -9,9 +9,10 @@ import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
 function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineAction): boolean {
   if (!ctx.cameraStateDriven) return false;
   const { params } = action;
+  const isPath = action.action === 'cameraPath';
   let duration = typeof params.duration === 'number' ? params.duration
-    : typeof params.durationSeconds === 'number' ? params.durationSeconds : 1;
-  if (action.action === 'cameraPath' && Array.isArray(params.keyframes)) {
+    : typeof params.durationSeconds === 'number' ? params.durationSeconds : isPath ? 0 : 1;
+  if (isPath && Array.isArray(params.keyframes)) {
     const keyframes: readonly { time?: number }[] = params.keyframes;
     const period = keyframes.reduce((end, frame) => Math.max(end, frame.time ?? 0), 0);
     const repeats = typeof params.repeat === 'number' && params.repeat >= 0 ? params.repeat : 0;
