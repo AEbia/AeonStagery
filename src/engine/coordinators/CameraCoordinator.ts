@@ -4,7 +4,7 @@ import { computeCameraStateAtTime, type CameraStateResolverDeps } from '../Camer
 import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
 import { evaluateCameraChannels, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
 
-/** Transitional boundary: role framing still needs the live-anchor runtime. */
+/** Whether a timeline can evaluate without a prepared historical anchor bundle. */
 export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineAction[]): boolean {
   return !timeline.some(({ action, params }) => {
     if (action === 'cameraFollow' || action === 'cameraUnfollow' || action === 'cameraHitchcock') return true;
@@ -19,6 +19,8 @@ export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineActi
 
 interface CameraCoordinatorDeps extends CameraStateResolverDeps {
   logicalReferenceSize?: CameraLogicalReferenceSize;
+  revision?: string | number;
+  trajectoryRevision?: string | number;
 }
 
 interface ResolvedStatePatch {
@@ -47,21 +49,23 @@ export class CameraCoordinator {
    * Scan the timeline at the given time and determine the correct
    * camera follow + shake state.
    *
-   * Anchor-independent scenes share one authority for playback and seek.
-   * Role-dependent scenes retain live focus/follow until historical anchor
-   * preparation is wired into this runtime boundary.
+   * Formal scenes always supply a prepared trajectory bundle and share one
+   * authority for playback and seek. The callback fallback is retained for
+   * standalone preview callers until their evaluator migration.
    */
   sync(
     time: number,
     timeline: readonly RuntimeTimelineAction[],
     deps: CameraCoordinatorDeps = {},
   ): CameraEvaluationOutput | undefined {
-    if (usesUnifiedCameraChannels(timeline)) {
+    if (deps.anchorTrajectories !== undefined || usesUnifiedCameraChannels(timeline)) {
       const resolved = evaluateCameraChannels({
         timeline,
         sceneTime: time,
         logicalReferenceSize: deps.logicalReferenceSize ?? { width: 1920, height: 1080 },
-        anchorTrajectories: [],
+        anchorTrajectories: deps.anchorTrajectories ?? [],
+        revision: deps.revision,
+        trajectoryRevision: deps.trajectoryRevision,
       });
       this.controller.unfollow();
       this.controller.applyShakeOffset(resolved.shake);

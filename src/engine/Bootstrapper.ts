@@ -1023,6 +1023,7 @@ export function bootstrap(options?: {
   }
 
   preBakeDaemon.setWmdlConfigRegistry(wmdlConfigRegistry);
+  getScriptEngine()?.setWmdlConfigRegistry(wmdlConfigRegistry);
 
   // PlaybackAdapter: bridged to the unified ScriptEngine.
   const playbackAdapter = new PlaybackAdapter(playbackStore, {

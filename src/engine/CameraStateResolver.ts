@@ -97,11 +97,13 @@ function followTransientWeight(smoothing: number, elapsedSeconds: number): numbe
  * When playback would stop tracking (authored duration end or a release
  * action), the ticker stops and the camera latches its current glide frame.
  */
-function findFollowReleaseInstant(timeline: readonly RuntimeTimelineAction[], afterStart: number): number {
+function findFollowReleaseInstant(timeline: readonly RuntimeTimelineAction[], afterAction: RuntimeTimelineAction): number {
+  const afterStart = afterAction.time ?? 0;
+  const afterIndex = timeline.indexOf(afterAction);
   let release = Infinity;
-  for (const action of timeline) {
+  for (const [index, action] of timeline.entries()) {
     const time = action.time ?? 0;
-    if (time <= afterStart || time >= release) continue;
+    if (time < afterStart || (time === afterStart && index <= afterIndex) || time >= release) continue;
     const params = action.params ?? {};
     const releases = action.action === 'cameraUnfollow'
       || action.action === 'cameraReset'
@@ -277,7 +279,7 @@ function computeCameraStateAtTimeInternal(
       const params = action.params ?? {};
       if (!params.characterId) continue;
       const duration = typeof params.duration === 'number' && params.duration > 0 ? params.duration : Infinity;
-      follow = sampleTime <= start + duration
+      follow = sampleTime < start + duration
         ? {
             characterId: params.characterId,
             offset: normalizeOffset(params.offset),
@@ -293,7 +295,7 @@ function computeCameraStateAtTimeInternal(
         // the settled anchor. The transient decays from the pre-follow channel
         // state toward the tracked anchor, measured against the anchor as it
         // was at the follow start.
-        const releaseAt = Math.min(duration === Infinity ? Infinity : start + duration, findFollowReleaseInstant(timeline, start));
+        const releaseAt = Math.min(duration === Infinity ? Infinity : start + duration, findFollowReleaseInstant(timeline, action));
         const followTime = Math.min(sampleTime, releaseAt);
         const trajectory = deps.anchorTrajectories?.find((candidate) =>
           candidate.characterId === activeFollow.characterId && candidate.part === (activeFollow.part ?? 'center'));
@@ -327,7 +329,7 @@ function computeCameraStateAtTimeInternal(
         // Duration-expired follow: playback's auto-unfollow latches the last
         // tracked glide frame — write that through so release semantics match
         // the explicit-unfollow path instead of reverting to pre-follow values.
-        const releaseAt = Math.min(start + duration, findFollowReleaseInstant(timeline, start));
+        const releaseAt = Math.min(start + duration, findFollowReleaseInstant(timeline, action));
         const followPart = typeof params.focus?.part === 'string' ? params.focus.part : 'center';
         const trajectory = deps.anchorTrajectories?.find((candidate) =>
           candidate.characterId === params.characterId && candidate.part === followPart);

@@ -35,8 +35,8 @@ KSM-0003 的 inventory、source、compiler、runtime、state、collaboration、t
 
 - rim-light baseline、set、finite modulate、reset、同时间顺序、seek 与 bake/playback 使用同一 resolver，并有 parity tests；
 - 不依赖角色锚点的正式相机编排，在播放与 seek 中由 `CameraCoordinator` 共同消费 `evaluateCameraChannels`：首个写入者之前回默认位姿，x/y/zoom/rotation 按实际编译轨道独立接管，结束保持且旧动作不恢复。正式动作调度只保留时长与播放事件，GSAP 不再写这些镜头通道，缓动函数继续复用；路径按属性独立插值，关键帧节奏不受占用范围伸缩。术语与后续迁移边界见[镜头与投影词汇表](../camera-language.md)和 [ADR-0038](../adr/0038-unified-camera-evaluation.md)；
-- 相机晃动由 `src/engine/CameraShake.ts` 按场景时间确定性求值，作为投影后的合成创作单位偏移进入角色、环境层和图片的共同投影；多个有限 envelope 可叠加，reset 按语句顺序释放此前的晃动，从未叠加抖动的位姿回默认值。包含角色聚焦或跟随的场景暂时整体保留原 GSAP/ticker 与 seek resolver 路径；历史锚点轨迹接入正式协调器仍是 implementation gap，不能由基础通道验收推断角色运镜、Bake/export 已完成统一；
-- follow 进入过渡同样属于 parity 契约：resolver 以 `position(t) = target + (preFollow − startTarget)·e^(−λ(t−s))`（λ=−60·ln(smoothing)，默认 0.85，目标按段 zoom 视口钳制、滑行值不钳制）镜像 `tickFollow()` 的指数趋近，seek 落入追随入口窗口呈现中间态而非终态；duration 到期与显式 unfollow 一样锁定最后滑行帧，起始锚点经 `resolveCharacterPositionAtTime` 取追随开始时刻的语句位置；
+- 相机晃动由 `src/engine/CameraShake.ts` 按场景时间确定性求值，作为投影后的合成创作单位偏移进入角色、环境层和图片的共同投影；多个有限 envelope 可叠加，reset 按语句顺序释放此前的晃动，从未叠加抖动的位姿回默认值。正式场景的角色聚焦与跟随同样通过统一求值结果写镜头，GSAP 仅保留场景时钟与播放事件；隔离 Bake 准备历史部位轨迹后才建立首次镜头时间线，播放与 seek 共用轨迹。后台快照 Bake 与 FrameCapture/export 的轨迹消费仍待单独接通，不能由预览验收推断这些入口已完成统一；
+- follow 的入口与持续追赶由只读历史轨迹重建：使用连续速率 λ=−60·ln(smoothing)，默认 0.85，按事件左右侧及有效区间切分积分，目标按历史 zoom 视口钳制、滑行值不钳制。初始无锚点保持进入前位置，失去锚点保持最后有效滑行值，重现后继续追赶；smoothing=0 在有效锚点处立即跟随，1 始终保持进入前位置。同刻进入与释放按编译稳定顺序执行，有限 duration 在精确终点释放，stop/reset/后续位置写入从该时刻实际值释放或接管；
 - runtime timeline representation 与 prepared adapter 位于 engine 内部，产品只从 `loadPreparedScene()`、`bakePrepared()` 和 `bakePreparedRange()` 进入；legacy background/camera scheduler alias 已删除；
 - legacy scene migrator/types 只位于 `scripts/migrations/legacy-scene`，normal loader 与产品 barrel 不导出该边界；
 - camera、visualStyle、lighting Inspector 与 timeline 专用描述直接消费 semantic metadata/source params；
@@ -248,11 +248,17 @@ camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须�
 
 - `focus` / `move` / `path` 的通道接管以 ADR-0038 为准：x、y、zoom、rotation 独立竞争，后写入者从自身起点的实际值接管，终值保持且旧动作不恢复。显式完整位置同时接管两轴。`hitchcock` 已由 ADR-0038 决定退役，拒绝旧输入与清理残留仍待后续实现。
 - `shake` 是可叠加的有限 envelope，不取得持久 transform ownership。
-- `follow` 使用 `operation: start \| stop`，不再用 `duration: 999` 或 Infinity 暗示生命周期。follow start 持有 position channel，直到同一 camera family 的 follow stop 或 reset 释放；在此期间任何写 position 的 focus/move/path/hitchcock 都必须先按 statement order stop follow，否则 validation error。只写 disjoint zoom/rotation keys 的操作可在 definition 明确声明后并行。
+- `follow` 使用 `operation: start \| stop`，不再用 `duration: 999` 或 Infinity 暗示生命周期。follow start 持有 position channel，直到 follow stop、有限 duration 终点、reset 或后续真实位置轨道释放；后续 focus/move/path 从释放时的实际跟随位置接管，不要求显式先 stop。只写 zoom/rotation 的编译轨道保留跟随关系，不能由旧 move 标签猜测位置所有权。
 - `reset` 复位 position/zoom/rotation，并终止 active follow 与未结束 shake。该语义必须同时用于 playback、seek 和 bake。
 - zoom 必须写成 `{ kind: 'absolute' | 'delta', value: number }`。禁止继续让裸 `zoom: 0.3` 同时承担“目标缩放 0.3”与“推进 0.3”的两种解释。
 - 同时间 camera statements 按 statement order 执行；registry 的 overlap/state-key validator 必须给出确定结果。
-- `path` 按各属性自己的关键帧与缓动插值；非零首帧从动作起点实际值过渡，零时刻首帧立即生效。关键帧时间决定运动节奏，`durationSeconds` 不伸缩或截断运动；有限 repeat 计入编排时间，loop 优先且无限重复保持有限场景范围。基础通道播放与 seek 已统一求值；上面的角色 follow 校验限制及历史轨迹接入仍属于后续迁移的 implementation gap。
+- `path` 按各属性自己的关键帧与缓动插值；非零首帧从动作起点实际值过渡，零时刻首帧立即生效。关键帧时间决定运动节奏，`durationSeconds` 不伸缩或截断运动；有限 repeat 计入编排时间，loop 优先且无限重复保持有限场景范围。基础通道与角色运镜的正式播放、seek 已统一求值；独立临时预览 API、后台快照 Bake 与导出仍有后续迁移边界。
+
+正式角色轨迹生命周期由 `CameraHistoricalRuntime` 持有，复用隔离 `BakeEngine.prepareCameraAnchorsPrepared` 生成带内容 revision、部位、有效性区间、不连续事件两侧值的轨迹。`ScriptEngine.loadPreparedScene` 等待完整轨迹后才建立镜头时间线；新加载、失败回滚和 teardown 取消旧任务，过期结果不能发布。协调器不通过活动模型的 getPoint/getPosition 推断历史，也不注册正式 follow ticker。诊断通过 `ScriptEngine.getCameraEvaluation()` 返回，由调用方呈现和去重。
+
+编排或合成参考尺寸变化触发重新准备。资源系统尚无完整内容 revision 通知，因此含角色运镜的场景每次显式重载都重新准备，覆盖语句未变但模型/姿态资源内容变化；仅基础通道仍保留相同内容跳过重载。隔离模型复用但准备任务串行，避免取消后资源加载尚未结束时共享模型。准备失败拒绝本次投影，不退回活动锚点或竞争写镜头的旧路径。
+
+可见手感变化：移动目标现在累计完整追赶历史，失去目标不丢弃关系；缩放期间跟随钳制消费对应历史 zoom，smoothing 边界精确遵守 0/1。既有独立 `CameraController` 临时预览 API 暂保留旧实现；240 步/秒、一秒检查点与 15 Hz 隔离锚点采样仍是待真实长场景证据收敛的候选，加载等待成本与精度不在此票宣称生产上界。
 
 #### Environment State Contract
 

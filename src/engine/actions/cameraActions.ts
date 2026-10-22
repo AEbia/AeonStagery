@@ -19,10 +19,10 @@ function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineA
     duration = Math.max(duration, period * (params.loop === true ? 1 : repeats + 1));
   }
   const segment = gsap.timeline();
-  if (action.action !== 'cameraReset') {
+  if (action.action !== 'cameraReset' && action.action !== 'cameraUnfollow') {
     segment.call(() => hookSystem.execute('camera:move', action.action === 'cameraPath'
       ? { type: 'path', keyframes: params.keyframes, config: params }
-      : { type: 'motion', config: params }), undefined, 0);
+      : { type: 'motion', config: action.action === 'cameraFollow' ? { ...params, move: 'follow' } : params }), undefined, 0);
   }
   segment.to({}, { duration: Math.max(0, duration) }, 0);
   ctx.tl.add(segment, action.time ?? 0);
@@ -31,7 +31,8 @@ function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineA
 
 // ── Backward-compat: route cameraFollow through executeMotion ──
 
-export function scheduleCameraFollow(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraFollow(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time, params } = action;
 
@@ -75,7 +76,8 @@ export function scheduleCameraShake(ctx: SchedulerContext, action: { time?: numb
 }
 
 // Releasing a follow only stops position tracking — never a full camera reset.
-export function scheduleCameraUnfollow(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraUnfollow(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time } = action;
   const camTl = cameraController.stopFollow();
@@ -96,7 +98,8 @@ export function scheduleCameraReset(ctx: SchedulerContext, action: RuntimeTimeli
   tl.add(camTl, time);
 }
 
-export function scheduleCameraHitchcock(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraHitchcock(ctx: SchedulerContext, action: RuntimeTimelineAction): void {
+  if (scheduleEvaluatedCamera(ctx, action)) return;
   const { tl } = ctx;
   const { time, params } = action;
   const camTl = cameraController.hitchcockZoom(params as any);
