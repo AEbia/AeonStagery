@@ -1,0 +1,517 @@
+{
+  "policy": "baseline",
+  "environment": {
+    "node": "v24.21.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13650HX",
+    "gc": false
+  },
+  "input": {
+    "duration": 600,
+    "characterCount": 1,
+    "motion": "avemujica/mutsumi/mtn_angry01_C_casual_spring_01",
+    "motionMeta": {
+      "Duration": 4.633,
+      "Fps": 30,
+      "Loop": true,
+      "AreBeziersRestricted": true,
+      "FadeInTime": 1,
+      "FadeOutTime": 1,
+      "CurveCount": 67,
+      "TotalSegmentCount": 162,
+      "TotalPointCount": 381,
+      "UserDataCount": 0,
+      "TotalUserDataSize": 0
+    },
+    "modelSha256": "d3bfd8a6beb3b0fa5a664ec3ca144d3736edbb17609492b75613ac887fce6230",
+    "motionSha256": "52fc5aa23c539fee8a49d8f4e65d4454afdade637a449e0471f8e43d5255772e",
+    "modelCount": 3,
+    "coreFrames": 27302,
+    "trackCount": 5,
+    "samples": 44865,
+    "events": 0,
+    "validity": [
+      {
+        "start": 0,
+        "end": 300
+      },
+      {
+        "start": 302,
+        "end": 600.0666666666667
+      }
+    ],
+    "retainedTrajectoryJsonBytes": 3427354
+  },
+  "timingsMs": {
+    "loadIncludingPreparation": 52082.56925,
+    "preparation": 51951.592975,
+    "firstColdEvaluation": 88801.294652,
+    "warm100Evaluations": 1914.6187220000138,
+    "firstSeekAfterPreparation": 94422.471509,
+    "warm20Seeks": 2965.2069070000143,
+    "bake49Samples": 309138.54477100004,
+    "capture48Frames": 26961.795643000165
+  },
+  "observations": [
+    {
+      "time": 0,
+      "state": {
+        "position": {
+          "x": 0.5,
+          "y": 0.5
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 0.012345,
+      "state": {
+        "position": {
+          "x": 0.5187682662890875,
+          "y": 0.5187682662890875
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 10.01234,
+      "state": {
+        "position": {
+          "x": 0.7499999999999979,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 299.99999,
+      "state": {
+        "position": {
+          "x": 0.5727954436908643,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 300,
+      "state": {
+        "position": {
+          "x": 0.5727954434842699,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 301,
+      "state": {
+        "position": {
+          "x": 0.5727954434842699,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 302,
+      "state": {
+        "position": {
+          "x": 0.5727954434842699,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 302.00001,
+      "state": {
+        "position": {
+          "x": 0.5728066453482386,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 598.12345,
+      "state": {
+        "position": {
+          "x": 0.7499999999999979,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "time": 599.12345,
+      "state": {
+        "position": {
+          "x": 0.7499999999999979,
+          "y": 0.7499999999999979
+        },
+        "zoom": 2,
+        "rotation": 0,
+        "follow": {
+          "characterId": "hero",
+          "offset": {
+            "x": 0,
+            "y": 0
+          },
+          "smoothing": 0.9
+        },
+        "coverage": {
+          "position": true,
+          "zoom": true,
+          "rotation": false
+        },
+        "shake": {
+          "x": 0,
+          "y": 0
+        },
+        "diagnostics": []
+      }
+    }
+  ],
+  "historyIntegrationErrors": [
+    {
+      "time": 0,
+      "compositionUnits": 0
+    },
+    {
+      "time": 0.012345,
+      "compositionUnits": 2.4457182613372134e-13
+    },
+    {
+      "time": 10.01234,
+      "compositionUnits": 4.157721044273263e-12
+    },
+    {
+      "time": 299.99999,
+      "compositionUnits": 2.3662288313726724e-12
+    },
+    {
+      "time": 300,
+      "compositionUnits": 2.3177245180813944e-12
+    },
+    {
+      "time": 301,
+      "compositionUnits": 2.3177245180813944e-12
+    },
+    {
+      "time": 302,
+      "compositionUnits": 2.3177245180813944e-12
+    },
+    {
+      "time": 302.00001,
+      "compositionUnits": 2.3177245180813944e-12
+    },
+    {
+      "time": 598.12345,
+      "compositionUnits": 4.646864696540706e-12
+    },
+    {
+      "time": 599.12345,
+      "compositionUnits": 4.646864696540706e-12
+    }
+  ],
+  "prefixWriterProbe": [
+    {
+      "writers": 64,
+      "threeEvaluationsMs": 12.111089000012726
+    },
+    {
+      "writers": 128,
+      "threeEvaluationsMs": 61.16390899987891
+    },
+    {
+      "writers": 256,
+      "threeEvaluationsMs": 400.85824400000274
+    }
+  ],
+  "approximation": {
+    "cadenceHz": 15,
+    "referenceHz": 240,
+    "referenceWindows": [
+      [
+        0,
+        5
+      ],
+      [
+        9.95,
+        10.15
+      ]
+    ],
+    "samples": 1247,
+    "maxCompositionPixels": 0.5970032228459405,
+    "rmsCompositionPixels": 0.08765539682832506,
+    "denseBakeMs": 95411.28279899992,
+    "fastDenseBakeMs": 14311.970991000067
+  },
+  "diagnostics": {
+    "cold": {
+      "anchorQueries": 0,
+      "indexedPoints": 0,
+      "contexts": 1,
+      "checkpoints": 256
+    },
+    "warm100": {
+      "anchorQueries": 0,
+      "indexedPoints": 0,
+      "contexts": 1,
+      "checkpoints": 256
+    },
+    "coldBaselineQueries": 287581,
+    "warmBaselineQueries": 6100
+  },
+  "sampleArrayReads": {
+    "cold": 2571859206,
+    "warm100": 54735300
+  },
+  "memory": {
+    "derivedHeapBefore": 104187032,
+    "derivedHeapAfter": 109777192,
+    "derivedHeapDelta": 5590160,
+    "heapBefore": {
+      "rss": 150024192,
+      "heapTotal": 110260224,
+      "heapUsed": 62966816,
+      "external": 20220580,
+      "arrayBuffers": 17682700
+    },
+    "heapAfter": {
+      "rss": 385204224,
+      "heapTotal": 215896064,
+      "heapUsed": 82587344,
+      "external": 57678166,
+      "arrayBuffers": 55157316
+    },
+    "heapUsedDelta": 19620528
+  },
+  "capture": {
+    "encoded": 48,
+    "rendered": 49,
+    "allPipelineRenders": 27109,
+    "schedulingFramesPerSecond": 1.7802968554307614,
+    "gpu": false,
+    "imageEncoding": false,
+    "videoEncoding": false
+  },
+  "deterministicParity": "repeated/reverse/subframe/cold/warm/24/30/60/120 fps passed",
+  "anchorProbe": [
+    {
+      "time": 0,
+      "position": {
+        "x": 0.8717451636213359,
+        "y": 1.355870288667411
+      }
+    },
+    {
+      "time": 1,
+      "position": {
+        "x": 0.8722250585506176,
+        "y": 1.3542710741983615
+      }
+    },
+    {
+      "time": 100,
+      "position": {
+        "x": 0.572810806947315,
+        "y": 1.1596274039790493
+      }
+    },
+    {
+      "time": 299,
+      "position": {
+        "x": 0.5728429831878474,
+        "y": 1.1588295098418526
+      }
+    },
+    {
+      "time": 302,
+      "position": {
+        "x": 0.9716736347870033,
+        "y": 1.3551942852164385
+      }
+    },
+    {
+      "time": 599,
+      "position": {
+        "x": 0.9716538388842153,
+        "y": 1.3550143578418157
+      }
+    }
+  ]
+}

@@ -1,11 +1,11 @@
-import { BakeEngine, type BakeResult } from './BakeEngine';
+import { BakeEngine, type BakeResult, type CameraAnchorPreparationOptions } from './BakeEngine';
 import type { PreparedCompiledScene } from '../api/types/semantic-scene';
 import { stageManager } from './StageManager';
 import type { WmdlConfigRegistry } from './WmdlConfigRegistry';
 
 /** Isolated character-runtime boundary, also usable by other prepared-scene consumers. */
 export interface CameraAnchorPreparer {
-  prepareCameraAnchorsPrepared(scene: PreparedCompiledScene, paths: Map<string, string>, token: number): Promise<BakeResult>;
+  prepareCameraAnchorsPrepared(scene: PreparedCompiledScene, paths: Map<string, string>, token: number, options?: CameraAnchorPreparationOptions): Promise<BakeResult>;
   cancel(): void;
   destroy(): void;
 }
@@ -47,7 +47,7 @@ export class CameraHistoricalRuntime {
       await previous.catch(() => {});
       if (generation !== this.generation) return false;
       const worker = this.worker ??= this.factory?.() ?? new BakeEngine(stageManager.getApp(), this.registry);
-      const result = await worker.prepareCameraAnchorsPrepared(scene, new Map(), generation);
+      const result = await worker.prepareCameraAnchorsPrepared(scene, new Map(), generation, { includeCameraStates: false });
       if (generation !== this.generation) return false;
       if (!result.anchorTrajectories || result.anchorRevision === undefined) {
         throw new Error('Historical camera anchor preparation did not publish a complete trajectory bundle.');

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateCameraChannels, type CameraAnchorTrajectory } from '../engine/CameraChannelEvaluator';
+import { getCameraFollowHistoryDiagnostics } from '../engine/CameraFollowHistory';
 import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 const referenceSize = { width: 1920, height: 1080 } as const;
@@ -104,4 +105,72 @@ describe('historical camera follow through the public evaluator', () => {
     query(0.151);
     expect(query(1.2345).position).toEqual(cold);
   });
+});
+
+describe('prepared history query work', () => {
+  it('reuses the immutable trajectory index across repeated public evaluations', () => {
+    let reads = 0;
+    const samples = Array.from({ length: 151 }, (_, index) => {
+      const sample = { time: index / 15, position: { x: 0.7, y: 0.6 } };
+      return Object.defineProperty(sample, 'time', { get: () => { reads++; return index / 15; } });
+    });
+    const trajectory = history([{ start: 0, end: 11 }], samples);
+    const input = makeInput(trajectory, 9.12345, 0.8);
+    const first = evaluateCameraChannels(input);
+    reads = 0;
+    expect(evaluateCameraChannels(input)).toEqual(first);
+    // A warmed partial second may perform many anchor queries, but none scan
+    // the 151 source samples again. This is a work bound, not a timing assertion.
+    expect(reads).toBeLessThan(500);
+  });
+});
+
+
+describe('chronological checkpoint reuse', () => {
+  it('continues from the preceding complete checkpoint when entering a new second at a subframe', () => {
+    const trajectory = history([{ start: 0, end: 21 }], [
+      { time: 0, position: { x: 0.7, y: 0.6 } }, { time: 21, position: { x: 0.7, y: 0.6 } },
+    ]);
+    const input = makeInput(trajectory, 9.99, 0.8);
+    evaluateCameraChannels(input);
+    const before = getCameraFollowHistoryDiagnostics(trajectory).anchorQueries;
+    const result = evaluateCameraChannels({ ...input, sceneTime: 10.00123 });
+    const work = getCameraFollowHistoryDiagnostics(trajectory).anchorQueries - before;
+    expect(work).toBeLessThan(2500);
+    expect(result.position.x).toBeCloseTo(0.7, 12);
+    expect(evaluateCameraChannels({ ...input, sceneTime: 9.99 })).toEqual(evaluateCameraChannels(input));
+  });
+});
+
+it('bounds retained complete checkpoints during integer-only export schedules', () => {
+  const trajectory = history([{ start: 0, end: 301 }], [
+    { time: 0, position: { x: 0.7, y: 0.6 } }, { time: 301, position: { x: 0.7, y: 0.6 } },
+  ]);
+  const input = makeInput(trajectory, 0, 0.8);
+  // Keep one unbounded follow for a long schedule, rather than the fixture's
+  // default finite twenty-second follow.
+  input.timeline[2].params.duration = undefined;
+  for (let time = 1; time <= 300; time++) evaluateCameraChannels({ ...input, sceneTime: time });
+  expect(getCameraFollowHistoryDiagnostics(trajectory).checkpoints).toBeLessThanOrEqual(256);
+});
+
+it('keeps an event left-side query independent of a warmed checkpoint at the same instant', () => {
+  const trajectory = history([{ start: 0, end: 3 }], [
+    { time: 0, position: { x: 0.25, y: 0.3 } }, { time: 3, position: { x: 0.75, y: 0.8 } },
+  ], [{ time: 1, left: { x: 0.25, y: 0.3 }, right: { x: 0.75, y: 0.8 } }]);
+  const input = makeInput(trajectory, 1.25, 0, 'left');
+  evaluateCameraChannels(input);
+  expect(evaluateCameraChannels({ ...input, sceneTime: 1 }).position).toEqual({ x: 0.25, y: 0.3 });
+  expect(evaluateCameraChannels(input).position).toEqual({ x: 0.75, y: 0.8 });
+});
+
+it('preserves existing exact-event priority when external history contains coincident events', () => {
+  const trajectory = history([{ start: 0, end: 3 }], [
+    { time: 3, position: { x: 0.8, y: 0.8 } }, { time: 0, position: { x: 0.2, y: 0.2 } },
+  ], [
+    { time: 1, left: { x: 0.25, y: 0.3 }, right: { x: 0.75, y: 0.8 } },
+    { time: 1, left: { x: 0.35, y: 0.4 }, right: { x: 0.65, y: 0.7 } },
+  ]);
+  expect(evaluateCameraChannels(makeInput(trajectory, 1, 0, 'left')).position).toEqual({ x: 0.25, y: 0.3 });
+  expect(evaluateCameraChannels(makeInput(trajectory, 1, 0, 'right')).position).toEqual({ x: 0.75, y: 0.8 });
 });

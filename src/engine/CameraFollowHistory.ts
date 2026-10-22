@@ -42,48 +42,96 @@ export interface CameraFollowHistoryOptions {
   readonly eventSide?: CameraAnchorEventSide;
 }
 
-export const CAMERA_FOLLOW_HISTORY_GRID_HZ = 240;
+export const CAMERA_FOLLOW_HISTORY_GRID_HZ = 960;
 export const CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS = 1;
 
 const followCheckpointCache = new WeakMap<CameraAnchorTrajectory, Map<string, Map<number, CameraPosition>>>();
 
-/** Sample only inside declared validity. Left samples may observe an interval's exclusive end. */
+interface IndexedAnchorPoint {
+  readonly time: number;
+  readonly left: CameraPosition;
+  readonly right: CameraPosition;
+  readonly exactEvent?: CameraAnchorEvent;
+}
+interface IndexedInterval {
+  readonly start: number;
+  readonly end: number;
+  readonly points: readonly IndexedAnchorPoint[];
+}
+interface TrajectoryIndex {
+  readonly revision: CameraAnchorTrajectory['revision'];
+  readonly samples: CameraAnchorTrajectory['samples'];
+  readonly events: CameraAnchorTrajectory['events'];
+  readonly validity: CameraAnchorTrajectory['validity'];
+  readonly intervals: readonly IndexedInterval[];
+  queries: number;
+}
+const trajectoryIndexes = new WeakMap<CameraAnchorTrajectory, TrajectoryIndex>();
+
+function indexTrajectory(trajectory: CameraAnchorTrajectory): TrajectoryIndex {
+  const known = trajectoryIndexes.get(trajectory);
+  if (known && known.revision === trajectory.revision && known.samples === trajectory.samples
+    && known.events === trajectory.events && known.validity === trajectory.validity) return known;
+  const intervals = trajectory.validity.map(interval => {
+    const points = new Map<number, IndexedAnchorPoint>();
+    for (const sample of trajectory.samples) {
+      if (sample.time >= interval.start && sample.time <= interval.end && !points.has(sample.time)) {
+        points.set(sample.time, { time: sample.time, left: sample.position, right: sample.position });
+      }
+    }
+    for (const event of trajectory.events) {
+      if (event.time >= interval.start && event.time <= interval.end) {
+        points.set(event.time, { time: event.time, left: event.left, right: event.right,
+          exactEvent: points.get(event.time)?.exactEvent ?? event });
+      }
+    }
+    return { ...interval, points: [...points.values()].sort((left, right) => left.time - right.time) };
+  });
+  const index = { revision: trajectory.revision, samples: trajectory.samples, events: trajectory.events,
+    validity: trajectory.validity, intervals, queries: 0 };
+  trajectoryIndexes.set(trajectory, index);
+  return index;
+}
+
+/** Actual retained derived-entry counts; byte sizes depend on the JS engine. */
+export function getCameraFollowHistoryDiagnostics(trajectory: CameraAnchorTrajectory) {
+  const index = trajectoryIndexes.get(trajectory);
+  const contexts = followCheckpointCache.get(trajectory);
+  return {
+    anchorQueries: index?.queries ?? 0,
+    indexedPoints: index?.intervals.reduce((sum, interval) => sum + interval.points.length, 0) ?? 0,
+    contexts: contexts?.size ?? 0,
+    checkpoints: [...contexts?.values() ?? []].reduce((sum, checkpoints) => sum + checkpoints.size, 0),
+  };
+}
+
+/** Sample only inside declared validity. Index immutable source data once, then binary-search. */
 export function sampleCameraAnchorTrajectory(
   trajectory: CameraAnchorTrajectory,
   time: number,
   side: CameraAnchorEventSide = 'right',
 ): CameraPosition | null {
-  const interval = trajectory.validity.find((candidate) => side === 'left'
+  const index = indexTrajectory(trajectory);
+  index.queries++;
+  const interval = index.intervals.find(candidate => side === 'left'
     ? time > candidate.start && time <= candidate.end
     : time >= candidate.start && time < candidate.end);
   if (!interval) return null;
-
-  const events = trajectory.events.filter((event) => event.time >= interval.start && event.time <= interval.end);
-  const event = events.find((candidate) => candidate.time === time);
-  if (event) return { ...event[side] };
-
-  const samples = trajectory.samples.filter((sample) => sample.time >= interval.start && sample.time <= interval.end);
-  let before: CameraAnchorSample | undefined;
-  let after: CameraAnchorSample | undefined;
-  for (const sample of samples) {
-    if (sample.time <= time && (!before || sample.time > before.time)) before = sample;
-    if (sample.time >= time && (!after || sample.time < after.time)) after = sample;
+  const points = interval.points;
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (points[middle].time < time) low = middle + 1;
+    else high = middle;
   }
-  for (const knownEvent of events) {
-    if (knownEvent.time < time && (!before || knownEvent.time >= before.time)) {
-      before = { time: knownEvent.time, position: knownEvent.right };
-    }
-    if (knownEvent.time > time && (!after || knownEvent.time <= after.time)) {
-      after = { time: knownEvent.time, position: knownEvent.left };
-    }
-  }
+  const after = points[low];
+  if (after?.time === time) return { ...(after.exactEvent?.[side] ?? after[side]) };
+  const before = points[low - 1];
   if (!before || !after) return null;
-  if (before.time === after.time) return { ...before.position };
   const progress = (time - before.time) / (after.time - before.time);
-  return {
-    x: before.position.x + (after.position.x - before.position.x) * progress,
-    y: before.position.y + (after.position.y - before.position.y) * progress,
-  };
+  return { x: before.right.x + (after.left.x - before.right.x) * progress,
+    y: before.right.y + (after.left.y - before.right.y) * progress };
 }
 
 function clampTarget(point: CameraPosition, zoom: number): CameraPosition {
@@ -155,8 +203,17 @@ export function evaluateCameraFollowHistory(
     : undefined;
   const checkpointIndex = Math.floor(queryTime / checkpointSeconds);
   const candidateCheckpoint = checkpointIndex * checkpointSeconds;
-  const cachedCheckpoint = candidateCheckpoint > startTime ? checkpoints?.get(candidateCheckpoint) : undefined;
-  const integrationStart = cachedCheckpoint ? candidateCheckpoint : startTime;
+  const queryIsLeftEvent = options.eventSide === 'left' && trajectory.events.some(event => event.time === queryTime);
+  let integrationStart = startTime;
+  let cachedCheckpoint: CameraPosition | undefined;
+  if (checkpoints) {
+    for (const [time, frame] of checkpoints) {
+      if (time > integrationStart && time <= candidateCheckpoint && (!queryIsLeftEvent || time < queryTime)) {
+        integrationStart = time;
+        cachedCheckpoint = frame;
+      }
+    }
+  }
   let position = cachedCheckpoint ? { ...cachedCheckpoint } : { ...initialPosition };
   let priorTime = integrationStart;
   let priorTarget = sampleCameraAnchorTrajectory(trajectory, integrationStart, options.eventSide ?? 'right');
@@ -226,9 +283,10 @@ export function evaluateCameraFollowHistory(
     }
   }
   const queryIsCheckpoint = Math.abs(queryTime / checkpointSeconds - Math.round(queryTime / checkpointSeconds)) < 1e-9;
-  if (baseCacheKey && queryIsCheckpoint) {
+  if (baseCacheKey && queryIsCheckpoint && !queryIsLeftEvent) {
     const cache = checkpoints ?? new Map<number, CameraPosition>();
     cache.set(queryTime, { ...position });
+    while (cache.size > 256) cache.delete(cache.keys().next().value as number);
     if (!checkpoints) {
       const perTrajectory = followCheckpointCache.get(trajectory) ?? new Map<string, Map<number, CameraPosition>>();
       perTrajectory.set(baseCacheKey, cache);

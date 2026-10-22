@@ -145,6 +145,46 @@ describe('formal camera Bake/export parity', () => {
     vi.unstubAllGlobals();
   });
 
+  it('prepares reusable anchors without eagerly materializing camera samples when only history is requested', async () => {
+    installModelBoundary();
+    const scene = await cameraCrossEntryScene(true);
+    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 101, { includeCameraStates: false });
+    expect(result.anchorTrajectories?.find(track => track.part === 'center')?.validity).toHaveLength(2);
+    expect(result.cameraStates).toBeUndefined();
+  });
+
+  it('prepares the authored endpoint of a fast character transform between cadence samples', async () => {
+    installModelBoundary();
+    const base = await cameraCrossEntryScene(true);
+    const scene = { ...base, durationSeconds: 12, actions: [
+      ...base.actions.filter(action => !['leave', 'return'].includes(action.source.statementId))
+        .map(action => action.source.statementId === 'walk'
+          ? { ...action, time: 10, params: { ...action.params, duration: 0.08 } } : action),
+      { id: 'terminal', action: 'cameraReset' as const, time: 12, params: { duration: 0 },
+        source: { statementId: 'terminal', outputKey: 'primary' } },
+    ] };
+    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 102, { includeCameraStates: false });
+    const track = result.anchorTrajectories!.find(track => track.part === 'center')!;
+    expect(track.samples.find(sample => sample.time === 10.08)?.position).toBeDefined();
+  });
+
+  it('keeps exact disappearance and reentry instants after long fixed-cadence preparation', async () => {
+    installModelBoundary();
+    const base = await cameraCrossEntryScene(true);
+    const scene = { ...base, durationSeconds: 600, actions: [
+      ...base.actions.map(action => action.source.statementId === 'leave' ? { ...action, time: 300 }
+        : action.source.statementId === 'return' ? { ...action, time: 302 } : action),
+      { id: 'terminal', action: 'cameraReset' as const, time: 600, params: { duration: 0 },
+        source: { statementId: 'terminal', outputKey: 'primary' } },
+    ] };
+    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 100, { includeCameraStates: false });
+    const track = result.anchorTrajectories!.find(track => track.part === 'center')!;
+    expect(track.validity[0].end).toBe(300);
+    expect(track.validity[1].start).toBe(302);
+    expect(track.samples.some(sample => sample.time === 300)).toBe(true);
+    expect(track.samples.some(sample => sample.time === 302)).toBe(true);
+  });
+
   it('waits for the current formal trajectory before initializing the backend or rendering', async () => {
     installModelBoundary();
     engine.destroy();

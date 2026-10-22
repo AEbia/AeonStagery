@@ -187,6 +187,11 @@ export interface PreparedBakeCameraInput {
 
 // ─── BakeEngine ───────────────────────────────────────────────────────────
 
+export interface CameraAnchorPreparationOptions {
+  /** Historical consumers need tracks only; explicit Bake callers may request camera samples. */
+  readonly includeCameraStates?: boolean;
+}
+
 export class BakeEngine {
   private models: Map<string, BakeModel> = new Map();
   private token = 0;
@@ -239,6 +244,7 @@ export class BakeEngine {
     scene: PreparedCompiledScene,
     resolvedModelPaths: Map<string, string>,
     token: number,
+    options: CameraAnchorPreparationOptions = {},
   ): Promise<BakeResult> {
     const referenceSize = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
     const revision = `${scene.sceneId}:${++this.anchorPreparationRevision}`;
@@ -247,6 +253,12 @@ export class BakeEngine {
     const eventTimes = [...new Set(runtimeScene.timeline
       .filter(isCameraAnchorDiscontinuity)
       .map((action) => action.time ?? 0))];
+    const sampleTimes = runtimeScene.timeline.flatMap(action => {
+      const duration = action.params.duration;
+      if (action.action !== 'transformCharacter' || typeof duration !== 'number'
+        || !Number.isFinite(duration) || duration <= 0) return [];
+      return [action.time ?? 0, (action.time ?? 0) + duration];
+    });
     const expectedTaskVersion = this.taskVersion + 1;
     const result = await this.bakeRuntimeRange(
       runtimeScene,
@@ -258,7 +270,7 @@ export class BakeEngine {
       undefined,
       true,
       buildPreparedBakeModelSourceMap(scene),
-      { captures, revision, eventTimes },
+      { captures, revision, eventTimes, sampleTimes },
     );
     if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion
       || referenceSize.width !== STAGE_WIDTH || referenceSize.height !== STAGE_HEIGHT) return { snapshotHistory: [] };
@@ -268,6 +280,7 @@ export class BakeEngine {
       captures,
       eventTimes,
     });
+    if (options.includeCameraStates === false) return { ...result, anchorRevision: revision, anchorTrajectories };
     const cameraTimes = [...new Set(captures.map((capture) => capture.time))].sort((a, b) => a - b);
     const cameraStates = Object.freeze(cameraTimes.map((time) => Object.freeze({
       time,
@@ -304,7 +317,7 @@ export class BakeEngine {
     if (!isCameraInputCurrent()) return { snapshotHistory: [] };
     const prepared = cameraInput ?? (usesUnifiedCameraChannels(runtimeScene.timeline)
       ? { anchorTrajectories: [], anchorRevision: `${scene.sceneId}:static` }
-      : await this.prepareCameraAnchorsPrepared(scene, resolvedModelPaths, token));
+      : await this.prepareCameraAnchorsPrepared(scene, resolvedModelPaths, token, { includeCameraStates: false }));
     if (!prepared.anchorTrajectories || prepared.anchorRevision === undefined || !isCameraInputCurrent()) return { snapshotHistory: [] };
     const expectedTaskVersion = this.taskVersion + 1;
     const result = await this.bakeRuntimeRange(
@@ -351,7 +364,7 @@ export class BakeEngine {
     seedSnapshot?: Snapshot,
     silent: boolean = false,
     modelSources: ReadonlyMap<string, string> = new Map(),
-    anchorCapture?: { captures: CameraAnchorCapture[]; revision: string | number; eventTimes: readonly number[] },
+    anchorCapture?: { captures: CameraAnchorCapture[]; revision: string | number; eventTimes: readonly number[]; sampleTimes?: readonly number[] },
     isCameraInputCurrent: () => boolean = () => true,
   ): Promise<BakeResult> {
     if (this.closed) return { snapshotHistory: [] };
@@ -508,10 +521,10 @@ export class BakeEngine {
     const effectiveEnd = Math.min(rangeEnd, totalDuration);
     const anchorTimes: number[] = [];
     if (anchorCapture) {
-      for (let time = simStart; time <= effectiveEnd + 1e-9; time += CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS) {
-        anchorTimes.push(Math.min(time, effectiveEnd));
+      for (let index = 0; simStart + index * CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS <= effectiveEnd + 1e-9; index++) {
+        anchorTimes.push(Math.min(simStart + index * CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS, effectiveEnd));
       }
-      for (const time of anchorCapture.eventTimes) {
+      for (const time of [...anchorCapture.eventTimes, ...anchorCapture.sampleTimes ?? []]) {
         if (time >= simStart && time <= effectiveEnd) {
           anchorTimes.push(time);
         }
@@ -519,7 +532,13 @@ export class BakeEngine {
       anchorTimes.push(effectiveEnd);
       anchorTimes.sort((a, b) => a - b);
       for (let index = anchorTimes.length - 1; index > 0; index--) {
-        if (Math.abs(anchorTimes[index] - anchorTimes[index - 1]) < 1e-9) anchorTimes.splice(index, 1);
+        if (Math.abs(anchorTimes[index] - anchorTimes[index - 1]) < 1e-9) {
+          // A cadence point may be numerically adjacent to an authored event.
+          // Retain the exact event time, so its right pose and left capture are
+          // evaluated on the intended side of the transition.
+          if (anchorCapture.eventTimes.includes(anchorTimes[index])) anchorTimes.splice(index - 1, 1);
+          else anchorTimes.splice(index, 1);
+        }
       }
     }
     let anchorTimeIndex = 0;
@@ -709,7 +728,7 @@ export class BakeEngine {
         previousFrameTime = simTime;
         const nextAnchorTime = anchorTimes[anchorTimeIndex];
         simTime = anchorCapture && nextAnchorTime !== undefined && nextAnchorTime > simTime
-          ? Math.min(simTime + step, nextAnchorTime)
+          ? nextAnchorTime
           : simTime + step;
         stepCount++;
 
