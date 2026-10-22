@@ -85,6 +85,12 @@ class ScriptEngine {
   private readonly historicalCamera: CameraHistoricalRuntime;
   private sceneLoadVersion = 0;
   private scenePreparation: Promise<void> = Promise.resolve();
+  private scenePreparing = false;
+  private seekRequestVersion = 0;
+  private requestedSeekTime = 0;
+  private cameraPlaybackPreparation: Promise<void> | null = null;
+  private lastProjectedTime = 0;
+  private playbackIntentVersion = 0;
   private cameraEvaluation: CameraEvaluationOutput | undefined;
   private characterSynchronizer = new CharacterSynchronizer(live2DManager);
   private dialogueCoordinator = new DialogueCoordinator(subtitleRenderer, lipSyncEngine);
@@ -144,7 +150,7 @@ class ScriptEngine {
   }
   getCurrentCamera(): CameraState {
     const timeline = this.currentScene?.timeline;
-    if (timeline && (this.historicalCamera.input || usesUnifiedCameraChannels(timeline))) {
+    if (timeline && (usesUnifiedCameraChannels(timeline) || this.historicalCamera.covers(this.getCurrentTime()))) {
       this.cameraEvaluation = this.cameraCoordinator.sync(this.masterTimeline?.time() ?? 0, timeline, this.buildCameraResolverDeps());
     }
     return cameraController.getState();
@@ -223,20 +229,28 @@ class ScriptEngine {
   private loadedStageSize = '';
 
   loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
-    const preparation = this.loadPreparedSceneRuntime(scene);
+    this.scenePreparing = true;
+    const preparation = this.loadPreparedSceneRuntime(scene).finally(() => {
+      if (this.scenePreparation === preparation) this.scenePreparing = false;
+    });
     this.scenePreparation = preparation;
     return preparation;
   }
 
   /** Await the current scene revision; an export must never switch histories mid-frame. */
-  async prepareForExport(signal?: AbortSignal): Promise<{ assertCurrent(): void }> {
+  async prepareForExport(signal?: AbortSignal, throughTime?: number): Promise<{ assertCurrent(): void }> {
     const version = this.sceneLoadVersion;
     const referenceSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
     let onAbort: (() => void) | undefined;
     try {
       signal?.throwIfAborted();
       await Promise.race([
-        this.scenePreparation,
+        (async () => {
+          await this.scenePreparation;
+          signal?.throwIfAborted();
+          if (version !== this.sceneLoadVersion) return;
+          if (throughTime !== undefined) await this.historicalCamera.ensureAt(throughTime);
+        })(),
         new Promise<never>((_resolve, reject) => {
           if (!signal) return;
           onAbort = () => reject(signal.reason ?? new DOMException('Export aborted', 'AbortError'));
@@ -259,7 +273,8 @@ class ScriptEngine {
 
   private async loadPreparedSceneRuntime(scene: PreparedCompiledScene): Promise<void> {
     const loadVersion = ++this.sceneLoadVersion;
-    if (!this.historicalCamera.input) this.historicalCamera.cancel();
+    const seekRequestVersion = this.seekRequestVersion;
+    this.historicalCamera.cancelPreparation();
     const stageSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
     if (this.loadedStageSize !== '' && this.loadedStageSize !== stageSize) {
       this.currentSceneAuxSignature = null;
@@ -276,7 +291,7 @@ class ScriptEngine {
     }
     try {
       if (loadVersion !== this.sceneLoadVersion) return;
-      await this.loadRuntimeScene(preparedSceneToRuntimeTimelineScene(scene), scene, loadVersion);
+      await this.loadRuntimeScene(preparedSceneToRuntimeTimelineScene(scene), scene, loadVersion, seekRequestVersion);
       if (loadVersion === this.sceneLoadVersion) this.loadedStageSize = stageSize;
     } catch (error) {
       // A projection can fail after the incoming scene has populated these
@@ -304,6 +319,7 @@ class ScriptEngine {
     compiledScript: RuntimeTimelineScene,
     preparedScene: PreparedCompiledScene,
     loadVersion: number,
+    seekRequestVersion: number,
   ): Promise<void> {
     const durationOverride = preparedScene.durationSeconds;
     const previousScene = this.currentScene;
@@ -367,7 +383,18 @@ class ScriptEngine {
       return;
     }
 
-    const oldTime = this.getCurrentTime();
+    // Keep the committed scene and its frozen pose intact while the isolated
+    // history is prepared. Clearing the timeline here used to discard seeks
+    // and expose a zero-time camera for the entire preparation window.
+    await this.prewarmModels(compiledScript);
+    if (loadVersion !== this.sceneLoadVersion) return;
+    let oldTime = this.seekRequestVersion === seekRequestVersion ? this.getCurrentTime() : this.requestedSeekTime;
+    if (!await this.historicalCamera.prepare(preparedScene, !usesUnifiedCameraChannels(compiledScript.timeline), oldTime)) return;
+    if (loadVersion !== this.sceneLoadVersion) return;
+    if (this.seekRequestVersion !== seekRequestVersion) {
+      oldTime = this.requestedSeekTime;
+      if (!await this.historicalCamera.ensureAt(oldTime) || loadVersion !== this.sceneLoadVersion) return;
+    }
     const wasPlaying = this.playing;
 
     this.currentScene = compiledScript;
@@ -375,23 +402,16 @@ class ScriptEngine {
     this.currentSceneAuxSignature = sceneAuxSignature(compiledScript);
     this.currentSceneDurationOverride = durationOverride;
     // Full cleanup if SceneID changed; soft cleanup otherwise (retain models for speed)
-    this.cleanup(!isSameScene, invalidationTime);
-    if (!await this.historicalCamera.prepare(preparedScene, !usesUnifiedCameraChannels(compiledScript.timeline))) return;
-    if (loadVersion !== this.sceneLoadVersion) return;
+    this.cleanup(!isSameScene, invalidationTime, true);
     this.initMasterTimeline(compiledScript, durationOverride);
-
-    // Entrance tweens are timeline-driven, but addCharacter model creation is async.
-    // Warm the Live2D instances before the first seek/play so the first visible
-    // entrance frame is controlled by the proxy tween instead of model load time.
-    await this.prewarmModels();
-    if (loadVersion !== this.sceneLoadVersion) return;
+    this.masterTimeline?.seek(oldTime, true);
 
     // Restore state for the editor. Incomplete image drafts are a script
     // diagnostic, not a runtime failure, so the seek path simply skips them.
     // A light seek suffices here: soft cleanup retained the loaded models and
     // _doSeek auto-upgrades to a full reconstruct when the character set or a
     // model resource actually changed.
-    await this.seek(oldTime, false);
+    await this.seekLoadedScene(oldTime, false);
     if (loadVersion !== this.sceneLoadVersion) return;
 
     // Background curve-cache pre-warm AFTER the initial seek: it is that seek's
@@ -407,20 +427,9 @@ class ScriptEngine {
     }
 
     // Attach PreBakeDaemon — it handles all background snapshot scheduling
-    const cameraInput = this.historicalCamera.input;
-    if (!cameraInput) return;
     preBakeDaemon.attach(
       this.snapshotStore,
       preparedScene,
-      Object.freeze({
-        scene: preparedScene,
-        logicalReferenceSize: Object.freeze({ width: STAGE_WIDTH, height: STAGE_HEIGHT }),
-        anchorRevision: cameraInput.trajectoryRevision,
-        anchorTrajectories: cameraInput.anchorTrajectories,
-        // An identical basic-channel reload can keep this same bundle. Actual
-        // scene/resource rebuilds replace it, including same-object reloads.
-        isCurrent: () => this.historicalCamera.input === cameraInput,
-      }),
     );
     // Start with a cold scan to establish baseline coverage
     preBakeDaemon.triggerColdScan();
@@ -453,6 +462,11 @@ class ScriptEngine {
         // PreBakeDaemon auto-resumes via scene:end event listener
       },
       onUpdate: () => {
+        if (!this.scenePreparing && this.currentScene && !usesUnifiedCameraChannels(this.currentScene.timeline)
+          && !this.historicalCamera.covers(this.getCurrentTime())) {
+          this.prepareCameraPlaybackFrame();
+          return;
+        }
         const cam = this.syncLive2DTransformsFromTimeline();
         const time = this.masterTimeline?.time() ?? 0;
         const stateAtTime = this.isReconstructing ? null : this.computeStateAtTime(time);
@@ -634,6 +648,7 @@ class ScriptEngine {
 
   play(): void {
     if (!this.masterTimeline) return;
+    this.playbackIntentVersion++;
 
     // PreBakeDaemon listens for 'scene:play' and auto-suspends all baking
     this.setPlaying(true); live2DManager.setAutoUpdate(true);
@@ -648,6 +663,7 @@ class ScriptEngine {
   }
 
   pause(): void {
+    this.playbackIntentVersion++;
     this.setPlaying(false); live2DManager.setAutoUpdate(false); live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
     this.masterTimeline?.pause();
@@ -690,8 +706,37 @@ class ScriptEngine {
         live2DManager.applyProxyTransform(id, proxy, undefined, cam);
       }
     });
+    this.lastProjectedTime = this.getCurrentTime();
 
     return cam;
+  }
+
+  private prepareCameraPlaybackFrame(): void {
+    if (this.cameraPlaybackPreparation || !this.masterTimeline) return;
+    const timeline = this.masterTimeline;
+    const time = timeline.time();
+    const version = this.sceneLoadVersion;
+    const request = this.seekRequestVersion;
+    timeline.pause();
+    live2DManager.setAutoUpdate(false);
+    live2DManager.pauseAllTweens();
+    // Rewind only the unprojected tick. Keep the last committed frame visible
+    // until its requested historical input exists; no zero-time fallback.
+    timeline.seek(this.lastProjectedTime, true);
+    const preparing = this.historicalCamera.ensureAt(time, 2).then(ready => {
+      if (!ready || version !== this.sceneLoadVersion || request !== this.seekRequestVersion || timeline !== this.masterTimeline) return;
+      if (!this.playing) return;
+      timeline.seek(time, false);
+      this.play();
+    }).catch(error => {
+      if (version === this.sceneLoadVersion) {
+        this.pause();
+        this.logger.error('Could not prepare historical camera input', error);
+      }
+    }).finally(() => {
+      if (this.cameraPlaybackPreparation === preparing) this.cameraPlaybackPreparation = null;
+    });
+    this.cameraPlaybackPreparation = preparing;
   }
 
 
@@ -727,6 +772,16 @@ class ScriptEngine {
   }
 
   async seek(time: number, forceReconstruct: boolean = true): Promise<void> {
+    const request = ++this.seekRequestVersion;
+    this.requestedSeekTime = time;
+    // A seek belongs to the incoming scene. Await its installation, and retain
+    // only the newest request if the editor scrubs during preparation.
+    while (this.scenePreparing) await this.scenePreparation;
+    if (request !== this.seekRequestVersion) return;
+    await this.seekLoadedScene(time, forceReconstruct);
+  }
+
+  private async seekLoadedScene(time: number, forceReconstruct: boolean = true): Promise<void> {
     const suppressSeekSideEffects = forceReconstruct === false;
     if (this._isSeeking) {
       return new Promise((resolve, reject) => {
@@ -778,7 +833,12 @@ class ScriptEngine {
 
     const seekVersion = ++this._seekVersion;
     const wasPlaying = this.playing;
+    const playbackIntent = this.playbackIntentVersion;
     eventBus.emit('scene:seek:start', { time });
+    if (this.currentScene && !usesUnifiedCameraChannels(this.currentScene.timeline) && !this.historicalCamera.covers(time)) {
+      this.pauseForSeek({ emitLifecycle: !suppressSeekSideEffects });
+      if (!await this.historicalCamera.ensureAt(time) || seekVersion !== this._seekVersion) return;
+    }
 
     // 核心优化：即使外部请求了 forceReconstruct = false，
     // 如果我们检测到目标时间点 desired 角色集合与当前已加载角色集合不一致，
@@ -955,7 +1015,7 @@ class ScriptEngine {
 
     // Crucial race-condition fix: only set playing to false if we haven't clicked Play during seek
     if (this._seekVersion === seekVersion) {
-      if (wasPlaying || this.playing) {
+      if ((wasPlaying && playbackIntent === this.playbackIntentVersion) || this.playing) {
         this.play();
       } else {
         this.setPlaying(false);
@@ -1408,9 +1468,12 @@ class ScriptEngine {
     return normalized;
   }
 
-  private cleanup(full: boolean = true, invalidationTime: number = 0): void {
-    if (full) this.historicalCamera.dispose();
-    else this.historicalCamera.cancel();
+  private cleanup(full: boolean = true, invalidationTime: number = 0, retainCameraHistory = false): void {
+    this._seekVersion++;
+    if (!retainCameraHistory) {
+      if (full) this.historicalCamera.dispose();
+      else this.historicalCamera.cancel();
+    }
     this.cameraEvaluation = undefined;
     if (full) this.customMotionPreview = null;
     this.masterTimeline?.kill(); this.masterTimeline = null; this.setPlaying(false);
@@ -1462,11 +1525,11 @@ class ScriptEngine {
     }
   }
 
-  private async prewarmModels(): Promise<void> {
-    if (!this.currentScene) return;
+  private async prewarmModels(scene = this.currentScene): Promise<void> {
+    if (!scene) return;
 
     const modelsToLoad = new Map<string, string>();
-    for (const action of this.currentScene.timeline) {
+    for (const action of scene.timeline) {
       if (action.action === 'addCharacter' && action.params?.id && action.params?.model) {
         try {
           const runtimePath = await this.resolvePathAsync(action.params.model);

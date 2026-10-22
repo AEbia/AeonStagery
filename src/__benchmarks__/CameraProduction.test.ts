@@ -24,7 +24,8 @@ import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
 import type { Live2DModelDisplayObject } from '../engine/runtime/Live2DRuntimeContracts';
 import { SemanticScenePipeline } from '../services/semantic-scene/SemanticScenePipeline';
 import type { CurrentSceneDocument, PreparedCompiledScene } from '../api/types/semantic-scene';
-import { BakeEngine, type BakeResult } from '../engine/BakeEngine';
+import { BakeEngine } from '../engine/BakeEngine';
+import { CameraAnchorSampler, type CameraAnchorPreparationResult } from '../engine/CameraAnchorSampler';
 import ScriptEngine from '../engine/ScriptEngine';
 import { stageManager } from '../engine/StageManager';
 import { subtitleRenderer } from '../engine/SubtitleRenderer';
@@ -721,7 +722,8 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
     return { kind: typeof model, scheme: uriScheme(model) };
   });
   const bake = new BakeEngine(app);
-  let prepared: BakeResult | undefined;
+  const sampler = new CameraAnchorSampler(app);
+  let prepared: CameraAnchorPreparationResult | undefined;
   let preparationMs = 0;
   const supplementaryExport = process.env.AEON_CAMERA_BENCHMARK_SUPPLEMENT === '1';
   const preparedTrackCachePath = process.env.AEON_CAMERA_BENCHMARK_PREPARED_TRACKS;
@@ -729,11 +731,11 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
   let anchorRevision: string | number;
   let loadIncludingPreparationMs = 0;
   let diagnosticTrackReuse = false;
-  const engine = new ScriptEngine(() => ({ prepareCameraAnchorsPrepared: async (value, paths, token, options) => {
-    const measured = await timed(() => bake.prepareCameraAnchorsPrepared(value, paths, token, options));
+  const engine = new ScriptEngine(() => ({ prepareCameraAnchorsPrepared: async (value, paths, token) => {
+    const measured = await timed(() => sampler.prepareCameraAnchorsPrepared(value, paths, token));
     prepared = measured.value; preparationMs = measured.ms;
     return measured.value;
-  }, cancel: () => bake.cancel(), destroy: () => {} }));
+  }, cancel: () => sampler.cancel(), destroy: () => {} }));
   const gc = (globalThis as typeof globalThis & { gc?: () => void }).gc;
   gc?.(); const heapBefore = process.memoryUsage();
   fs.writeSync(1, 'CAMERA_BENCHMARK stage=prepare\n');
@@ -864,13 +866,9 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
     expect(evaluateCameraChannels({ ...evaluation, anchorTrajectories: [coldTrack], sceneTime: 599.12345 })).toEqual(first.value);
     fs.writeSync(1, 'CAMERA_BENCHMARK stage=dense-reference\n');
     recordDense = { start: 0, end: 5 };
-    const dense = await timed(() => bake.bakePreparedRange(scene, new Map(), 99, 0, 5, 1 / 240, undefined, true, {
-      scene, logicalReferenceSize: { width: 1920, height: 1080 }, anchorTrajectories: tracks, anchorRevision: prepared!.anchorRevision!,
-    }));
+    const dense = await timed(() => bake.bakePreparedRange(scene, new Map(), 99, 0, 5, 1 / 240, undefined, true));
     recordDense = { start: 9.95, end: 10.15 };
-    const fastDense = await timed(() => bake.bakePreparedRange(scene, new Map(), 98, 9.95, 10.15, 1 / 240, undefined, true, {
-      scene, logicalReferenceSize: { width: 1920, height: 1080 }, anchorTrajectories: tracks, anchorRevision: prepared!.anchorRevision!,
-    }));
+    const fastDense = await timed(() => bake.bakePreparedRange(scene, new Map(), 98, 9.95, 10.15, 1 / 240, undefined, true));
     recordDense = null;
     const trajectoryErrors = densePoses.filter(sample => sample.time > 0).map(sample => {
       const approximate = sampleCameraAnchorTrajectory(head, sample.time)!;
@@ -882,14 +880,13 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
       maxCompositionPixels: Math.max(...trajectoryErrors), rmsCompositionPixels: Math.sqrt(trajectoryErrors.reduce((sum, error) => sum + error * error, 0) / trajectoryErrors.length), denseBakeMs: dense.ms, fastDenseBakeMs: fastDense.ms };
     persist('approximation', approximation);
     fs.writeSync(1, 'CAMERA_BENCHMARK stage=bake\n');
-    const baked = await timed(() => bake.bakePreparedRange(scene, new Map(), 100, 598, 600, 1 / 24, undefined, true, {
-      scene, logicalReferenceSize: { width: 1920, height: 1080 }, anchorTrajectories: tracks, anchorRevision: prepared!.anchorRevision!,
-    }));
-    for (const sample of baked.value.cameraStates ?? []) {
-      await engine.seek(sample.time); expect(engine.getCameraEvaluation()).toEqual(sample.state);
-      engine.getMasterTimeline()!.seek(sample.time, false); expect(engine.getCameraEvaluation()).toEqual(sample.state);
+    const baked = await timed(() => bake.bakePreparedRange(scene, new Map(), 100, 598, 600, 1 / 24, undefined, true));
+    for (const sample of baked.value.snapshotHistory) {
+      const camera = evaluateCameraChannels({ ...evaluation, sceneTime: sample.time });
+      await engine.seek(sample.time); expect(engine.getCameraEvaluation()).toEqual(camera);
+      engine.getMasterTimeline()!.seek(sample.time, false); expect(engine.getCameraEvaluation()).toEqual(camera);
     }
-    persist('bake', { ms: baked.ms, samples: baked.value.cameraStates?.length });
+    persist('bake', { ms: baked.ms, samples: baked.value.snapshotHistory.length, output: 'live2d-snapshots-only' });
     fs.writeSync(1, 'CAMERA_BENCHMARK stage=capture\n');
     let encoded = 0;
     const capture = new FrameCaptureEngine({ getApp: () => app, getWidth: () => 1920, getHeight: () => 1080, pauseTicker: () => {}, resumeTicker: () => {} }, engine,
@@ -957,5 +954,5 @@ it.skipIf(!enabled)('measures real prepared history across ten-minute playback, 
       anchorProbe: [0, 1, 100, 299, 302, 599].map(time => ({ time, position: sampleCameraAnchorTrajectory(head, time) })) };
     fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
     fs.writeSync(1, 'CAMERA_BENCHMARK_RESULT ' + JSON.stringify(result) + '\n');
-  } finally { engine.destroy(); bake.destroy(); root.destroy({ children: true }); }
+  } finally { engine.destroy(); bake.destroy(); sampler.destroy(); root.destroy({ children: true }); }
 }, 43_200_000);

@@ -3,6 +3,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as PIXI from 'pixi.js';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
 import { BakeEngine } from '../engine/BakeEngine';
+import { IsolatedLive2DSimulation } from '../engine/IsolatedLive2DSimulation';
+import { CameraAnchorSampler } from '../engine/CameraAnchorSampler';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
 import { captureModelSnapshot } from '../engine/Live2DConfig';
@@ -780,7 +782,7 @@ describe('BakeEngine runtime routing', () => {
   });
 
   it('records dialogue mouth parameters in the live injected-parameter source', () => {
-    const engine = new BakeEngine(createApp());
+    const engine = new IsolatedLive2DSimulation(createApp());
     const entry = {
       id: 'rana',
       injectedParams: {},
@@ -805,7 +807,7 @@ describe('BakeEngine runtime routing', () => {
     expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 0, ParamMouthOpenY: 0 });
   });
 
-  it('prepares posed historical anchors through isolated Bake and evaluates camera focus from those tracks', async () => {
+  it('prepares posed historical anchors independently of snapshot Bake', async () => {
     const modelPath = 'figure/rana/rana.model3.json';
     let posedOffset = 0;
     let poseTimeSeconds = 0;
@@ -875,7 +877,7 @@ describe('BakeEngine runtime routing', () => {
         },
       ],
     };
-    const engine = new BakeEngine(createApp());
+    const engine = new CameraAnchorSampler(createApp());
     try {
       const result = await engine.prepareCameraAnchorsPrepared(scene, new Map([[modelPath, modelPath]]), 7);
       const head = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'head');
@@ -903,8 +905,7 @@ describe('BakeEngine runtime routing', () => {
       expect(center?.samples[0].position.x).toBeCloseTo(0.05, 6);
       expect(center?.samples[0].position.y).toBeLessThan(0.5);
       expect(updateDrawableBounds).toHaveBeenCalledTimes(5);
-      expect(result.cameraStates?.[0].state.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
-      expect(result.cameraStates?.[0].state.position).toEqual(head?.samples[0].position);
+      expect(result).not.toHaveProperty('cameraStates');
     } finally {
       engine.destroy();
       vi.unstubAllGlobals();

@@ -27,7 +27,7 @@ interface PlaybackSubsystem {
   getDuration(): number;
   setSilentMode(v: boolean): void;
   getMasterTimeline(): gsap.core.Timeline | null;
-  prepareForExport?(signal?: AbortSignal): Promise<{ assertCurrent(): void }>;
+  prepareForExport?(signal?: AbortSignal, throughTime?: number): Promise<{ assertCurrent(): void }>;
 }
 
 interface LightingSubsystem {
@@ -273,7 +273,7 @@ export class FrameCaptureEngine {
 
     try {
       signal?.throwIfAborted();
-      const cameraSession = await this.playback.prepareForExport?.(signal);
+      const cameraSession = await this.playback.prepareForExport?.(signal, rangeEnd);
       // ── Init ──
       // Video dimensions are physical output pixels. Preview DPR must not
       // multiply the encoder input size.

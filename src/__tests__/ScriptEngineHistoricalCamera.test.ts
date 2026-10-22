@@ -10,7 +10,7 @@ import { preBakeDaemon } from '../engine/daemons/PreBakeDaemon';
 import { SemanticScenePipeline } from '../services/semantic-scene/SemanticScenePipeline';
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 import type { PreparedCameraAnchorTrajectory } from '../engine/CameraAnchorPreparation';
-import type { BakeResult } from '../engine/BakeEngine';
+import type { CameraAnchorPreparationResult } from '../engine/CameraAnchorSampler';
 import { live2DManager } from '../engine/Live2DManager';
 import { setStageDimensions } from '../engine/StageDimensions';
 import { hookSystem } from '../api/hooks';
@@ -69,16 +69,116 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
     await engine.seek(4, true);
     expect(engine.getCurrentCamera().position).toEqual({ x: 0.72, y: 0.32 });
   });
+
+  it('honors a seek issued while historical preparation is pending', async () => {
+    engine.destroy();
+    let finishPreparation!: (result: CameraAnchorPreparationResult) => void;
+    let started!: () => void;
+    const preparing = new Promise<void>(resolve => { started = resolve; });
+    engine = new ScriptEngine(() => ({
+      prepareCameraAnchorsPrepared: () => {
+        started();
+        return new Promise<CameraAnchorPreparationResult>(resolve => { finishPreparation = resolve; });
+      },
+      cancel: () => {}, destroy: () => {},
+    }));
+    const loading = engine.loadPreparedScene(await prepare([{
+      id: 'focus', type: 'camera', time: 1,
+      params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
+    }]));
+    await preparing;
+    const seeking = engine.seek(6);
+    finishPreparation({ snapshotHistory: [], anchorRevision: 'posed-v1', anchorTrajectories: tracks });
+    await Promise.all([loading, seeking]);
+    expect(engine.getCurrentTime()).toBe(6);
+  });
+
+  it('keeps a user pause during on-demand history preparation after seek completes', async () => {
+    engine.destroy();
+    let calls = 0;
+    let started!: () => void;
+    let finish!: (result: CameraAnchorPreparationResult) => void;
+    const preparing = new Promise<void>(resolve => { started = resolve; });
+    engine = new ScriptEngine(() => ({
+      prepareCameraAnchorsPrepared: () => ++calls === 1
+        ? Promise.resolve({ snapshotHistory: [], anchorRevision: 'initial', anchorTrajectories: tracks, preparedThroughTime: 0 })
+        : new Promise<CameraAnchorPreparationResult>(resolve => { finish = resolve; started(); }),
+      cancel: () => {}, destroy: () => {},
+    }));
+    await engine.loadPreparedScene(await prepare([{
+      id: 'follow', type: 'camera', time: 1,
+      params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 0 },
+    }]));
+    engine.play();
+    const seeking = engine.seek(3);
+    await preparing;
+    engine.pause();
+    finish({ snapshotHistory: [], anchorRevision: 'extended', anchorTrajectories: tracks, preparedThroughTime: 3 });
+    await seeking;
+    expect(engine.getCurrentTime()).toBe(3);
+    expect(engine.isPlaying()).toBe(false);
+  });
+
+  it('retains only the latest scrub target while initial history is pending', async () => {
+    engine.destroy();
+    let started!: () => void;
+    let finish!: (result: CameraAnchorPreparationResult) => void;
+    const preparing = new Promise<void>(resolve => { started = resolve; });
+    engine = new ScriptEngine(() => ({
+      prepareCameraAnchorsPrepared: () => new Promise<CameraAnchorPreparationResult>(resolve => { finish = resolve; started(); }),
+      cancel: () => {}, destroy: () => {},
+    }));
+    const loading = engine.loadPreparedScene(await prepare([{
+      id: 'focus', type: 'camera', time: 1, params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
+    }]));
+    await preparing;
+    const first = engine.seek(6);
+    const latest = engine.seek(3);
+    finish({ snapshotHistory: [], anchorRevision: 'ready', anchorTrajectories: tracks });
+    await Promise.all([loading, first, latest]);
+    expect(engine.getCurrentTime()).toBe(3);
+  });
+
+  it('retains the paused scene time and camera while a reload prepares history', async () => {
+    engine.destroy();
+    let finish!: (result: CameraAnchorPreparationResult) => void;
+    let started!: () => void;
+    const preparing = new Promise<void>(resolve => { started = resolve; });
+    let call = 0;
+    engine = new ScriptEngine(() => ({
+      prepareCameraAnchorsPrepared: () => ++call === 1
+        ? Promise.resolve({ snapshotHistory: [], anchorRevision: 'posed-v1', anchorTrajectories: tracks })
+        : new Promise<CameraAnchorPreparationResult>(resolve => { finish = resolve; started(); }),
+      cancel: () => {}, destroy: () => {},
+    }));
+    const scene = await prepare([{
+      id: 'focus', type: 'camera', time: 1,
+      params: { mode: 'focus', target: 'hero', durationSeconds: 0 },
+    }]);
+    await engine.loadPreparedScene(scene);
+    await engine.seek(6);
+    engine.pause();
+    const camera = engine.getCurrentCamera();
+    const loading = engine.loadPreparedScene(scene);
+    await preparing;
+    expect(engine.getCurrentTime()).toBe(6);
+    expect(engine.getCurrentCamera()).toEqual(camera);
+    finish({ snapshotHistory: [], anchorRevision: 'reloaded', anchorTrajectories: tracks });
+    await loading;
+    expect(engine.getCurrentTime()).toBe(6);
+    expect(engine.getCurrentCamera()).toEqual(camera);
+    expect(engine.isPlaying()).toBe(false);
+  });
   it('cancels a superseded preparation before the new preload settles and discards its late result', async () => {
     engine.destroy();
-    let finishOld: ((result: BakeResult) => void) | undefined;
+    let finishOld: ((result: CameraAnchorPreparationResult) => void) | undefined;
     let started: (() => void) | undefined;
     const oldStarted = new Promise<void>((resolve) => { started = resolve; });
     let cancelled = false;
     engine = new ScriptEngine(() => ({
       prepareCameraAnchorsPrepared: async () => {
         started?.();
-        return new Promise<BakeResult>((resolve) => { finishOld = resolve; });
+        return new Promise<CameraAnchorPreparationResult>((resolve) => { finishOld = resolve; });
       },
       cancel: () => { cancelled = true; }, destroy: () => {},
     }));
@@ -326,12 +426,12 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
 
   it('discards a late preparation after engine teardown', async () => {
     engine.destroy();
-    let finish: ((result: BakeResult) => void) | undefined;
+    let finish: ((result: CameraAnchorPreparationResult) => void) | undefined;
     let started: (() => void) | undefined;
     const startedPromise = new Promise<void>((resolve) => { started = resolve; });
     engine = new ScriptEngine(() => ({
       prepareCameraAnchorsPrepared: async () => {
-        started?.(); return new Promise<BakeResult>((resolve) => { finish = resolve; });
+        started?.(); return new Promise<CameraAnchorPreparationResult>((resolve) => { finish = resolve; });
       },
       cancel: () => {}, destroy: () => {},
     }));

@@ -4,6 +4,9 @@ import gsap from 'gsap';
 import { Assets, Container, ObservablePoint, Texture, type Application } from 'pixi.js';
 import ScriptEngine from '../engine/ScriptEngine';
 import { BakeEngine } from '../engine/BakeEngine';
+import { CameraAnchorSampler } from '../engine/CameraAnchorSampler';
+import type { PreparedCompiledScene } from '../api/types/semantic-scene';
+import { preparedSceneToRuntimeTimelineScene } from '../engine/PreparedRuntimeScene';
 import { stageManager } from '../engine/StageManager';
 import { subtitleRenderer } from '../engine/SubtitleRenderer';
 import { textLayerManager } from '../engine/TextLayerManager';
@@ -21,7 +24,9 @@ import { projectToScreen } from '../engine/Projection';
 import { setStageDimensions, STAGE_WIDTH, STAGE_HEIGHT } from '../engine/StageDimensions';
 import { live2DManager } from '../engine/Live2DManager';
 import { hookSystem } from '../api/hooks';
-import type { CameraEvaluationOutput } from '../engine/CameraChannelEvaluator';
+import { resolveVec2 } from '../engine/utils/math';
+import { live2DStageState } from './helpers/live2DStageState';
+import { evaluateCameraChannels, type CameraEvaluationOutput } from '../engine/CameraChannelEvaluator';
 
 // Capture the SDK boundary before singleton Live2DModelResources binds it.
 vi.mock('../engine/Live2DRuntimeAdapter', async importOriginal => ({
@@ -32,6 +37,7 @@ vi.mock('../engine/Live2DRuntimeAdapter', async importOriginal => ({
 describe('formal camera Bake/export parity', () => {
   let engine: ScriptEngine;
   let bake: BakeEngine;
+  let sampler: CameraAnchorSampler;
   beforeEach(() => {
     vi.spyOn(subtitleRenderer, 'preloadPreparedScene').mockResolvedValue(undefined);
     vi.spyOn(subtitleRenderer, 'clear').mockImplementation(() => {});
@@ -41,8 +47,9 @@ describe('formal camera Bake/export parity', () => {
     vi.spyOn(stageManager, 'updateImages').mockImplementation(() => {});
     engine = new ScriptEngine();
     bake = new BakeEngine({ renderer: {} } as Application);
+    sampler = new CameraAnchorSampler({ renderer: {} } as Application);
   });
-  function installModelBoundary(onFrame: () => void = () => {}, onHead: () => void = () => {}) {
+  function installModelBoundary(onFrame: () => void = () => {}, onHead: () => void = () => {}, realisticAnchor = false) {
     const stageRoot = new Container();
     vi.spyOn(stageManager, 'getApp').mockReturnValue({ stage: stageRoot,
       ticker: { add: () => {}, remove: () => {} }, renderer: {},
@@ -54,10 +61,16 @@ describe('formal camera Bake/export parity', () => {
     });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
-      createModel: async () => Object.assign(new Container(), {
-        anchor: new ObservablePoint({ _onUpdate: () => {} }, 0, 0),
-        getLocalBounds: () => ({ x: 0, y: 0, width: 100, height: 200 }),
-      }),
+      createModel: async () => {
+        const model = new Container();
+        const anchor = new ObservablePoint({ _onUpdate: () => {
+          if (realisticAnchor) model.pivot.set(anchor.x * 100, anchor.y * 200);
+        } }, 0, 0);
+        return Object.assign(model, {
+          anchor,
+          getLocalBounds: () => ({ x: 0, y: 0, width: 100, height: 200 }),
+        });
+      },
       createTestControls: () => mockControls({ captureSnapshot: () => snapshot, captureIdleSnapshot: () => snapshot,
         getHeadAnchor: () => { onHead(); return { x: 0.5, y: 0.2 }; },
         stepBakeFrame: onFrame,
@@ -85,12 +98,27 @@ describe('formal camera Bake/export parity', () => {
     });
     return { root, run, resizes, app };
   }
-  afterEach(() => { engine.destroy(); bake.destroy(); gsap.globalTimeline.clear(); setStageDimensions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(() => { engine.destroy(); bake.destroy(); sampler.destroy(); gsap.globalTimeline.clear(); setStageDimensions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  async function cameraSamples(scene: PreparedCompiledScene, start: number, end: number, precision: number) {
+    const history = await sampler.prepareCameraAnchorsPrepared(scene, new Map(), 200);
+    const timeline = preparedSceneToRuntimeTimelineScene(scene).timeline;
+    const cameraStates = [];
+    for (let index = 0; start + index * precision <= end + 1e-9; index++) {
+      const time = Math.min(start + index * precision, end);
+      cameraStates.push({ time, state: evaluateCameraChannels({ timeline, sceneTime: time,
+        logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
+        anchorTrajectories: history.anchorTrajectories ?? [], trajectoryRevision: history.anchorRevision,
+      }) });
+    }
+    return { ...history, cameraStates };
+  }
 
   it('publishes the same final camera as formal playback and seek at Bake subframes', async () => {
     const scene = await cameraCrossEntryScene();
     await engine.loadPreparedScene(scene);
-    const result = await bake.bakePreparedRange(scene, new Map(), 1, 0.875, 1.125, 0.125);
+    await bake.bakePreparedRange(scene, new Map(), 1, 0.875, 1.125, 0.125);
+    const result = await cameraSamples(scene, 0.875, 1.125, 0.125);
     expect(result.cameraStates?.map(sample => sample.time)).toEqual([0.875, 1, 1.125]);
     for (const sample of result.cameraStates ?? []) {
       engine.getMasterTimeline()!.seek(sample.time, false);
@@ -130,13 +158,15 @@ describe('formal camera Bake/export parity', () => {
   it('matches prepared historical focus, missing/reappearing follow and takeover through formal Bake and scene loading', async () => {
     installModelBoundary();
     engine.destroy();
-    engine = new ScriptEngine(() => new BakeEngine({ renderer: {} } as Application));
+    engine = new ScriptEngine(() => new CameraAnchorSampler({ renderer: {} } as Application));
     const scene = await cameraCrossEntryScene(true);
     await engine.loadPreparedScene(scene);
-    const result = await bake.bakePreparedRange(scene, new Map(), 3, 0, 7, 0.125);
+    await bake.bakePreparedRange(scene, new Map(), 3, 0, 7, 0.125);
+    const result = await cameraSamples(scene, 0, 7, 0.125);
     expect(result.cameraStates).toHaveLength(57);
     expect(result.anchorTrajectories?.find(track => track.part === 'head')?.validity).toHaveLength(2);
     for (const sample of result.cameraStates ?? []) {
+      await engine.seek(sample.time);
       engine.getMasterTimeline()!.seek(sample.time, false);
       expect(engine.getCameraEvaluation()).toEqual(sample.state);
       await engine.seek(sample.time);
@@ -148,9 +178,51 @@ describe('formal camera Bake/export parity', () => {
   it('prepares reusable anchors without eagerly materializing camera samples when only history is requested', async () => {
     installModelBoundary();
     const scene = await cameraCrossEntryScene(true);
-    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 101, { includeCameraStates: false });
+    const result = await sampler.prepareCameraAnchorsPrepared(scene, new Map(), 101);
     expect(result.anchorTrajectories?.find(track => track.part === 'center')?.validity).toHaveLength(2);
-    expect(result.cameraStates).toBeUndefined();
+    expect(result).not.toHaveProperty('cameraStates');
+  });
+
+  it('focuses on the same posed head that the visible character projects', async () => {
+    installModelBoundary(() => {}, () => {}, true);
+    const scene = await cameraCrossEntryScene(true);
+    await engine.loadPreparedScene(scene);
+    await engine.seek(1.75);
+    const head = live2DManager.getPoint('hero', 'head');
+    expect(head).not.toBeNull();
+    expect(resolveVec2(engine.getCurrentCamera().position).x).toBeCloseTo(head!.x, 6);
+    expect(resolveVec2(engine.getCurrentCamera().position).y).toBeCloseTo(head!.y, 6);
+    const model = live2DStageState(live2DManager).characters.get('hero')!.model;
+    const projectedHead = model.toGlobal({ x: 50, y: 40 });
+    const shake = engine.getCurrentCamera().shakeOffset;
+    expect(projectedHead.x).toBeCloseTo(STAGE_WIDTH / 2 + (shake?.x ?? 0), 6);
+    expect(projectedHead.y).toBeCloseTo(STAGE_HEIGHT / 2 + (shake?.y ?? 0), 6);
+  });
+
+  it('bakes only Live2D snapshots without preparing or returning camera history', async () => {
+    installModelBoundary(() => {}, () => { throw new Error('Snapshot Bake must not query camera anchors'); });
+    const result = await bake.bakePreparedRange(await cameraCrossEntryScene(true), new Map(), 99, 1, 2, 0.125);
+    expect(result.snapshotHistory.length).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty('anchorTrajectories');
+    expect(result).not.toHaveProperty('anchorRevision');
+    expect(result).not.toHaveProperty('cameraStates');
+  });
+
+  it('loads a long scene without scanning its future camera history', async () => {
+    let frames = 0;
+    installModelBoundary(() => { frames++; }, () => {}, true);
+    const base = await cameraCrossEntryScene(true);
+    const scene = { ...base, durationSeconds: 600, actions: [ ...base.actions,
+      { id: 'terminal', action: 'cameraReset' as const, time: 600, params: { duration: 0 },
+        source: { statementId: 'terminal', outputKey: 'primary' } },
+    ] };
+    await engine.loadPreparedScene(scene);
+    expect(frames).toBeLessThan(30);
+    await engine.seek(1.75);
+    const head = live2DManager.getPoint('hero', 'head')!;
+    expect(resolveVec2(engine.getCurrentCamera().position).x).toBeCloseTo(head.x, 6);
+    expect(resolveVec2(engine.getCurrentCamera().position).y).toBeCloseTo(head.y, 6);
+    expect(frames).toBeLessThan(100);
   });
 
   it('prepares the authored endpoint of a fast character transform between cadence samples', async () => {
@@ -163,7 +235,7 @@ describe('formal camera Bake/export parity', () => {
       { id: 'terminal', action: 'cameraReset' as const, time: 12, params: { duration: 0 },
         source: { statementId: 'terminal', outputKey: 'primary' } },
     ] };
-    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 102, { includeCameraStates: false });
+    const result = await sampler.prepareCameraAnchorsPrepared(scene, new Map(), 102);
     const track = result.anchorTrajectories!.find(track => track.part === 'center')!;
     expect(track.samples.find(sample => sample.time === 10.08)?.position).toBeDefined();
   });
@@ -177,7 +249,7 @@ describe('formal camera Bake/export parity', () => {
       { id: 'terminal', action: 'cameraReset' as const, time: 600, params: { duration: 0 },
         source: { statementId: 'terminal', outputKey: 'primary' } },
     ] };
-    const result = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 100, { includeCameraStates: false });
+    const result = await sampler.prepareCameraAnchorsPrepared(scene, new Map(), 100);
     const track = result.anchorTrajectories!.find(track => track.part === 'center')!;
     expect(track.validity[0].end).toBe(300);
     expect(track.validity[1].start).toBe(302);
@@ -195,8 +267,8 @@ describe('formal camera Bake/export parity', () => {
     engine = new ScriptEngine(() => ({
       prepareCameraAnchorsPrepared: async (scene, paths, token) => {
         started?.(); await gate;
-        return bake.prepareCameraAnchorsPrepared(scene, paths, token);
-      }, cancel: () => bake.cancel(), destroy: () => {},
+        return sampler.prepareCameraAnchorsPrepared(scene, paths, token);
+      }, cancel: () => sampler.cancel(), destroy: () => {},
     }));
     const loading = engine.loadPreparedScene(await cameraCrossEntryScene(true));
     await preparing;
@@ -226,8 +298,8 @@ describe('formal camera Bake/export parity', () => {
       prepareCameraAnchorsPrepared: async (scene, paths, token) => {
         started?.(); await gate;
         if (mode === 'failure') throw new Error('Anchor preparation failed');
-        return bake.prepareCameraAnchorsPrepared(scene, paths, token);
-      }, cancel: () => bake.cancel(), destroy: () => {},
+        return sampler.prepareCameraAnchorsPrepared(scene, paths, token);
+      }, cancel: () => sampler.cancel(), destroy: () => {},
     }));
     const loading = engine.loadPreparedScene(await cameraCrossEntryScene(true));
     const loadingOutcome = loading.catch(error => error as Error);
@@ -265,70 +337,66 @@ describe('formal camera Bake/export parity', () => {
     rig.root.destroy();
   });
 
-  it('discards a cancelled actual Bake preparation and recovers without publishing its camera bundle', async () => {
+  it('discards cancelled snapshot Bake work and recovers without publishing camera data', async () => {
     let cancelNext = true;
     installModelBoundary(() => { if (cancelNext) { cancelNext = false; bake.cancel(); } });
     const scene = await cameraCrossEntryScene(true);
     const cancelled = await bake.bakePreparedRange(scene, new Map(), 8, 1, 2, 0.125);
     expect(cancelled).toEqual({ snapshotHistory: [] });
     const recovered = await bake.bakePreparedRange(scene, new Map(), 9, 1, 2, 0.125);
-    expect(recovered.cameraStates).toHaveLength(9);
-    expect(recovered.anchorTrajectories?.length).toBeGreaterThan(0);
+    expect(recovered.snapshotHistory).toHaveLength(9);
+    expect(recovered).not.toHaveProperty('cameraStates');
+    expect(recovered).not.toHaveProperty('anchorTrajectories');
   });
 
-  it('reuses the current immutable camera bundle for seeded range Bake without preparing character anchors again', async () => {
-    let allowPreparation = true;
-    installModelBoundary(() => {}, () => { if (!allowPreparation) throw new Error('Unexpected repeated anchor preparation'); });
+  it('produces seeded range snapshots without preparing character anchors', async () => {
+    installModelBoundary(() => {}, () => { throw new Error('Unexpected anchor preparation'); });
     const scene = await cameraCrossEntryScene(true);
-    const prepared = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 10);
-    allowPreparation = false;
-    const result = await bake.bakePreparedRange(scene, new Map(), 11, 2.125, 2.25, 0.125, undefined, true, {
-      scene, logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
-      anchorRevision: prepared.anchorRevision!, anchorTrajectories: prepared.anchorTrajectories!,
-    });
-    expect(result.cameraStates?.map(sample => sample.time)).toEqual([2.125, 2.25]);
-    expect(result.anchorRevision).toBe(prepared.anchorRevision);
+    const result = await bake.bakePreparedRange(scene, new Map(), 11, 2.125, 2.25, 0.125, undefined, true);
+    expect(result.snapshotHistory.length).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty('cameraStates');
   });
 
-  it('hands the immutable bundle through the actual background daemon into actual Bake snapshots', async () => {
+  it('runs the actual background daemon without any camera history input', async () => {
     let allowPreparation = true;
     installModelBoundary(() => {}, () => { if (!allowPreparation) throw new Error('Daemon repeated anchor preparation'); });
     const scene = await cameraCrossEntryScene(true);
-    const prepared = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 15);
     allowPreparation = false;
     const daemon = new PreBakeDaemon();
     const store = new SnapshotStore();
     try {
-      daemon.attach(store, scene, Object.freeze({ scene,
-        logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
-        anchorRevision: prepared.anchorRevision!, anchorTrajectories: prepared.anchorTrajectories!,
-      }));
+      daemon.attach(store, scene);
       daemon.triggerColdScan();
       await vi.waitFor(() => expect(store.size).toBeGreaterThan(0), { timeout: 4000, interval: 10 });
       expect(store.findBefore(6)?.models.has('hero')).toBe(true);
     } finally { daemon.dispose(); }
   });
 
-  it.each(['scene', 'reference', 'content', 'mid-frame'] as const)('discards stale %s history supplied to actual range Bake', async mode => {
-    let valid = true;
-    let invalidateOnFrame = false;
-    installModelBoundary(() => { if (invalidateOnFrame) valid = false; });
+  it('leaves the paused live character and camera unchanged while snapshot Bake advances', async () => {
+    let assertDuringBake = () => {};
+    installModelBoundary(() => assertDuringBake());
     const scene = await cameraCrossEntryScene(true);
-    const prepared = await bake.prepareCameraAnchorsPrepared(scene, new Map(), 12);
-    invalidateOnFrame = mode === 'mid-frame';
-    const result = await bake.bakePreparedRange(scene, new Map(), 13, 2.125, 2.25, 0.125, undefined, true, {
-      scene: mode === 'scene' ? { ...scene } : scene,
-      logicalReferenceSize: { width: STAGE_WIDTH + (mode === 'reference' ? 1 : 0), height: STAGE_HEIGHT },
-      anchorRevision: prepared.anchorRevision!, anchorTrajectories: prepared.anchorTrajectories!,
-      isCurrent: () => mode !== 'content' && valid,
-    });
-    expect(result).toEqual({ snapshotHistory: [] });
+    await engine.loadPreparedScene(scene);
+    await engine.seek(1.75);
+    engine.pause();
+    const camera = engine.getCurrentCamera();
+    const actor = live2DManager.getContainer('hero');
+    const pose = { x: actor.x, y: actor.y, angle: actor.angle };
+    let frames = 0;
+    assertDuringBake = () => {
+      frames++;
+      expect(engine.getCurrentTime()).toBe(1.75);
+      expect(engine.getCurrentCamera()).toEqual(camera);
+      expect({ x: actor.x, y: actor.y, angle: actor.angle }).toEqual(pose);
+    };
+    await bake.bakePreparedRange(scene, new Map(), 13, 0, 7, 0.125, undefined, true);
+    expect(frames).toBeGreaterThan(10);
   });
 
   it('drops a trajectory batch whose reference size changes during isolated model preparation', async () => {
     let changed = false;
     installModelBoundary(() => { if (!changed) { changed = true; setStageDimensions({ width: 1080, height: 1920, fps: 60 }); } });
-    const result = await bake.bakePreparedRange(await cameraCrossEntryScene(true), new Map(), 14, 1, 2, 0.125);
+    const result = await sampler.prepareCameraAnchorsPrepared(await cameraCrossEntryScene(true), new Map(), 14);
     expect(result).toEqual({ snapshotHistory: [] });
   });
 
@@ -336,7 +404,7 @@ describe('formal camera Bake/export parity', () => {
     'preserves projected character orientation, UI and authoring-unit shake at $width x $height and double output pixels', async format => {
       setStageDimensions({ ...format, fps: 60 });
       installModelBoundary(); engine.destroy();
-      engine = new ScriptEngine(() => new BakeEngine({ renderer: {} } as Application));
+      engine = new ScriptEngine(() => new CameraAnchorSampler({ renderer: {} } as Application));
       const scene = await cameraCrossEntryScene(true);
       await engine.loadPreparedScene(scene);
       await engine.seek(1.125);
@@ -454,7 +522,7 @@ describe('formal camera Bake/export parity', () => {
 
   it('keeps camera evaluation reads free of camera events and character pose updates after fps sampling', async () => {
     installModelBoundary(); engine.destroy();
-    engine = new ScriptEngine(() => new BakeEngine({ renderer: {} } as Application));
+    engine = new ScriptEngine(() => new CameraAnchorSampler({ renderer: {} } as Application));
     await engine.loadPreparedScene(await cameraCrossEntryScene(true));
     await engine.seek(2.875);
     const update = vi.spyOn(live2DManager, 'updateAll');
@@ -470,7 +538,7 @@ describe('formal camera Bake/export parity', () => {
 
   it('keeps actual capture and Bake equal across 24/30/60/120 fps and reverse subframe queries', async () => {
     installModelBoundary(); engine.destroy();
-    engine = new ScriptEngine(() => new BakeEngine({ renderer: {} } as Application));
+    engine = new ScriptEngine(() => new CameraAnchorSampler({ renderer: {} } as Application));
     const scene = await cameraCrossEntryScene(true);
     await engine.loadPreparedScene(scene);
     const commonTimes = [0.125, 0.5, 0.75, 1.125, 1.25, 1.5, 1.75, 2, 2.375, 2.75, 3.25, 4, 4.125, 4.75, 5.625];
@@ -479,7 +547,8 @@ describe('formal camera Bake/export parity', () => {
     for (const fps of [24, 30, 60, 120]) {
       const start = 0.125;
       const end = 7;
-      const baked = await bake.bakePreparedRange(scene, new Map(), fps, start, end, 1 / fps);
+      await bake.bakePreparedRange(scene, new Map(), fps, start, end, 1 / fps);
+      const baked = await cameraSamples(scene, start, end, 1 / fps);
       const expected: CameraState[] = [];
       const expectedEvaluation: CameraEvaluationOutput[] = [];
       for (const sample of baked.cameraStates ?? []) {
