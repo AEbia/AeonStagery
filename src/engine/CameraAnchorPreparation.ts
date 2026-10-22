@@ -16,6 +16,8 @@ export interface CameraAnchorCapture {
   readonly time: number;
   readonly characterId: string;
   readonly anchors: Readonly<Partial<Record<'origin' | 'head' | 'chest' | 'feet' | 'center', CameraPosition | null>>>;
+  /** Exact pre-transition pose at a known discontinuity, captured at `time`. */
+  readonly leftAnchors?: Readonly<Partial<Record<'origin' | 'head' | 'chest' | 'feet' | 'center', CameraPosition | null>>>;
 }
 
 export interface CameraAnchorPreparationInput {
@@ -55,6 +57,13 @@ export function prepareCameraAnchorTrajectories(
         time: capture.time,
         position: Object.freeze({ ...capture.anchors[part]! }),
       }));
+      for (const capture of captures) {
+        const left = capture.leftAnchors?.[part];
+        const right = capture.anchors[part];
+        if ((left === null || left === undefined) || (right !== null && right !== undefined)) continue;
+        samples.push(Object.freeze({ time: capture.time, position: Object.freeze({ ...left }) }));
+      }
+      samples.sort((a, b) => a.time - b.time);
       const validity: CameraAnchorValidityInterval[] = [];
       let start: number | null = null;
       let previousValidTime: number | null = null;
@@ -82,10 +91,10 @@ export function prepareCameraAnchorTrajectories(
 
       const events: CameraAnchorEvent[] = [];
       for (const eventTime of input.eventTimes ?? []) {
-        const right = valid.find((capture) => capture.time === eventTime)?.anchors[part];
-        const leftCapture = [...valid].reverse().find((capture) => capture.time < eventTime);
-        const left = leftCapture?.anchors[part];
-        if (leftCapture && left && right && eventTime - leftCapture.time <= input.cadenceSeconds * 1.5
+        const eventCapture = captures.find((capture) => capture.time === eventTime);
+        const right = eventCapture?.anchors[part];
+        const left = eventCapture?.leftAnchors?.[part];
+        if (left && right
           && Number.isFinite(left.x) && Number.isFinite(left.y)) {
           events.push(Object.freeze({
             time: eventTime,

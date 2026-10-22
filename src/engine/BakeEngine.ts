@@ -15,6 +15,7 @@ import { computeSceneStateAtTime } from './RuntimeSceneState';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { PreparedAssetRef, PreparedCompiledScene, PreparedRuntimeValue } from '../api/types/semantic-scene';
 import { resolveVec2 } from './utils/math';
+import { captureLive2DAnchorOffsets, transformLive2DAnchorOffsets, type LogicalHeightAnchorOffset } from './Live2DAnchorGeometry';
 import { eventBus } from '../api/events';
 import { settingsManager } from '../ui/SettingsStore';
 import type { Snapshot } from './SnapshotStore';
@@ -37,11 +38,86 @@ import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeContro
 import type { CustomMotionStageHandle } from './live2d/customMotionStage';
 import { evaluateCameraChannels, type CameraEvaluationOutput } from './CameraChannelEvaluator';
 import { prepareCameraAnchorTrajectories, type CameraAnchorCapture, type PreparedCameraAnchorTrajectory } from './CameraAnchorPreparation';
-import { resolveCameraAnchorPositions } from './cameraAnchorResolver';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
 
 const CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS = 1 / 15;
-const CAMERA_ANCHOR_EVENT_EPSILON_SECONDS = 1e-6;
+
+type PreparedAnchorCharacterState = {
+  position?: readonly [number, number];
+  scale?: number;
+  rotation?: number;
+  config?: { flipX?: boolean };
+};
+
+type AnchorGeometryModel = PIXI.Container & {
+  updateLocalTransform?: () => void;
+  localTransform?: { apply: (point: { x: number; y: number }) => { x: number; y: number } };
+};
+
+function isCameraAnchorDiscontinuity(action: RuntimeTimelineScene['timeline'][number]): boolean {
+  return action.action === 'addCharacter' || action.action === 'removeCharacter'
+    || (action.action === 'transformCharacter' && (action.params?.duration ?? 0) <= 0);
+}
+
+function captureCameraAnchorOffsets(
+  entry: BakeModel,
+  headFraction: { readonly x: number; readonly y: number } | null,
+): Partial<Record<'head' | 'chest' | 'feet' | 'center', LogicalHeightAnchorOffset>> {
+  const root = entry.runtimeHandle.displayObject as PIXI.Container & {
+    _flipX?: boolean;
+    mainModel?: AnchorGeometryModel;
+    subModels?: AnchorGeometryModel[];
+  };
+  const rootPivot = root.pivot ?? { x: 0, y: 0 };
+  if (!(root instanceof Live2DCompositeModel)) {
+    return captureLive2DAnchorOffsets(root, ['head', 'chest', 'feet', 'center'], entry.baseHeight, headFraction, rootPivot) ?? {};
+  }
+
+  const result: Partial<Record<'head' | 'chest' | 'feet' | 'center', LogicalHeightAnchorOffset>> = {};
+  const headSource = root.subModels?.[0] ?? root.mainModel;
+  if (headSource) {
+    if (headSource !== root) headSource.updateLocalTransform?.();
+    Object.assign(result, captureLive2DAnchorOffsets(
+      headSource,
+      ['head'],
+      entry.baseHeight,
+      headFraction,
+      rootPivot,
+      headSource === root ? undefined : headSource.localTransform,
+    ));
+  }
+  const bodySource = root.mainModel;
+  if (bodySource) {
+    if (bodySource !== root) bodySource.updateLocalTransform?.();
+    Object.assign(result, captureLive2DAnchorOffsets(
+      bodySource,
+      ['chest', 'feet', 'center'],
+      entry.baseHeight,
+      headFraction,
+      rootPivot,
+      bodySource === root ? undefined : bodySource.localTransform,
+    ));
+  }
+  return result;
+}
+
+function resolveCapturedCameraAnchors(
+  state: PreparedAnchorCharacterState | undefined,
+  root: PIXI.Container & { _flipX?: boolean },
+  offsets: Partial<Record<'head' | 'chest' | 'feet' | 'center', LogicalHeightAnchorOffset>>,
+): Readonly<Partial<Record<'origin' | 'head' | 'chest' | 'feet' | 'center', { x: number; y: number } | null>>> {
+  const position = state?.position;
+  if (!position || !Number.isFinite(position[0]) || !Number.isFinite(position[1])) {
+    return { origin: null, head: null, chest: null, feet: null, center: null };
+  }
+  const parts = transformLive2DAnchorOffsets(offsets, {
+    position,
+    scale: state.scale,
+    rotation: state.rotation,
+    flipX: state.config?.flipX ?? root._flipX ?? false,
+  });
+  return { origin: { x: position[0], y: position[1] }, ...parts };
+}
 
 function resolveAuthoredAnchorOrigin(position: readonly [number, number] | undefined): { x: number; y: number } | null {
   if (!position || !Number.isFinite(position[0]) || !Number.isFinite(position[1])) return null;
@@ -167,8 +243,7 @@ export class BakeEngine {
     const runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
     const captures: CameraAnchorCapture[] = [];
     const eventTimes = [...new Set(runtimeScene.timeline
-      .filter((action) => action.action === 'addCharacter' || action.action === 'removeCharacter'
-        || (action.action === 'transformCharacter' && (action.params?.duration ?? 0) <= 0))
+      .filter(isCameraAnchorDiscontinuity)
       .map((action) => action.time ?? 0))];
     const expectedTaskVersion = this.taskVersion + 1;
     const result = await this.bakeRuntimeRange(
@@ -399,9 +474,6 @@ export class BakeEngine {
       }
       for (const time of anchorCapture.eventTimes) {
         if (time >= simStart && time <= effectiveEnd) {
-          if (time - CAMERA_ANCHOR_EVENT_EPSILON_SECONDS >= simStart) {
-            anchorTimes.push(time - CAMERA_ANCHOR_EVENT_EPSILON_SECONDS);
-          }
           anchorTimes.push(time);
         }
       }
@@ -424,6 +496,14 @@ export class BakeEngine {
 
           // 1. Prepare domain state before submitting one complete runtime frame.
           const { characters, dialogue } = computeSceneStateAtTime(script, simTime);
+          const isAnchorEventTime = anchorCapture?.eventTimes.some((time) => Math.abs(time - simTime) < 1e-9) ?? false;
+          const charactersBeforeAnchorEvent = isAnchorEventTime
+            ? computeSceneStateAtTime({
+                ...script,
+                timeline: script.timeline.filter((action) => !isCameraAnchorDiscontinuity(action)
+                  || Math.abs((action.time ?? 0) - simTime) >= 1e-9),
+              }, simTime).characters
+            : undefined;
           const resetForPlaybackIds = new Set<string>();
           const expressionUpdates = new Map<string, Live2DSeekExpressionState & { previousKey?: string | null }>();
           for (const [id, state] of characters) {
@@ -535,36 +615,39 @@ export class BakeEngine {
 
           if (anchorCapture) {
             while (anchorTimeIndex < anchorTimes.length && anchorTimes[anchorTimeIndex] < simTime - 1e-9) anchorTimeIndex++;
-            for (const id of charModelMap.keys()) {
-              const state = characters.get(id);
-              if (!state) {
+            if (anchorTimeIndex < anchorTimes.length && Math.abs(anchorTimes[anchorTimeIndex] - simTime) < 1e-7) {
+              for (const id of charModelMap.keys()) {
+                const state = characters.get(id) as PreparedAnchorCharacterState | undefined;
+                const leftState = charactersBeforeAnchorEvent?.get(id) as PreparedAnchorCharacterState | undefined;
+                const entry = this.models.get(id);
+                const root = entry?.runtimeHandle.displayObject as (PIXI.Container & { _flipX?: boolean }) | undefined;
+                const offsets = entry && (state || leftState)
+                  ? captureCameraAnchorOffsets(entry, entry.runtimeHandle.character.getHeadAnchor(
+                      entry.runtimeHandle.displayObject instanceof Live2DCompositeModel ? 'head' : 'main',
+                    ))
+                  : {};
+                const emptyAnchors = { origin: null, head: null, chest: null, feet: null, center: null };
+                const anchors = state && root
+                  ? resolveCapturedCameraAnchors(state, root, offsets)
+                  : state
+                    ? { origin: resolveAuthoredAnchorOrigin(state.position), head: null, chest: null, feet: null, center: null }
+                    : emptyAnchors;
+                const leftAnchors = isAnchorEventTime
+                  ? leftState && root
+                    ? resolveCapturedCameraAnchors(leftState, root, offsets)
+                    : leftState
+                      ? { origin: resolveAuthoredAnchorOrigin(leftState.position), head: null, chest: null, feet: null, center: null }
+                      : emptyAnchors
+                  : undefined;
                 anchorCapture.captures.push(Object.freeze({
                   time: simTime,
                   characterId: id,
-                  anchors: Object.freeze({ origin: null, head: null, chest: null, feet: null, center: null }),
+                  anchors: Object.freeze({ ...anchors }),
+                  ...(leftAnchors ? { leftAnchors: Object.freeze({ ...leftAnchors }) } : {}),
                 }));
-                continue;
               }
-              if (anchorTimeIndex >= anchorTimes.length || Math.abs(anchorTimes[anchorTimeIndex] - simTime) >= 1e-7) break;
-              const entry = this.models.get(id);
-              const pointState = state as { position?: readonly [number, number]; scale?: number; rotation?: number; config?: { flipX?: boolean } };
-              const anchors = entry
-                ? resolveCameraAnchorPositions({
-                    state: pointState,
-                    displayObject: entry.runtimeHandle.displayObject,
-                    baseHeight: entry.baseHeight,
-                    headFraction: entry.runtimeHandle.character.getHeadAnchor(
-                      entry.runtimeHandle.displayObject instanceof Live2DCompositeModel ? 'head' : 'main',
-                    ),
-                  })
-                : { origin: resolveAuthoredAnchorOrigin(pointState.position), head: null, chest: null, feet: null, center: null };
-              anchorCapture.captures.push(Object.freeze({
-                time: simTime,
-                characterId: id,
-                anchors: Object.freeze({ ...anchors }),
-              }));
+              anchorTimeIndex++;
             }
-            if (anchorTimeIndex < anchorTimes.length && Math.abs(anchorTimes[anchorTimeIndex] - simTime) < 1e-7) anchorTimeIndex++;
           }
 
           if (!anchorCapture) {

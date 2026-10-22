@@ -125,9 +125,15 @@ export function evaluateCameraFollowHistory(
   options: CameraFollowHistoryOptions,
 ): CameraPosition {
   const { startTime, queryTime, initialPosition, offset } = options;
-  if (queryTime <= startTime) return { ...initialPosition };
+  if (queryTime < startTime) return { ...initialPosition };
   const smoothing = Math.max(0, Math.min(1, options.smoothing));
-  if (smoothing === 1) return { ...initialPosition };
+  if (smoothing === 1 || (queryTime === startTime && smoothing !== 0)) return { ...initialPosition };
+  if (queryTime === startTime) {
+    const target = sampleCameraAnchorTrajectory(trajectory, startTime, options.eventSide ?? 'right');
+    return target
+      ? clampTarget({ x: target.x + offset.x, y: target.y + offset.y }, options.zoomAt(startTime))
+      : { ...initialPosition };
+  }
   const gridHz = options.gridHz ?? CAMERA_FOLLOW_HISTORY_GRID_HZ;
   const requestedCheckpointSeconds = options.checkpointSeconds ?? CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;
   const checkpointSeconds = requestedCheckpointSeconds > 0 ? requestedCheckpointSeconds : CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;

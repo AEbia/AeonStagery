@@ -1,3 +1,5 @@
+import { STAGE_HEIGHT, STAGE_WIDTH } from './StageDimensions';
+
 export type Live2DAnchorName = 'head' | 'chest' | 'feet' | 'center';
 
 export interface LogicalHeightAnchorOffset {
@@ -5,6 +7,40 @@ export interface LogicalHeightAnchorOffset {
   readonly x: number;
   /** Vertical displacement from the authored model origin, in logical heights. */
   readonly y: number;
+}
+
+export interface Live2DAnchorTransform {
+  readonly position: readonly [number, number];
+  readonly scale?: number;
+  readonly rotation?: number;
+  readonly flipX?: boolean;
+}
+
+export interface NormalizedAnchorPosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Apply authored stage transforms to offsets captured once from a posed model. */
+export function transformLive2DAnchorOffsets(
+  offsets: Partial<Record<Live2DAnchorName, LogicalHeightAnchorOffset>>,
+  state: Live2DAnchorTransform,
+): Partial<Record<Live2DAnchorName, NormalizedAnchorPosition>> {
+  const scale = Number.isFinite(state.scale) ? state.scale! : 1;
+  const radians = (Number.isFinite(state.rotation) ? state.rotation! : 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const result: Partial<Record<Live2DAnchorName, NormalizedAnchorPosition>> = {};
+  for (const [anchor, offset] of Object.entries(offsets) as Array<[Live2DAnchorName, LogicalHeightAnchorOffset]>) {
+    const localX = offset.x * STAGE_HEIGHT * scale * (state.flipX ? -1 : 1);
+    const localY = offset.y * STAGE_HEIGHT * scale;
+    const point = {
+      x: state.position[0] + (localX * cos - localY * sin) / STAGE_WIDTH,
+      y: state.position[1] + (localX * sin + localY * cos) / STAGE_HEIGHT,
+    };
+    if (Number.isFinite(point.x) && Number.isFinite(point.y)) result[anchor] = point;
+  }
+  return result;
 }
 
 type Bounds = { x: number; y: number; width: number; height: number };

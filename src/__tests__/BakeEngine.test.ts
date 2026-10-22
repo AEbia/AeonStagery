@@ -808,7 +808,9 @@ describe('BakeEngine runtime routing', () => {
   it('prepares posed historical anchors through isolated Bake and evaluates camera focus from those tracks', async () => {
     const modelPath = 'figure/rana/rana.model3.json';
     let posedOffset = 0;
-    const updateDrawableBounds = vi.fn();
+    const posesAtBoundsRefresh: number[] = [];
+    const models: PIXI.Container[] = [];
+    const updateDrawableBounds = vi.fn(() => { posesAtBoundsRefresh.push(posedOffset); });
     const createModel = vi.fn(async () => {
       const values = new Float32Array([0]);
       const model = Object.assign(new PIXI.Container(), {
@@ -824,8 +826,9 @@ describe('BakeEngine runtime routing', () => {
         render: vi.fn(),
         startMotion: vi.fn(async () => true),
         updateDrawableBounds,
-        getLocalBounds: () => ({ x: posedOffset, y: 0, width: 100, height: 200 }),
+        getLocalBounds: () => ({ x: posedOffset + 20, y: -20, width: 100, height: 200 }),
       });
+      models.push(model);
       return model;
     });
     vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
@@ -833,6 +836,7 @@ describe('BakeEngine runtime routing', () => {
     });
     const controls = mockControls({
       stepBakeFrame: vi.fn(() => { posedOffset += 1; }),
+      getHeadAnchor: vi.fn(() => ({ x: 0.8, y: 0.3 })),
     });
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
       id: 'untitled-pixi-live2d-engine-cubism',
@@ -852,6 +856,11 @@ describe('BakeEngine runtime routing', () => {
       actions: [
         { ...base.actions[0], params: { ...base.actions[0].params, position: [0.5, 0.5], scale: 2, rotation: 90, flipX: true, duration } },
         {
+          id: 'instant-transform', time: duration, action: 'transformCharacter',
+          params: { id: 'rana', position: [0.7, 0.4], duration: 0 },
+          source: { statementId: 'instant-transform', outputKey: 'primary' },
+        },
+        {
           id: 'focus-head', time: 0, action: 'cameraMotion',
           params: { move: 'pan', duration: 0, focus: { character: 'rana', part: 'head' } },
           source: { statementId: 'focus-head', outputKey: 'primary' },
@@ -863,13 +872,21 @@ describe('BakeEngine runtime routing', () => {
       const result = await engine.prepareCameraAnchorsPrepared(scene, new Map([[modelPath, modelPath]]), 7);
       const head = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'head');
       const center = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'center');
+      const transition = head?.events.find((event) => event.time === duration);
+      const modelPivot = models[0].pivot;
+      const initialHeadOffsetX = (posesAtBoundsRefresh[0] + 20 + 100 * 0.8 - modelPivot.x) / 200;
 
       expect(head?.version).toBe(1);
       expect(head?.revision).toEqual(expect.any(String));
       expect(head?.samples).toHaveLength(2);
       expect(head?.samples[0].position).not.toEqual(head?.samples[1].position);
+      expect(head?.samples[0].position.y).toBeCloseTo(0.5 - 2 * initialHeadOffsetX, 6);
+      expect(head?.samples[0].position.y).not.toBeCloseTo(0.5 + 2 * initialHeadOffsetX, 3);
+      expect(transition).toBeDefined();
+      expect(transition?.left.x).toBeCloseTo(transition!.right.x - 0.2, 6);
+      expect(transition?.left.y).toBeCloseTo(transition!.right.y + 0.1, 6);
       expect(center?.samples).toHaveLength(2);
-      expect(center?.samples[0].position.x).toBeCloseTo(-0.0625, 6);
+      expect(center?.samples[0].position.x).toBeCloseTo(0.05, 6);
       expect(center?.samples[0].position.y).toBeLessThan(0.5);
       expect(updateDrawableBounds).toHaveBeenCalledTimes(2);
       expect(result.cameraStates?.[0].state.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));

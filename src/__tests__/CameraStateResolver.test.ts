@@ -1,7 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { computeCameraStateAtTime } from '../engine/CameraStateResolver';
+import { computeCameraStateAtTime, prepareCameraZoomResolver } from '../engine/CameraStateResolver';
+import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('computeCameraStateAtTime', () => {
+  it('prepares a zoom-only history that matches motion, path, relative zoom, and reset sampling', () => {
+    const timeline: RuntimeTimelineAction[] = [
+      { _id: 'zoom-start', action: 'cameraMotion', time: 0, params: { zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
+      {
+        _id: 'zoom-path',
+        action: 'cameraPath', time: 1, params: {
+          keyframes: [{ time: 0, zoom: 2 }, { time: 2, zoom: 4, ease: 'linear' }],
+        },
+      },
+      { _id: 'zoom-relative', action: 'cameraMotion', time: 3, params: { zoom: '+=1', duration: 2, easing: 'linear', _cameraProperties: ['zoom'] } },
+      { _id: 'zoom-reset', action: 'cameraReset', time: 6, params: { duration: 2, easing: 'linear' } },
+    ];
+    const preparedZoom = prepareCameraZoomResolver(timeline);
+
+    for (const time of [0, 0.5, 1, 1.5, 2.5, 3, 4, 5, 6, 7, 8, 9]) {
+      expect(preparedZoom(time)).toBeCloseTo(
+        computeCameraStateAtTime(timeline, time, { compiledChannelOwnership: true }).zoom,
+        8,
+      );
+    }
+  });
+
   it('returns stage-default state with no coverage before the first camera writer', () => {
     const timeline = [
       { action: 'cameraFollow', time: 5, params: { characterId: 'hero' } },

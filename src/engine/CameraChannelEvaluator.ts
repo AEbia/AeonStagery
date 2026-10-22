@@ -1,6 +1,7 @@
 import type { RuntimeTimelineAction } from './RuntimeTimelineScene';
 import {
   computeCameraStateAtTime,
+  prepareCameraZoomResolver,
   type CameraPosition,
   type CameraStateResolverDeps,
   type ResolvedCameraState,
@@ -129,14 +130,7 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
       || action.params.move === 'push' || action.params.move === 'pull' || action.params.move === 'rotate'))
     || (action.action === 'cameraPath' && Array.isArray(action.params.keyframes)
       && action.params.keyframes.some((keyframe) => readRecord(keyframe)?.zoom !== undefined)));
-  const zoomCache = new Map<number, number>();
-  const zoomAt = (time: number): number => {
-    const cached = zoomCache.get(time);
-    if (cached !== undefined) return cached;
-    const value = computeCameraStateAtTime(zoomTimeline, time, { compiledChannelOwnership: true }).zoom;
-    zoomCache.set(time, value);
-    return value;
-  };
+  const zoomAt = prepareCameraZoomResolver(zoomTimeline);
   const trajectoryIdentity = input.anchorTrajectories.map((trajectory) =>
     `${identityOf(trajectory)}:${trajectory.revision ?? 'unversioned'}`).join(',');
   const followCacheKey = [

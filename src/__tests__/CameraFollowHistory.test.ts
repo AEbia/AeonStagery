@@ -52,6 +52,18 @@ describe('historical camera follow through the public evaluator', () => {
     expect(state.position.x).toBeCloseTo(expectedX, 8);
   });
 
+  it('follows a valid anchor at the exact zero-smoothing start but holds without a usable start anchor', () => {
+    const anchors = history([{ start: 0, end: 2 }], [
+      { time: 0, position: { x: 0.8, y: 0.7 } },
+      { time: 2, position: { x: 0.8, y: 0.7 } },
+    ]);
+    const missingStartAnchor = history([], []);
+
+    expect(evaluateCameraChannels(makeInput(anchors, 0, 0)).position).toEqual({ x: 0.8, y: 0.7 });
+    expect(evaluateCameraChannels(makeInput(anchors, 0, 1)).position).toEqual({ x: 0.2, y: 0.25 });
+    expect(evaluateCameraChannels(makeInput(missingStartAnchor, 0, 0)).position).toEqual({ x: 0.2, y: 0.25 });
+  });
+
   it('holds through invalid gaps, samples the exclusive end from the left, and resumes on reappearance', () => {
     const anchors = history(
       [{ start: 0, end: 1 }, { start: 2, end: 4 }],

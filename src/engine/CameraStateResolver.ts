@@ -150,6 +150,91 @@ export function computeCameraStateAtTime(
   return computeCameraStateAtTimeInternal(timeline, time, evaluationDeps, context);
 }
 
+/**
+ * Prepare the zoom-only property history once, then resolve samples by the
+ * latest writer. Follow integration can query this curve at every grid step
+ * without replaying the complete camera action history for each sample.
+ */
+export function prepareCameraZoomResolver(
+  timeline: readonly RuntimeTimelineAction[],
+): (time: number) => number {
+  const writers = timeline
+    .map((action, index) => ({ action, index, start: action.time ?? 0 }))
+    .filter(({ action }) => action.action === 'cameraReset'
+      || (action.action === 'cameraMotion' && compiledMotionWritesZoom(action.params ?? {}))
+      || (action.action === 'cameraPath' && compiledPathWritesProperty(action.params ?? {}, 'zoom')))
+    .sort((left, right) => left.start - right.start || left.index - right.index);
+
+  let current = (_time: number): number => STAGE_DEFAULT_CAMERA_ZOOM;
+  const prepared: Array<{ readonly start: number; readonly sample: (time: number) => number }> = [];
+  for (const { action, start } of writers) {
+    const from = current(start);
+    const sample = createPreparedCameraZoomWriter(action, start, from);
+    prepared.push({ start, sample });
+    current = sample;
+  }
+
+  return (time: number): number => {
+    let low = 0;
+    let high = prepared.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (prepared[middle].start <= time) low = middle + 1;
+      else high = middle;
+    }
+    return low === 0 ? STAGE_DEFAULT_CAMERA_ZOOM : prepared[low - 1].sample(time);
+  };
+}
+
+function createPreparedCameraZoomWriter(
+  action: RuntimeTimelineAction,
+  start: number,
+  from: number,
+): (time: number) => number {
+  if (action.action === 'cameraReset') {
+    const params = action.params ?? {};
+    const rawDuration = params.duration ?? params.durationSeconds;
+    const duration = typeof rawDuration === 'number' && rawDuration >= 0 ? rawDuration : 1;
+    const ease = typeof params.ease === 'string'
+      ? params.ease
+      : typeof params.easing === 'string' ? params.easing : 'power3.inOut';
+    return (time) => {
+      const progress = duration === 0 ? 1 : Math.max(0, Math.min(1, (time - start) / duration));
+      const weight = evaluateCharacterEase(ease, progress, 'power3.inOut');
+      return from + (STAGE_DEFAULT_CAMERA_ZOOM - from) * weight;
+    };
+  }
+
+  if (action.action === 'cameraMotion') {
+    const params = action.params ?? {};
+    const duration = typeof params.duration === 'number' && params.duration >= 0 ? params.duration : 1;
+    const ease = typeof params.easing === 'string' ? params.easing : 'smooth';
+    const legacyDefaults = !Array.isArray(params._cameraProperties);
+    const legacyZoomDefault = legacyDefaults
+      ? params.move === 'zoom' ? 1.5 : params.move === 'push' ? '+=0.3' : params.move === 'pull' ? '-=0.3' : undefined
+      : undefined;
+    const rawZoom = params.zoom ?? legacyZoomDefault;
+    const zoomTo = compiledMotionWritesZoom(params) && rawZoom !== undefined
+      ? resolveZoomValue(rawZoom, from)
+      : undefined;
+    return (time) => {
+      if (time < start || zoomTo === undefined) return from;
+      const progress = duration === 0 ? 1 : Math.max(0, Math.min(1, (time - start) / duration));
+      const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
+      return from + (zoomTo - from) * weight;
+    };
+  }
+
+  const params = action.params ?? {};
+  const samplePath = createPreparedCameraPath(params);
+  return (time) => {
+    const channels: MotionChannels = { ...STAGE_DEFAULT_CAMERA_POSITION, zoom: from, rotation: STAGE_DEFAULT_CAMERA_ROTATION };
+    const coverage: CameraChannelCoverage = { position: false, zoom: false, rotation: false };
+    samplePath(channels, coverage, start, time);
+    return channels.zoom;
+  };
+}
+
 function computeCameraStateAtTimeInternal(
   timeline: readonly RuntimeTimelineAction[],
   time: number,
@@ -718,85 +803,105 @@ function applyCameraPath(
   start: number,
   time: number,
 ): void {
-  const raw = Array.isArray(params.keyframes) ? params.keyframes : [];
-  const keyframes = raw
-    .filter((kf: any) => kf && Number.isFinite(kf.time))
-    .sort((a: any, b: any) => a.time - b.time) as Array<Record<string, any>>;
-  if (keyframes.length === 0) return;
-
-  if (keyframes.some((kf) => kf.position !== undefined)) coverage.position = true;
-  if (keyframes.some((kf) => kf.zoom !== undefined)) coverage.zoom = true;
-  if (keyframes.some((kf) => kf.rotation !== undefined)) coverage.rotation = true;
-
-  let local = time - start;
-  const duration = Number(keyframes[keyframes.length - 1].time);
-  if (duration > 0) {
-    const repeatValue = params.repeat;
-    const infinite = params.loop === true || repeatValue === -1;
-    const repeatCount = typeof repeatValue === 'number' && Number.isInteger(repeatValue) && repeatValue > 0
-      ? repeatValue
-      : 0;
-    const plays = infinite ? Infinity : repeatCount + 1;
-    if (local >= duration && (infinite || local < duration * plays)) {
-      const cycle = Math.floor(local / duration);
-      local %= duration;
-      if (params.yoyo === true && cycle % 2 === 1) local = duration - local;
-    } else if (!infinite && local >= duration * plays) {
-      local = params.yoyo === true && plays % 2 === 0 ? 0 : duration;
-    }
-  }
-  const sampleProperty = (
-    property: 'position' | 'zoom' | 'rotation',
-    initial: number | CameraPosition,
-  ): number | CameraPosition => {
-    const track = keyframes.filter((keyframe) => {
-      if (property === 'position') return keyframe.position !== undefined;
-      return Number.isFinite(keyframe[property]);
-    });
-    let value = initial;
-    let previousTime = 0;
-    for (const keyframe of track) {
-      const keyTime = Number(keyframe.time);
-      const rawTarget = property === 'position' ? normalizePoint(keyframe.position) : Number(keyframe[property]);
-      if (rawTarget === null || (typeof rawTarget === 'number' && !Number.isFinite(rawTarget))) continue;
-      if (local >= keyTime) {
-        value = rawTarget;
-        previousTime = keyTime;
-        continue;
-      }
-      if (keyTime > previousTime) {
-        const progress = Math.max(0, Math.min(1, (local - previousTime) / (keyTime - previousTime)));
-        const ease = typeof keyframe.ease === 'string'
-          ? keyframe.ease
-          : typeof params.ease === 'string' ? params.ease : 'power2.inOut';
-        const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
-        if (typeof value === 'number' && typeof rawTarget === 'number') {
-          return value + (rawTarget - value) * weight;
-        }
-        if (typeof value !== 'number' && typeof rawTarget !== 'number') {
-          return {
-            x: value.x + (rawTarget.x - value.x) * weight,
-            y: value.y + (rawTarget.y - value.y) * weight,
-          };
-        }
-      }
-      break;
-    }
-    return value;
-  };
-
-  const position = sampleProperty('position', { x: channels.x, y: channels.y });
-  if (typeof position !== 'number') {
-    channels.x = position.x;
-    channels.y = position.y;
-  }
-  const zoom = sampleProperty('zoom', channels.zoom);
-  if (typeof zoom === 'number') channels.zoom = zoom;
-  const rotation = sampleProperty('rotation', channels.rotation);
-  if (typeof rotation === 'number') channels.rotation = rotation;
+  createPreparedCameraPath(params)(channels, coverage, start, time);
 }
 
-function normalizePoint(value: unknown): CameraPosition | null {  const point = resolveVec2(value as any);
+type PreparedCameraPathKeyframe = Record<string, unknown> & { readonly time: number };
+
+function createPreparedCameraPath(
+  params: Readonly<Record<string, unknown>>,
+): (channels: MotionChannels, coverage: CameraChannelCoverage, start: number, time: number) => void {
+  const raw = Array.isArray(params.keyframes) ? params.keyframes : [];
+  const keyframes = raw
+    .filter((value: unknown): value is PreparedCameraPathKeyframe => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+      const keyframe = value as Record<string, unknown>;
+      return typeof keyframe.time === 'number' && Number.isFinite(keyframe.time);
+    })
+    .sort((left, right) => left.time - right.time);
+  const positionTrack = keyframes.filter((keyframe) => keyframe.position !== undefined);
+  const zoomTrack = keyframes.filter((keyframe) => Number.isFinite(keyframe.zoom));
+  const rotationTrack = keyframes.filter((keyframe) => Number.isFinite(keyframe.rotation));
+  const writesPosition = positionTrack.length > 0;
+  const writesZoom = zoomTrack.length > 0;
+  const writesRotation = rotationTrack.length > 0;
+
+  return (channels, coverage, start, time) => {
+    if (keyframes.length === 0) return;
+
+    if (writesPosition) coverage.position = true;
+    if (writesZoom) coverage.zoom = true;
+    if (writesRotation) coverage.rotation = true;
+
+    let local = time - start;
+      const duration = keyframes[keyframes.length - 1].time;
+    if (duration > 0) {
+      const repeatValue = params.repeat;
+      const infinite = params.loop === true || repeatValue === -1;
+      const repeatCount = typeof repeatValue === 'number' && Number.isInteger(repeatValue) && repeatValue > 0
+        ? repeatValue
+        : 0;
+      const plays = infinite ? Infinity : repeatCount + 1;
+      if (local >= duration && (infinite || local < duration * plays)) {
+        const cycle = Math.floor(local / duration);
+        local %= duration;
+        if (params.yoyo === true && cycle % 2 === 1) local = duration - local;
+      } else if (!infinite && local >= duration * plays) {
+        local = params.yoyo === true && plays % 2 === 0 ? 0 : duration;
+      }
+    }
+
+    const sampleProperty = (
+      property: 'position' | 'zoom' | 'rotation',
+      track: readonly PreparedCameraPathKeyframe[],
+      initial: number | CameraPosition,
+    ): number | CameraPosition => {
+      let value = initial;
+      let previousTime = 0;
+      for (const keyframe of track) {
+        const keyTime = keyframe.time;
+        const rawTarget = property === 'position' ? normalizePoint(keyframe.position) : Number(keyframe[property]);
+        if (rawTarget === null || (typeof rawTarget === 'number' && !Number.isFinite(rawTarget))) continue;
+        if (local >= keyTime) {
+          value = rawTarget;
+          previousTime = keyTime;
+          continue;
+        }
+        if (keyTime > previousTime) {
+          const progress = Math.max(0, Math.min(1, (local - previousTime) / (keyTime - previousTime)));
+          const ease = typeof keyframe.ease === 'string'
+            ? keyframe.ease
+            : typeof params.ease === 'string' ? params.ease : 'power2.inOut';
+          const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
+          if (typeof value === 'number' && typeof rawTarget === 'number') {
+            return value + (rawTarget - value) * weight;
+          }
+          if (typeof value !== 'number' && typeof rawTarget !== 'number') {
+            return {
+              x: value.x + (rawTarget.x - value.x) * weight,
+              y: value.y + (rawTarget.y - value.y) * weight,
+            };
+          }
+        }
+        break;
+      }
+      return value;
+    };
+
+    const position = sampleProperty('position', positionTrack, { x: channels.x, y: channels.y });
+    if (typeof position !== 'number') {
+      channels.x = position.x;
+      channels.y = position.y;
+    }
+    const zoom = sampleProperty('zoom', zoomTrack, channels.zoom);
+    if (typeof zoom === 'number') channels.zoom = zoom;
+    const rotation = sampleProperty('rotation', rotationTrack, channels.rotation);
+    if (typeof rotation === 'number') channels.rotation = rotation;
+  };
+}
+
+function normalizePoint(value: unknown): CameraPosition | null {
+  const point = resolveVec2(value as any);
   return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? { x: point.x, y: point.y } : null;
 }
 
