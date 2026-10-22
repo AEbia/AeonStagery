@@ -1,6 +1,5 @@
 import { BakeEngine, type BakeResult } from './BakeEngine';
 import type { PreparedCompiledScene } from '../api/types/semantic-scene';
-import type { CameraAnchorTrajectory } from './CameraChannelEvaluator';
 import { stageManager } from './StageManager';
 import type { WmdlConfigRegistry } from './WmdlConfigRegistry';
 
@@ -18,7 +17,7 @@ export class CameraHistoricalRuntime {
   private registry: WmdlConfigRegistry | undefined;
   private generation = 0;
   private pending: Promise<unknown> = Promise.resolve();
-  private ready: { anchorTrajectories: readonly CameraAnchorTrajectory[]; trajectoryRevision: string | number } | null = null;
+  private ready: { anchorTrajectories: NonNullable<BakeResult['anchorTrajectories']>; trajectoryRevision: string | number } | null = null;
 
   constructor(private readonly factory?: CameraAnchorPreparerFactory) {}
 

@@ -252,13 +252,17 @@ camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须�
 - `reset` 复位 position/zoom/rotation，并终止 active follow 与未结束 shake。该语义必须同时用于 playback、seek 和 bake。
 - zoom 必须写成 `{ kind: 'absolute' | 'delta', value: number }`。禁止继续让裸 `zoom: 0.3` 同时承担“目标缩放 0.3”与“推进 0.3”的两种解释。
 - 同时间 camera statements 按 statement order 执行；registry 的 overlap/state-key validator 必须给出确定结果。
-- `path` 按各属性自己的关键帧与缓动插值；非零首帧从动作起点实际值过渡，零时刻首帧立即生效。关键帧时间决定运动节奏，`durationSeconds` 不伸缩或截断运动；有限 repeat 计入编排时间，loop 优先且无限重复保持有限场景范围。基础通道与角色运镜的正式播放、seek 已统一求值；独立临时预览 API、后台快照 Bake 与导出仍有后续迁移边界。
+- `path` 按各属性自己的关键帧与缓动插值；非零首帧从动作起点实际值过渡，零时刻首帧立即生效。关键帧时间决定运动节奏，`durationSeconds` 不伸缩或截断运动；有限 repeat 计入编排时间，loop 优先且无限重复保持有限场景范围。基础通道与角色运镜的正式播放、seek、Bake 与逐帧导出消费统一摄像机求值；独立临时预览 API 的求值迁移仍有后续边界。
 
 正式角色轨迹生命周期由 `CameraHistoricalRuntime` 持有，复用隔离 `BakeEngine.prepareCameraAnchorsPrepared` 生成带内容 revision、部位、有效性区间、不连续事件两侧值的轨迹。`ScriptEngine.loadPreparedScene` 等待完整轨迹后才建立镜头时间线；新加载、失败回滚和 teardown 取消旧任务，过期结果不能发布。协调器不通过活动模型的 getPoint/getPosition 推断历史，也不注册正式 follow ticker。诊断通过 `ScriptEngine.getCameraEvaluation()` 返回，由调用方呈现和去重。
 
 编排或合成参考尺寸变化触发重新准备。资源系统尚无完整内容 revision 通知，因此含角色运镜的场景每次显式重载都重新准备，覆盖语句未变但模型/姿态资源内容变化；仅基础通道仍保留相同内容跳过重载。隔离模型复用但准备任务串行，避免取消后资源加载尚未结束时共享模型。准备失败拒绝本次投影，不退回活动锚点或竞争写镜头的旧路径。
 
-可见手感变化：移动目标现在累计完整追赶历史，失去目标不丢弃关系；缩放期间跟随钳制消费对应历史 zoom，smoothing 边界精确遵守 0/1。既有独立 `CameraController` 临时预览 API 暂保留旧实现；240 步/秒、一秒检查点与 15 Hz 隔离锚点采样仍是待真实长场景证据收敛的候选，加载等待成本与精度不在此票宣称生产上界。
+`BakeEngine.bakePrepared*` 在采样前取得完整历史轨迹，以同一参考尺寸发布 `cameraStates`。`ScriptEngine` 把当前不可变轨迹及内容有效性传给 `PreBakeDaemon`，后台分段 Bake 复用该批准备，保留 seeded snapshot 的快速恢复。独立 Bake 自行准备；取消、换场景、内容版本失效或参考尺寸改变后不发布过期相机 bundle。`FrameCaptureEngine` 通过 `ScriptEngine.prepareForExport` 等待正式加载完成，在后端初始化前验证版本，并在重建和渲染时继续检查；等待可取消，准备失败会拒绝导出。
+
+正式导出开始先移除独立运镜的 GSAP 时间线、follow ticker 和临时晃动，再 seek 到导出起点；禁止 seek 后再初始化镜头。每帧 awaited seek 的统一结果保留到最终捕获，全局时间线推进不能让旧临时镜头回调再次改写它。相同场景夹具已覆盖正式加载、播放、seek、独立与后台 Bake、实际逐帧捕获、24/30/60/120 fps、横/竖/方形参考尺寸与同宽高比输出密度；渲染器和模型 SDK 的系统边界在集成测试中使用替身，不作为真实模型生产误差或性能上界的证据。
+
+可见手感变化：移动目标现在累计完整追赶历史，失去目标不丢弃关系；缩放期间跟随钳制消费对应历史 zoom，smoothing 边界精确遵守 0/1。已有非零镜头旋转会实际改变角色、环境和图片的位置与朝向，绕画面中心统一旋转；字幕等画面 UI 保持独立。晃动在投影后按创作单位叠加，输出像素密度变化只做最后换算；旧 z 继续同时影响艺术化位移视差与绘制排序。没有持久化格式、schema epoch 或协作协议变更，其他未知数据的保真规则不变。既有独立 `CameraController` 临时预览 API 暂保留旧实现；240 步/秒、一秒检查点与 15 Hz 隔离锚点采样仍是待真实长场景证据收敛的候选，加载等待成本与精度不在此票宣称生产上界。
 
 #### Environment State Contract
 

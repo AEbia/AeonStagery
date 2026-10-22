@@ -84,6 +84,7 @@ class ScriptEngine {
   private cameraCoordinator = new CameraCoordinator(cameraController);
   private readonly historicalCamera: CameraHistoricalRuntime;
   private sceneLoadVersion = 0;
+  private scenePreparation: Promise<void> = Promise.resolve();
   private cameraEvaluation: CameraEvaluationOutput | undefined;
   private characterSynchronizer = new CharacterSynchronizer(live2DManager);
   private dialogueCoordinator = new DialogueCoordinator(subtitleRenderer, lipSyncEngine);
@@ -221,7 +222,42 @@ class ScriptEngine {
 
   private loadedStageSize = '';
 
-  async loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
+  loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
+    const preparation = this.loadPreparedSceneRuntime(scene);
+    this.scenePreparation = preparation;
+    return preparation;
+  }
+
+  /** Await the current scene revision; an export must never switch histories mid-frame. */
+  async prepareForExport(signal?: AbortSignal): Promise<{ assertCurrent(): void }> {
+    const version = this.sceneLoadVersion;
+    const referenceSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
+    let onAbort: (() => void) | undefined;
+    try {
+      signal?.throwIfAborted();
+      await Promise.race([
+        this.scenePreparation,
+        new Promise<never>((_resolve, reject) => {
+          if (!signal) return;
+          onAbort = () => reject(signal.reason ?? new DOMException('Export aborted', 'AbortError'));
+          signal.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]);
+    } finally {
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+    const assertCurrent = () => {
+      signal?.throwIfAborted();
+      if (version !== this.sceneLoadVersion || !this.masterTimeline || !this.historicalCamera.input
+        || referenceSize !== `${STAGE_WIDTH}x${STAGE_HEIGHT}`) {
+        throw new Error('Prepared camera scene changed during export.');
+      }
+    };
+    assertCurrent();
+    return { assertCurrent };
+  }
+
+  private async loadPreparedSceneRuntime(scene: PreparedCompiledScene): Promise<void> {
     const loadVersion = ++this.sceneLoadVersion;
     if (!this.historicalCamera.input) this.historicalCamera.cancel();
     const stageSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
@@ -371,9 +407,20 @@ class ScriptEngine {
     }
 
     // Attach PreBakeDaemon — it handles all background snapshot scheduling
+    const cameraInput = this.historicalCamera.input;
+    if (!cameraInput) return;
     preBakeDaemon.attach(
       this.snapshotStore,
       preparedScene,
+      Object.freeze({
+        scene: preparedScene,
+        logicalReferenceSize: Object.freeze({ width: STAGE_WIDTH, height: STAGE_HEIGHT }),
+        anchorRevision: cameraInput.trajectoryRevision,
+        anchorTrajectories: cameraInput.anchorTrajectories,
+        // An identical basic-channel reload can keep this same bundle. Actual
+        // scene/resource rebuilds replace it, including same-object reloads.
+        isCurrent: () => this.historicalCamera.input === cameraInput,
+      }),
     );
     // Start with a cold scan to establish baseline coverage
     preBakeDaemon.triggerColdScan();

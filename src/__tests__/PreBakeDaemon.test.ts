@@ -144,6 +144,7 @@ describe('PreBakeDaemon', () => {
       0.5,
       undefined,
       true,
+      undefined,
     );
     expect(mocks.destroy).toHaveBeenCalledTimes(1);
     expect(store.size).toBe(1);

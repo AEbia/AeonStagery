@@ -13,7 +13,7 @@
  * interfering with the main rendering thread.
  */
 
-import { BakeEngine } from '../BakeEngine';
+import { BakeEngine, type PreparedBakeCameraInput } from '../BakeEngine';
 import { SnapshotStore } from '../SnapshotStore';
 import { WmdlConfigRegistry } from '../WmdlConfigRegistry';
 import { stageManager } from '../StageManager';
@@ -47,6 +47,7 @@ export class PreBakeDaemon {
   // External dependencies (injected via attach)
   private snapshotStore: SnapshotStore | null = null;
   private currentScene: PreparedCompiledScene | null = null;
+  private cameraInput: PreparedBakeCameraInput | undefined;
   private resolvedModelPaths: Map<string, string> = new Map();
 
   // Scheduling
@@ -68,6 +69,7 @@ export class PreBakeDaemon {
   attach(
     snapshotStore: SnapshotStore,
     scene: PreparedCompiledScene,
+    cameraInput?: PreparedBakeCameraInput,
   ): void {
     // 核心修复：切勿在此处调用 this.dispose() 销毁 BakeEngine！
     // 用户每次编辑时间轴都会触发 ScriptEngine.loadPreparedScene，从而调用 attach。
@@ -89,6 +91,7 @@ export class PreBakeDaemon {
 
     this.snapshotStore = snapshotStore;
     this.currentScene = scene;
+    this.cameraInput = cameraInput;
     this.state = 'idle';
     this.isPlaying = false;
     this.isSeeking = false;
@@ -290,6 +293,7 @@ export class PreBakeDaemon {
     this.taskQueue = [];
     this.snapshotStore = null;
     this.currentScene = null;
+    this.cameraInput = undefined;
     this.state = 'detached';
   }
 
@@ -319,6 +323,7 @@ export class PreBakeDaemon {
     this.taskQueue = [];
     this.snapshotStore = null;
     this.currentScene = null;
+    this.cameraInput = undefined;
 
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
@@ -457,6 +462,7 @@ export class PreBakeDaemon {
           task.precision,
           seedSnapshot ?? undefined,
           true, // silent = true for background daemon pre-baking
+          this.cameraInput,
         );
 
         // We DO NOT destroy the engine here to reuse models across tasks.

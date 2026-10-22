@@ -36,7 +36,8 @@ import type {
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 import { submitLive2DBakeFrameBatch } from './live2d/runtime/Live2DRuntimeControlModule';
 import type { CustomMotionStageHandle } from './live2d/customMotionStage';
-import { evaluateCameraChannels, type CameraEvaluationOutput } from './CameraChannelEvaluator';
+import { evaluateCameraChannels, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from './CameraChannelEvaluator';
+import { usesUnifiedCameraChannels } from './coordinators/CameraCoordinator';
 import { prepareCameraAnchorTrajectories, type CameraAnchorCapture, type PreparedCameraAnchorTrajectory } from './CameraAnchorPreparation';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
 
@@ -174,6 +175,16 @@ export interface BakeResult {
   motionReport?: import('./BakeMotionRuntime').BakeMotionRuntimeReport;
 }
 
+/** Immutable camera history belonging to one prepared scene and composition. */
+export interface PreparedBakeCameraInput {
+  readonly scene: PreparedCompiledScene;
+  readonly logicalReferenceSize: CameraLogicalReferenceSize;
+  readonly anchorRevision: string | number;
+  readonly anchorTrajectories: readonly PreparedCameraAnchorTrajectory[];
+  /** Formal scene owners invalidate the bundle when resource contents are re-prepared. */
+  readonly isCurrent?: () => boolean;
+}
+
 // ─── BakeEngine ───────────────────────────────────────────────────────────
 
 export class BakeEngine {
@@ -220,17 +231,7 @@ export class BakeEngine {
     token: number,
   ): Promise<BakeResult> {
     const step = settingsManager.get('bakePrecision');
-    return this.bakeRuntimeRange(
-      preparedSceneToRuntimeTimelineScene(scene),
-      buildPreparedBakeModelPathMap(scene, resolvedModelPaths),
-      token,
-      0,
-      scene.durationSeconds,
-      step,
-      undefined,
-      false,
-      buildPreparedBakeModelSourceMap(scene),
-    );
+    return this.bakePreparedRange(scene, resolvedModelPaths, token, 0, scene.durationSeconds, step);
   }
 
   /** Prepare immutable historical anchor tracks on a fixed cadence in isolated Bake models. */
@@ -239,6 +240,7 @@ export class BakeEngine {
     resolvedModelPaths: Map<string, string>,
     token: number,
   ): Promise<BakeResult> {
+    const referenceSize = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
     const revision = `${scene.sceneId}:${++this.anchorPreparationRevision}`;
     const runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
     const captures: CameraAnchorCapture[] = [];
@@ -258,7 +260,8 @@ export class BakeEngine {
       buildPreparedBakeModelSourceMap(scene),
       { captures, revision, eventTimes },
     );
-    if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion) return result;
+    if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion
+      || referenceSize.width !== STAGE_WIDTH || referenceSize.height !== STAGE_HEIGHT) return { snapshotHistory: [] };
     const anchorTrajectories = prepareCameraAnchorTrajectories({
       revision,
       cadenceSeconds: CAMERA_ANCHOR_PREPARATION_CADENCE_SECONDS,
@@ -271,7 +274,7 @@ export class BakeEngine {
       state: Object.freeze(evaluateCameraChannels({
         timeline: runtimeScene.timeline,
         sceneTime: time,
-        logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
+        logicalReferenceSize: referenceSize,
         anchorTrajectories,
       })),
     })));
@@ -287,9 +290,25 @@ export class BakeEngine {
     precision: number,
     seedSnapshot?: Snapshot,
     silent = false,
+    cameraInput?: PreparedBakeCameraInput,
   ): Promise<BakeResult> {
-    return this.bakeRuntimeRange(
-      preparedSceneToRuntimeTimelineScene(scene),
+    if (!(precision > 0) || !Number.isFinite(precision)) throw new Error('Bake precision must be finite and positive.');
+    // Historical poses are prepared independently of the requested snapshot cadence
+    // and range. A mid-action Bake must retain the same complete camera history.
+    const runtimeScene = preparedSceneToRuntimeTimelineScene(scene);
+    const referenceSize = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
+    const isCameraInputCurrent = () => referenceSize.width === STAGE_WIDTH && referenceSize.height === STAGE_HEIGHT
+      && (!cameraInput || (cameraInput.scene === scene
+        && cameraInput.logicalReferenceSize.width === referenceSize.width
+        && cameraInput.logicalReferenceSize.height === referenceSize.height && cameraInput.isCurrent?.() !== false));
+    if (!isCameraInputCurrent()) return { snapshotHistory: [] };
+    const prepared = cameraInput ?? (usesUnifiedCameraChannels(runtimeScene.timeline)
+      ? { anchorTrajectories: [], anchorRevision: `${scene.sceneId}:static` }
+      : await this.prepareCameraAnchorsPrepared(scene, resolvedModelPaths, token));
+    if (!prepared.anchorTrajectories || prepared.anchorRevision === undefined || !isCameraInputCurrent()) return { snapshotHistory: [] };
+    const expectedTaskVersion = this.taskVersion + 1;
+    const result = await this.bakeRuntimeRange(
+      runtimeScene,
       buildPreparedBakeModelPathMap(scene, resolvedModelPaths),
       token,
       rangeStart,
@@ -298,7 +317,23 @@ export class BakeEngine {
       seedSnapshot,
       silent,
       buildPreparedBakeModelSourceMap(scene),
+      undefined,
+      isCameraInputCurrent,
     );
+    if (this.closed || this.token !== token || this.taskVersion !== expectedTaskVersion || !isCameraInputCurrent()) return { snapshotHistory: [] };
+    const cameraStates: NonNullable<BakeResult['cameraStates']>[number][] = [];
+    const end = Math.min(rangeEnd, scene.durationSeconds);
+    for (let index = 0; rangeStart + index * precision <= end + 1e-9; index++) {
+      const time = Math.min(rangeStart + index * precision, end);
+      cameraStates.push(Object.freeze({ time, state: Object.freeze(evaluateCameraChannels({
+        timeline: runtimeScene.timeline, sceneTime: time,
+        logicalReferenceSize: referenceSize,
+        anchorTrajectories: prepared.anchorTrajectories,
+        trajectoryRevision: prepared.anchorRevision,
+      })) }));
+    }
+    return { ...result, anchorRevision: prepared.anchorRevision, anchorTrajectories: prepared.anchorTrajectories,
+      cameraStates: Object.freeze(cameraStates) };
   }
 
   /**
@@ -317,12 +352,15 @@ export class BakeEngine {
     silent: boolean = false,
     modelSources: ReadonlyMap<string, string> = new Map(),
     anchorCapture?: { captures: CameraAnchorCapture[]; revision: string | number; eventTimes: readonly number[] },
+    isCameraInputCurrent: () => boolean = () => true,
   ): Promise<BakeResult> {
     if (this.closed) return { snapshotHistory: [] };
     this.modelResources.cancelLoads();
     const taskVersion = ++this.taskVersion;
     this.token = token;
-    const isCurrent = () => this.checkToken(token, taskVersion);
+    const referenceSize = { width: STAGE_WIDTH, height: STAGE_HEIGHT };
+    const isCurrent = () => this.checkToken(token, taskVersion) && isCameraInputCurrent()
+      && referenceSize.width === STAGE_WIDTH && referenceSize.height === STAGE_HEIGHT;
 
     this.snapshotHistory = [];
     

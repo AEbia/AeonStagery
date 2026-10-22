@@ -105,6 +105,19 @@ class CameraController {
     this.applyTransform();
   }
 
+  /** Formal export owns the camera; discard independent preview writers. */
+  clearTemporaryState(): void {
+    // A reset/path timeline can also contain callbacks. Killing just its
+    // property tweens leaves those callbacks able to clear the scene's shake.
+    for (const tween of gsap.getTweensOf([this.state, this.state.position])) {
+      const owner = tween.parent;
+      if (owner && owner !== gsap.globalTimeline) owner.kill();
+      else tween.kill();
+    }
+    this.resetShake();
+    this.unfollow();
+  }
+
   /**
    * Pan the camera to a target position.
    */
