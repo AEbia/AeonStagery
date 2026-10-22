@@ -404,7 +404,9 @@ const definitions = {
         const repeatedExtent = lastKeyframe * (1 + (params.repeat ?? 0));
         return Math.max(duration(params.durationSeconds), repeatedExtent);
       }
-      if (params.mode === 'follow') return 0;
+      if (params.mode === 'follow') {
+        return params.operation === 'start' ? duration(params.durationSeconds) : 0;
+      }
       return duration(params.durationSeconds);
     },
     collectAssetReferences: () => [],

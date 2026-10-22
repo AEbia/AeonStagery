@@ -10,8 +10,9 @@ function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineA
   if (!ctx.cameraStateDriven) return false;
   const { params } = action;
   const isPath = action.action === 'cameraPath';
+  const isFollowStateChange = action.action === 'cameraFollow' || action.action === 'cameraUnfollow';
   let duration = typeof params.duration === 'number' ? params.duration
-    : typeof params.durationSeconds === 'number' ? params.durationSeconds : isPath ? 0 : 1;
+    : typeof params.durationSeconds === 'number' ? params.durationSeconds : isPath || isFollowStateChange ? 0 : 1;
   if (isPath && Array.isArray(params.keyframes)) {
     const keyframes: readonly { time?: number }[] = params.keyframes;
     const period = keyframes.reduce((end, frame) => Math.max(end, frame.time ?? 0), 0);

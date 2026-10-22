@@ -251,6 +251,25 @@ describe('semantic visual diagnostics', () => {
     expect(validateSemanticSceneStructure(document)).toEqual([]);
   });
 
+  it('validates finite follow expiration at its authored endpoint', () => {
+    const document = makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 2,
+      } },
+      { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
+      { id: 'follow_again', time: 3, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 1,
+      } },
+    ]);
+
+    const issues = validateSemanticSceneStructure(document);
+
+    expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraFollowStopWithoutActiveTarget, 'follow_stop'))
+      .toBeUndefined();
+    expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraFollowOverlap, 'follow_again'))
+      .toBeUndefined();
+  });
+
   it('validates post targets against declared objects without requiring active-time presence', () => {
     const document = makeDocument([
       {

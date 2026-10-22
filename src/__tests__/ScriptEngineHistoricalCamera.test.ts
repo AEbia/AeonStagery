@@ -40,10 +40,15 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
   });
   afterEach(() => { engine.destroy(); gsap.globalTimeline.clear(); setStageDimensions(); vi.restoreAllMocks(); });
 
-  async function prepare(statements: CurrentSceneDocument['statements'], sceneId = 'historical-camera') {
+  async function prepare(
+    statements: CurrentSceneDocument['statements'],
+    sceneId = 'historical-camera',
+    durationSeconds: number | null = 8,
+  ) {
     return (await new SemanticScenePipeline({ resolveAsset: (source) => source }).processDocument({
       schemaVersion: 5, sceneId,
-      meta: { title: 'Historical camera', resolution: [1920, 1080], fps: 60, durationSeconds: 8,
+      meta: { title: 'Historical camera', resolution: [1920, 1080], fps: 60,
+        ...(durationSeconds !== null ? { durationSeconds } : {}),
         characters: [{ id: 'hero', name: 'Hero', model: 'hero.model3.json' }] },
       statements,
     })).prepared;
@@ -211,13 +216,37 @@ describe('formal historical camera (semantic load, real dispatcher, controller a
     }
   });
 
+  it('keeps durationless follow start and stop at the declared scene boundary', async () => {
+    const ends: number[] = [];
+    const offEnd = hookSystem.on('scene:end', () => { ends.push(engine.getCurrentTime()); });
+    try {
+      const scene = await prepare([
+        { id: 'start', type: 'camera', time: 8, params: { mode: 'follow', operation: 'start', target: 'hero' } },
+        { id: 'stop', type: 'camera', time: 8, params: { mode: 'follow', operation: 'stop', target: 'hero' } },
+      ]);
+      await engine.loadPreparedScene(scene);
+      const master = engine.getMasterTimeline()!;
+
+      expect(scene.durationSeconds).toBe(8);
+      expect(master.duration()).toBeCloseTo(8.001, 8);
+      master.seek(master.duration(), false);
+      expect(ends).toHaveLength(1);
+      expect(ends[0]).toBeCloseTo(8.001, 8);
+    } finally {
+      offEnd();
+    }
+  });
+
   it('releases a finite compiled follow at its exact end and keeps its actual endpoint', async () => {
     const prepared = await prepare([
       { id: 'zoom', type: 'camera', time: 0, params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
-      { id: 'follow', type: 'camera', time: 0, params: { mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing: 0 } },
-    ]);
-    await engine.loadPreparedScene({ ...prepared, actions: prepared.actions.map((action) => action.action === 'cameraFollow'
-      ? { ...action, params: { ...action.params, duration: 1 } } : action) });
+      { id: 'follow', type: 'camera', time: 0, params: {
+        mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing: 0, durationSeconds: 1,
+      } },
+    ], 'finite-follow', null);
+    expect(prepared.durationSeconds).toBe(1);
+    expect(prepared.actions.find((action) => action.action === 'cameraFollow')?.params.duration).toBe(1);
+    await engine.loadPreparedScene(prepared);
     for (const time of [1, 2.5, 7, 1]) {
       engine.getMasterTimeline()!.seek(time, false);
       expect(engine.getCurrentCamera().position).toEqual({ x: expect.closeTo(0.72, 8), y: expect.closeTo(0.32, 8) });

@@ -694,13 +694,14 @@ export function parseCameraParams(input: unknown, path: string): CameraParams {
         ease: optionalString(record.ease, `${path}.ease`),
       });
     case 'follow':
-      expectKeys(record, path, ['mode', 'operation', 'target', 'offset', 'smoothing']);
+      expectKeys(record, path, ['mode', 'operation', 'target', 'offset', 'smoothing', 'durationSeconds']);
       return compact({
         mode,
         operation: expectOneOf(record.operation, `${path}.operation`, ['start', 'stop']),
         target: optionalDiagnosticString(record.target, `${path}.target`),
         offset: optionalVec2(record.offset, `${path}.offset`),
         smoothing: optionalFiniteNumber(record.smoothing, `${path}.smoothing`),
+        durationSeconds: optionalNonNegativeNumber(record.durationSeconds, `${path}.durationSeconds`),
       });
     case 'path':
       expectKeys(record, path, ['mode', 'keyframes', 'durationSeconds', 'ease', 'loop', 'repeat', 'yoyo']);

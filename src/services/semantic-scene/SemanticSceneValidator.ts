@@ -75,6 +75,7 @@ interface StatementValidationContext {
 
 interface ActiveFollow {
   readonly target: string;
+  readonly endTime?: number;
 }
 
 /**
@@ -281,6 +282,13 @@ function validateSemanticVisualStatements(
   ));
 
   for (const context of orderedContexts) {
+    if (activeFollow?.endTime !== undefined && context.statement.time >= activeFollow.endTime) {
+      const isStopAtEnd = context.statement.type === 'camera'
+        && context.statement.params.mode === 'follow'
+        && context.statement.params.operation === 'stop'
+        && context.statement.time === activeFollow.endTime;
+      if (!isStopAtEnd) activeFollow = undefined;
+    }
     if (context.statement.type === 'environmentLayer') {
       environmentLayers = updateEnvironmentLayerCoverage(environmentLayers, context.statement, environmentOrder++);
       continue;
@@ -727,7 +735,12 @@ function validateCameraFollow(
       );
     }
     return params.target && hasNonEmptyString(params.target)
-      ? { target: params.target }
+      ? {
+          target: params.target,
+          ...(params.durationSeconds !== undefined
+            ? { endTime: context.statement.time + params.durationSeconds }
+            : {}),
+        }
       : undefined;
   }
 

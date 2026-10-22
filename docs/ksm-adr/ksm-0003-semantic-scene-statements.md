@@ -248,7 +248,7 @@ camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须�
 
 - `focus` / `move` / `path` 的通道接管以 ADR-0038 为准：x、y、zoom、rotation 独立竞争，后写入者从自身起点的实际值接管，终值保持且旧动作不恢复。显式完整位置同时接管两轴。`hitchcock` 已由 ADR-0038 决定退役，拒绝旧输入与清理残留仍待后续实现。
 - `shake` 是可叠加的有限 envelope，不取得持久 transform ownership。
-- `follow` 使用 `operation: start \| stop`，不再用 `duration: 999` 或 Infinity 暗示生命周期。follow start 持有 position channel，直到 follow stop、有限 duration 终点、reset 或后续真实位置轨道释放；后续 focus/move/path 从释放时的实际跟随位置接管，不要求显式先 stop。只写 zoom/rotation 的编译轨道保留跟随关系，不能由旧 move 标签猜测位置所有权。
+- `follow` 使用 `operation: start \| stop`，不再用 `duration: 999` 或 Infinity 暗示生命周期。start 可带可选非负 `durationSeconds`；有限跟随在精确终点释放，并将该时长计入 scene extent，未指定时仍持续到其他释放事件且不延长 scene。stop 是瞬时状态变化，不占用额外时间。本次只扩展现有 camera source 字段，不提升 schema epoch；省略时长的旧 source 保持原语义。follow start 持有 position channel，直到 follow stop、有限 duration 终点、reset 或后续真实位置轨道释放；后续 focus/move/path 从释放时的实际跟随位置接管，不要求显式先 stop。只写 zoom/rotation 的编译轨道保留跟随关系，不能由旧 move 标签猜测位置所有权。
 - `reset` 复位 position/zoom/rotation，并终止 active follow 与未结束 shake。该语义必须同时用于 playback、seek 和 bake。
 - zoom 必须写成 `{ kind: 'absolute' | 'delta', value: number }`。禁止继续让裸 `zoom: 0.3` 同时承担“目标缩放 0.3”与“推进 0.3”的两种解释。
 - 同时间 camera statements 按 statement order 执行；registry 的 overlap/state-key validator 必须给出确定结果。

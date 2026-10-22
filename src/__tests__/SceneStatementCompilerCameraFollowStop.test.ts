@@ -51,6 +51,36 @@ describe('scene statement compiler — camera follow stop', () => {
     });
   });
 
+  it('preserves a finite follow duration and includes only its end in the scene extent', () => {
+    const document = makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds: 2,
+      } },
+      { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop' } },
+    ]);
+
+    const compiled = sceneStatementCompiler.compile(document);
+
+    expect(compiled.sourceSchemaVersion).toBe(document.schemaVersion);
+    expect(compiled.durationSeconds).toBe(3);
+    expect(compiled.actions).toMatchObject([
+      { action: 'cameraFollow', time: 1, params: { characterId: 'tomori', duration: 2 } },
+      { action: 'cameraUnfollow', time: 3, params: {} },
+    ]);
+  });
+
+  it.each([
+    { durationSeconds: -0.25, message: /Expected non-negative number at .*durationSeconds/ },
+    { durationSeconds: Number.NaN, message: /Expected finite number at .*durationSeconds/ },
+    { durationSeconds: Number.POSITIVE_INFINITY, message: /Expected finite number at .*durationSeconds/ },
+  ])('rejects an invalid authored follow duration: $durationSeconds', ({ durationSeconds, message }) => {
+    expect(() => makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds,
+      } },
+    ])).toThrow(message);
+  });
+
   it('keeps camera reset semantics for explicit reset statements', () => {
     const compiled = sceneStatementCompiler.compile(makeDocument([
       {
