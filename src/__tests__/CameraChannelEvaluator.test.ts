@@ -38,7 +38,7 @@ describe('evaluateCameraChannels', () => {
 
     expect(result.position.x).toBeCloseTo(0.4, 6);
     expect(result.position.y).toBeCloseTo(0.45, 6);
-    expect(result.diagnostics).toEqual([]);
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
   });
 
   it('continues interpolation from a discontinuity right side after the event', () => {
@@ -162,6 +162,65 @@ describe('evaluateCameraChannels', () => {
     expect(finite.follow).toBeNull();
   });
 
+  it('latches an explicit zero-duration follow at its authored instant before later writers', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 5 }],
+      samples: [
+        { time: 0, position: { x: 0.1, y: 0.2 } },
+        { time: 5, position: { x: 0.9, y: 0.8 } },
+      ],
+      events: [],
+    };
+    const timeline = [
+      action('zoom-before-follow', 'cameraMotion', 0, {
+        zoom: 2, duration: 0, _cameraProperties: ['zoom'],
+      }),
+      action('instant-follow', 'cameraFollow', 1, { characterId: 'hero', smoothing: 0, duration: 0 }),
+      action('later-pan', 'cameraMotion', 2, {
+        target: [0.8, 0.7], duration: 1, easing: 'linear', _cameraProperties: ['position'],
+      }),
+    ];
+    const evaluate = (sceneTime: number) => evaluateCameraChannels({
+      timeline,
+      sceneTime,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+
+    const before = evaluate(0.999);
+    const atEndpoint = evaluate(1);
+    const afterEndpoint = evaluate(1.5);
+    const duringLaterWriter = evaluate(2.5);
+
+    expect(before.position).toEqual({ x: 0.5, y: 0.5 });
+    expect(before.follow).toBeNull();
+    expect(atEndpoint.position.x).toBeCloseTo(0.26, 8);
+    expect(atEndpoint.position.y).toBeCloseTo(0.32, 8);
+    expect(atEndpoint.follow).toBeNull();
+    expect(afterEndpoint.position).toEqual(atEndpoint.position);
+    expect(afterEndpoint.follow).toBeNull();
+    expect(duringLaterWriter.position.x).toBeCloseTo(0.53, 8);
+    expect(duringLaterWriter.position.y).toBeCloseTo(0.51, 8);
+    expect(duringLaterWriter.follow).toBeNull();
+
+    const omittedDuration = evaluateCameraChannels({
+      timeline: [
+        action('zoom-before-unbounded-follow', 'cameraMotion', 0, {
+          zoom: 2, duration: 0, _cameraProperties: ['zoom'],
+        }),
+        action('unbounded-follow', 'cameraFollow', 1, { characterId: 'hero', smoothing: 0 }),
+      ],
+      sceneTime: 1.5,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+    });
+    expect(omittedDuration.follow?.characterId).toBe('hero');
+    expect(omittedDuration.position.x).toBeCloseTo(0.34, 8);
+  });
+
   it('does not late-capture a focus anchor that became valid after the action start', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,
@@ -254,6 +313,185 @@ describe('evaluateCameraChannels', () => {
 
     expect(result.position).toEqual({ x: 0.5, y: 0.5 });
     expect(result.coverage).toEqual({ position: false, zoom: true, rotation: false });
+  });
+
+  it.each([
+    ['zoom', ['zoom']],
+    ['rotate', ['rotation']],
+  ] as const)('does not report a missing focus anchor for a compiled %s-only writer', (move, properties) => {
+    const result = evaluateCameraChannels({
+      timeline: [action(`focus-${move}`, 'cameraMotion', 1, {
+        move,
+        duration: 1,
+        focus: { character: 'missing' },
+        ...(move === 'zoom' ? { zoom: 1.5 } : { angle: 15 }),
+        _cameraProperties: properties,
+      })],
+      sceneTime: 1.5,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [],
+    });
+
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
+  });
+
+  it('retains legacy focus-anchor diagnostics when compiled property metadata is absent', () => {
+    const result = evaluateCameraChannels({
+      timeline: [action('legacy-focus', 'cameraMotion', 1, {
+        move: 'zoom', duration: 1, focus: { character: 'missing' }, zoom: 1.5,
+      })],
+      sceneTime: 1.5,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [],
+    });
+
+    expect(result.diagnostics).toMatchObject([{ code: 'missing-focus-anchor', actionId: 'legacy-focus' }]);
+  });
+
+  it.each([64, 128, 256])('keeps %i dense zoom writer states independent of cold, warm, and reverse query order', (count) => {
+    const timeline = Array.from({ length: count }, (_, index) => action(
+      `zoom-${index}`,
+      'cameraMotion',
+      index / count,
+      { zoom: 2 + index / count, duration: 0, _cameraProperties: ['zoom'] },
+    ));
+    const input = {
+      timeline,
+      sceneTime: 1,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [],
+      revision: `dense-${count}`,
+    };
+    const cold = evaluateCameraChannels(input);
+    const expectedFinalZoom = 2 + (count - 1) / count;
+
+    expect(cold.zoom).toBe(expectedFinalZoom);
+    for (const sceneTime of [0.5, 0.125, 0.875, 1]) {
+      evaluateCameraChannels({ ...input, sceneTime });
+    }
+    expect(evaluateCameraChannels(input)).toEqual(cold);
+  });
+
+  it('rebuilds a prepared zoom curve when its timeline content changes in place', () => {
+    const timeline = [action('zoom', 'cameraMotion', 0, {
+      zoom: 1.5, duration: 0, _cameraProperties: ['zoom'],
+    })];
+    const input = {
+      timeline,
+      sceneTime: 1,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [],
+      revision: 'zoom-v1',
+    };
+
+    expect(evaluateCameraChannels(input).zoom).toBe(1.5);
+    timeline[0].params.zoom = 2;
+    expect(evaluateCameraChannels({ ...input, revision: 'zoom-v2' }).zoom).toBe(2);
+  });
+
+  it('reuses a nonzero-duration sparse zoom plan through follow and a position takeover', () => {
+    const trajectory: CameraAnchorTrajectory = {
+      version: 1,
+      revision: 1,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 3 }],
+      samples: [
+        { time: 0, position: { x: 0.35, y: 0.4 } },
+        { time: 3, position: { x: 0.35, y: 0.4 } },
+      ],
+      events: [],
+    };
+    const timeline = [
+      action('zoom-seed', 'cameraMotion', 0, {
+        zoom: 2, duration: 0, _cameraProperties: ['zoom'],
+      }),
+      action('follow', 'cameraFollow', 0.1, { characterId: 'hero', smoothing: 0.25 }),
+      ...Array.from({ length: 64 }, (_, index) => action(
+        `sparse-zoom-${index}`,
+        'cameraMotion',
+        0.2 + index / 96,
+        {
+          zoom: 1.8 + (index % 16) / 100,
+          duration: 0.35,
+          easing: 'linear',
+          _cameraProperties: ['zoom'],
+        },
+      )),
+      action('rotation-only', 'cameraMotion', 0.75, {
+        angle: 35, duration: 0.25, easing: 'linear', _cameraProperties: ['rotation'],
+      }),
+      action('position-takeover', 'cameraMotion', 1.25, {
+        target: [0.7, 0.45], duration: 0.5, easing: 'linear', _cameraProperties: ['position'],
+      }),
+    ];
+    const evaluate = (sceneTime: number) => evaluateCameraChannels({
+      timeline,
+      sceneTime,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [trajectory],
+      revision: 'sparse-writers-v1',
+    });
+
+    const beforeTakeover = evaluate(1);
+    const afterTakeover = evaluate(1.5);
+    evaluate(0.5);
+    const warmReverse = evaluate(1);
+
+    expect(beforeTakeover.follow?.characterId).toBe('hero');
+    expect(beforeTakeover.zoom).toBeGreaterThan(1.8);
+    expect(beforeTakeover.zoom).toBeLessThan(2);
+    expect(beforeTakeover.rotation).toBeGreaterThan(0);
+    expect(warmReverse).toEqual(beforeTakeover);
+    expect(afterTakeover.follow).toBeNull();
+    expect(afterTakeover.position.x).toBeGreaterThan(beforeTakeover.position.x);
+    expect(afterTakeover.position.y).toBeGreaterThan(beforeTakeover.position.y);
+  });
+
+  it('invalidates prepared follow output for new trajectory revisions and reference sizes', () => {
+    const timeline = [
+      action('zoom', 'cameraMotion', 0, { zoom: 2, duration: 0, _cameraProperties: ['zoom'] }),
+      action('follow', 'cameraFollow', 0.1, { characterId: 'hero', smoothing: 0 }),
+    ];
+    const trajectory = (x: number, revision: number): CameraAnchorTrajectory => ({
+      version: 1,
+      revision,
+      characterId: 'hero',
+      part: 'center',
+      validity: [{ start: 0, end: 3 }],
+      samples: [
+        { time: 0, position: { x, y: 0.4 } },
+        { time: 3, position: { x, y: 0.4 } },
+      ],
+      events: [],
+    });
+    const firstTrajectory = [trajectory(0.3, 1)];
+    const secondTrajectory = [trajectory(0.7, 2)];
+    const first = evaluateCameraChannels({
+      timeline, sceneTime: 1, logicalReferenceSize: referenceSize,
+      anchorTrajectories: firstTrajectory, trajectoryRevision: 'hero-v1',
+    });
+    const second = evaluateCameraChannels({
+      timeline, sceneTime: 1, logicalReferenceSize: referenceSize,
+      anchorTrajectories: secondTrajectory, trajectoryRevision: 'hero-v2',
+    });
+
+    expect(first.position.x).toBeCloseTo(0.3, 8);
+    expect(second.position.x).toBeCloseTo(0.7, 8);
+
+    const rotatedTimeline = [
+      action('zoom', 'cameraMotion', 0, { zoom: 1.5, duration: 0, _cameraProperties: ['zoom'] }),
+      action('rotation', 'cameraMotion', 0, { angle: 45, duration: 0, _cameraProperties: ['rotation'] }),
+    ];
+    const wide = evaluateCameraChannels({
+      timeline: rotatedTimeline, sceneTime: 1, logicalReferenceSize: referenceSize, anchorTrajectories: [],
+    });
+    const square = evaluateCameraChannels({
+      timeline: rotatedTimeline, sceneTime: 1, logicalReferenceSize: { width: 1080, height: 1080 }, anchorTrajectories: [],
+    });
+
+    expect(wide.diagnostics).toContainEqual(expect.objectContaining({ code: 'rotation-edge-exposure' }));
+    expect(square.diagnostics).not.toContainEqual(expect.objectContaining({ code: 'rotation-edge-exposure' }));
   });
 
   it('keeps an unrelated position track moving while a zoom track starts', () => {

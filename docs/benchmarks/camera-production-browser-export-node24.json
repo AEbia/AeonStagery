@@ -144,6 +144,13 @@
     "height": 360,
     "elapsedMs": 2367.89999999851,
     "encodedFramesPerSecond": 10.135563157234301,
+    "encodedFramesPerSecondMeasurementMode": "instrumented end-to-end",
+    "encodedFramesPerSecondTimedWork": [
+      "frame validation and camera parity comparisons",
+      "model snapshot and bounds checks",
+      "pixel scanning and full pixel-buffer copying",
+      "frame hashing"
+    ],
     "renderedFrameCount": 24,
     "uniqueRenderedFrameHashes": 21,
     "maxCameraParityCompositionUnits": 0,

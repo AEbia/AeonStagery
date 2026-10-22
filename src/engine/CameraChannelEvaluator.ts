@@ -101,7 +101,43 @@ function getTrajectory(
 function hasFocusWriter(action: RuntimeTimelineAction, queryTime: number): boolean {
   if (action.action !== 'cameraMotion' || (action.time ?? 0) > queryTime) return false;
   const params = action.params;
-  return Boolean(focusCharacter(params) && ['pan', 'push', 'pull', 'zoom', 'rotate'].includes(String(params.move)));
+  const properties = params._cameraProperties;
+  const writesPosition = properties === undefined
+    ? ['pan', 'push', 'pull', 'zoom', 'rotate'].includes(String(params.move))
+    : Array.isArray(properties) && properties.includes('position');
+  return Boolean(focusCharacter(params) && writesPosition);
+}
+
+interface PreparedZoomResolverEntry {
+  readonly signature: string;
+  readonly resolveAt: (time: number) => number;
+}
+
+const preparedZoomResolvers = new WeakMap<object, PreparedZoomResolverEntry>();
+
+function getPreparedZoomResolver(input: CameraEvaluationInput): (time: number) => number {
+  const zoomTimeline = input.timeline.filter((action) => action.action === 'cameraReset'
+    || (action.action === 'cameraMotion' && (action.params.zoom !== undefined || action.params.move === 'zoom'
+      || action.params.move === 'push' || action.params.move === 'pull' || action.params.move === 'rotate'))
+    || (action.action === 'cameraPath' && Array.isArray(action.params.keyframes)
+      && action.params.keyframes.some((keyframe) => readRecord(keyframe)?.zoom !== undefined)));
+
+  let signature: string | undefined;
+  try {
+    signature = JSON.stringify([input.revision, zoomTimeline]);
+  } catch {
+    // Runtime timelines are normally compiled JSON. Cyclic or otherwise
+    // non-serializable input stays correct by rebuilding its derived curve.
+  }
+
+  if (signature !== undefined) {
+    const cached = preparedZoomResolvers.get(input.timeline);
+    if (cached?.signature === signature) return cached.resolveAt;
+  }
+
+  const resolveAt = prepareCameraZoomResolver(zoomTimeline);
+  if (signature !== undefined) preparedZoomResolvers.set(input.timeline, { signature, resolveAt });
+  return resolveAt;
 }
 
 function estimateRotationEdgeExposure(
@@ -125,12 +161,7 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
     const trajectory = getTrajectory(input.anchorTrajectories, characterId, part ?? 'head');
     return trajectory ? sampleCameraAnchorTrajectory(trajectory, time, side) : null;
   };
-  const zoomTimeline = input.timeline.filter((action) => action.action === 'cameraReset'
-    || (action.action === 'cameraMotion' && (action.params.zoom !== undefined || action.params.move === 'zoom'
-      || action.params.move === 'push' || action.params.move === 'pull' || action.params.move === 'rotate'))
-    || (action.action === 'cameraPath' && Array.isArray(action.params.keyframes)
-      && action.params.keyframes.some((keyframe) => readRecord(keyframe)?.zoom !== undefined)));
-  const zoomAt = prepareCameraZoomResolver(zoomTimeline);
+  const zoomAt = getPreparedZoomResolver(input);
   const trajectoryIdentity = input.anchorTrajectories.map((trajectory) =>
     `${identityOf(trajectory)}:${trajectory.revision ?? 'unversioned'}`).join(',');
   const followCacheKey = [

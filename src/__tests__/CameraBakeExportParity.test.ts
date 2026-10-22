@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import gsap from 'gsap';
-import { Container, ObservablePoint, type Application } from 'pixi.js';
+import { Assets, Container, ObservablePoint, Texture, type Application } from 'pixi.js';
 import ScriptEngine from '../engine/ScriptEngine';
 import { BakeEngine } from '../engine/BakeEngine';
 import { stageManager } from '../engine/StageManager';
@@ -83,7 +83,7 @@ describe('formal camera Bake/export parity', () => {
       width: 1920, height: 1080, bitrateBps: 1, outputPath: '/tmp/parity.mp4', codec: 'h264',
       backend, onProgress: () => {}, signal, ...overrides,
     });
-    return { root, run, resizes };
+    return { root, run, resizes, app };
   }
   afterEach(() => { engine.destroy(); bake.destroy(); gsap.globalTimeline.clear(); setStageDimensions(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -366,6 +366,91 @@ describe('formal camera Bake/export parity', () => {
       rig.root.destroy();
     },
   );
+
+  it('captures projected environment and custom images beside fixed UI at 1x and 2x', async () => {
+    await engine.loadPreparedScene(await cameraCrossEntryScene());
+    await engine.seek(1.125);
+    const camera = engine.getCurrentCamera();
+    let capturedImage: ReturnType<typeof stageManager.addImage> = null;
+    const rig = captureRig(() => {
+      capturedImage = stageManager.addImage({
+        id: 'capture-image', file: 'images/capture-image.png',
+        position: { x: 0.35, y: 0.65 }, scale: 1, rotation: -15, z: 20,
+      });
+      stageManager.updateImages(cameraController.getState());
+    });
+    const backgroundLayer = new Container();
+    const effectsLayer = new Container();
+    rig.root.addChild(backgroundLayer, effectsLayer);
+    const originalApp = Object.getOwnPropertyDescriptor(stageManager, 'app');
+    Object.defineProperty(stageManager, 'app', { configurable: true, writable: true, value: rig.app });
+    const getLayerSpy = vi.spyOn(stageManager, 'getLayer').mockImplementation((name) => (
+      name === 'background' ? backgroundLayer : effectsLayer
+    ));
+    const assetLoadSpy = vi.spyOn(Assets, 'load').mockImplementation(async () => Texture.EMPTY as never);
+
+    try {
+      await stageManager.renderEnvironmentLayer({
+        layerId: 'capture-environment', x: 0.65, y: 0.4, scale: 1, rotation: 25, z: 10,
+        images: [{ image: 'images/capture-environment.png', weight: 1 }],
+      }, camera);
+      const environment = stageManager.getEnvironmentLayerDisplayObject('capture-environment');
+      if (!environment) throw new Error('Capture environment fixture was not materialized.');
+      vi.spyOn(stageManager, 'updateImages').mockRestore();
+
+      const ui = rig.root.addChild(new Container());
+      ui.position.set(18, 27);
+      ui.angle = 9;
+      const expectedEnvironment = projectToScreen({
+        x: 0.65 * STAGE_WIDTH, y: 0.4 * STAGE_HEIGHT, scale: 1, rotation: 25,
+        parallaxDepth: 10, drawOrder: 10,
+      }, camera, { w: STAGE_WIDTH, h: STAGE_HEIGHT });
+      const environmentBaseScale = Math.max(
+        STAGE_WIDTH / Texture.EMPTY.width,
+        STAGE_HEIGHT / Texture.EMPTY.height,
+      );
+
+      for (const multiplier of [1, 2]) {
+        let encoded = 0;
+        await rig.run({ init: async () => {}, encodeFrame: async () => {
+          const imageCamera = cameraController.getState();
+          const expectedImage = projectToScreen({
+            x: 0.35 * STAGE_WIDTH, y: 0.65 * STAGE_HEIGHT, scale: 1, rotation: -15,
+            parallaxDepth: 20, drawOrder: 20,
+          }, imageCamera, { w: STAGE_WIDTH, h: STAGE_HEIGHT });
+          if (!capturedImage) throw new Error('Capture image fixture was not materialized.');
+          expect(environment.parent).toBe(backgroundLayer.children[0]);
+          expect(environment.x).toBeCloseTo(expectedEnvironment.screenX, 7);
+          expect(environment.y).toBeCloseTo(expectedEnvironment.screenY, 7);
+          expect(environment.angle).toBeCloseTo(expectedEnvironment.screenRotation, 7);
+          expect(environment.scale.x / environmentBaseScale).toBeCloseTo(expectedEnvironment.screenScale, 7);
+          expect(capturedImage.parent).toBe(effectsLayer);
+          expect(capturedImage.x).toBeCloseTo(expectedImage.screenX, 7);
+          expect(capturedImage.y).toBeCloseTo(expectedImage.screenY, 7);
+          expect(capturedImage.angle).toBeCloseTo(expectedImage.screenRotation, 7);
+          expect(capturedImage.scale.x).toBeCloseTo(expectedImage.screenScale, 7);
+          expect(capturedImage.scale.y).toBeCloseTo(expectedImage.screenScale, 7);
+          expect(ui.getGlobalPosition().x).toBeCloseTo(18, 7);
+          expect(ui.getGlobalPosition().y).toBeCloseTo(27, 7);
+          expect(ui.getGlobalTransform().a).toBeCloseTo(Math.cos(9 * Math.PI / 180), 7);
+          encoded++;
+        }, finish: async () => {} }, undefined, {
+          width: 1920 * multiplier,
+          height: 1080 * multiplier,
+        });
+        expect(encoded).toBe(1);
+        expect(rig.resizes.at(-2)).toEqual([STAGE_WIDTH, STAGE_HEIGHT, multiplier]);
+      }
+    } finally {
+      stageManager.cancelImageRequest('capture-image');
+      stageManager.clearEnvironmentLayer('capture-environment');
+      if (originalApp) Object.defineProperty(stageManager, 'app', originalApp);
+      else Reflect.deleteProperty(stageManager, 'app');
+      assetLoadSpy.mockRestore();
+      getLayerSpy.mockRestore();
+      rig.root.destroy({ children: true });
+    }
+  });
 
   it('keeps camera evaluation reads free of camera events and character pose updates after fps sampling', async () => {
     installModelBoundary(); engine.destroy();

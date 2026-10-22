@@ -70,7 +70,7 @@ export interface CameraStateResolverDeps {
   /** Immutable historical inputs used to reconstruct follow pursuit. */
   anchorTrajectories?: readonly CameraAnchorTrajectory[];
   /** Resolve the already-prepared zoom property curve at an arbitrary time. */
-  resolveZoomAtTime?: (time: number) => number;
+  resolveZoomAtTime?: (time: number, beforeAction?: RuntimeTimelineAction) => number;
   followCacheKey?: string;
   followEventSide?: CameraAnchorEventSide;
 }
@@ -159,7 +159,7 @@ export function computeCameraStateAtTime(
  */
 export function prepareCameraZoomResolver(
   timeline: readonly RuntimeTimelineAction[],
-): (time: number) => number {
+): (time: number, beforeAction?: RuntimeTimelineAction) => number {
   const writers = timeline
     .map((action, index) => ({ action, index, start: action.time ?? 0 }))
     .filter(({ action }) => action.action === 'cameraReset'
@@ -169,14 +169,20 @@ export function prepareCameraZoomResolver(
 
   let current = (_time: number): number => STAGE_DEFAULT_CAMERA_ZOOM;
   const prepared: Array<{ readonly start: number; readonly sample: (time: number) => number }> = [];
+  const beforeWriter = new WeakMap<object, (time: number) => number>();
   for (const { action, start } of writers) {
+    beforeWriter.set(action, current);
     const from = current(start);
     const sample = createPreparedCameraZoomWriter(action, start, from);
     prepared.push({ start, sample });
     current = sample;
   }
 
-  return (time: number): number => {
+  return (time: number, beforeAction?: RuntimeTimelineAction): number => {
+    if (beforeAction) {
+      const resolveBeforeWriter = beforeWriter.get(beforeAction);
+      if (resolveBeforeWriter) return resolveBeforeWriter(time);
+    }
     let low = 0;
     let high = prepared.length;
     while (low < high) {
@@ -278,7 +284,7 @@ function computeCameraStateAtTimeInternal(
     if (action.action === 'cameraFollow') {
       const params = action.params ?? {};
       if (!params.characterId) continue;
-      const duration = typeof params.duration === 'number' && params.duration > 0 ? params.duration : Infinity;
+      const duration = typeof params.duration === 'number' && params.duration >= 0 ? params.duration : Infinity;
       follow = sampleTime < start + duration
         ? {
             characterId: params.characterId,
@@ -385,11 +391,19 @@ function computeCameraStateAtTimeInternal(
 
     if (action.action === 'cameraMotion') {
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
-        if (compiledMotionWritesX(action.params ?? {})) channels.x = startState.position.x;
-        if (compiledMotionWritesY(action.params ?? {})) channels.y = startState.position.y;
-        if (compiledMotionWritesZoom(action.params ?? {})) channels.zoom = startState.zoom;
-        if (compiledMotionWritesRotation(action.params ?? {})) channels.rotation = startState.rotation;
+        const params = action.params ?? {};
+        const writesX = compiledMotionWritesX(params);
+        const writesY = compiledMotionWritesY(params);
+        const writesZoom = compiledMotionWritesZoom(params);
+        const writesRotation = compiledMotionWritesRotation(params);
+        if (writesX || writesY || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
+          const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+          if (writesX) channels.x = startState.position.x;
+          if (writesY) channels.y = startState.position.y;
+          if (writesZoom && !deps.resolveZoomAtTime) channels.zoom = startState.zoom;
+          if (writesRotation) channels.rotation = startState.rotation;
+        }
+        if (writesZoom && deps.resolveZoomAtTime) channels.zoom = deps.resolveZoomAtTime(start, action);
       }
       if (deps.compiledChannelOwnership && compiledMotionWritesPosition(action.params ?? {})) {
         follow = null;
@@ -401,13 +415,20 @@ function computeCameraStateAtTimeInternal(
 
     if (action.action === 'cameraPath') {
       if (deps.compiledChannelOwnership) {
-        const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
-        if (compiledPathWritesProperty(action.params ?? {}, 'position')) {
-          channels.x = startState.position.x;
-          channels.y = startState.position.y;
+        const params = action.params ?? {};
+        const writesPosition = compiledPathWritesProperty(params, 'position');
+        const writesZoom = compiledPathWritesProperty(params, 'zoom');
+        const writesRotation = compiledPathWritesProperty(params, 'rotation');
+        if (writesPosition || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
+          const startState = computeCameraStateAtTimeInternal(orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context);
+          if (writesPosition) {
+            channels.x = startState.position.x;
+            channels.y = startState.position.y;
+          }
+          if (writesZoom && !deps.resolveZoomAtTime) channels.zoom = startState.zoom;
+          if (writesRotation) channels.rotation = startState.rotation;
         }
-        if (compiledPathWritesProperty(action.params ?? {}, 'zoom')) channels.zoom = startState.zoom;
-        if (compiledPathWritesProperty(action.params ?? {}, 'rotation')) channels.rotation = startState.rotation;
+        if (writesZoom && deps.resolveZoomAtTime) channels.zoom = deps.resolveZoomAtTime(start, action);
       }
       if (deps.compiledChannelOwnership && compiledPathWritesPosition(action.params ?? {})) {
         follow = null;

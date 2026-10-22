@@ -21,6 +21,6 @@
 ## 实现对齐与剩余差异
 
 - 不依赖角色锚点的正式场景，通过 [`CameraCoordinator`](../src/engine/coordinators/CameraCoordinator.ts) 在播放和 seek 中消费 [`evaluateCameraChannels`](../src/engine/CameraChannelEvaluator.ts)。[`cameraActions`](../src/engine/actions/cameraActions.ts) 保留场景时长与播放 hook，不为这些正式通道创建 GSAP 镜头属性 tween。GSAP 缓动函数继续用于纯求值。
-- 包含角色聚焦、follow 或历史 Hitchcock 的场景暂时整体保留旧运行路径，避免过渡阶段混合两种位置权威。角色历史轨迹尚未接入正式播放协调器，是 implementation gap；后续角色运镜票负责删除该回退。Hitchcock 的 source 拒绝与残留清理也尚待后续票完成。
-- 旋转投影、Bake/export 统一接入以及临时预览迁移分别属于后续实现；基础通道播放与 seek 的通过不表示这些入口已经一致。
+- 正式场景中的角色 focus/follow 与基础通道由统一摄像机求值消费；历史查询使用隔离的按时间锚点轨迹。播放、seek、Bake 和 export 已接入同一套求值规则。Hitchcock source 已退役，但 parser、compiler、resolver 与 runtime 的残留清理仍待后续完成。
+- 角色、环境和图像显示对象消费旋转投影，屏幕空间 UI 保持在独立容器；逻辑参考尺寸在输出像素换算前保持一致。独立临时预览（`focusOn()`、`shake()`、`executeMotion()`）的统一求值与清理生命周期仍待后续实现。
 - 正式加载与最终位姿验收见 [`ScriptEngineCameraChannels.test.ts`](../src/__tests__/ScriptEngineCameraChannels.test.ts)，通道生命周期与确定性矩阵见 [`CameraPlaybackChannels.test.ts`](../src/__tests__/CameraPlaybackChannels.test.ts)。
