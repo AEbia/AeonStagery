@@ -116,10 +116,22 @@ export interface AgentProjectOverview {
   readonly activeScene?: AgentProjectSceneSummary;
   readonly scenes: readonly AgentProjectSceneSummary[];
   readonly assetRoots: Readonly<Record<string, string>>;
+  readonly dialogueStyles?: AgentDialogueStyleCatalog;
   readonly templates?: {
     readonly enabledTemplateIds: readonly string[];
     readonly defaults?: Readonly<Record<string, string>>;
   };
+}
+
+export interface AgentDialogueStyleCatalog {
+  readonly defaultStyleId: string;
+  readonly availableStyles: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly renderer: string;
+    /** Image styles outside the project snapshot must be adopted before use. */
+    readonly materializationRequired: boolean;
+  }[];
 }
 
 export interface AgentProjectFileEntry {

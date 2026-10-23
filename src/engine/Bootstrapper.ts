@@ -108,6 +108,7 @@ import type { ProjectAgentService, ProjectAgentTargetVerificationResult } from '
 import type { ProjectAgentTargetIdentityRef } from '../services/project-agent-service/ProjectAgentTargetIdentity';
 import type { ProjectAgentOverviewSource } from '../services/project-agent-service/ProjectAgentOverviewPort';
 import { createProjectAgentOverviewPort } from '../services/project-agent-service/ProjectAgentOverviewPort';
+import { describeProjectAgentDialogueStyles } from '../services/project-agent-service/ProjectAgentDialogueStyles';
 import type { ProjectAgentReadPorts, ProjectAgentWritePorts } from '../services/project-agent/ProjectAgentPorts';
 import type { ProjectAgentSceneSnapshot } from '../services/project-agent/ProjectAgentPorts';
 import { createProjectAgentProjectReadPorts } from '../services/project-agent/ProjectAgentProjectReadPorts';
@@ -434,6 +435,9 @@ export function bootstrap(options?: {
   };
   const aiProse = createAiProseAuthoringComposition({
     ...options?.aiProse,
+    dialogueDefaults: options?.aiProse?.dialogueDefaults ?? {
+      getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates,
+    },
     ...(aiProseConfiguration ? { configuration: aiProseConfiguration } : {}),
     transport: aiProseTransport,
     pipelineOptions: aiProsePipelineOptions,
@@ -560,6 +564,7 @@ export function bootstrap(options?: {
             ? { activeScene: { name: activeEntry.name, path: activeEntry.path } }
             : {}),
           scenes: project?.metadata.scenes ?? [],
+          dialogueStyles: describeProjectAgentDialogueStyles(project?.metadata.templates, templatePackageCatalog.getPackages()),
           ...(project?.metadata
             ? { assetRoots: Object.fromEntries(Object.entries(project.metadata.assetRoots)) }
             : {}),
@@ -593,6 +598,7 @@ export function bootstrap(options?: {
     },
   };
   const projectAgentWritePorts: ProjectAgentWritePorts = {
+    dialogueDefaults: { getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates },
     scene: projectAgentReadPorts.scene,
     validation: {
       // Strict authoring gate (ADR0023): source schema + complete semantic
