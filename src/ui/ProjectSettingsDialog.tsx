@@ -19,8 +19,11 @@ export function ProjectSettingsDialog({ project, workspace, onClose }: {
     <div className="modal-overlay" onClick={event => { if (event.target === event.currentTarget) close(); }}>
       <div ref={dialogRef} className="modal project-settings-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="modal__header">
-          <span id={titleId}>项目设置 · {project.metadata.name}</span>
-          <button type="button" className="btn btn--icon" onClick={close} disabled={saving} aria-label="关闭项目设置"><IconX /></button>
+          <div className="project-settings-dialog__heading">
+            <h2 id={titleId}>画布设置</h2>
+            <p>{project.metadata.name}</p>
+          </div>
+          <button type="button" className="btn btn--icon" onClick={close} disabled={saving} aria-label="关闭画布设置"><IconX /></button>
         </div>
         <div className="project-settings-dialog__body">
           <ProjectVideoSettings project={project} workspace={workspace} onSavingChange={setSaving} />

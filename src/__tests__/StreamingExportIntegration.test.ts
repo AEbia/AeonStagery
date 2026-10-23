@@ -12,6 +12,8 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
 }));
 import { registerFFmpegHandlers } from '../../electron/ffmpeg-export';
+import { sampleExportSize } from '../engine/export/ExportSizeSampler';
+import type { ExportConfig, ExportOperationResult } from '../api/types/export';
 
 function invoke(name: string, ...args: unknown[]): Promise<unknown> {
   const callback = handlers.get(`ffmpeg:${name}`);
@@ -41,7 +43,9 @@ describe('streaming export through main-process handlers', () => {
     await fs.rm(directory, { recursive: true, force: true });
   });
 
-  it('streams H.264 into HEVC with audio and publishes only the completed file', async () => {
+  it.each(['mp4', 'mkv'])('streams H.264 into HEVC with audio in %s and publishes only the completed file', async container => {
+    if (container !== 'mp4') await fs.rename(output, join(directory, `final.${container}`));
+    output = join(directory, `final.${container}`);
     const audio = join(directory, 'audio.wav');
     media(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.3', audio]);
     const h264 = media(['-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=30', '-frames:v', '9', '-c:v', 'libx264', '-bf', '0', '-f', 'h264', '-']);
@@ -55,7 +59,7 @@ describe('streaming export through main-process handlers', () => {
     }
     expect(await fs.readFile(output, 'utf8')).toBe('original');
     expect(await invoke('endStreamExport')).toMatchObject({ success: true });
-    expect((await fs.readdir(directory)).sort()).toEqual(['audio.wav', 'final.mp4']);
+    expect((await fs.readdir(directory)).sort()).toEqual(['audio.wav', `final.${container}`]);
     const frames = media(['-i', output, '-map', '0:v', '-f', 'framemd5', '-']).toString().split('\n').filter(line => /^0,/.test(line));
     expect(frames).toHaveLength(9);
     expect(media(['-i', output, '-map', '0:a', '-f', 'f32le', '-']).length).toBeGreaterThan(0);
@@ -67,5 +71,44 @@ describe('streaming export through main-process handlers', () => {
     expect(await invoke('cancelExport')).toMatchObject({ success: true });
     expect(await fs.readFile(output, 'utf8')).toBe('original');
     expect(await fs.readdir(directory)).toEqual(['final.mp4']);
+  });
+
+  it('estimates CRF output from actual encoded clips within 25% of a full motion-video export', async () => {
+    const width = 80, height = 80, fps = 10;
+    const pixels = media(['-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=${fps}`, '-frames:v', '120', '-pix_fmt', 'rgba', '-f', 'rawvideo', '-']);
+    const config: ExportConfig = {
+      format: 'mp4', codec: 'libx264', bitrateMbps: 1, width, height, fps,
+      rangeStart: 0, rangeEnd: 12, includeAudio: false, backend: 'rawpixels', outputPath: output,
+      encoding: { videoCodec: 'h264', implementation: 'ffmpeg', quality: 'custom', rateControl: { mode: 'crf', crf: 20 } },
+    };
+    const encode = async (sample: ExportConfig, measureOnly = false) => {
+      const first = Math.floor(sample.rangeStart * fps), last = Math.ceil(sample.rangeEnd * fps);
+      expect(await invoke('startStreamExport', sample.outputPath, {
+        width, height, fps, codec: 'libx264', crf: 20, totalFrames: last - first, measureOnly,
+      })).toMatchObject({ success: true });
+      const frameBytes = width * height * 4;
+      for (let frame = first; frame < last; frame++) {
+        expect(await invoke('pushFrame', pixels.subarray(frame * frameBytes, (frame + 1) * frameBytes))).toMatchObject({ success: true });
+      }
+      const result = await invoke('endStreamExport') as ExportOperationResult;
+      if (measureOnly) {
+        await expect(fs.stat(sample.outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(await fs.readdir(directory)).toEqual(['final.mp4']);
+        expect(result.sizeBytes).toBeGreaterThan(0);
+      }
+      return result;
+    };
+    const estimate = await sampleExportSize(config, {
+      exportVideo: sample => encode(sample, true),
+      playback: { getCurrentTime: () => 0, pause: () => {}, seek: async () => {} },
+      electron: {
+        export: { getTempDir: async () => directory },
+        path: { join: async (...parts) => join(...parts) },
+      },
+    });
+    expect(await fs.readdir(directory)).toEqual(['final.mp4']);
+    await encode(config);
+    const actualBytes = (await fs.stat(output)).size;
+    expect(Math.abs(estimate.bytes - actualBytes) / actualBytes).toBeLessThan(0.25);
   });
 });

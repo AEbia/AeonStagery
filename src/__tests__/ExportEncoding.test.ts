@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyExportFailure, resolveExportEncoding } from '../api/exportEncoding';
+import { classifyExportFailure, getFFmpegEncoderCandidates, resolveExportEncoding } from '../api/exportEncoding';
 import type { ExportConfig } from '../api/types/export';
 
 const config: ExportConfig = {
@@ -14,7 +14,35 @@ describe('export encoding settings', () => {
 
   it('gives new settings precedence and keeps the intermediate bitrate independent', () => {
     expect(resolveExportEncoding({ ...config, bitrateMbps: 2, encoding: { videoCodec: 'av1', implementation: 'auto', quality: 'balanced' } }))
-      .toMatchObject({ encoder: 'libaom-av1', implementation: 'auto', rateControl: { mode: 'crf', crf: 32 }, intermediateBitrateMbps: 40 });
+      .toMatchObject({ encoder: 'auto', implementation: 'auto', rateControl: { mode: 'crf', crf: 32 }, intermediateBitrateMbps: 40 });
+  });
+
+  it.each([undefined, 'auto'])('selects compiled-in hardware before software for encoder %s', ffmpegEncoder => {
+    const settings = resolveExportEncoding({ ...config, encoding: {
+      videoCodec: 'hevc', implementation: 'ffmpeg', quality: 'balanced', ffmpegEncoder,
+      rateControl: { mode: 'bitrate', bitrateMbps: 12.5 },
+    } });
+    expect(getFFmpegEncoderCandidates(settings, ['libx265', 'hevc_qsv', 'h264_nvenc', 'hevc_nvenc']))
+      .toEqual(['hevc_nvenc', 'hevc_qsv', 'libx265']);
+    expect(getFFmpegEncoderCandidates(settings, [])).toEqual(['libx265']);
+    expect(getFFmpegEncoderCandidates(settings)).toEqual(['libx265']);
+  });
+
+  it('keeps CRF on software when automatic hardware selection is available', () => {
+    const settings = resolveExportEncoding({ ...config, encoding: {
+      videoCodec: 'hevc', implementation: 'ffmpeg', quality: 'balanced', ffmpegEncoder: 'auto',
+      rateControl: { mode: 'crf', crf: 24 },
+    } });
+    expect(getFFmpegEncoderCandidates(settings, ['hevc_nvenc', 'libx265'])).toEqual(['libx265']);
+  });
+
+  it('honors a manual encoder and only falls back to software', () => {
+    const settings = resolveExportEncoding({ ...config, encoding: {
+      videoCodec: 'hevc', implementation: 'ffmpeg', quality: 'balanced', ffmpegEncoder: 'hevc_qsv',
+      rateControl: { mode: 'bitrate', bitrateMbps: 12.5 },
+    } });
+    expect(getFFmpegEncoderCandidates(settings, ['hevc_nvenc', 'hevc_qsv', 'libx265'])).toEqual(['hevc_qsv', 'libx265']);
+    expect(getFFmpegEncoderCandidates(settings, ['hevc_nvenc', 'libx265'])).toEqual(['libx265']);
   });
 
   it('disables intermediate encoding for high quality unless explicitly enabled', () => {

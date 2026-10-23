@@ -818,7 +818,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                 <section className="ph-stagger-3" aria-labelledby="create-video-title">
                   <h3 id="create-video-title" className="ph-field-label">画布与帧率</h3>
                   <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="create-video" disabled={isSubmitting} />
-                  <p className="video-format__message">分辨率和帧率将保存在此项目中，创建后可在项目设置中调整。</p>
+                  <p className="video-format__message">分辨率和帧率将保存在此项目中，创建后可在画布设置中调整。</p>
                   {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
                 </section>
 

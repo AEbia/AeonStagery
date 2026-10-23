@@ -31,6 +31,10 @@ export interface BackendFrame {
   fps: number;
 }
 
+export interface CaptureResult {
+  sizeBytes?: number;
+}
+
 export interface ICaptureBackend {
   /** One-time setup — configure encoder, start stream export */
   init(config: BackendInit): Promise<void>;
@@ -38,7 +42,7 @@ export interface ICaptureBackend {
   /** Encode/push a single frame. Returns a promise that resolves when backpressure clears. */
   encodeFrame(frame: BackendFrame): Promise<void>;
 
-  /** Flush remaining encoder frames, close stream, return the video path */
-  finish(): Promise<void>;
+  /** Flush and close the stream; samples return their measured size. */
+  finish(): Promise<CaptureResult | void>;
   abort?(cancelled?: boolean): Promise<void>;
 }

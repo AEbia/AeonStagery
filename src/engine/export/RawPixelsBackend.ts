@@ -1,4 +1,4 @@
-import type { ICaptureBackend, BackendInit, BackendFrame } from './ICaptureBackend';
+import type { ICaptureBackend, BackendInit, BackendFrame, CaptureResult } from './ICaptureBackend';
 import { ExportWriteQueue } from './ExportWriteQueue';
 import type { ExportOperationResult, FFmpegStreamOptions } from '../../api/types/export';
 import { assertExportOperation, classifyExportFailure, ExportEncodingError } from '../../api/exportEncoding';
@@ -6,7 +6,7 @@ import { assertExportOperation, classifyExportFailure, ExportEncodingError } fro
 interface ElectronExportAPI {
   startStreamExport(outputPath: string, options: FFmpegStreamOptions): Promise<ExportOperationResult>;
   pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
-  endStreamExport(): Promise<{ success: boolean; error?: string }>;
+  endStreamExport(): Promise<ExportOperationResult>;
   cancelExport(): Promise<ExportOperationResult>;
 }
 
@@ -55,12 +55,13 @@ export class RawPixelsBackend implements ICaptureBackend {
     }
   }
 
-  async finish(): Promise<void> {
+  async finish(): Promise<CaptureResult | void> {
     try {
       await this.pushQueue.drain();
       const result = await this.electronAPI.endStreamExport();
       this.streamFinished = true;
       assertExportOperation(result, 'FFmpeg stream finish');
+      if (result.sizeBytes !== undefined) return { sizeBytes: result.sizeBytes };
     } catch (error) {
       await this.abort();
       throw classifyEncodingError(error);

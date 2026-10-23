@@ -24,12 +24,14 @@ import {
 } from './icons';
 import { FormSelect } from './FormSelect';
 import { InfoTip } from './Tooltip';
-import type { ExportProgress, ExportEncodingSettings, ExportEncodingInfo } from '../api/types/export';
-import { getDefaultCrf, getSoftwareEncoder } from '../api/exportEncoding';
+import type { ExportConfig, ExportProgress, ExportEncodingSettings, ExportEncodingInfo } from '../api/types/export';
+import { EXPORT_CONTAINER_CODECS, getDefaultCrf, getSoftwareEncoder } from '../api/exportEncoding';
+import type { ExportSizeEstimateConfig } from '../api/exportSizeEstimate';
 import { ExportEncodingFields, formatExportEncoding } from './ExportEncodingFields';
 import { useModalDialog } from './hooks/useModalDialog';
 import { ExportEtaEstimator } from './ExportEtaEstimator';
 import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
+import { useExportSizeEstimate } from './hooks/useExportSizeEstimate';
 import { VideoFormatFields } from './VideoFormatFields';
 import { validateVideoFormat, type OutputFit } from '../api/types/video-format';
 import { revealFileInManager } from './fileReveal';
@@ -41,30 +43,6 @@ interface Props {
 }
 
 type UIState = 'idle' | 'recording' | 'converting' | 'done' | 'cancelled' | 'error';
-
-function formatEstimatedRemainingTime(remainingSeconds: number | null): string {
-  if (remainingSeconds === null || !Number.isFinite(remainingSeconds)) {
-    return '预计剩余时间计算中...';
-  }
-  if (remainingSeconds <= 2) return '预计即将完成';
-
-  const roundingStep = remainingSeconds < 60 ? 5 : remainingSeconds < 600 ? 15 : 60;
-  const displaySeconds = Math.ceil(remainingSeconds / roundingStep) * roundingStep;
-  if (displaySeconds < 60) return `预计剩余约 ${displaySeconds} 秒`;
-  if (displaySeconds < 3600) {
-    const minutes = Math.floor(displaySeconds / 60);
-    const seconds = displaySeconds % 60;
-    return seconds === 0
-      ? `预计剩余约 ${minutes} 分钟`
-      : `预计剩余约 ${minutes} 分钟 ${seconds} 秒`;
-  }
-
-  const hours = Math.floor(displaySeconds / 3600);
-  const minutes = Math.floor((displaySeconds % 3600) / 60);
-  return minutes === 0
-    ? `预计剩余约 ${hours} 小时`
-    : `预计剩余约 ${hours} 小时 ${minutes} 分钟`;
-}
 
 function formatFileSize(bytes: number | null): string {
   if (bytes === null || !Number.isFinite(bytes) || bytes < 0) return '';
@@ -96,8 +74,8 @@ function getAspectRatioLabel(width: number, height: number): string {
 }
 
 export default function ExportDialog({ onClose }: Props) {
-  const dialogRef = useModalDialog(onClose);
   const [uiState, setUiState] = useState<UIState>('idle');
+  const [preparingExport, setPreparingExport] = useState(false);
   const [progress, setProgress] = useState(0);
   const [estimatedRemainingSeconds, setEstimatedRemainingSeconds] = useState<number | null>(null);
   const [statusText, setStatusText] = useState('准备导出');
@@ -106,10 +84,9 @@ export default function ExportDialog({ onClose }: Props) {
   const [cancelling, setCancelling] = useState(false);
   const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
   const [copiedError, setCopiedError] = useState(false);
-  const [currentFrameNum, setCurrentFrameNum] = useState(0);
-  const [totalFrameNum, setTotalFrameNum] = useState(0);
 
   const exportControllerRef = useRef<AbortController | null>(null);
+  useEffect(() => () => exportControllerRef.current?.abort(), []);
   const exportStartedAtRef = useRef<number | null>(null);
   const etaProgressRef = useRef(0);
   const etaEstimatorRef = useRef(new ExportEtaEstimator());
@@ -134,11 +111,24 @@ export default function ExportDialog({ onClose }: Props) {
   const formatError = validateVideoFormat(videoFormat);
 
   // Export config state
-  const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>('mp4');
+  const [format, setFormat] = useState<ExportConfig['format']>('mp4');
   const [codec, setCodec] = useState('libx264');
   const [encoding, setEncoding] = useState<ExportEncodingSettings>({ videoCodec: 'h264', implementation: 'auto', quality: 'balanced' });
   const [actualEncoding, setActualEncoding] = useState<ExportEncodingInfo | null>(null);
   const encodingAttemptRef = useRef(0);
+
+  const handleFormatChange = (nextFormat: ExportConfig['format']) => {
+    setFormat(nextFormat);
+    if (EXPORT_CONTAINER_CODECS[nextFormat].includes(encoding.videoCodec)) return;
+    const videoCodec = EXPORT_CONTAINER_CODECS[nextFormat][0];
+    setCodec(getSoftwareEncoder(videoCodec));
+    setEncoding(previous => ({
+      ...previous, videoCodec, ffmpegEncoder: undefined,
+      rateControl: previous.rateControl?.mode === 'crf'
+        ? { mode: 'crf', crf: getDefaultCrf(videoCodec, previous.quality) }
+        : undefined,
+    }));
+  };
 
   const recommendedBitrate = useMemo(() => {
     return getRecommendedBitrate(videoFormat.width, videoFormat.height, videoFormat.fps, codec);
@@ -148,6 +138,21 @@ export default function ExportDialog({ onClose }: Props) {
   const [bitrate, setBitrate] = useState<number>(() => {
     return getRecommendedBitrate(projectFormat.width, projectFormat.height, projectFormat.fps, 'libx264').standard;
   });
+  const [adjustingRateControl, setAdjustingRateControl] = useState(false);
+
+  useEffect(() => {
+    if (!adjustingRateControl) return;
+    const finishAdjustment = () => setAdjustingRateControl(false);
+    // A native slider can be released outside its bounds or interrupted by the OS.
+    window.addEventListener('pointerup', finishAdjustment);
+    window.addEventListener('pointercancel', finishAdjustment);
+    window.addEventListener('blur', finishAdjustment);
+    return () => {
+      window.removeEventListener('pointerup', finishAdjustment);
+      window.removeEventListener('pointercancel', finishAdjustment);
+      window.removeEventListener('blur', finishAdjustment);
+    };
+  }, [adjustingRateControl]);
 
   useEffect(() => {
     if (!userOverrodeBitrate) {
@@ -165,6 +170,33 @@ export default function ExportDialog({ onClose }: Props) {
 
   const isSubtitleIsolated =
     subtitleExportMode === 'subtitle-only' || subtitleExportMode === 'subtitle-chroma';
+
+  const exportConfig = useMemo<ExportSizeEstimateConfig>(() => ({
+    format, codec, bitrateMbps: bitrate,
+    encoding: {
+      ...encoding,
+      // Only explicit FFmpeg CRF uses CRF. Native encoding and every fallback
+      // share the visible target bitrate; ProRes keeps its fixed alpha pipeline.
+      rateControl: encoding.videoCodec === 'prores'
+        || (encoding.implementation === 'ffmpeg' && encoding.rateControl?.mode === 'crf')
+        ? encoding.rateControl
+        : { mode: 'bitrate', bitrateMbps: bitrate },
+    }, ...videoFormat, fit,
+    rangeStart: exportStart > 0 || exportEnd < fullDuration ? exportStart : 0,
+    rangeEnd: exportStart > 0 || exportEnd < fullDuration ? exportEnd : fullDuration,
+    includeAudio,
+    includeSubtitles: subtitleExportMode !== 'scene',
+    subtitleOnly: subtitleExportMode === 'subtitle-only',
+    subtitleChroma: subtitleExportMode === 'subtitle-chroma',
+    backend: exportMode,
+  }), [format, codec, bitrate, encoding, videoFormat, fit, exportStart, exportEnd, fullDuration, includeAudio, subtitleExportMode, exportMode]);
+  const { pending: sizeEstimatePending, estimate: sizeEstimate, error: sizeEstimateError, stop: stopSizeEstimate } = useExportSizeEstimate(exportConfig, uiState === 'idle' && !preparingExport, exportAdapter, adjustingRateControl);
+  const handleClose = useCallback(() => {
+    exportControllerRef.current?.abort();
+    void stopSizeEstimate();
+    onClose();
+  }, [onClose, stopSizeEstimate]);
+  const dialogRef = useModalDialog(handleClose);
 
   // Total frames ref for calculation
   const totalFramesRef = useRef(0);
@@ -200,7 +232,6 @@ export default function ExportDialog({ onClose }: Props) {
       const match = msg.match(/frame=\s*(\d+)/);
       if (match) {
         const currentFrame = parseInt(match[1]);
-        setCurrentFrameNum(currentFrame);
         const frameRatio = Math.max(0, currentFrame / totalFramesRef.current);
         const mixProgress = Math.min(9, Math.round(frameRatio * 10));
         const etaProgress = 90 + Math.min(9.9, frameRatio * 10);
@@ -211,23 +242,25 @@ export default function ExportDialog({ onClose }: Props) {
   }, [updateProgress]);
 
   const handleExport = useCallback(async () => {
-    if (formatError) return;
+    if (formatError || preparingExport) return;
+    const controller = new AbortController();
+    exportControllerRef.current = controller;
+    setPreparingExport(true);
     try {
+      await stopSizeEstimate();
+      if (controller.signal.aborted) return;
       const saveResult = await window.aeonStageryAPI.dialog.showSave({
         title: '导出视频',
         defaultPath: `AeonStagery_Export_${Date.now()}.${format}`,
         filters: [
           {
-            name: format === 'mp4' ? 'MP4 Video' : format === 'mov' ? 'MOV Video' : 'WebM Video',
+            name: `${format === 'webm' ? 'WebM' : format.toUpperCase()} Video`,
             extensions: [format],
           },
         ],
       });
 
-      if (saveResult.canceled || !saveResult.filePath) return;
-
-      const controller = new AbortController();
-      exportControllerRef.current = controller;
+      if (controller.signal.aborted || saveResult.canceled || !saveResult.filePath) return;
       exportStartedAtRef.current = Date.now();
       etaEstimatorRef.current.reset();
       progressPhaseRef.current = 'capture';
@@ -242,28 +275,13 @@ export default function ExportDialog({ onClose }: Props) {
       setUiState('recording');
       setStatusText('正在初始化导出...');
 
-      const rangeStart = exportStart > 0 || exportEnd < fullDuration ? exportStart : 0;
-      const rangeEnd = exportStart > 0 || exportEnd < fullDuration ? exportEnd : fullDuration;
+      const { rangeStart, rangeEnd } = exportConfig;
       const calcTotalFrames = Math.ceil(rangeEnd * videoFormat.fps) - Math.floor(rangeStart * videoFormat.fps);
       totalFramesRef.current = calcTotalFrames;
-      setTotalFrameNum(calcTotalFrames);
-      setCurrentFrameNum(0);
 
       const result = await exportAdapter.export(
         {
-          format,
-          codec,
-          bitrateMbps: bitrate,
-          encoding,
-          ...videoFormat,
-          fit,
-          rangeStart,
-          rangeEnd,
-          includeAudio,
-          includeSubtitles: subtitleExportMode !== 'scene',
-          subtitleOnly: subtitleExportMode === 'subtitle-only',
-          subtitleChroma: subtitleExportMode === 'subtitle-chroma',
-          backend: exportMode,
+          ...exportConfig,
           outputPath: saveResult.filePath,
           ffmpegLogCallback,
         },
@@ -284,8 +302,6 @@ export default function ExportDialog({ onClose }: Props) {
               setEstimatedRemainingSeconds(null);
             }
             setUiState('recording');
-            if (p.frame !== undefined) setCurrentFrameNum(p.frame);
-            if (p.totalFrames !== undefined) setTotalFrameNum(p.totalFrames);
 
             const captureEtaProgress = p.frame !== undefined
               && p.totalFrames !== undefined
@@ -293,9 +309,7 @@ export default function ExportDialog({ onClose }: Props) {
               ? Math.min(100, Math.max(0, (p.frame / p.totalFrames) * 100))
               : p.percent;
             updateProgress(p.percent, captureEtaProgress);
-            setStatusText(
-              `正在渲染视频帧: ${p.percent.toFixed(1)}% (${p.frame}/${p.totalFrames} 帧)`,
-            );
+            setStatusText('正在渲染视频帧');
           } else if (p.phase === 'mix') {
             if (progressPhaseRef.current !== 'mix') {
               etaEstimatorRef.current.reset();
@@ -348,13 +362,13 @@ export default function ExportDialog({ onClose }: Props) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
       setStatusText('导出失败');
     } finally {
+      setPreparingExport(false);
       exportControllerRef.current = null;
       exportStartedAtRef.current = null;
       setCancelling(false);
     }
   }, [
-    format, codec, bitrate, exportStart, exportEnd, includeAudio, videoFormat, fit, formatError,
-    subtitleExportMode, exportMode, encoding, fullDuration, exportAdapter, ffmpegLogCallback, updateProgress,
+    format, videoFormat, formatError, exportConfig, exportAdapter, ffmpegLogCallback, updateProgress, preparingExport, stopSizeEstimate,
   ]);
 
   const handleRevealInFolder = useCallback(async () => {
@@ -374,7 +388,6 @@ export default function ExportDialog({ onClose }: Props) {
     setErrorMsg('');
     setCancelling(false);
     setFileSizeBytes(null);
-    setUserOverrodeBitrate(false);
   };
 
   const handleCopyError = async () => {
@@ -393,10 +406,9 @@ export default function ExportDialog({ onClose }: Props) {
   }, [videoFormat.width, videoFormat.height]);
 
   const exportDuration = Math.max(0, exportEnd - exportStart);
-  const approxFrames = Math.round(exportDuration * videoFormat.fps);
 
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && handleClose()}>
       <div
         ref={dialogRef}
         className="modal export-dialog"
@@ -414,7 +426,7 @@ export default function ExportDialog({ onClose }: Props) {
             <div id="export-dialog-title" className="export-dialog__title">导出视频</div>
           </div>
           {(uiState === 'idle' || uiState === 'done' || uiState === 'error' || uiState === 'cancelled') && (
-            <button className="export-dialog__close-btn" onClick={onClose} aria-label="关闭窗口" title="关闭">
+            <button className="export-dialog__close-btn" onClick={handleClose} aria-label="关闭窗口" title="关闭">
               <IconX width={16} height={16} />
             </button>
           )}
@@ -514,52 +526,59 @@ export default function ExportDialog({ onClose }: Props) {
                       视频封装格式
                       <InfoTip
                         title="视频容器格式"
-                        content="MP4 兼容性广；WebM 支持 VP9 和 AV1。"
+                        content="MP4 兼容性广；WebM 支持 VP9 和 AV1；MKV 支持 H.264、HEVC、VP9 和 AV1。"
                       />
                     </label>
                     <div className="export-segmented" role="radiogroup" aria-label="视频封装格式">
                       <button
                         type="button"
                         className={`export-segmented__item ${format === 'mp4' ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setFormat('mp4');
-                          setCodec('libx264');
-                          setEncoding(previous => ({ ...previous, videoCodec: 'h264', ffmpegEncoder: undefined, rateControl: undefined }));
-                        }}
+                        onClick={() => handleFormatChange('mp4')}
                       >
                         <span className="export-segmented__name">MP4 (.mp4)</span>
-                        <span className="export-segmented__desc">通用兼容 · 剪辑主流</span>
+                        <span className="export-segmented__desc">推荐 · 主流格式</span>
                       </button>
                       <button
                         type="button"
                         className={`export-segmented__item ${format === 'webm' ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setFormat('webm');
-                          setCodec('libvpx-vp9');
-                          setEncoding(previous => ({ ...previous, videoCodec: 'vp9', ffmpegEncoder: undefined, rateControl: undefined }));
-                        }}
+                        onClick={() => handleFormatChange('webm')}
                       >
                         <span className="export-segmented__name">WebM (.webm)</span>
                         <span className="export-segmented__desc">VP9 · AV1</span>
                       </button>
+                      <button
+                        type="button"
+                        className={`export-segmented__item ${format === 'mkv' ? 'is-active' : ''}`}
+                        onClick={() => handleFormatChange('mkv')}
+                      >
+                        <span className="export-segmented__name">MKV (.mkv)</span>
+                        <span className="export-segmented__desc">多编码支持</span>
+                      </button>
                     </div>
                   </div>
-
-                  <ExportEncodingFields format={format} value={encoding} bitrate={bitrate}
-                    intermediateBitrate={getRecommendedBitrate(videoFormat.width, videoFormat.height, videoFormat.fps, 'libx264').high * 2}
-                    onChange={next => {
-                      setEncoding(next);
-                      setCodec(next.ffmpegEncoder ?? getSoftwareEncoder(next.videoCodec));
-                      setUserOverrodeBitrate(next.quality === 'custom');
-                      setExportMode(next.implementation === 'ffmpeg' ? 'rawpixels' : 'webcodecs');
-                    }}
-                    onBitrateChange={next => {
-                      setUserOverrodeBitrate(true);
-                      setBitrate(next);
-                      setEncoding(previous => ({ ...previous, quality: 'custom',
-                        rateControl: previous.rateControl ?? { mode: 'crf', crf: getDefaultCrf(previous.videoCodec, previous.quality) } }));
-                    }} />
                 </>
+              )}
+
+              {subtitleExportMode !== 'subtitle-only' && (
+                <ExportEncodingFields format={format} value={encoding} bitrate={bitrate}
+                  onRateControlPointerDown={() => setAdjustingRateControl(true)}
+                  subtitleMode={subtitleExportMode === 'subtitle-chroma' ? 'chroma' : undefined}
+                  intermediateBitrate={getRecommendedBitrate(videoFormat.width, videoFormat.height, videoFormat.fps, 'libx264').high * 2}
+                  onChange={next => {
+                    setEncoding(next);
+                    setCodec(next.ffmpegEncoder && next.ffmpegEncoder !== 'auto'
+                      ? next.ffmpegEncoder : getSoftwareEncoder(next.videoCodec));
+                    setUserOverrodeBitrate(next.quality === 'custom');
+                    setExportMode(next.implementation === 'ffmpeg' ? 'rawpixels' : 'webcodecs');
+                  }}
+                  onBitrateChange={next => {
+                    setUserOverrodeBitrate(true);
+                    setBitrate(next);
+                    setEncoding(previous => ({
+                      ...previous, quality: 'custom',
+                      allowH264Intermediate: previous.allowH264Intermediate ?? previous.quality !== 'high',
+                    }));
+                  }} />
               )}
             </div>
 
@@ -650,8 +669,8 @@ export default function ExportDialog({ onClose }: Props) {
                     options={[
                       { value: 'full', label: '完整合成 · 画面与字幕 (默认)' },
                       { value: 'scene', label: '仅画面 (无字幕)' },
-                      { value: 'subtitle-only', label: '独立字幕轨 · MOV Apple ProRes 4444 (Alpha 透明通道)' },
-                      { value: 'subtitle-chroma', label: '独立字幕轨 · MP4 H.264 (色度键绿幕背景)' },
+                      { value: 'subtitle-only', label: '独立字幕轨 · MOV Apple ProRes 4444 (含Alpha 透明通道)' },
+                      { value: 'subtitle-chroma', label: '独立字幕轨 · MP4 H.264 (绿幕背景)' },
                     ]}
                     onChange={(value) => {
                       const mode = value as 'full' | 'scene' | 'subtitle-only' | 'subtitle-chroma';
@@ -683,10 +702,10 @@ export default function ExportDialog({ onClose }: Props) {
         {/* ── Body: Exporting Dashboard ─────────────────────────── */}
         {(uiState === 'recording' || uiState === 'converting') && (
           <div className="export-dialog__body export-dashboard">
-            {actualEncoding && <p className="export-encoding-status" title={actualEncoding.fallbackReason}>{formatExportEncoding(actualEncoding)}</p>}
+            {actualEncoding && <p className="export-encoding-status" title={actualEncoding.fallbackReason}>{formatExportEncoding(actualEncoding, { includeFallbackStatus: false })}</p>}
             <div className="export-dashboard__status-pill">
               <span className="export-pulse-dot" />
-              <span>{uiState === 'recording' ? '阶段 1/2 · 视频帧渲染' : '阶段 2/2 · 音画混流封装'}</span>
+              <span>{uiState === 'recording' ? '阶段 1/2' : '阶段 2/2'}</span>
             </div>
 
             <div className="export-dashboard__percent tabular-nums">
@@ -712,20 +731,14 @@ export default function ExportDialog({ onClose }: Props) {
               role="status"
               aria-live="polite"
             >
-              {statusText} — {cancelling ? '正在停止...' : formatEstimatedRemainingTime(estimatedRemainingSeconds)}
+              {cancelling ? '正在取消导出...' : statusText}
             </div>
 
             <div className="export-metrics-grid">
               <div className="export-metric-card">
-                <span className="export-metric-card__label">渲染进度</span>
-                <span className="export-metric-card__value">
-                  {currentFrameNum} / {totalFrameNum || '—'} 帧
-                </span>
-              </div>
-              <div className="export-metric-card">
                 <span className="export-metric-card__label">预计剩余时间</span>
                 <span className="export-metric-card__value">
-                  {cancelling ? '取消中' : (estimatedRemainingSeconds !== null && Number.isFinite(estimatedRemainingSeconds) ? `${Math.ceil(estimatedRemainingSeconds)} 秒` : '估算中...')}
+                  {cancelling ? '—' : (estimatedRemainingSeconds !== null && Number.isFinite(estimatedRemainingSeconds) ? `${Math.ceil(estimatedRemainingSeconds)} 秒` : '估算中...')}
                 </span>
               </div>
               <div className="export-metric-card">
@@ -757,7 +770,7 @@ export default function ExportDialog({ onClose }: Props) {
                 )}
               </div>
               <div className="export-result-file-card__path">{outputPath}</div>
-              {actualEncoding && <p className="export-encoding-status" title={actualEncoding.fallbackReason}>{formatExportEncoding(actualEncoding)}</p>}
+              {actualEncoding && <p className="export-encoding-status" title={actualEncoding.fallbackReason}>{formatExportEncoding(actualEncoding, { includeFallbackStatus: false })}</p>}
               <div style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
                 <span>规格: {videoFormat.width}×{videoFormat.height} · {videoFormat.fps}fps</span>
                 <span>·</span>
@@ -777,7 +790,7 @@ export default function ExportDialog({ onClose }: Props) {
             </div>
 
             <h3 className="export-result-view__title">导出中断或失败</h3>
-            <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+            <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--text-secondary)' }}>
               视频导出过程中遇到错误，请检查磁盘空间或切换兼容模式重试。
             </p>
 
@@ -816,15 +829,23 @@ export default function ExportDialog({ onClose }: Props) {
                 <span>·</span>
                 <span>{videoFormat.fps} fps</span>
                 <span>·</span>
-                <span>{format.toUpperCase()}</span>
-                <span>·</span>
-                <span>约 {approxFrames} 帧</span>
+                <span className="export-summary-chip__size" role="status" aria-live="polite" aria-atomic="true">
+                  {sizeEstimatePending ? '正在预估' : sizeEstimate ? `预估大小：约 ${formatFileSize(sizeEstimate.bytes)}` : '预估大小：暂无法估算'}
+                </span>
+                <InfoTip
+                  title="预估视频大小"
+                  content={sizeEstimate
+                    ? `${sizeEstimate.basis === 'bitrate'
+                      ? `按${sizeEstimate.encoding?.implementation === 'webcodecs' ? ' WebCodecs VBR ' : '最终'}目标码率与时长估算；${includeAudio ? '计入混音轨道预算。' : '不包含音频。'}`
+                      : `${sizeEstimate.sampledFrames === sizeEstimate.totalFrames ? '已对完整导出范围试编码。' : `按 ${sizeEstimate.sampleCount} 段实测视频推算，共抽样 ${(sizeEstimate.sampledFrames / videoFormat.fps).toFixed(1)} 秒。`}${includeAudio ? '抽样包含实际音频。' : '不包含音频。'}`}${sizeEstimate.encoding ? `${sizeEstimate.basis === 'sample' ? '实测' : '预估'}编码路径：${formatExportEncoding(sizeEstimate.encoding)}。` : ''}实际大小受画面复杂度影响。`
+                    : sizeEstimateError || '面板动画结束后自动估算；自动 / WebCodecs 按 VBR 目标码率计算。使用 FFmpeg CRF / ProRes 时抽样。退出页面自动停止。'}
+                />
               </div>
               <div className="export-dialog__footer-actions">
-                <button className="btn" onClick={onClose}>取消</button>
+                <button className="btn" onClick={handleClose}>取消</button>
                 <button
                   className="btn btn--primary"
-                  disabled={!!formatError}
+                  disabled={!!formatError || preparingExport}
                   onClick={handleExport}
                 >
                   <IconFilm width={14} height={14} /> 开始导出
@@ -835,7 +856,7 @@ export default function ExportDialog({ onClose }: Props) {
 
           {(uiState === 'recording' || uiState === 'converting') && (
             <div style={{ display: 'flex', width: '100%', justifyContent: 'flex-end' }}>
-              <button className="btn" onClick={handleCancelExport} disabled={cancelling}>
+              <button className="btn export-dialog__cancel-btn" onClick={handleCancelExport} disabled={cancelling}>
                 {cancelling ? '正在取消...' : '取消导出'}
               </button>
             </div>

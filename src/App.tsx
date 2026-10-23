@@ -8,6 +8,7 @@ import {
   IconAiProse,
   IconArrowLeft,
   IconBell,
+  IconCanvasSettings,
   IconCrosshair,
   IconFilm,
   IconFolder,
@@ -357,8 +358,8 @@ function AppContent({ contextValue, sessionBindings }: {
                 }}
                 role="menuitem"
               >
-                <IconSettings width={15} height={15} />
-                项目设置
+                <IconCanvasSettings width={15} height={15} />
+                画布设置
               </button>
               <button
                 className="top-bar__menu-item"

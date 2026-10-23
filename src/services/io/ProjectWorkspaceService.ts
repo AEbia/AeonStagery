@@ -83,7 +83,7 @@ export class ProjectWorkspaceService {
       const commit = async () => {
         const active = this.session.getCurrentProject();
         if (!active || active.rootPath !== current.rootPath || active.metadata.projectId !== current.metadata.projectId) {
-          throw new Error('当前项目已切换，请重新打开项目设置。');
+          throw new Error('当前项目已切换，请重新打开画布设置。');
         }
         const project = await this.projectResources.saveProjectMetadata(active, { ...active.metadata, videoFormat });
         if (this.session.getCurrentProject() !== active) throw new Error('项目已变更，请重试。');
@@ -92,7 +92,7 @@ export class ProjectWorkspaceService {
       };
       if (this.applyVideoFormat) await this.applyVideoFormat(videoFormat, commit);
       else await commit();
-      if (!savedProject) throw new Error('项目设置未保存，请重试。');
+      if (!savedProject) throw new Error('画布设置未保存，请重试。');
       return { success: true, project: savedProject };
     } catch (error: unknown) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };

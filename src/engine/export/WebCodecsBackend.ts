@@ -1,4 +1,4 @@
-import type { ICaptureBackend, BackendInit, BackendFrame } from './ICaptureBackend';
+import type { ICaptureBackend, BackendInit, BackendFrame, CaptureResult } from './ICaptureBackend';
 import { ExportWriteQueue } from './ExportWriteQueue';
 import { EncodedVideoStreamWriter, resolveNativeEncoderConfig } from './WebCodecsEncoding';
 import { assertExportOperation, classifyExportFailure, ExportEncodingError, ExportOutputError, getExportVideoCodec } from '../../api/exportEncoding';
@@ -125,7 +125,7 @@ export class WebCodecsBackend implements ICaptureBackend {
     }
   }
 
-  async finish(): Promise<void> {
+  async finish(): Promise<CaptureResult | void> {
     try {
       if (!this.encoder) throw new Error('WebCodecsBackend not initialized');
       if (this.encoderFailure) throw this.encoderFailure;
@@ -142,6 +142,7 @@ export class WebCodecsBackend implements ICaptureBackend {
       const result = await this.electronAPI.endStreamExport();
       this.streamFinished = true;
       assertExportOperation(result, 'FFmpeg stream finish');
+      if (result.sizeBytes !== undefined) return { sizeBytes: result.sizeBytes };
     } catch (error) {
       await this.abort();
       throw classifyEncodingError(error);
