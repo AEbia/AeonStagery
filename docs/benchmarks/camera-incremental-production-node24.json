@@ -1,0 +1,22 @@
+{
+  "policy": "camera-incremental-real-core",
+  "environment": {
+    "node": "v24.21.0"
+  },
+  "fixture": {
+    "durationSeconds": 12,
+    "extensionSeconds": 2,
+    "physics": false,
+    "autoEyeBlink": false
+  },
+  "timingsMs": {
+    "fullPreparation": 1757.9869259999996,
+    "incrementalPreparation": 1243.0642149999994,
+    "replayedPreparation": 4189.343986999999
+  },
+  "fullCoreFrames": 191,
+  "incrementalCoreFrames": 190,
+  "replayedCoreFrames": 678,
+  "maxAnchorErrorCompositionUnits": 0,
+  "scope": "real Core; resource motion; disappearance/reentry; pruned motion catalog; no GPU or video encoding"
+}
