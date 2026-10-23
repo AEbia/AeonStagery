@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../../engine/StageDimensions';
 import React, { useEffect, useRef } from 'react';
 import { usePlaybackAdapter, useTimelineAdapter } from '../context/AppContext';
 import { useValidationIssues } from '../store/storeHooks';
@@ -54,8 +55,8 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
       if (
         left.id !== right.id ||
         left.name !== right.name ||
-        Math.round((left.proxy.x / 1920) * 100) !== Math.round((right.proxy.x / 1920) * 100) ||
-        Math.round((left.proxy.y / 1080) * 100) !== Math.round((right.proxy.y / 1080) * 100) ||
+        Math.round((left.proxy.x / STAGE_WIDTH) * 100) !== Math.round((right.proxy.x / STAGE_WIDTH) * 100) ||
+        Math.round((left.proxy.y / STAGE_HEIGHT) * 100) !== Math.round((right.proxy.y / STAGE_HEIGHT) * 100) ||
         Number((left.proxy.z ?? 0).toFixed(1)) !== Number((right.proxy.z ?? 0).toFixed(1)) ||
         Number(left.proxy.scale.toFixed(1)) !== Number(right.proxy.scale.toFixed(1)) ||
         Number(left.proxy.opacity.toFixed(1)) !== Number(right.proxy.opacity.toFixed(1))
@@ -148,7 +149,7 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{c.name}</span>
                 <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '4px 8px', borderRadius: 'var(--radius-sm)' }}>
-                  {((c.proxy.x/1920)*100).toFixed(0)}% , {((c.proxy.y/1080)*100).toFixed(0)}% <span style={{ opacity: 0.5 }}>z:{c.proxy.z?.toFixed(1) || '0'}</span>
+                  {((c.proxy.x/STAGE_WIDTH)*100).toFixed(0)}% , {((c.proxy.y/STAGE_HEIGHT)*100).toFixed(0)}% <span style={{ opacity: 0.5 }}>z:{c.proxy.z?.toFixed(1) || '0'}</span>
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>

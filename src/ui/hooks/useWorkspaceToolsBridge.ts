@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../../engine/StageDimensions';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { BootstrapContext } from '../../engine/Bootstrapper';
 import { cameraController } from '../../engine/CameraController';
@@ -38,8 +39,8 @@ function captureWorkspaceRuntimeSnapshot(
     characters.push({
       id,
       name: character.name || id,
-      x: (proxy.x / 1920) * 100,
-      y: (proxy.y / 1080) * 100,
+      x: (proxy.x / STAGE_WIDTH) * 100,
+      y: (proxy.y / STAGE_HEIGHT) * 100,
       z: proxy.z ?? 0,
       scale: proxy.scale,
       opacity: proxy.opacity,

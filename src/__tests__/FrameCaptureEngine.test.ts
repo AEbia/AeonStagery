@@ -16,12 +16,13 @@ vi.mock('../engine/CustomAnimHost', () => ({ customAnimHost: customAnimMocks }))
 vi.mock('../engine/TextLayerManager', () => ({ textLayerManager: textLayerMocks }));
 
 import { FrameCaptureEngine } from '../engine/export/FrameCaptureEngine';
+import { AlphaFilter, ColorMatrixFilter, Container, Text, Graphics } from 'pixi.js';
 
 function createMockStage() {
   return {
     getApp: vi.fn().mockReturnValue({
       renderer: {
-        width: 1280, height: 720, resolution: 2,
+        width: 2560, height: 1440, resolution: 2, screen: { width: 1280, height: 720 },
         render: vi.fn(),
         resize: vi.fn(),
         // Pixi v8 shape: systems expose `resetState()` and the renderer
@@ -105,6 +106,94 @@ describe('FrameCaptureEngine', () => {
 
   it('constructs with all subsystems', () => {
     expect(engine).toBeDefined();
+  });
+
+  it.each(['webcodecs', 'rawpixels'])('renders native 4K through %s, samples requested fps, and restores preview density', async mode => {
+    const root = new Container();
+    const text = root.addChild(new Text({ text: 'Native 4K' }));
+    text.resolution = 1;
+    stage.getApp().stage = root;
+    const nativeStage = { ...stage, getLayer: () => null, getWidth: () => 1920, getHeight: () => 1080 };
+    const capture = new FrameCaptureEngine(nativeStage, playback, lighting, live2D, camera);
+    const backend = { ...createMockBackend(), ...(mode === 'rawpixels' ? { pushQueue: [] } : {}) };
+    backend.encodeFrame.mockImplementation(async () => {
+      expect(text.resolution).toBe(2);
+      if (mode === 'rawpixels') {
+        const options = stage.getApp().renderer.render.mock.lastCall?.[0] as { target: import('pixi.js').RenderTexture };
+        expect(options.target.source.pixelWidth).toBe(3840);
+        expect(options.target.source.pixelHeight).toBe(2160);
+      }
+    });
+    await capture.capture({
+      fps: 30, rangeStart: 0, rangeEnd: 0.1, width: 3840, height: 2160,
+      bitrateBps: 40_000_000, outputPath: '/tmp/4k.mp4', codec: 'libx264', backend, onProgress: vi.fn(),
+    });
+    expect(stage.getApp().renderer.resize).toHaveBeenNthCalledWith(1, 1920, 1080, 2);
+    expect(backend.init).toHaveBeenCalledWith(expect.objectContaining({ width: 3840, height: 2160, fps: 30 }));
+    expect(backend.encodeFrame).toHaveBeenCalledTimes(3);
+    expect(playback.seek.mock.calls.slice(-3)).toEqual([[0], [1 / 30], [2 / 30]]);
+    expect(text.resolution).toBe(1);
+    expect(stage.getApp().renderer.resize).toHaveBeenLastCalledWith(1280, 720, 2);
+    root.destroy({ children: true });
+  });
+
+  it.each(['success', 'failure', 'cancellation'] as const)('restores automatic text resolution after capture %s', async outcome => {
+    const root = new Container();
+    const automaticText = root.addChild(new Text({ text: 'Automatic speaker label' }));
+    // CanvasTextPipe caches renderer density without changing automatic mode.
+    automaticText._resolution = 0.25;
+    expect(automaticText._autoResolution).toBe(true);
+    const fixedText = root.addChild(new Text({ text: 'Explicit density', resolution: 0.5 }));
+    const inheritedFilter = new AlphaFilter({ alpha: 0.5, resolution: 'inherit' });
+    const fixedFilter = new ColorMatrixFilter();
+    root.filters = [inheritedFilter, fixedFilter];
+    stage.getApp().stage = root;
+    const capture = new FrameCaptureEngine(
+      { ...stage, getLayer: () => null, getWidth: () => 1920, getHeight: () => 1080 },
+      playback, lighting, live2D, camera,
+    );
+    const controller = new AbortController();
+    const backend = createMockBackend();
+    backend.encodeFrame.mockImplementation(async () => {
+      expect(automaticText.resolution).toBe(2);
+      expect(fixedText.resolution).toBe(2);
+      expect(inheritedFilter.resolution).toBe('inherit');
+      expect(fixedFilter.resolution).toBe(2);
+      if (outcome === 'failure') throw new Error('capture failed');
+      if (outcome === 'cancellation') controller.abort();
+    });
+    const result = capture.capture({
+      fps: 30, rangeStart: 0, rangeEnd: 1 / 30, width: 3840, height: 2160,
+      bitrateBps: 40_000_000, outputPath: '/tmp/4k.mp4', codec: 'libx264',
+      backend, onProgress: vi.fn(), signal: controller.signal,
+    });
+    if (outcome === 'success') await result;
+    else if (outcome === 'failure') await expect(result).rejects.toThrow('capture failed');
+    else await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(automaticText._autoResolution).toBe(true);
+    expect(automaticText.resolution).toBeNull();
+    expect(fixedText._autoResolution).toBe(false);
+    expect(fixedText.resolution).toBe(0.5);
+    expect(inheritedFilter.resolution).toBe('inherit');
+    expect(fixedFilter.resolution).toBe(1);
+    root.destroy({ children: true });
+  });
+
+  it('clips scene overflow when fitting a landscape stage inside square output and removes the temporary mask', async () => {
+    const root = new Container();
+    stage.getApp().stage = root;
+    const capture = new FrameCaptureEngine({ ...stage, getLayer: () => null, getWidth: () => 1920, getHeight: () => 1080 }, playback, lighting, live2D, camera);
+    const backend = createMockBackend();
+    backend.encodeFrame.mockImplementation(async () => { expect(root.mask).toBeInstanceOf(Graphics); });
+    await capture.capture({
+      fps: 30, rangeStart: 0, rangeEnd: 1 / 30, width: 1920, height: 1920,
+      bitrateBps: 12_000_000, outputPath: '/tmp/square.mp4', codec: 'libx264', backend, onProgress: vi.fn(),
+    });
+    expect(stage.getApp().renderer.render).toHaveBeenCalledWith(expect.objectContaining({ transform: expect.objectContaining({ tx: 0, ty: 420 }) }));
+    expect(root.mask).toBeUndefined();
+    expect(root.children).toHaveLength(0);
+    root.destroy();
   });
 
   it('stops at a frame boundary after cancellation and restores preview state', async () => {
@@ -273,8 +362,9 @@ describe('FrameCaptureEngine', () => {
     });
 
     expect(renderTargets.length).toBeGreaterThan(0);
-    expect(renderTargets.every((target) => target === app.stage)).toBe(true);
-    expect(extractedTargets).toEqual([app.stage]);
+    expect(renderTargets).toEqual(expect.arrayContaining([expect.objectContaining({ container: app.stage })]));
+    expect(extractedTargets).toHaveLength(1);
+    expect(renderTargets).toContainEqual(expect.objectContaining({ container: app.stage, target: extractedTargets[0] }));
   });
 
   it('composites custom HTML capture pixels into the raw export frame', async () => {
@@ -462,7 +552,7 @@ describe('FrameCaptureEngine', () => {
     // Hiding subtitles must still render the scene, rather than using the
     // now-hidden subtitle layer as the render root and producing blank frames.
     expect(stage.getApp().renderer.render.mock.calls.every(
-      ([target]: readonly unknown[]) => target === stage.getApp().stage,
+      ([options]: readonly { container: unknown }[]) => options.container === stage.getApp().stage,
     )).toBe(true);
     expect(subtitleLayer.visible).toBe(true); // restored after capture
   });
@@ -559,7 +649,7 @@ describe('FrameCaptureEngine', () => {
     });
 
     expect(renderTargets.length).toBeGreaterThan(0);
-    expect(renderTargets.every((target) => target === subtitleLayer)).toBe(true);
+    expect(renderTargets).toEqual(renderTargets.map(() => expect.objectContaining({ container: subtitleLayer })));
     expect(app.renderer.background.alpha).toBe(1); // restored after capture
   });
 
@@ -697,7 +787,7 @@ describe('FrameCaptureEngine', () => {
     });
 
     expect(renderTargets.length).toBeGreaterThan(0);
-    expect(renderTargets.every((target) => target === subtitleLayer)).toBe(true);
+    expect(renderTargets).toEqual(renderTargets.map(() => expect.objectContaining({ container: subtitleLayer })));
     expect(backgroundDuringRender.every((bg) => bg.color === 0x00ff00 && bg.alpha === 1)).toBe(true);
     // Background restored to its original state after capture
     expect(app.renderer.background.color).toBe(0x0a0a0f);

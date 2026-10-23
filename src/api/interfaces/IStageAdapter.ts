@@ -12,6 +12,7 @@ export interface IStageAdapter {
   getApp(): any;
   getPreviewResolution(): StagePreviewResolution;
   setPreviewResolution(resolution: StagePreviewResolution): void;
+  setProjectVideoFormat(format: import('../types/video-format').ProjectVideoFormat): void;
   pauseTicker(): void;
   resumeTicker(): void;
 }

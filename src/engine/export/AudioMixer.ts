@@ -1,5 +1,6 @@
 import type { PreparedCompiledAction, PreparedCompiledScene, PreparedRuntimeValue } from '../../api/types/semantic-scene';
 import { ProjectResourceService } from '../../services/io/ProjectResourceService';
+import type { ExportOperationResult, FFmpegConvertOptions, FFmpegVideoOptions } from '../../api/types/export';
 
 export interface AudioSource {
   path: string;
@@ -20,7 +21,7 @@ interface ElectronFsAPI {
 }
 
 interface ElectronExportAPI {
-  convert(inputPath: string, outputPath: string, options?: Record<string, unknown>): Promise<{ success: boolean; error?: string; stderr?: string; path?: string }>;
+  convert(inputPath: string, outputPath: string, options?: FFmpegConvertOptions): Promise<ExportOperationResult>;
 }
 
 
@@ -34,6 +35,7 @@ interface AudioMixConfig {
   bitrateMbps: number;
   /** Preserve the alpha channel (yuva420p) when re-encoding — subtitle-only exports. */
   transparent?: boolean;
+  encoding?: FFmpegVideoOptions;
 }
 
 interface AudioInterval {
@@ -372,7 +374,7 @@ export class AudioMixer {
     sources: AudioSource[],
     config: AudioMixConfig,
     isTranscodeNeeded: boolean,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<ExportOperationResult> {
     if (sources.length > 0 || isTranscodeNeeded) {
       if (!this.exportAPI) return { success: false, error: 'Video conversion is unavailable' };
       const result = await this.exportAPI.convert(videoPath, outputPath, {
@@ -384,6 +386,7 @@ export class AudioMixer {
         height: config.height,
         totalFrames: config.totalFrames,
         bitrate: config.bitrateMbps,
+        ...(isTranscodeNeeded ? config.encoding : {}),
         ...(config.transparent === true ? { transparent: true } : {}),
       });
 
@@ -391,6 +394,8 @@ export class AudioMixer {
         return {
           success: false,
           error: `Video conversion failed: ${result.error || result.stderr}`,
+          stderr: result.stderr,
+          failureKind: result.failureKind,
         };
       }
       return { success: true };

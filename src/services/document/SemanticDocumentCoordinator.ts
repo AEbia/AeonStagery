@@ -10,9 +10,8 @@ import type {
 import type { SemanticScenePipeline } from '../semantic-scene';
 
 type BatchEntry = {
-  prepare: () => Promise<SemanticSceneBundle>;
-  path?: string;
-  resolve: (bundle: SemanticSceneBundle) => void;
+  run: () => Promise<SemanticSceneBundle | void>;
+  resolve: (bundle: SemanticSceneBundle | void) => void;
   reject: (error: unknown) => void;
 };
 
@@ -75,29 +74,68 @@ export class SemanticDocumentCoordinator {
     return this.enqueue(() => this.pipeline.processDocument(document), path, options);
   }
 
+  /** Serializes runtime configuration and its persistence with document projections.
+   * Reads the current scene only when the queued operation starts. No source or
+   * history revision is created by a runtime-only reload.
+   */
+  updateRuntimeConfiguration(
+    apply: () => void,
+    rollback: () => void,
+    commit: () => Promise<void>,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.schedule({
+        run: async () => {
+          const prepared = this.documentStore.getPreparedSceneSnapshot();
+          try {
+            apply();
+            if (prepared) await this.runtime.projectPreparedScene(prepared);
+            await commit();
+          } catch (error) {
+            rollback();
+            if (prepared) {
+              try { await this.runtime.projectPreparedScene(prepared); }
+              catch (restoreError) {
+                throw new AggregateError([error, restoreError], '画布设置应用失败，场景恢复也失败，请重新打开项目。');
+              }
+            }
+            throw error;
+          }
+        },
+        resolve: () => resolve(), reject,
+      }, false);
+    });
+  }
+
   private enqueue(
     prepare: () => Promise<SemanticSceneBundle>,
     path?: string,
     options: SemanticDocumentCommitOptions = {},
   ): Promise<SemanticSceneBundle> {
     return new Promise((resolve, reject) => {
-      const entry: BatchEntry = { prepare, path, resolve, reject };
-      const coalesce = options.coalesce !== false;
-      if (this.batch !== null) {
-        // A batch is already open.
-        if (coalesce) {
-          // Coalesce into its final drain (latest-wins).
-          this.batch.members.push(entry);
-        } else {
-          // Wait for the batch to close, then run as its own leading batch.
-          this.exclusiveQueue.push(entry);
-        }
-        return;
-      }
-      // No batch in flight: this entry opens one, whether coalescable or not —
-      // an isolated commit is always projected immediately (no added latency).
-      this.openBatch(entry);
+      const entry: BatchEntry = {
+        run: () => this.projectDocument(prepare, path),
+        resolve: bundle => { if (bundle) resolve(bundle); }, reject,
+      };
+      this.schedule(entry, options.coalesce !== false);
     });
+  }
+
+  private schedule(entry: BatchEntry, coalesce: boolean): void {
+    if (this.batch !== null) {
+      // A batch is already open.
+      if (coalesce) {
+        // Coalesce into its final drain (latest-wins).
+        this.batch.members.push(entry);
+      } else {
+        // Wait for the batch to close, then run as its own leading batch.
+        this.exclusiveQueue.push(entry);
+      }
+      return;
+    }
+    // No batch in flight: this entry opens one, whether coalescable or not —
+    // an isolated commit is always projected immediately (no added latency).
+    this.openBatch(entry);
   }
 
   private openBatch(leading: BatchEntry): void {
@@ -109,7 +147,7 @@ export class SemanticDocumentCoordinator {
       .catch(() => undefined)
       .then(async () => {
         try {
-          const bundle = await this.runEntry(leading);
+          const bundle = await leading.run();
           leading.resolve(bundle);
         } catch (error) {
           leading.reject(error);
@@ -134,7 +172,7 @@ export class SemanticDocumentCoordinator {
       this.batch.members = [];
       const latest = members[members.length - 1];
       try {
-        const bundle = await this.runEntry(latest);
+        const bundle = await latest.run();
         for (const entry of members) entry.resolve(bundle);
       } catch (error) {
         for (const entry of members) entry.reject(error);
@@ -150,13 +188,13 @@ export class SemanticDocumentCoordinator {
     }
   }
 
-  private async runEntry(entry: BatchEntry): Promise<SemanticSceneBundle> {
+  private async projectDocument(prepare: () => Promise<SemanticSceneBundle>, path?: string): Promise<SemanticSceneBundle> {
     const previousPrepared = this.documentStore.getPreparedSceneSnapshot();
-    const bundle = await entry.prepare();
+    const bundle = await prepare();
     try {
       await this.beforeProject?.(bundle);
       await this.runtime.projectPreparedScene(bundle.prepared);
-      this.documentStore._replaceSemanticScene(bundle, entry.path);
+      this.documentStore._replaceSemanticScene(bundle, path);
       this.durationSink?.setDuration(bundle.prepared.durationSeconds);
       return bundle;
     } catch (error) {

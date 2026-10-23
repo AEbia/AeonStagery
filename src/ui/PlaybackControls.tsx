@@ -5,7 +5,7 @@ import { useEditorDuration, useEditorStatus } from './store/storeHooks';
 import { IconPlay, IconPause, IconSkipBack, IconChevronDown, IconLoop } from './icons';
 import { Tooltip } from './Tooltip';
 
-const FRAME_STEP = 1 / 60;
+import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
 
 const pad2 = (n: number) => n < 10 ? '0' + n : '' + n;
 
@@ -38,6 +38,8 @@ const RESOLUTION_OPTIONS: readonly {
 ] as const;
 
 export function PlaybackControls() {
+  const { fps } = useProjectVideoFormat();
+  const frameStep = 1 / fps;
   const playbackAdapter = usePlaybackAdapter();
   const stageAdapter = useStageAdapter();
   const duration = useEditorDuration();
@@ -111,8 +113,8 @@ export function PlaybackControls() {
     if (duration <= 0) return;
     const currentTime = playbackAdapter.getCurrentTime();
     let nextTime = currentTime;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextTime -= FRAME_STEP;
-    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextTime += FRAME_STEP;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextTime -= frameStep;
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextTime += frameStep;
     else if (event.key === 'PageDown') nextTime -= duration * 0.1;
     else if (event.key === 'PageUp') nextTime += duration * 0.1;
     else if (event.key === 'Home') nextTime = 0;
@@ -121,12 +123,12 @@ export function PlaybackControls() {
 
     event.preventDefault();
     playbackAdapter.seek(Math.max(0, Math.min(duration, nextTime)));
-  }, [duration, playbackAdapter]);
+  }, [duration, playbackAdapter, frameStep]);
 
   const handleFrameStep = useCallback((dir: 1 | -1) => {
     const ct = playbackAdapter.getCurrentTime();
-    playbackAdapter.seek(Math.max(0, ct + dir * FRAME_STEP));
-  }, [playbackAdapter]);
+    playbackAdapter.seek(Math.max(0, Math.min(duration, ct + dir * frameStep)));
+  }, [playbackAdapter, duration, frameStep]);
 
   const handleLoopToggle = useCallback(() => {
     const next = !loopEnabled;

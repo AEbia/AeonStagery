@@ -23,6 +23,22 @@ function makeProject(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 describe('CompatibleProjectSession', () => {
+  it('keeps legacy metadata minimal and preserves future video fields through known edits', () => {
+    const legacy = CompatibleProjectSession.open(makeProject());
+    if (legacy.status !== 'ready') throw new Error('Expected ready');
+    legacy.session.applyTypedEdit({ ...legacy.session.projection, name: 'Renamed' });
+    expect(legacy.session.serialize()).not.toHaveProperty('videoFormat');
+
+    const custom = CompatibleProjectSession.open(makeProject({ videoFormat: { width: 1080, height: 1920, fps: 29.97, futureColorSpace: 'wide' } }));
+    if (custom.status !== 'ready') throw new Error('Expected ready');
+    expect(custom.session.projection.videoFormat).toEqual({ width: 1080, height: 1920, fps: 29.97 });
+    custom.session.applyTypedEdit({ ...custom.session.projection, videoFormat: { width: 2160, height: 3840, fps: 30 } });
+    expect(custom.session.serialize()).toHaveProperty('videoFormat', { width: 2160, height: 3840, fps: 30, futureColorSpace: 'wide' });
+  });
+
+  it('rejects malformed video metadata at project admission', () => {
+    expect(CompatibleProjectSession.open(makeProject({ videoFormat: { width: 1920, height: 1080, fps: 0 } })).status).toBe('invalid');
+  });
   describe('version classification', () => {
     it('returns ready for a valid projectVersion 2 document', () => {
       const source = makeProject();

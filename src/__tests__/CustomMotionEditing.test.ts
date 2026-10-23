@@ -22,7 +22,7 @@ function document(): CurrentSceneDocument {
   };
 }
 
-async function harness(authority: CustomMotionEditAuthority = new InMemoryCustomMotionEditAuthority(), source = document()) {
+async function harness(authority: CustomMotionEditAuthority = new InMemoryCustomMotionEditAuthority(), source = document(), getFps?: () => number) {
   const store = new DocumentStore();
   const coordinator = new SemanticDocumentCoordinator(store, new SemanticScenePipeline({ resolveAsset: async (source) => source }), {
     projectPreparedScene: vi.fn(async () => {}),
@@ -30,7 +30,7 @@ async function harness(authority: CustomMotionEditAuthority = new InMemoryCustom
   await coordinator.applyDocument(source);
   const authoring = new SemanticAuthoringApplicationService(store, coordinator);
   const preview = { apply: vi.fn(), clear: vi.fn(async () => {}) };
-  const editing = new CustomMotionEditing({ store, authoring, authority, preview });
+  const editing = new CustomMotionEditing({ store, authoring, authority, preview, getFps });
   return { store, coordinator, authoring, editing, preview };
 }
 
@@ -60,6 +60,45 @@ function delayedAuthority() {
 async function settle() { for (let index = 0; index < 12; index++) await Promise.resolve(); }
 
 describe('CustomMotionEditing session interface', () => {
+  it('uses project fps for opening, refreshing and committing when scene fps differs', async () => {
+    const source = document();
+    source.meta.fps = 60;
+    const { editing, coordinator, store } = await harness(undefined, source, () => 30);
+    try {
+      const session = editing.open({ statementId: 'performance' });
+      await session.ready;
+      expect(editing.getSnapshot().fps).toBe(30);
+      const keyframe = editing.getSnapshot().keyframes[1].ref;
+      expect(session.preview({ type: 'update-keyframe', keyframe, value: 12 }).status).toBe('previewed');
+      expect(await session.commit()).toEqual({ status: 'committed' });
+      expect(session.preview({ type: 'insert-keyframe', parameterId: 'ANGLE', frame: 7, value: 4 }).status).toBe('previewed');
+      expect(await session.commit()).toEqual({ status: 'committed' });
+      expect(editing.getSnapshot()).toMatchObject({ fps: 30, state: 'held' });
+      expect(editing.getSnapshot().motion!.tracks[0].keyframes[1].time).toBe(7 / 30);
+      const current = store.getCurrentSceneDocumentSnapshot()!;
+      await coordinator.applyDocument({ ...current, meta: { ...current.meta, fps: 24 } });
+      expect(editing.getSnapshot().fps).toBe(30);
+    } finally { await editing.dispose(); }
+  });
+
+  it('drops a pending commit if project fps changes before the lease arrives', async () => {
+    const gate = delayedAuthority();
+    let fps = 30;
+    const { editing, store } = await harness(gate.authority, document(), () => fps);
+    try {
+      const session = editing.open({ statementId: 'performance' });
+      await settle();
+      const version = store.version;
+      session.preview({ type: 'update-keyframe', keyframe: editing.getSnapshot().keyframes[1].ref, value: 12 });
+      const committing = session.commit();
+      fps = 24;
+      gate.grant(0);
+      expect((await committing).status).toBe('dropped');
+      expect(store.version).toBe(version);
+      expect(editing.getSnapshot()).toMatchObject({ fps: 24, state: 'held' });
+    } finally { await editing.dispose(); }
+  });
+
   it('previews a dense motion in a 100-action scene without copying the scene', async () => {
     const source = document();
     source.statements = Array.from({ length: 100 }, (_, index) => ({

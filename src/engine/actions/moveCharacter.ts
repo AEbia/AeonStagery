@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import { resolveVec2 } from '../utils/math';
 import { DEFAULT_CHARACTER_TRANSFORM_EASE, normalizeCharacterEase } from '../CharacterAnimationContract';
 import type { SchedulerContext } from './types';
@@ -15,7 +16,7 @@ export function scheduleMoveCharacter(ctx: SchedulerContext, action: { time?: nu
     };
     if (params.position) {
       const pos = resolveVec2(params.position);
-      anim.x = pos.x * 1920; anim.y = pos.y * 1080;
+      anim.x = pos.x * STAGE_WIDTH; anim.y = pos.y * STAGE_HEIGHT;
     }
     if (params.scale !== undefined) anim.scale = params.scale;
     if (params.rotation !== undefined) anim.rotation = params.rotation;

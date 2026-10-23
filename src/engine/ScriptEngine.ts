@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT, STAGE_FPS } from './StageDimensions';
 /**
  * AeonStagery — Script Engine & Timeline Sequencer
  * Created by White_AE
@@ -201,7 +202,15 @@ class ScriptEngine {
     }
   }
 
+  private loadedStageSize = '';
+
   async loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
+    const stageSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
+    if (this.loadedStageSize !== '' && this.loadedStageSize !== stageSize) {
+      this.currentSceneAuxSignature = null;
+      this.snapshotStore.clear();
+      this.lastSnapshotTime = -1;
+    }
     try {
       await subtitleRenderer.preloadPreparedScene(scene);
     } catch (error) {
@@ -212,6 +221,7 @@ class ScriptEngine {
     }
     try {
       await this.loadRuntimeScene(preparedSceneToRuntimeTimelineScene(scene), scene);
+      this.loadedStageSize = stageSize;
     } catch (error) {
       // A projection can fail after the incoming scene has populated these
       // diff caches. Clear both runtime state and identity caches so a
@@ -435,7 +445,7 @@ class ScriptEngine {
       if ((a as any).params?.targetCharacter) charIds.add((a as any).params.targetCharacter);
     });
     for (const id of charIds) {
-      this.transformationProxies.set(id, { x: 960, y: 540, scale: 1, rotation: 0, opacity: 1, z: 0 });
+      this.transformationProxies.set(id, { x: STAGE_WIDTH / 2, y: STAGE_HEIGHT / 2, scale: 1, rotation: 0, opacity: 1, z: 0 });
     }
 
     for (const action of script.timeline) {
@@ -444,7 +454,7 @@ class ScriptEngine {
         if (proxy) {
           if (action.params.position) {
             const pos = resolveVec2(action.params.position);
-            proxy.x = pos.x * 1920; proxy.y = pos.y * 1080;
+            proxy.x = pos.x * STAGE_WIDTH; proxy.y = pos.y * STAGE_HEIGHT;
           }
           if (action.params.scale !== undefined) proxy.scale = action.params.scale;
           if (action.params.rotation !== undefined) proxy.rotation = action.params.rotation;
@@ -789,8 +799,8 @@ class ScriptEngine {
           const proxy = this.transformationProxies.get(id);
           if (proxy) {
             if (charState.position !== undefined) {
-              proxy.x = charState.position[0] * 1920;
-              proxy.y = charState.position[1] * 1080;
+              proxy.x = charState.position[0] * STAGE_WIDTH;
+              proxy.y = charState.position[1] * STAGE_HEIGHT;
             }
             if (charState.scale !== undefined) proxy.scale = charState.scale;
             if (charState.rotation !== undefined) proxy.rotation = charState.rotation;
@@ -1115,7 +1125,7 @@ class ScriptEngine {
       shouldCancel: () => !!this._pendingSeek,
       skipHardReset,
       isScrubbing,
-      fps: this.currentScene?.meta?.fps ?? 60,
+      fps: STAGE_FPS,
       resolveStateAtTime: (atTime) => this.computeStateAtTime(atTime).characters,
     });
 

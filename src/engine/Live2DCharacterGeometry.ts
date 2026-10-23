@@ -185,8 +185,8 @@ export class Live2DCharacterGeometry {
             }
           }
 
-          const normalizedX = x / 1920;
-          const normalizedY = y / 1080;
+          const normalizedX = x / STAGE_WIDTH;
+          const normalizedY = y / STAGE_HEIGHT;
           if (out) {
             out.x = normalizedX;
             out.y = normalizedY;
@@ -205,8 +205,8 @@ export class Live2DCharacterGeometry {
     if (proxies) {
       const proxy = proxies.get(id);
       if (proxy) {
-        const nx = proxy.x / 1920;
-        const ny = proxy.y / 1080;
+        const nx = proxy.x / STAGE_WIDTH;
+        const ny = proxy.y / STAGE_HEIGHT;
         const scale = proxy.scale !== undefined ? proxy.scale : 1.0;
 
         let targetY = ny;
@@ -315,7 +315,7 @@ export class Live2DCharacterGeometry {
 
           let alphaFilter = container._alphaFilter;
           if (!alphaFilter) {
-            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity });
+            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity, resolution: 'inherit' });
             alphaFilter.padding = 50;
             container._alphaFilter = alphaFilter;
           } else {

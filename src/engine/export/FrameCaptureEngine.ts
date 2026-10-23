@@ -1,5 +1,5 @@
-import type { ICaptureBackend } from './ICaptureBackend';
-import type { ExportProgress } from '../../api/types/export';
+import type { ICaptureBackend, CaptureResult } from './ICaptureBackend';
+import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions, FFmpegStreamMuxOptions } from '../../api/types/export';
 import type { VisualLightingOverlay } from '../visual-runtime/VisualRuntimeResolver';
 import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
@@ -7,11 +7,14 @@ import { customAnimHost } from '../CustomAnimHost';
 import type { CustomAnimationCaptureFrame } from '../CustomAnimHost';
 import { advanceLive2DExportClock } from '../live2d/runtime/Live2DRuntimeControlModule';
 import { textLayerManager } from '../TextLayerManager';
-import { Rectangle, RenderTexture } from 'pixi.js';
+import { Matrix, RenderTexture, Text, Container, Graphics } from 'pixi.js';
+import { getOutputViewport, type OutputFit } from '../../api/types/video-format';
 
 // Minimal interfaces for injected dependencies — only what FrameCaptureEngine actually uses
 interface StageSubsystem {
   getApp(): import('pixi.js').Application;
+  getWidth?(): number;
+  getHeight?(): number;
   pauseTicker(): void;
   resumeTicker(): void;
   /** Optional access to named stage layers (used to hide/render the subtitle layer during subtitle-less or subtitle-only export). */
@@ -53,6 +56,8 @@ export interface FrameCaptureVisualRuntime {
 }
 
 interface FrameCaptureConfig {
+  /** Sampling retains the export dialog layout while using the same pixels. */
+  isolateUI?: boolean;
   signal?: AbortSignal;
   onBackendStarted?: () => void;
   fps: number;
@@ -60,10 +65,14 @@ interface FrameCaptureConfig {
   rangeEnd: number;
   width: number;
   height: number;
+  fit?: OutputFit;
   bitrateBps: number;
   outputPath: string;
   codec: string;
   backend: ICaptureBackend;
+  videoCodec?: ExportVideoCodec;
+  encoding?: FFmpegVideoOptions;
+  streamOptions?: FFmpegStreamMuxOptions;
   onProgress: (p: ExportProgress) => void;
   visualRuntime?: FrameCaptureVisualRuntime;
   voiceLipSync?: { beforeSeek(time: number): void; applyAtTime(time: number): void; dispose(): void };
@@ -109,6 +118,7 @@ function createCompositeCanvas(
   customFrame: CustomAnimationCaptureFrame,
   width: number,
   height: number,
+  placement = { x: 0, y: 0, width, height },
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') {
     throw new Error('Custom HTML capture cannot be composited because no document canvas is available.');
@@ -137,9 +147,9 @@ function createCompositeCanvas(
       const imageData = overlayContext.createImageData(customFrame.width, customFrame.height);
       imageData.data.set(customFrame.pixels);
       overlayContext.putImageData(imageData, 0, 0);
-      context.drawImage(overlayCanvas, 0, 0, width, height);
+      context.drawImage(overlayCanvas, placement.x, placement.y, placement.width, placement.height);
     } else if (customFrame.canvas) {
-      context.drawImage(customFrame.canvas as CanvasImageSource, 0, 0, width, height);
+      context.drawImage(customFrame.canvas as CanvasImageSource, placement.x, placement.y, placement.width, placement.height);
     } else {
       throw new Error('Custom HTML capture returned no pixels or canvas.');
     }
@@ -176,7 +186,7 @@ export class FrameCaptureEngine {
    * Owns the entire capture lifecycle:
    *  - renderer resize, engine lockdown, frame stepping, cleanup.
    */
-  async capture(config: FrameCaptureConfig): Promise<void> {
+  async capture(config: FrameCaptureConfig): Promise<CaptureResult | void> {
     const { fps, rangeStart, rangeEnd, width, height, bitrateBps, outputPath, codec, backend, onProgress } = config;
 
     // Resolve lazy-loaded subsystem singletons (dynamic getters)
@@ -191,19 +201,50 @@ export class FrameCaptureEngine {
     }
 
     const app = this.stage.getApp();
-    const originalWidth = app.renderer.width;
-    const originalHeight = app.renderer.height;
+    const originalWidth = app.renderer.screen?.width ?? app.renderer.width / app.renderer.resolution;
+    const originalHeight = app.renderer.screen?.height ?? app.renderer.height / app.renderer.resolution;
     const originalResolution = app.renderer.resolution;
+    const viewport = getOutputViewport(
+      { width: this.stage.getWidth?.() ?? width, height: this.stage.getHeight?.() ?? height },
+      { width, height }, config.fit,
+    );
+    const contentWidth = this.stage.getWidth?.() ?? width;
+    const contentHeight = this.stage.getHeight?.() ?? height;
+    const captureTransform = new Matrix().translate(viewport.x, viewport.y);
+    const textResolutions = new Map<Text, number | null>();
+    const filterResolutions = new Map<import('pixi.js').Filter, number>();
+    const prepareResolution = (container: Container) => {
+      if (container instanceof Text && container.resolution < viewport.scale) {
+        if (!textResolutions.has(container)) {
+          textResolutions.set(container, container._autoResolution ? null : container.resolution);
+        }
+        container.resolution = viewport.scale;
+      }
+      for (const filter of container.filters ?? []) {
+        if (typeof filter.resolution === 'number' && filter.resolution < viewport.scale) {
+          if (!filterResolutions.has(filter)) filterResolutions.set(filter, filter.resolution);
+          filter.resolution = viewport.scale;
+        }
+      }
+      for (const child of container.children ?? []) prepareResolution(child);
+    };
     const canvasStyle = app.canvas?.style;
     const originalCanvasStyle = canvasStyle
       ? { width: canvasStyle.width, height: canvasStyle.height }
       : null;
     let backendFinished = false;
+    let backendFinalizing = false;
     const signal = config.signal;
-    const abortBackend = (backend as ICaptureBackend & { abort?: (cancelled?: boolean) => Promise<void> }).abort;
+    const abortBackend = backend.abort;
     let backendReady = false;
+    let backendStarted = false;
+    const markBackendStarted = () => {
+      if (backendStarted) return;
+      backendStarted = true;
+      config.onBackendStarted?.();
+    };
     const cancelBackend = () => {
-      if (backendReady && !backendFinished && abortBackend) {
+      if (backendReady && !backendFinalizing && !backendFinished && abortBackend) {
         void abortBackend.call(backend, true).catch((error) => console.error('[FrameCapture] Cancellation cleanup failed:', error));
       }
     };
@@ -226,13 +267,14 @@ export class FrameCaptureEngine {
     let originalSubtitleVisible = true;
     const isRawPixels = 'pushQueue' in backend;
     let subtitleRenderTexture: RenderTexture | null = null;
+    let restoreCaptureMask: (() => void) | undefined;
 
     try {
       signal?.throwIfAborted();
       // ── Init ──
       // Video dimensions are physical output pixels. Preview DPR must not
       // multiply the encoder input size.
-      app.renderer.resize(width, height, 1);
+      app.renderer.resize(viewport.width, viewport.height, viewport.scale);
 
       if (renderSubtitlesOnly) {
         subtitleLayer = this.stage.getLayer?.('subtitle') ?? null;
@@ -262,9 +304,13 @@ export class FrameCaptureEngine {
         codec,
         isEncoded: true,
         transparent: subtitleOnly,
+        videoCodec: config.videoCodec,
+        encoding: config.encoding,
+        streamOptions: config.streamOptions,
+        ...(config.onBackendStarted ? { onStarted: markBackendStarted } : {}),
       });
       backendReady = true;
-      config.onBackendStarted?.();
+      markBackendStarted();
       signal?.throwIfAborted();
 
       // ── Deterministic Lockdown ──
@@ -291,8 +337,20 @@ export class FrameCaptureEngine {
       // Render only the subtitle layer for subtitle-only exports; the layer
       // was resolved above and is guaranteed non-null in that mode.
       const renderTarget = renderSubtitlesOnly && subtitleLayer ? subtitleLayer : app.stage;
+      if (renderTarget instanceof Container && (viewport.x > 0 || viewport.y > 0)) {
+        const previousMask = renderTarget.mask;
+        const clip = new Graphics().rect(0, 0, contentWidth, contentHeight).fill(0xffffff);
+        renderTarget.addChild(clip);
+        renderTarget.mask = clip;
+        restoreCaptureMask = () => {
+          renderTarget.mask = previousMask;
+          clip.removeFromParent();
+          clip.destroy();
+        };
+      }
 
       const renderCaptureTarget = () => {
+        prepareResolution(renderTarget);
         const restoreTextLayers = renderSubtitlesOnly
           ? textLayerManager.hideForSubtitleExport()
           : null;
@@ -304,11 +362,12 @@ export class FrameCaptureEngine {
             app.renderer.render({
               container: renderTarget,
               target: subtitleRenderTexture,
+              transform: captureTransform,
               clear: true,
-              clearColor: subtitleChroma ? [0, 1, 0, 1] : [0, 0, 0, 0],
+              clearColor: subtitleChroma ? [0, 1, 0, 1] : subtitleOnly ? [0, 0, 0, 0] : app.renderer.background.color,
             });
           } else {
-            app.renderer.render(renderTarget);
+            app.renderer.render({ container: renderTarget, transform: captureTransform, clear: true });
           }
         } finally {
           restoreTextLayers?.();
@@ -326,7 +385,7 @@ export class FrameCaptureEngine {
       // ── Performance Lockdown ──
       this.stage.pauseTicker();
       this.playback.setSilentMode(true);
-      if (typeof document !== 'undefined') {
+      if (config.isolateUI !== false && typeof document !== 'undefined') {
         document.body.classList.add('is-exporting');
       }
 
@@ -336,9 +395,10 @@ export class FrameCaptureEngine {
       const endFrame = Math.ceil(rangeEnd * fps);
       const totalFrames = endFrame - startFrame;
 
-      if (renderSubtitlesOnly && isRawPixels) {
+      if (isRawPixels) {
         subtitleRenderTexture = RenderTexture.create({
-          width, height, resolution: 1, antialias: app.renderer.view?.antialias ?? false,
+          width: viewport.width, height: viewport.height, resolution: viewport.scale,
+          antialias: app.renderer.view?.antialias ?? false,
         });
       }
 
@@ -404,7 +464,19 @@ export class FrameCaptureEngine {
             : 0;
         if (!renderSubtitlesOnly && typeof (customAnimHost as any).captureFrame === 'function') {
           try {
-            customFrame = await (customAnimHost as any).captureFrame(width, height, time);
+            customFrame = await customAnimHost.captureFrame(
+              Math.round(contentWidth * viewport.scale), Math.round(contentHeight * viewport.scale), time,
+            );
+            if (customFrame && (viewport.x !== 0 || viewport.y !== 0)) {
+              const transparent = document.createElement('canvas');
+              transparent.width = width;
+              transparent.height = height;
+              const mapped = createCompositeCanvas(transparent, customFrame, width, height, {
+                x: viewport.x * viewport.scale, y: viewport.y * viewport.scale,
+                width: contentWidth * viewport.scale, height: contentHeight * viewport.scale,
+              });
+              customFrame = mapped ? { width, height, canvas: mapped } : null;
+            }
           } catch (error) {
             throw new Error(
               `Custom HTML animation capture failed at ${time.toFixed(3)}s: ${String(error)} `
@@ -427,8 +499,7 @@ export class FrameCaptureEngine {
             // Match the render target. Subtitle-only exports must not pull the
             // camera-affected scene (including panorama post effects) back in
             // through a second full-stage extraction.
-            target: subtitleRenderTexture ?? renderTarget,
-            frame: new Rectangle(0, 0, width, height),
+            target: subtitleRenderTexture!,
           });
           const pixels = extractedPixels instanceof Uint8Array || extractedPixels instanceof Uint8ClampedArray
             ? extractedPixels
@@ -467,9 +538,17 @@ export class FrameCaptureEngine {
       }
 
       signal?.throwIfAborted();
-      await backend.finish();
-      signal?.throwIfAborted();
+      onProgress({
+        phase: 'mix',
+        percent: 90,
+        ...(config.streamOptions?.audioSources ? { audioSourceCount: config.streamOptions.audioSources.length } : {}),
+      });
+      // Once finish begins, the main process may already be atomically
+      // publishing the destination. Let it settle and report its outcome.
+      backendFinalizing = true;
+      const result = await backend.finish();
       backendFinished = true;
+      return result;
     } catch (error) {
       if (!backendFinished && typeof abortBackend === 'function') {
         try {
@@ -483,7 +562,16 @@ export class FrameCaptureEngine {
       throw error;
     } finally {
       signal?.removeEventListener('abort', cancelBackend);
+      restoreCaptureMask?.();
       subtitleRenderTexture?.destroy(true);
+      for (const [text, resolution] of textResolutions) {
+        // Pixi accepts null to restore automatic mode, but its declaration only
+        // allows numbers. Use the setter so its cached raster is invalidated too.
+        if (!text.destroyed) Reflect.set(text, 'resolution', resolution);
+      }
+      for (const [filter, resolution] of filterResolutions) {
+        if (!filter._destroyed) filter.resolution = resolution;
+      }
       // ── Restore ──
       config.voiceLipSync?.dispose();
       app.renderer.resize(originalWidth, originalHeight, originalResolution);
@@ -502,7 +590,7 @@ export class FrameCaptureEngine {
       if (originalBackgroundColor !== undefined) {
         app.renderer.background.color = originalBackgroundColor;
       }
-      if (typeof document !== 'undefined') {
+      if (config.isolateUI !== false && typeof document !== 'undefined') {
         document.body.classList.remove('is-exporting');
       }
       gsap.globalTimeline.play();

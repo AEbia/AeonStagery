@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import type { CharacterInfo } from '../../api/types/character';
 import type { SnapshotStore } from '../SnapshotStore';
 import type { ProxyRegistry } from './ProxyRegistry';
@@ -608,8 +609,8 @@ export class CharacterSynchronizer {
         const proxy = transformationProxies.get(id);
         if (proxy) {
           if (state.position !== undefined) {
-            proxy.x = state.position[0] * 1920;
-            proxy.y = state.position[1] * 1080;
+            proxy.x = state.position[0] * STAGE_WIDTH;
+            proxy.y = state.position[1] * STAGE_HEIGHT;
           }
           if (state.scale !== undefined) proxy.scale = state.scale;
           if (state.rotation !== undefined) proxy.rotation = state.rotation;

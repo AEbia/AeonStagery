@@ -2,7 +2,7 @@
  * AeonStagery — Stage Manager
  *
  * Manages the PixiJS application and layer hierarchy.
- * The stage is 1920×1080 with TWO top-level containers:
+ * The stage uses project-aspect logical coordinates with TWO top-level containers:
  *
  *   sceneContainer (affected by camera transforms):
  *     background → characters → effects → customAnimation
@@ -29,18 +29,10 @@ import { ensureLive2DRenderPipe } from './Live2DEngineBridge';
 import { installPixiFilterResolutionGuard } from './PixiFilterResolutionGuard';
 import type { StagePreviewResolution } from '../api/interfaces/IStageAdapter';
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
-const MAX_PREVIEW_RESOLUTION = 2;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
+import { setStageDimensions } from './StageDimensions';
+import { DEFAULT_VIDEO_FORMAT, type ProjectVideoFormat } from '../api/types/video-format';
 const PREVIEW_RESOLUTION_VALUES: readonly StagePreviewResolution[] = [1, 0.5, 0.25];
-
-function resolvePreviewResolution(): number {
-  const deviceResolution = typeof window === 'undefined'
-    ? 1
-    : Number(window.devicePixelRatio);
-  if (!Number.isFinite(deviceResolution) || deviceResolution <= 1) return 1;
-  return Math.min(deviceResolution, MAX_PREVIEW_RESOLUTION);
-}
 
 /** Layers that move with the camera */
 const SCENE_LAYERS: LayerName[] = [
@@ -89,7 +81,8 @@ class StageManager {
   private stageResizeObserver: ResizeObserver | null = null;
   private initialized = false;
   private previewResolution: StagePreviewResolution = 1;
-  private previewBaseResolution = 1;
+  private projectFormat: Readonly<ProjectVideoFormat> = DEFAULT_VIDEO_FORMAT;
+  private resizeStageView: (() => void) | null = null;
   private environmentLayerEntries: Map<string, PIXI.Container> = new Map();
   private environmentLayerRequests = new Map<string, object>();
   private environmentTextureLoads = new Map<string, Promise<PIXI.Texture | null>>();
@@ -103,14 +96,13 @@ class StageManager {
 
     try {
       await ensureLive2DRenderPipe();
-        this.previewBaseResolution = resolvePreviewResolution();
       this.app = new PIXI.Application();
       await this.app.init({
         width: STAGE_WIDTH,
         height: STAGE_HEIGHT,
         backgroundColor: 0x0a0a0f,
         antialias: true,
-        resolution: this.previewBaseResolution * this.previewResolution,
+        resolution: this.projectFormat.width / STAGE_WIDTH * this.previewResolution,
         autoDensity: true,
         powerPreference: 'high-performance',
         preserveDrawingBuffer: true, // Required for video capture
@@ -204,7 +196,7 @@ class StageManager {
   }
 
   /**
-   * Set up responsive resizing to fit the container while keeping 16:9 ratio.
+   * Set up responsive resizing to fit the container while keeping the project aspect ratio.
    */
   private setupResponsiveResize(container: HTMLElement): void {
     if (!this.app) return;
@@ -225,6 +217,7 @@ class StageManager {
       canvas.style.top = `${(containerHeight - STAGE_HEIGHT * scale) / 2}px`;
     };
 
+    this.resizeStageView = resize;
     resize();
     if (typeof ResizeObserver === 'undefined') return;
     this.stageResizeObserver?.disconnect();
@@ -269,6 +262,17 @@ class StageManager {
     return this.previewResolution;
   }
 
+  setProjectVideoFormat(format: Readonly<ProjectVideoFormat>): void {
+    const samePixels = this.projectFormat.width === format.width && this.projectFormat.height === format.height;
+    this.projectFormat = format;
+    setStageDimensions(format);
+    if (!this.app || samePixels) return;
+    if (this.sceneContainer?.filterArea) this.sceneContainer.filterArea = new PIXI.Rectangle(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+    this.setPreviewResolution(this.previewResolution);
+    this.resizeStageView?.();
+    customAnimHost.resizeStage?.();
+  }
+
   setPreviewResolution(resolution: StagePreviewResolution): void {
     const nextResolution = PREVIEW_RESOLUTION_VALUES.includes(resolution)
       ? resolution
@@ -282,7 +286,7 @@ class StageManager {
     this.app.renderer.resize(
       STAGE_WIDTH,
       STAGE_HEIGHT,
-      this.previewBaseResolution * nextResolution,
+      this.projectFormat.width / STAGE_WIDTH * nextResolution,
     );
     // Pixi autoDensity updates inline CSS size during resize. Restore the
     // responsive stage size so changing quality never changes layout.

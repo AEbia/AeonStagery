@@ -41,6 +41,10 @@ export class StageAdapter implements IStageAdapter {
     stageManager.setPreviewResolution(resolution);
   }
 
+  setProjectVideoFormat(format: import('../types/video-format').ProjectVideoFormat): void {
+    stageManager.setProjectVideoFormat(format);
+  }
+
   pauseTicker(): void {
     stageManager.pauseTicker();
   }

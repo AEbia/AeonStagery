@@ -8,6 +8,7 @@ import {
   IconAiProse,
   IconArrowLeft,
   IconBell,
+  IconCanvasSettings,
   IconCrosshair,
   IconFilm,
   IconFolder,
@@ -44,6 +45,7 @@ import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
 import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
+import { ProjectSettingsDialog } from './ui/ProjectSettingsDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
 import { TemplatePackageSelector } from './ui/templates/TemplateCapabilityConfig';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
@@ -142,6 +144,8 @@ function AppContent({ contextValue, sessionBindings }: {
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
   const [renameTarget, setRenameTarget] = useState<{ name: string; projectFilePath: string } | null>(null);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  useEffect(() => { setShowProjectSettings(false); }, [currentProject?.rootPath, currentProject?.metadata.projectId]);
   const {
     collaborationController, collaborationServerStatus, effectiveServerCredentials,
     shouldShowCollaborationPanel, handleHostNewCollaboration, handleHostExistingCollaboration,
@@ -344,6 +348,19 @@ function AppContent({ contextValue, sessionBindings }: {
               {hasUnreadChangelog && <span className="top-bar__unread-badge" aria-label="有未读更新" />}
             </summary>
             <div className="top-bar__menu" role="menu">
+              <button
+                className="top-bar__menu-item"
+                disabled={!currentProject || showProjectHome}
+                onClick={event => {
+                  const details = event.currentTarget.closest('details');
+                  if (details) details.open = false;
+                  setShowProjectSettings(true);
+                }}
+                role="menuitem"
+              >
+                <IconCanvasSettings width={15} height={15} />
+                画布设置
+              </button>
               <button
                 className="top-bar__menu-item"
                 onClick={() => {
@@ -634,6 +651,15 @@ function AppContent({ contextValue, sessionBindings }: {
             setShowWebGalRegenerate(false);
             return handleRegenerateWebGalScene(speed);
           }}
+        />
+      )}
+
+      {showProjectSettings && currentProject && !showProjectHome && (
+        <ProjectSettingsDialog
+          key={currentProject.metadata.projectId}
+          project={currentProject}
+          workspace={contextValue.services.projectWorkspace}
+          onClose={() => setShowProjectSettings(false)}
         />
       )}
 

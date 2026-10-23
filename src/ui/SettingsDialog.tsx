@@ -373,6 +373,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
               </Section>
             )}
 
+
             {activeTab === 'engine' && (
               <Section title="预烘焙与回放">
                 <SettingItem

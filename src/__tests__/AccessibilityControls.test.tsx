@@ -14,6 +14,7 @@ import { MarkerPrompt } from '../ui/timeline/MarkerPrompt';
 
 const testState = vi.hoisted(() => ({
   isPlaying: false,
+  project: { metadata: { videoFormat: { width: 1920, height: 1080, fps: 60 } } },
   playbackAdapter: {
     getCurrentTime: vi.fn(() => 0),
     getDuration: vi.fn(() => 10),
@@ -33,6 +34,7 @@ const testState = vi.hoisted(() => ({
 }));
 
 vi.mock('../ui/context/AppContext', () => ({
+  useOptionalApp: () => ({ services: { projectWorkspace: { subscribe: () => () => {}, getCurrentProject: () => testState.project } } }),
   usePlaybackAdapter: () => testState.playbackAdapter,
   useStageAdapter: () => testState.stageAdapter,
   useSceneAssetService: () => undefined,
@@ -79,6 +81,7 @@ function ModalFocusHarness({ name, onClose }: { name: string; onClose: () => voi
 
 describe('accessible custom controls', () => {
   beforeEach(() => {
+    testState.project.metadata.videoFormat.fps = 60;
     testState.playbackAdapter.getCurrentTime.mockReturnValue(0);
     testState.playbackAdapter.seek.mockClear();
     testState.playbackAdapter.subscribeTime.mockClear();
@@ -211,6 +214,15 @@ describe('accessible custom controls', () => {
 
     expect(testState.playbackAdapter.seek).toHaveBeenNthCalledWith(1, 1 / 60);
     expect(testState.playbackAdapter.seek).toHaveBeenNthCalledWith(2, 10);
+  });
+
+  it('uses project fps for keyboard and button frame stepping', () => {
+    testState.project.metadata.videoFormat.fps = 30;
+    render(<PlaybackControls />);
+    fireEvent.keyDown(screen.getByRole('slider', { name: '播放进度' }), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('button', { name: '前进一帧' }));
+    expect(testState.playbackAdapter.seek).toHaveBeenNthCalledWith(1, 1 / 30);
+    expect(testState.playbackAdapter.seek).toHaveBeenNthCalledWith(2, 1 / 30);
   });
 
   it('keeps the progress fill inside the slider when the CTI moves past the scene duration', () => {

@@ -95,6 +95,19 @@ function makeRecentProjects(count: number) {
 }
 
 describe('ProjectHome collaboration entry', () => {
+  it('validates and submits project resolution and fps during creation', async () => {
+    const props = renderHome();
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    fireEvent.change(screen.getByLabelText('宽度 (px)'), { target: { value: '1080' } });
+    fireEvent.change(screen.getByLabelText('高度 (px)'), { target: { value: '1920' } });
+    fireEvent.change(screen.getByLabelText('帧率 (fps)'), { target: { value: '0' } });
+    expect((screen.getByRole('button', { name: '创建项目' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('1–240 fps');
+    fireEvent.change(screen.getByLabelText('帧率 (fps)'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(props.onCreateProject).toHaveBeenCalledWith(expect.objectContaining({ videoFormat: { width: 1080, height: 1920, fps: 30 } })));
+  });
+
   it('reveals recent projects from the button and right-click menu without opening them', async () => {
     const showItemInFolder = vi.fn().mockResolvedValue({ success: true });
     vi.stubGlobal('aeonStageryAPI', { fs: { showItemInFolder } });

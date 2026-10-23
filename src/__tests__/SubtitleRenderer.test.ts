@@ -9,6 +9,7 @@ import type { DialogueConfig } from '../engine/DialogueTemplates';
 import { DialogueCoordinator } from '../engine/coordinators/DialogueCoordinator';
 import { sceneStatementDefinitionRegistry } from '../services/semantic-scene/SceneStatementDefinitionRegistry';
 import { SEMANTIC_BUILTIN_TEMPLATE_PACKAGE } from '../services/template-package/BuiltinTemplatePackage';
+import { setStageDimensions } from '../engine/StageDimensions';
 
 const stageState = vi.hoisted(() => ({
   subtitleLayer: null as any,
@@ -95,10 +96,38 @@ describe('SubtitleRenderer', () => {
   });
 
   afterEach(() => {
+    setStageDimensions();
     gsap.globalTimeline.clear();
     vi.restoreAllMocks();
     stageState.subtitleLayer.destroy({ children: true });
     stageState.subtitleLayer = null;
+  });
+
+  it('reflows an image dialogue for portrait while keeping the authored template unchanged', () => {
+    setStageDimensions({ width: 1080, height: 1920, fps: 30 });
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: 'portrait', speaker: '', text: 'Hello', style: 'instant' as const, duration: 2,
+      presentation: {
+        renderer: 'image-dialogue-v1' as const,
+        textbox: { image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 },
+        text: { x: 198, y: 820, maxWidth: 1520, fontSize: 48, lineHeight: 68 },
+      },
+    };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const panel = container.children[0];
+    const text = container.children.find((child): child is PIXI.Text => child instanceof PIXI.Text)!;
+    expect(panel.x).toBe(67.5);
+    expect(panel.width).toBe(945);
+    expect(panel.y).toBe(1632);
+    expect(text.y).toBe(1660);
+    expect(text.style.wordWrapWidth).toBeLessThan(1080);
+    expect(config.presentation.textbox).toEqual({ image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 });
+    renderer.ensureDialogueOnStage(config, 1.5);
+    expect(text.y).toBe(1660);
   });
 
   it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'])('retains hidden state across dialogue playback, seek and replacement for %s', (styleId) => {

@@ -12,12 +12,11 @@ import gsap from 'gsap';
 import { stageManager } from './StageManager';
 import { hookSystem } from '../api/hooks';
 import { templates, DialogueConfig } from './DialogueTemplates';
-import { ImageDialogueTemplate } from './ImageDialogueTemplate';
+import { ImageDialogueTemplate, adaptDialoguePresentation } from './ImageDialogueTemplate';
 import { settingsManager } from '../ui/SettingsStore';
 import type { PreparedAssetRef, PreparedCompiledScene, PreparedRuntimeValue } from '../api/types/semantic-scene';
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 // Performance: TextMetrics Cache
 const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
@@ -125,6 +124,7 @@ class SubtitleRenderer {
       templateId,
       presentation ? JSON.stringify(presentation) : '',
       speedKey,
+      STAGE_WIDTH, STAGE_HEIGHT,
       settingsManager.get('dialogueEntranceAnimation') !== false,
       this.getDialogueFontSize(),
       this.getDialogueFontSizeSource(),
@@ -155,6 +155,8 @@ class SubtitleRenderer {
   }
 
   showDialogue(config: DialogueConfig): gsap.core.Timeline {
+    const sourceConfig = config;
+    if (config.presentation) config = { ...config, presentation: adaptDialoguePresentation(config.presentation) };
     const {
       text: rawText,
       style = 'typewriter',
@@ -166,7 +168,7 @@ class SubtitleRenderer {
 
     const templateId = configTemplate || this.currentTemplateId;
     const dialogueTextSpeed = settingsManager.get('dialogueTextSpeed');
-    const cacheKey = this.buildDialogueCacheKey(config, templateId, dialogueTextSpeed);
+    const cacheKey = this.buildDialogueCacheKey(sourceConfig, templateId, dialogueTextSpeed);
 
     // Clean up obsolete cache entries for the same config._id
     if (config._id) {
@@ -496,7 +498,7 @@ class SubtitleRenderer {
     this.dialogueCache.set(cacheKey, {
       container,
       timeline: tl,
-      config,
+      config: sourceConfig,
       fontSize: globalFontSize,
       fontSizeSource,
       textSpeed: dialogueTextSpeed,

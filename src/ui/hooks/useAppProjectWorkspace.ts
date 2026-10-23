@@ -110,9 +110,11 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     rootPath,
     templates,
     webgal,
+    videoFormat,
   }: {
     name: string;
     rootPath: string;
+    videoFormat?: import('../../api/types/video-format').ProjectVideoFormat;
     templates?: ProjectTemplateConfiguration;
     webgal?: WebGalImportInput;
   }) => {
@@ -122,6 +124,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
       rootPath,
       templates,
       webgal,
+      videoFormat,
     });
     if (result.success && result.webgalReport) {
       const { stats, characters, unsupportedCommands } = result.webgalReport;

@@ -13,7 +13,7 @@ import type {
   CameraMotionConfig,
 } from './camera';
 import type { CharacterConfig, CharacterTransformConfig } from './character';
-import type { ExportConfig, ExportProgress, ExportResult, FFmpegConvertOptions } from './export';
+import type { ExportConfig, ExportProgress, ExportResult, ExportOperationResult, FFmpegConvertOptions, FFmpegStreamOptions } from './export';
 import type { HookEvent, HookContext } from './hook';
 import type {
   WorkspaceRuntimeSnapshot,
@@ -308,9 +308,10 @@ export interface AeonStageryElectronAPI {
   };
   export: {
     saveVideo(buffer: ArrayBuffer, path: string): Promise<{ success: boolean; error?: string }>;
-    convert(inputPath: string, outputPath: string, options?: FFmpegConvertOptions): Promise<{ success: boolean; error?: string; stderr?: string; path?: string }>;
+    convert(inputPath: string, outputPath: string, options?: FFmpegConvertOptions): Promise<ExportOperationResult & { path?: string }>;
     getTempDir(): Promise<string>;
-    startStreamExport(outputPath: string, options?: { fps?: number; width?: number; height?: number; codec?: string; crf?: number; vflip?: boolean; isEncoded?: boolean; bitrate?: number; transparent?: boolean }): Promise<{ success: boolean; error?: string }>;
+    getEncodingCapabilities(): Promise<{ success: boolean; encoders: string[]; error?: string }>;
+    startStreamExport(outputPath: string, options?: FFmpegStreamOptions): Promise<ExportOperationResult>;
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;

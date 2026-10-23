@@ -5,6 +5,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AppProvider } from '../ui/context/AppContext';
 import { TrackArea } from '../ui/timeline/TrackArea';
+import type { ICharacterAdapter } from '../api/interfaces/ICharacterAdapter';
+import type { Live2DMotionSamplingOptions } from '../engine/runtime/Live2DRuntimeContracts';
 import type { LooseTimelineAction as SceneAction } from './fixtures/TimelineTestTypes';
 
 function createAction(id: string, time: number, actionType: SceneAction['action'] = 'dialogue'): { id: string; action: SceneAction } {
@@ -53,6 +55,7 @@ function renderTrackArea(options: {
   onDeleteActions?: (ids: readonly string[]) => void | Promise<void>;
   copyBuffer?: any[];
   services?: any;
+  characterAdapter?: Partial<Pick<ICharacterAdapter, 'getMotionDuration' | 'sampleMotion'>>;
 } = {}) {
   const actions = options.actions ?? Array.from({ length: 50 }, (_, index) => createAction(`a${index}`, index * 0.2));
   if (!options.actions) {
@@ -87,7 +90,7 @@ function renderTrackArea(options: {
       setSpeed: vi.fn(),
     } as any,
     camera: {} as any,
-    character: {} as any,
+    character: (options.characterAdapter ?? {}) as unknown as ICharacterAdapter,
     stage: {} as any,
     timeline: { select: vi.fn() } as any,
     export: {} as any,
@@ -207,6 +210,58 @@ describe('TrackArea summary mode', () => {
     const target = container.querySelector('[data-tutorial-target="timeline-blank-after-entrance"]');
     expect(target).toBeTruthy();
     expect((target as HTMLElement).style.left).toBe('125px');
+  });
+
+  it('uses project FPS for conversion sampling and keyframe estimates when scene FPS is omitted', async () => {
+    const motion = { kind: 'resource', key: 'wave.mtn' };
+    const action = {
+      _id: 'motion_1',
+      action: 'playMotion',
+      semanticType: 'characterPerformance',
+      time: 2,
+      params: { target: 'hero', duration: 2, motion },
+      sourceParams: { target: 'hero', durationSeconds: 2, motion },
+    } as unknown as SceneAction;
+    const sampleMotion = vi.fn(async (_characterId: string, _motionKey: string, _options: Live2DMotionSamplingOptions) => ({
+      status: 'sampled' as const,
+      metadata: { durationSeconds: 2 },
+    }));
+    const project = { metadata: { videoFormat: { width: 1920, height: 1080, fps: 30 } } };
+    const projectWorkspace = {
+      getCurrentProject: () => project,
+      subscribe: () => () => {},
+    };
+
+    renderTrackArea({
+      actions: [{ id: 'motion_1', action }],
+      semanticDocument: {
+        schemaVersion: 5,
+        sceneId: 'scene_1',
+        meta: { title: 'Motion FPS' },
+        statements: [{
+          id: 'statement-motion_1',
+          time: 2,
+          type: 'characterPerformance',
+          params: { target: 'hero', durationSeconds: 2, motion },
+        }],
+      },
+      characterAdapter: {
+        getMotionDuration: () => 0,
+        sampleMotion,
+      },
+      services: {
+        projectWorkspace,
+        customMotionConversion: { convert: vi.fn() },
+      },
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('timeline-track-block'), { clientX: 20, clientY: 50 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '转为自定义动作…' }));
+
+    await waitFor(() => {
+      expect(sampleMotion).toHaveBeenCalledWith('hero', 'wave.mtn', { fps: 30, zeroSourceFades: true });
+      expect(screen.getByText('约 60 帧')).toBeTruthy();
+    });
   });
 
   it('renders summary blocks, anchor pins, and a single portal tooltip', async () => {

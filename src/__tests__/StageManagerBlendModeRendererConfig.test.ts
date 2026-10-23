@@ -62,7 +62,7 @@ it('enables Pixi back-buffer support when initializing the stage for advanced bl
     preference: 'webgl',
     preserveDrawingBuffer: true,
     useBackBuffer: true,
-    resolution: 2,
+    resolution: 1,
   }));
 
   const canvas = stageManager.getCanvas();
@@ -70,15 +70,27 @@ it('enables Pixi back-buffer support when initializing the stage for advanced bl
 
   stageManager.setPreviewResolution(0.5);
   expect(stageManager.getPreviewResolution()).toBe(0.5);
-  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 1);
+  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 0.5);
   expect(stageManager.getApp().render).toHaveBeenCalledTimes(1);
   expect(canvas.style.width).toBe(originalStyle.width);
   expect(canvas.style.height).toBe(originalStyle.height);
 
   stageManager.setPreviewResolution(0.25);
   expect(stageManager.getPreviewResolution()).toBe(0.25);
-  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 0.5);
+  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 0.25);
 
   stageManager.setPreviewResolution(1);
+  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 1);
+
+  stageManager.setProjectVideoFormat({ width: 3840, height: 2160, fps: 30 });
+  expect(stageManager.getWidth()).toBe(1920);
+  expect(stageManager.getHeight()).toBe(1080);
   expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 2);
+  stageManager.setPreviewResolution(0.5);
+  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1920, 1080, 1);
+  stageManager.setProjectVideoFormat({ width: 1080, height: 1920, fps: 30 });
+  expect(stageManager.getWidth()).toBe(1080);
+  expect(stageManager.getHeight()).toBe(1920);
+  expect(stageManager.getApp().renderer.resize).toHaveBeenLastCalledWith(1080, 1920, 0.5);
+  stageManager.setProjectVideoFormat({ width: 1920, height: 1080, fps: 60 });
 });

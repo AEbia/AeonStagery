@@ -25,6 +25,7 @@ import {
   useCharacterAdapter,
 } from '../context/AppContext';
 import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
+import { useProjectVideoFormat } from '../hooks/useProjectVideoFormat';
 
 import { computePresentationFootprintLanes } from './laneUtils';
 import { resolveLifecyclePairRelationshipLaneIndices } from './lifecyclePairRelationshipGeometry';
@@ -158,6 +159,7 @@ export const TrackArea = React.memo(({
   const marqueeRef = useRef<HTMLDivElement>(null);
 
   const documentStore = useDocumentStore();
+  const { fps: projectFps } = useProjectVideoFormat();
   const semanticSnapshot = useSemanticTimelineSnapshot(providedSemanticSnapshot);
   const { items: semanticTimelineItems, itemById: semanticTimelineItemById } = semanticSnapshot;
   const selectAfterCommit = useCallback((ids: Record<string, boolean>) => onSelect(Object.keys(ids), false), [onSelect]);
@@ -892,7 +894,7 @@ export const TrackArea = React.memo(({
           setConversionDialog({ mode: 'convert', targetId: charId, motionKey, durationSeconds });
           if (charId && motionKey && adapterDuration <= 0) {
             if (characterAdapter.sampleMotion) {
-              void characterAdapter.sampleMotion(charId, motionKey, { fps: 60, zeroSourceFades: true }).then((sampled) => {
+              void characterAdapter.sampleMotion(charId, motionKey, { fps: projectFps, zeroSourceFades: true }).then((sampled) => {
                 const meta = sampled.metadata;
                 if (!meta) return;
                 if (meta.durationSeconds > 0) {
@@ -928,13 +930,12 @@ export const TrackArea = React.memo(({
       ];
     }
     return [];
-  }, [actionById, semanticTimelineItemById, onSelect, customMotionEditing, characterAdapter]);
+  }, [actionById, semanticTimelineItemById, onSelect, customMotionEditing, characterAdapter, projectFps]);
 
-  const sceneFps = semanticSnapshot.document?.meta?.fps ?? 60;
   const estimateKeyframesForDensity = React.useCallback((density: CustomMotionDensity): number => {
     if (!conversionDialog) return 0;
-    return estimateCustomMotionKeyframes(conversionDialog.durationSeconds, density, sceneFps);
-  }, [conversionDialog, sceneFps]);
+    return estimateCustomMotionKeyframes(conversionDialog.durationSeconds, density, projectFps);
+  }, [conversionDialog, projectFps]);
 
   const handleConvertConfirm = async (density: CustomMotionDensity) => {
     const target = conversionTargetRef.current;

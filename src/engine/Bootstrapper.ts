@@ -116,6 +116,7 @@ import { createProjectAgentImageReadPort } from '../services/project-agent/Proje
 import { ProjectAgentImageSessionCache } from '../services/project-agent/ProjectAgentImageSessionCache';
 import { ProjectAgentIFileAccessFs } from '../services/project-agent/ProjectAgentProjectFs';
 import type { ProjectState } from '../api/types/project';
+import { DEFAULT_VIDEO_FORMAT } from '../api/types/video-format';
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 
 export type BootstrapAiProseOptions = Omit<
@@ -371,12 +372,21 @@ export function bootstrap(options?: {
     resolveAsset: (source, assetContext) => sceneAssets.resolveSemanticRuntimeAsset(source, assetContext),
     prepareSource: (source) => sceneAssets.normalizeSemanticSource(source),
   });
+  const stageAdapter = new StageAdapter();
+  let activeVideoFormat = DEFAULT_VIDEO_FORMAT;
+  const setProjectVideoFormat = (format: typeof DEFAULT_VIDEO_FORMAT) => {
+    stageAdapter.setProjectVideoFormat(format);
+    activeVideoFormat = format;
+  };
   const semanticDocumentCoordinator = new SemanticDocumentCoordinator(
     documentStore,
     semanticPipeline,
     projectionRuntime,
     durationSink,
-    async (bundle) => sceneAssets.hydratePreparedRuntimeConfigs(bundle.prepared),
+    async (bundle) => {
+      setProjectVideoFormat(projectSession.getCurrentProject()?.metadata.videoFormat ?? DEFAULT_VIDEO_FORMAT);
+      await sceneAssets.hydratePreparedRuntimeConfigs(bundle.prepared);
+    },
   );
   const semanticAuthoring = new SemanticAuthoringApplicationService(
     documentStore,
@@ -485,6 +495,7 @@ export function bootstrap(options?: {
   const characterAdapter = new CharacterAdapter();
   const customMotionEditing = new CustomMotionEditing({
     store: documentStore, authoring: semanticAuthoring,
+    getFps: () => projectSession.getCurrentProject()?.metadata.videoFormat?.fps ?? DEFAULT_VIDEO_FORMAT.fps,
     authority: new InMemoryCustomMotionEditAuthority(),
     preview: {
       apply: (input) => getScriptEngine()?.previewCustomMotion(input),
@@ -493,12 +504,14 @@ export function bootstrap(options?: {
   });
   const customMotionConversion = new CustomMotionConversion({
     store: documentStore, authoring: semanticAuthoring, editing: customMotionEditing,
+    getFps: () => projectSession.getCurrentProject()?.metadata.videoFormat?.fps ?? DEFAULT_VIDEO_FORMAT.fps,
     sampleMotion: (characterId, motionKey, options) => characterAdapter.sampleMotion(characterId, motionKey, options),
   });
   let editingProject = projectSession.getCurrentProject();
   const disposeMotionProjectLifecycle = projectSession.subscribe(() => {
     const next = projectSession.getCurrentProject();
-    if (!next || next.rootPath !== editingProject?.rootPath || next.metadata.projectId !== editingProject?.metadata.projectId) {
+    if (!next || next.rootPath !== editingProject?.rootPath || next.metadata.projectId !== editingProject?.metadata.projectId
+      || (next.metadata.videoFormat?.fps ?? 60) !== (editingProject?.metadata.videoFormat?.fps ?? 60)) {
       void customMotionConversion.cancel();
       void customMotionEditing.closeActive('project-changed').catch(() => {});
     }
@@ -930,6 +943,14 @@ export function bootstrap(options?: {
     },
     () => [...templatePackageCatalog.getPackages()],
     sceneAssets,
+    (format, commit) => {
+      let previous = activeVideoFormat;
+      return semanticDocumentCoordinator.updateRuntimeConfiguration(
+        () => { previous = activeVideoFormat; setProjectVideoFormat(format); },
+        () => setProjectVideoFormat(previous),
+        commit,
+      );
+    },
   );
   const libraryRoots = new LibraryRoots(
     projectWorkspace,
@@ -1024,7 +1045,6 @@ export function bootstrap(options?: {
   });
 
   const cameraAdapter = new CameraAdapter();
-  const stageAdapter = new StageAdapter();
   const timelineAdapter = new TimelineAdapter(editorStore);
 
   const exportAdapter = new ExportAdapter(

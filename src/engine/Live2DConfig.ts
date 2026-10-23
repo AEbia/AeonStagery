@@ -8,8 +8,7 @@ import type { Live2DAdapterId, Live2DRuntimeDescriptor } from './Live2DRuntimeRe
 import type { Live2DModelHandle } from './live2d/runtime/Live2DRuntimeControlModule';
 import { readPartOpacities } from './live2d/runtime/Cubism2PartOpacity';
 
-export const STAGE_WIDTH = 1920;
-export const STAGE_HEIGHT = 1080;
+export { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 /**
  * Standard Cubism 2 parameter names and their idle default values.

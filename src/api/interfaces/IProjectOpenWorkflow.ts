@@ -41,6 +41,7 @@ export interface ProjectWorkflowResult {
 export interface CreateProjectWorkflowInput {
   name: string;
   rootPath: string;
+  videoFormat?: import('../types/video-format').ProjectVideoFormat;
   templates?: ProjectTemplateConfiguration;
   webgal?: WebGalImportInput;
 }

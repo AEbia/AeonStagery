@@ -277,6 +277,7 @@ const electronAPI = {
     convert: (inputPath: string, outputPath: string, options?: Parameters<AeonStageryElectronAPI['export']['convert']>[2]) =>
       ipcRenderer.invoke('ffmpeg:convert', inputPath, outputPath, options),
     getTempDir: () => ipcRenderer.invoke('ffmpeg:getTempDir'),
+    getEncodingCapabilities: () => ipcRenderer.invoke('ffmpeg:getEncodingCapabilities'),
     startStreamExport: (outputPath: string, options?: Parameters<AeonStageryElectronAPI['export']['startStreamExport']>[1]) =>
       ipcRenderer.invoke('ffmpeg:startStreamExport', outputPath, options),
     pushFrame: (frameData: Uint8Array | Uint8ClampedArray) =>

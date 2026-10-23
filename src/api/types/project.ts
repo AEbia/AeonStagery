@@ -326,6 +326,8 @@ export interface ProjectMetadataV2 {
   defaultSceneId: string;
   scenes: ProjectSceneEntry[];
   assetRoots: ProjectAssetRoots;
+  /** Omitted by legacy projects; resolves to 1920×1080 at 60 fps. */
+  videoFormat?: import('./video-format').ProjectVideoFormat;
   /** Portable, project-contained library copies keyed by stable mount id. */
   embeddedLibraryMounts?: EmbeddedLibraryMount[];
   templates?: ProjectTemplateConfiguration;
