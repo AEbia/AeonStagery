@@ -405,7 +405,7 @@ const definitions = {
         return Math.max(duration(params.durationSeconds), repeatedExtent);
       }
       if (params.mode === 'follow') {
-        return params.operation === 'start' ? duration(params.durationSeconds) : 0;
+        return 0;
       }
       return duration(params.durationSeconds);
     },

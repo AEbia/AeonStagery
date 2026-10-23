@@ -218,7 +218,7 @@ describe('formal camera Bake/export parity', () => {
     expect(engine.getCurrentCamera()).not.toEqual(pursued);
   });
 
-  it.each(['stop', 'duration'] as const)('holds the release position through seek and frame capture after follow %s', async operation => {
+  it('holds the release position through seek and frame capture after follow stop', async () => {
     installModelBoundary();
     const { prepared } = await new SemanticScenePipeline({ resolveAsset: source => source }).processDocument({
       schemaVersion: 5, sceneId: 'released-follow',
@@ -232,10 +232,9 @@ describe('formal camera Bake/export parity', () => {
         { id: 'zoom', type: 'camera', time: 0,
           params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
         { id: 'follow', type: 'camera', time: 1,
-          params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 0.85,
-            ...(operation === 'duration' ? { durationSeconds: 1 } : {}) } },
-        ...(operation === 'stop' ? [{ id: 'stop', type: 'camera' as const, time: 2,
-          params: { mode: 'follow' as const, operation: 'stop' as const } }] : []),
+          params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 0.85 } },
+        { id: 'stop', type: 'camera', time: 2,
+          params: { mode: 'follow', operation: 'stop' } },
       ],
     });
     // Keep part geometry fixed relative to the proxy origin while the authored
@@ -261,17 +260,15 @@ describe('formal camera Bake/export parity', () => {
     } finally { rig.root.destroy(); }
   });
 
-  it.each(['stop', 'duration', 'move'] as const)('hands the live pursuit position to a following %s without snapping', async operation => {
+  it.each(['stop', 'move'] as const)('hands the live pursuit position to a following %s without snapping', async operation => {
     installModelBoundary();
     const base = await cameraCrossEntryScene(true);
     const takeover = base.actions.find(action => action.source.statementId === 'takeover');
     if (!takeover) throw new Error('Missing takeover fixture');
     const release = operation === 'move' ? takeover : { ...takeover, action: 'cameraUnfollow' as const, params: {} };
     const scene = { ...base, actions: [
-      ...base.actions.filter(action => ['enter', 'move', 'follow'].includes(action.source.statementId))
-        .map(action => operation === 'duration' && action.source.statementId === 'follow'
-          ? { ...action, params: { ...action.params, duration: 1.5 } } : action),
-      ...(operation === 'duration' ? [] : [release]),
+      ...base.actions.filter(action => ['enter', 'move', 'follow'].includes(action.source.statementId)),
+      release,
     ] };
     await engine.loadPreparedScene(scene);
     await engine.seek(3.2, true);

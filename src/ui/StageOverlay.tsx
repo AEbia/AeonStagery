@@ -178,8 +178,8 @@ export default function StageOverlay() {
         const charId = group.getAttribute('data-char-id');
         if (!charId) continue;
 
-        const head = characterAdapter.getPoint(charId, 'head', headPoint);
-        const chest = characterAdapter.getPoint(charId, 'chest', chestPoint);
+        const head = characterAdapter.getScreenPoint(charId, 'head', headPoint);
+        const chest = characterAdapter.getScreenPoint(charId, 'chest', chestPoint);
 
         if (head && chest) {
           const headCircle = group.querySelector('.head-marker') as SVGCircleElement;
@@ -243,7 +243,7 @@ export default function StageOverlay() {
     const stageY = (e.clientY - canvasRect.top) / canvasRect.height;
 
     const charId = selectedAction.params.id;
-    const headPoint = characterAdapter.getPoint(charId, 'head');
+    const headPoint = characterAdapter.getScreenPoint(charId, 'head');
     if (!headPoint) return;
 
     const focusX = Math.max(-1, Math.min(1, (stageX - headPoint.x) * 4));

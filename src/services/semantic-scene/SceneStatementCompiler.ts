@@ -318,7 +318,6 @@ function validateCameraFollowLifecycle(
 ): void {
   let activeFollow: CameraTimelineEvent | undefined;
   for (const event of collectCameraTimelineEvents(document, registry)) {
-    if (activeFollow && followExpiresBy(activeFollow, event.time)) activeFollow = undefined;
     const params = event.params;
     if (params.mode === 'follow') {
       if (params.operation === 'start') {
@@ -344,14 +343,6 @@ function validateCameraFollowLifecycle(
 
     if (cameraStatementWritesPosition(params)) activeFollow = undefined;
   }
-}
-
-function followExpiresBy(event: CameraTimelineEvent, time: number): boolean {
-  const { params } = event;
-  return params.mode === 'follow'
-    && params.operation === 'start'
-    && params.durationSeconds !== undefined
-    && time >= event.time + params.durationSeconds;
 }
 
 function collectCameraTimelineEvents(
@@ -635,7 +626,6 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
           characterId: params.target,
           offset: params.offset,
           smoothing: params.smoothing,
-          duration: params.durationSeconds,
         }))];
       }
       // Follow only holds the position channel: releasing it must not touch

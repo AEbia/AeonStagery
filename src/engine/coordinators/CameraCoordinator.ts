@@ -166,8 +166,7 @@ export class CameraCoordinator {
       if (!deps.retainFollowPosition) this.controller.tickFollow(true);
       if (deps.retainFollowPosition && !this.liveFollow) {
         if (action) {
-          const duration = typeof action.params.duration === 'number' ? action.params.duration : Infinity;
-          this.liveFollow = { action, releaseTime: Math.min((action.time ?? 0) + duration, findFollowReleaseInstant(timeline, action)) };
+          this.liveFollow = { action, releaseTime: findFollowReleaseInstant(timeline, action) };
         }
       }
     } else {

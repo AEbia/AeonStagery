@@ -11,8 +11,8 @@ function scheduleEvaluatedCamera(ctx: SchedulerContext, action: RuntimeTimelineA
   const { params } = action;
   const isPath = action.action === 'cameraPath';
   const isFollowStateChange = action.action === 'cameraFollow' || action.action === 'cameraUnfollow';
-  let duration = typeof params.duration === 'number' ? params.duration
-    : typeof params.durationSeconds === 'number' ? params.durationSeconds : isPath || isFollowStateChange ? 0 : 1;
+  let duration = isFollowStateChange ? 0 : typeof params.duration === 'number' ? params.duration
+    : typeof params.durationSeconds === 'number' ? params.durationSeconds : isPath ? 0 : 1;
   if (isPath && Array.isArray(params.keyframes)) {
     const keyframes: readonly { time?: number }[] = params.keyframes;
     const period = keyframes.reduce((end, frame) => Math.max(end, frame.time ?? 0), 0);
@@ -37,20 +37,13 @@ export function scheduleCameraFollow(ctx: SchedulerContext, action: RuntimeTimel
   const { tl } = ctx;
   const { time, params } = action;
 
-  // Legacy actions may carry an authored duration. Honor it so GSAP-driven
-  // playback stops at the same moment CameraCoordinator's seek reconciliation
-  // (params.duration) does — one lifetime, two paths.
-  const authoredDuration =
-    typeof params.duration === 'number' && params.duration > 0 ? params.duration : undefined;
-
   const config: CameraMotionConfig = {
     move: 'follow',
     easing: 'linear',
-    duration: authoredDuration ?? 999, // indefinite
+    duration: 0,
     characterId: params.characterId,
     offset: params.offset,
     smoothing: params.smoothing,
-    autoUnfollow: authoredDuration !== undefined,
   };
 
   const camTl = cameraController.executeMotion(config);

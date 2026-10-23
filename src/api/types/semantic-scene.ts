@@ -418,7 +418,6 @@ export interface CameraFollowParams {
   target?: string;
   offset?: Vec2;
   smoothing?: number;
-  durationSeconds?: number;
 }
 
 export interface CameraPathKeyframe {

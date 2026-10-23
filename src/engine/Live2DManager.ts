@@ -714,6 +714,10 @@ class Live2DManager {
     return this.characterGeometry.getPoint(id, pointName, out);
   }
 
+  getScreenPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null {
+    return this.characterGeometry.getScreenPoint(id, pointName, out);
+  }
+
   getPosition(id: string): { x: number; y: number } | null {
     return this.getPoint(id, 'center');
   }

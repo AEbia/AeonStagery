@@ -3,12 +3,12 @@ import { computeCameraStateAtTime, prepareCameraZoomResolver } from '../engine/C
 import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('computeCameraStateAtTime', () => {
-  it.each(['stop', 'duration'] as const)('holds the release-time anchor after follow %s without a trajectory', operation => {
+  it('holds the release-time anchor after follow stop without a trajectory', () => {
     const timeline: RuntimeTimelineAction[] = [
       { _id: 'zoom', action: 'cameraMotion', time: 0, params: { zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
       { _id: 'follow', action: 'cameraFollow', time: 1,
-        params: { characterId: 'hero', smoothing: 0.85, ...(operation === 'duration' ? { duration: 1 } : {}) } },
-      ...(operation === 'stop' ? [{ _id: 'stop', action: 'cameraUnfollow' as const, time: 2, params: {} }] : []),
+        params: { characterId: 'hero', smoothing: 0.85 } },
+      { _id: 'stop', action: 'cameraUnfollow', time: 2, params: {} },
     ];
     const anchorAt = (time: number) => ({ x: 0.4 + time * 0.1, y: 0.5 });
     // Cold direct seek, forward export samples, then out-of-order seeks.
@@ -176,18 +176,19 @@ describe('computeCameraStateAtTime', () => {
     expect(released.zoom).toBe(2);
   });
 
-  it('ends an indefinite follow only through release actions, honoring authored durations', () => {
+  it('ends follow through release events and ignores legacy duration values', () => {
     const deps = { resolveCharacterPosition: () => ({ x: 0.7, y: 0.6 }) };
-    const timeline = [
-      { action: 'cameraFollow', time: 5, params: { characterId: 'hero' } },
-      { action: 'cameraUnfollow', time: 7, params: {} },
-      { action: 'cameraFollow', time: 10, params: { characterId: 'hero', duration: 2 } },
+    const timeline: RuntimeTimelineAction[] = [
+      { _id: 'first', action: 'cameraFollow', time: 5, params: { characterId: 'hero' } },
+      { _id: 'stop-first', action: 'cameraUnfollow', time: 7, params: {} },
+      { _id: 'second', action: 'cameraFollow', time: 10, params: { characterId: 'hero', duration: 2 } },
+      { _id: 'stop-second', action: 'cameraUnfollow', time: 15, params: {} },
     ];
 
-    expect(computeCameraStateAtTime(timeline as any, 6.5, deps).follow).not.toBeNull();
-    expect(computeCameraStateAtTime(timeline as any, 11, deps).follow).not.toBeNull();
-    // Authored duration expires the second follow without a stop statement.
-    expect(computeCameraStateAtTime(timeline as any, 13, deps).follow).toBeNull();
+    expect(computeCameraStateAtTime(timeline, 6.5, deps).follow).not.toBeNull();
+    expect(computeCameraStateAtTime(timeline, 7, deps).follow).toBeNull();
+    expect(computeCameraStateAtTime(timeline, 13, deps).follow).not.toBeNull();
+    expect(computeCameraStateAtTime(timeline, 15, deps).follow).toBeNull();
   });
 
   it('keeps prior channel values when a follow anchor cannot be resolved', () => {
@@ -557,7 +558,8 @@ describe('camera follow entry transient (seek presents the intermediate state)',
   it('caps the transient at the release instant so short follows latch their mid-glide frame', () => {
     const timeline = [
       pushFirst,
-      { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1], duration: 0.3 } },
+      { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1] } },
+      { action: 'cameraUnfollow', time: 5.3, params: {} },
     ];
     // Elapsed capped at 0.3s → weight ≈ 0.0536464; latch holds that frame.
     const wCap = 0.0536464;

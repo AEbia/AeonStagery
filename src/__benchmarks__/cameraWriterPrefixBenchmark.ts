@@ -16,7 +16,7 @@ for (const scenario of scenarios) for (const count of counts) {
     const start = index / count;
     if (scenario === 'position') return action(`position-${index}`, 'cameraMotion', start, { target: [0.2 + (index % 8) / 20, 0.3 + (index % 7) / 20], duration: 0.35, easing: 'linear', _cameraProperties: ['position'] });
     if (scenario === 'rotation') return action(`rotation-${index}`, 'cameraMotion', start, { angle: (index % 30) + 1, duration: 0.35, easing: 'linear', _cameraProperties: ['rotation'] });
-    if (scenario === 'follow') return action(`follow-${index}`, 'cameraFollow', start, { characterId: 'hero', duration: 0.35, smoothing: 0.25 });
+    if (scenario === 'follow') return action(`follow-${index}`, 'cameraFollow', start, { characterId: 'hero', smoothing: 0.25 });
     if (scenario === 'reset') return action(`reset-${index}`, 'cameraReset', start, { duration: 0.35, ease: 'linear' });
     return action(`path-${index}`, 'cameraPath', start, { ease: 'linear', keyframes: [{ time: 0, position: [0.2, 0.3] }, { time: 0.35, position: [0.7, 0.6] }] });
   });

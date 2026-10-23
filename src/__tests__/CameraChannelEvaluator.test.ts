@@ -48,7 +48,7 @@ describe('evaluateCameraChannels', () => {
       const timeline: RuntimeTimelineAction[] = Array.from({ length: 20 }, (_, index) => {
         const time = index * 0.17;
         const kind = (index + variant) % 6;
-        if (kind === 0) return action(`follow-${index}`, 'cameraFollow', time, { characterId: 'hero', smoothing: 0.6, duration: 0.41 });
+        if (kind === 0) return action(`follow-${index}`, 'cameraFollow', time, { characterId: 'hero', smoothing: 0.6 });
         if (kind === 1) return action(`stop-${index}`, 'cameraUnfollow', time, {});
         if (kind === 2) return action(`position-${index}`, 'cameraMotion', time, { target: [0.3 + (index % 4) / 10, 0.4], duration: 0.37, easing: 'linear', _cameraProperties: ['position'] });
         if (kind === 3) return action(`rotation-${index}`, 'cameraMotion', time, { angle: index * 7, duration: 0.31, easing: 'linear', _cameraProperties: ['rotation'] });
@@ -162,7 +162,7 @@ describe('evaluateCameraChannels', () => {
     const result = evaluateCameraChannels({
       timeline: [
         action('zoom-before-follow', 'cameraMotion', 0, { zoom: 2, _cameraProperties: ['zoom'] }),
-        action('follow-center', 'cameraFollow', 0.5, { characterId: 'hero', smoothing: 0, duration: 2 }),
+        action('follow-center', 'cameraFollow', 0.5, { characterId: 'hero', smoothing: 0 }),
       ],
       sceneTime: 1,
       logicalReferenceSize: referenceSize,
@@ -171,6 +171,30 @@ describe('evaluateCameraChannels', () => {
 
     expect(result.position.x).toBeCloseTo(0.35, 8);
     expect(result.position.y).toBeCloseTo(0.4, 8);
+    expect(result.follow?.characterId).toBe('hero');
+  });
+
+  it.each([undefined, 'chest'])('holds follow entry when its %s trajectory is missing despite an available head', part => {
+    const result = evaluateCameraChannels({
+      timeline: [
+        action('zoom', 'cameraMotion', 0, { zoom: 2, duration: 0, _cameraProperties: ['zoom'] }),
+        action('follow', 'cameraFollow', 0, {
+          characterId: 'hero', smoothing: 0.5, ...(part ? { focus: { part } } : {}),
+        }),
+      ],
+      sceneTime: 1,
+      logicalReferenceSize: referenceSize,
+      anchorTrajectories: [{
+        version: 1, characterId: 'hero', part: 'head',
+        validity: [{ start: 0, end: 2 }], events: [],
+        samples: [
+          { time: 0, position: { x: 0.8, y: 0.8 } },
+          { time: 2, position: { x: 0.8, y: 0.8 } },
+        ],
+      }],
+    });
+
+    expect(result.position).toEqual({ x: 0.5, y: 0.5 });
     expect(result.follow?.characterId).toBe('hero');
   });
 
@@ -185,7 +209,7 @@ describe('evaluateCameraChannels', () => {
     };
     const result = evaluateCameraChannels({
       timeline: [
-        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 3 }),
+        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0 }),
         action('zoom-during-follow', 'cameraMotion', 0, {
           zoom: 4, duration: 2, easing: 'linear', _cameraProperties: ['zoom'],
         }),
@@ -201,7 +225,7 @@ describe('evaluateCameraChannels', () => {
     expect(result.follow?.characterId).toBe('hero');
   });
 
-  it('latches at a true position takeover and at a finite follow end', () => {
+  it('latches at a true position takeover and at an explicit follow stop', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,
       characterId: 'hero',
@@ -212,17 +236,18 @@ describe('evaluateCameraChannels', () => {
     };
     const takenOver = evaluateCameraChannels({
       timeline: [
-        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 4 }),
+        action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0 }),
         action('position-takeover', 'cameraMotion', 1, { move: 'pan', duration: 0, target: [0.9, 0.8] }),
       ],
       sceneTime: 2,
       logicalReferenceSize: referenceSize,
       anchorTrajectories: [trajectory],
     });
-    const finite = evaluateCameraChannels({
+    const stopped = evaluateCameraChannels({
       timeline: [
-        action('finite-zoom', 'cameraMotion', 0, { zoom: 2, _cameraProperties: ['zoom'] }),
-        action('finite-follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0, duration: 1 }),
+        action('stop-zoom', 'cameraMotion', 0, { zoom: 2, _cameraProperties: ['zoom'] }),
+        action('stopped-follow', 'cameraFollow', 0, { characterId: 'hero', smoothing: 0 }),
+        action('stop', 'cameraUnfollow', 1, {}),
       ],
       sceneTime: 2,
       logicalReferenceSize: referenceSize,
@@ -231,11 +256,11 @@ describe('evaluateCameraChannels', () => {
 
     expect(takenOver.position).toEqual({ x: 0.9, y: 0.8 });
     expect(takenOver.follow).toBeNull();
-    expect(finite.position).toEqual({ x: 0.3, y: 0.4 });
-    expect(finite.follow).toBeNull();
+    expect(stopped.position).toEqual({ x: 0.3, y: 0.4 });
+    expect(stopped.follow).toBeNull();
   });
 
-  it('latches an explicit zero-duration follow at its authored instant before later writers', () => {
+  it('latches same-time follow start and stop in statement order before later writers', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,
       characterId: 'hero',
@@ -251,7 +276,8 @@ describe('evaluateCameraChannels', () => {
       action('zoom-before-follow', 'cameraMotion', 0, {
         zoom: 2, duration: 0, _cameraProperties: ['zoom'],
       }),
-      action('instant-follow', 'cameraFollow', 1, { characterId: 'hero', smoothing: 0, duration: 0 }),
+      action('instant-follow', 'cameraFollow', 1, { characterId: 'hero', smoothing: 0 }),
+      action('instant-stop', 'cameraUnfollow', 1, {}),
       action('later-pan', 'cameraMotion', 2, {
         target: [0.8, 0.7], duration: 1, easing: 'linear', _cameraProperties: ['position'],
       }),
@@ -279,7 +305,7 @@ describe('evaluateCameraChannels', () => {
     expect(duringLaterWriter.position.y).toBeCloseTo(0.51, 8);
     expect(duringLaterWriter.follow).toBeNull();
 
-    const omittedDuration = evaluateCameraChannels({
+    const withoutStop = evaluateCameraChannels({
       timeline: [
         action('zoom-before-unbounded-follow', 'cameraMotion', 0, {
           zoom: 2, duration: 0, _cameraProperties: ['zoom'],
@@ -290,8 +316,8 @@ describe('evaluateCameraChannels', () => {
       logicalReferenceSize: referenceSize,
       anchorTrajectories: [trajectory],
     });
-    expect(omittedDuration.follow?.characterId).toBe('hero');
-    expect(omittedDuration.position.x).toBeCloseTo(0.34, 8);
+    expect(withoutStop.follow?.characterId).toBe('hero');
+    expect(withoutStop.position.x).toBeCloseTo(0.34, 8);
   });
 
   it('does not late-capture a focus anchor that became valid after the action start', () => {

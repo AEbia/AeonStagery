@@ -292,6 +292,24 @@ export class Live2DCharacterGeometry {
     return null;
   }
 
+  /** Normalized picture coordinates, before editor viewport/CSS transforms. */
+  getScreenPoint(id: string, pointName: CharacterPoint, out?: { x: number; y: number }): { x: number; y: number } | null {
+    const point = this.getPoint(id, pointName, out);
+    if (!point) return null;
+    const camera = this.getCamera();
+    const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+    // Without a proxy, getPoint uses the legacy measured display bounds.
+    if (!camera || !proxy) return point;
+    const projected = projectToScreen(
+      { x: point.x * STAGE_WIDTH, y: point.y * STAGE_HEIGHT, scale: 1, parallaxDepth: proxy.z ?? 0 },
+      camera,
+      { w: STAGE_WIDTH, h: STAGE_HEIGHT },
+    );
+    point.x = projected.screenX / STAGE_WIDTH;
+    point.y = projected.screenY / STAGE_HEIGHT;
+    return point;
+  }
+
   getStableSampleBounds(id: string, camera: CharacterCamera | null): PIXI.Rectangle | null {
     const entry = this.characters.get(id);
     if (!entry) return null;

@@ -173,7 +173,6 @@ export interface CameraMotionConfig {
   // ── Follow ──
   offset?: Vec2;
   smoothing?: number;
-  autoUnfollow?: boolean;  // stop following after duration
 
   // ── Tilt ──
   toY?: number;

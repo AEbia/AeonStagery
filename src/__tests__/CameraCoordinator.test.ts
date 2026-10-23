@@ -65,24 +65,25 @@ describe('CameraCoordinator', () => {
     expect(controller.applyShakeOffset).toHaveBeenCalledWith({ x: 0, y: 0 });
   });
 
-  it.each([false, true])('clamps a reconstructed follow with the zoom curve after newer zoom writes (finite: %s)', finite => {
+  it.each([false, true])('clamps a reconstructed follow with the zoom curve after newer zoom writes (stopped: %s)', stopped => {
     const timeline: RuntimeTimelineAction[] = [
       { _id: 'seed-zoom', action: 'cameraMotion', time: 0,
         params: { move: 'zoom', zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
       { _id: 'follow', action: 'cameraFollow', time: 1,
-        params: { characterId: 'hero', smoothing: 0, ...(finite ? { duration: 1.5 } : {}) } },
+        params: { characterId: 'hero', smoothing: 0 } },
       { _id: 'later-zoom', action: 'cameraMotion', time: 2,
         params: { move: 'zoom', zoom: 3, duration: 0, _cameraProperties: ['zoom'] } },
-      ...(finite ? [{ _id: 'after-release-zoom', action: 'cameraMotion' as const, time: 4,
+      ...(stopped ? [{ _id: 'stop', action: 'cameraUnfollow' as const, time: 2.5, params: {} }] : []),
+      ...(stopped ? [{ _id: 'after-release-zoom', action: 'cameraMotion' as const, time: 4,
         params: { move: 'zoom', zoom: 4, duration: 0, _cameraProperties: ['zoom'] } }] : []),
     ];
-    coordinator.sync(finite ? 5 : 3, timeline, {
+    coordinator.sync(stopped ? 5 : 3, timeline, {
       resolveCharacterPosition: () => ({ x: 0.95, y: 0.95 }),
       resolveCharacterPositionAtTime: () => ({ x: 0.95, y: 0.95 }),
     });
     expect(controller.applyResolvedState).toHaveBeenLastCalledWith({
       position: { x: expect.closeTo(5 / 6, 8), y: expect.closeTo(5 / 6, 8) },
-      zoom: finite ? 4 : 3, rotation: 0,
+      zoom: stopped ? 4 : 3, rotation: 0,
     });
   });
 
@@ -141,9 +142,9 @@ describe('CameraCoordinator', () => {
     });
   });
 
-  it('sync activates follow when time is within a cameraFollow action range', () => {
+  it('sync activates follow after its start', () => {
     const timeline = [
-      { action: 'cameraFollow', time: 0, params: { characterId: 'char1', duration: 5 } },
+      { action: 'cameraFollow', time: 0, params: { characterId: 'char1' } },
     ];
     coordinator.sync(2.0, timeline as any);
     expect(controller.follow).toHaveBeenCalledWith('char1', expect.objectContaining({}));
@@ -167,11 +168,15 @@ describe('CameraCoordinator', () => {
     expect(controller.applyResolvedState).toHaveBeenLastCalledWith(expect.objectContaining({ position: expect.any(Object) }));
   });
 
-  it('sync unfollows when time is past the follow action duration', () => {
-    const timeline = [
-      { action: 'cameraFollow', time: 0, params: { characterId: 'char1', duration: 3 } },
+  it('keeps live follow past legacy duration until an explicit stop', () => {
+    const timeline: RuntimeTimelineAction[] = [
+      { _id: 'follow', action: 'cameraFollow', time: 0, params: { characterId: 'char1', duration: 3 } },
+      { _id: 'stop', action: 'cameraUnfollow', time: 6, params: {} },
     ];
-    coordinator.sync(5.0, timeline as any);
+    coordinator.sync(1, timeline, { retainFollowPosition: true });
+    coordinator.sync(5, timeline, { retainFollowPosition: true });
+    expect(controller.unfollow).not.toHaveBeenCalled();
+    coordinator.sync(6, timeline, { retainFollowPosition: true });
     expect(controller.unfollow).toHaveBeenCalled();
   });
 
@@ -195,8 +200,8 @@ describe('CameraCoordinator', () => {
 
   it('sync uses the last matching cameraFollow when multiple exist', () => {
     const timeline = [
-      { action: 'cameraFollow', time: 0, params: { characterId: 'char1', duration: 5 } },
-      { action: 'cameraFollow', time: 2, params: { characterId: 'char2', duration: 5 } },
+      { action: 'cameraFollow', time: 0, params: { characterId: 'char1' } },
+      { action: 'cameraFollow', time: 2, params: { characterId: 'char2' } },
     ];
     coordinator.sync(3.0, timeline as any);
     expect(controller.follow).toHaveBeenCalledWith('char2', expect.anything());

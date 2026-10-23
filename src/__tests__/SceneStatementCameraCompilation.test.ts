@@ -23,18 +23,7 @@ describe('semantic camera compilation contracts', () => {
     expect(() => sceneStatementCompiler.compile(document)).toThrow('still active');
   });
 
-  it('preserves omitted, zero, and positive follow durations as distinct lifecycle values', () => {
-    const zeroDuration = sceneStatementCompiler.compile(makeDocument([
-      { id: 'instant-follow', time: 1, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds: 0,
-      } },
-      { id: 'follow-after-zero', time: 2, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds: 1,
-      } },
-    ]));
-    expect(zeroDuration.actions.map((action) => ({ time: action.time, duration: action.params.duration })))
-      .toEqual([{ time: 1, duration: 0 }, { time: 2, duration: 1 }]);
-
+  it('requires a release event before starting another follow', () => {
     const unboundedFollow = makeDocument([
       { id: 'unbounded-follow', time: 1, type: 'camera', params: {
         mode: 'follow', operation: 'start', target: 'tomori',

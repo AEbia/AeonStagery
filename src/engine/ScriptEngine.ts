@@ -83,6 +83,8 @@ class ScriptEngine {
 
   private cameraCoordinator = new CameraCoordinator(cameraController);
   private sceneLoadVersion = 0;
+  /** Installed content revision; identical load requests retain captured focus. */
+  private cameraSceneRevision = 0;
   private scenePreparation: Promise<void> = Promise.resolve();
   private scenePreparing = false;
   private seekRequestVersion = 0;
@@ -383,6 +385,7 @@ class ScriptEngine {
     const wasPlaying = this.playing;
 
     this.currentScene = compiledScript;
+    this.cameraSceneRevision = loadVersion;
     this.currentSceneActionSignatures = signatures;
     this.currentSceneAuxSignature = sceneAuxSignature(compiledScript);
     this.currentSceneDurationOverride = durationOverride;
@@ -830,6 +833,7 @@ class ScriptEngine {
         this.logger.trace(`snapshotStore range: [${storeRange?.min.toFixed(3) ?? 'N/A'} .. ${storeRange?.max.toFixed(3) ?? 'N/A'}] count=${this.snapshotStore.size}`, 'color: #fff');
       }
       this.pauseForSeek({ emitLifecycle: !suppressSeekSideEffects });
+      cameraController.clearTemporaryState();
 
       if (forceReconstruct) {
         this.isReconstructing = true;
@@ -1009,7 +1013,7 @@ class ScriptEngine {
     logicalReferenceSize: { width: number; height: number };
     revision: number;
   } {
-    const base = { logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT }, revision: this.sceneLoadVersion };
+    const base = { logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT }, revision: this.cameraSceneRevision };
     if (usesUnifiedCameraChannels(this.currentScene?.timeline ?? [])) return base;
     const resolveAtTime = (atTime: number) => {
       const desiredCharacters = this.computeStateAtTime(atTime).characters;

@@ -47,7 +47,7 @@
 | [0036 更新渠道与差分下载基线](adr/0036-update-channels-and-differential-baselines.md) | current, accepted | OSS / GitHub 渠道、差分更新基线与块图补取、安装缓存 SHA256/签名校验及禁止静默整包回退的权威入口。 |
 | [0037 项目画布与原生分辨率导出](adr/0037-project-video-format-and-native-resolution-export.md) | current, implemented | 项目输出像素、逻辑画布、独立预览质量、导出覆盖、帧率步进及流式转码混音、磁盘空间与输出生命周期契约的权威入口。 |
 
-| [0038 统一摄像机求值](adr/0038-unified-camera-evaluation.md) | current, partially implemented | 基础通道、路径和固定聚焦目标按当前时间求值；2026-10-23 撤回角色镜头预计算，持续跟随保留活动舞台 ticker，完整历史确定性存在实现差异。 |
+| [0038 统一摄像机求值](adr/0038-unified-camera-evaluation.md) | current, partially implemented | 基础通道、路径和固定聚焦目标按当前时间求值；2026-10-23 撤回角色镜头预计算，持续跟随保留活动舞台 ticker，2026-10-24 统一为事件释放并移除跟随时长，完整历史确定性存在实现差异。 |
 
 ## Historical / Superseded
 

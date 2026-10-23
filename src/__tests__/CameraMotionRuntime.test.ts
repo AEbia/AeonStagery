@@ -128,7 +128,7 @@ describe('camera motion runtime', () => {
     });
   });
 
-  it('starts and automatically stops character follow by default', () => {
+  it('starts follow without scheduling an automatic stop', () => {
     const camera = {
       follow: vi.fn(),
       unfollow: vi.fn(),
@@ -151,6 +151,7 @@ describe('camera motion runtime', () => {
     });
 
     timeline.progress(1);
-    expect(camera.unfollow).toHaveBeenCalledTimes(1);
+    expect(camera.unfollow).not.toHaveBeenCalled();
+    expect(timeline.duration()).toBe(0);
   });
 });

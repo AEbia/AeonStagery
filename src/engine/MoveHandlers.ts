@@ -237,13 +237,12 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
    * follow — Continuous character tracking via PixiJS ticker.
    *   Uses smooth lerp towards the character's current position each frame.
-   *   When autoUnfollow is true (default), stops after duration.
+   *   Tracking persists until an explicit release; timing only delays its start.
    */
   follow(config, _ease) {
     const {
-      characterId, duration = 2.0, delay = 0,
+      characterId, delay = 0,
       offset = [0, -0.1], smoothing = 0.85,
-      autoUnfollow = true,
     } = config;
 
     if (!characterId) {
@@ -254,10 +253,6 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     tl.call(() => {
       this.follow(characterId, { offset, smoothing });
     });
-    if (autoUnfollow) {
-      tl.to({}, { duration }, '>');
-      tl.call(() => this.unfollow());
-    }
     return tl;
   },
 };

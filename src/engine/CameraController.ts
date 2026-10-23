@@ -58,6 +58,7 @@ class CameraController {
   /** Active shake animation */
   private shakeTimeline: gsap.core.Timeline | null = null;
   private readonly shakeSamples = new Map<gsap.core.Timeline, CameraShakeOffset>();
+  private readonly motionAnimations = new WeakSet<gsap.core.Animation>();
 
   /** Last standalone shake timeline, for API callers. */
   getShakeTimeline(): gsap.core.Timeline | null {
@@ -106,8 +107,13 @@ class CameraController {
     this.applyTransform();
   }
 
-  /** Formal export owns the camera; discard independent preview writers. */
+  /** Seek and formal export own the camera; discard independent preview writers. */
   clearTemporaryState(): void {
+    // Delayed follow timelines contain only callbacks, so property-tween
+    // lookup cannot find them. Track motions without retaining completed ones.
+    for (const animation of gsap.globalTimeline.getChildren(true, true, true)) {
+      if (this.motionAnimations.has(animation)) animation.kill();
+    }
     // A reset/path timeline can also contain callbacks. Killing just its
     // property tweens leaves those callbacks able to clear the scene's shake.
     for (const tween of gsap.getTweensOf([this.state, this.state.position])) {
@@ -401,6 +407,7 @@ class CameraController {
     };
 
     const result = handler.call(this, { ...resolved, resolveFocusPosition }, gsapEasing);
+    this.motionAnimations.add(result);
     hookSystem.execute('camera:move', { type: 'motion', config: resolved });
     return result;
   }

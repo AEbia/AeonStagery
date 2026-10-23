@@ -51,10 +51,10 @@ describe('scene statement compiler — camera follow stop', () => {
     });
   });
 
-  it('preserves a finite follow duration and includes only its end in the scene extent', () => {
+  it('uses the stop statement to bound follow without adding a duration to its start', () => {
     const document = makeDocument([
       { id: 'follow_start', time: 1, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds: 2,
+        mode: 'follow', operation: 'start', target: 'tomori',
       } },
       { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop' } },
     ]);
@@ -63,22 +63,21 @@ describe('scene statement compiler — camera follow stop', () => {
 
     expect(compiled.sourceSchemaVersion).toBe(document.schemaVersion);
     expect(compiled.durationSeconds).toBe(3);
+    expect(compiled.actions[0].params).not.toHaveProperty('duration');
     expect(compiled.actions).toMatchObject([
-      { action: 'cameraFollow', time: 1, params: { characterId: 'tomori', duration: 2 } },
+      { action: 'cameraFollow', time: 1, params: { characterId: 'tomori' } },
       { action: 'cameraUnfollow', time: 3, params: {} },
     ]);
   });
 
-  it.each([
-    { durationSeconds: -0.25, message: /Expected non-negative number at .*durationSeconds/ },
-    { durationSeconds: Number.NaN, message: /Expected finite number at .*durationSeconds/ },
-    { durationSeconds: Number.POSITIVE_INFINITY, message: /Expected finite number at .*durationSeconds/ },
-  ])('rejects an invalid authored follow duration: $durationSeconds', ({ durationSeconds, message }) => {
-    expect(() => makeDocument([
-      { id: 'follow_start', time: 1, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'tomori', durationSeconds,
-      } },
-    ])).toThrow(message);
+  it.each(['start', 'stop'])('rejects durationSeconds on follow %s', operation => {
+    for (const durationSeconds of [0, 2, -0.25, Number.NaN, Infinity]) {
+      expect(() => makeDocument([
+        { id: 'follow', time: 1, type: 'camera', params: {
+          mode: 'follow', operation, target: 'tomori', durationSeconds,
+        } },
+      ])).toThrow(/durationSeconds/);
+    }
   });
 
   it('keeps camera reset semantics for explicit reset statements', () => {

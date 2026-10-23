@@ -251,14 +251,14 @@ describe('semantic visual diagnostics', () => {
     expect(validateSemanticSceneStructure(document)).toEqual([]);
   });
 
-  it('validates finite follow expiration at its authored endpoint', () => {
+  it('allows another follow after an explicit stop at the same time', () => {
     const document = makeDocument([
       { id: 'follow_start', time: 1, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 2,
+        mode: 'follow', operation: 'start', target: 'hero',
       } },
       { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
       { id: 'follow_again', time: 3, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 1,
+        mode: 'follow', operation: 'start', target: 'hero',
       } },
     ]);
 
@@ -270,10 +270,10 @@ describe('semantic visual diagnostics', () => {
       .toBeUndefined();
   });
 
-  it('rejects durationSeconds on follow stops while preserving finite starts and durationless stops', () => {
+  it('accepts durationless follow starts and stops', () => {
     const validDocument = makeDocument([
       { id: 'follow_start', time: 1, type: 'camera', params: {
-        mode: 'follow', operation: 'start', target: 'hero', durationSeconds: 2,
+        mode: 'follow', operation: 'start', target: 'hero',
       } },
       { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
     ]);

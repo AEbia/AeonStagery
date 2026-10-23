@@ -694,18 +694,14 @@ export function parseCameraParams(input: unknown, path: string): CameraParams {
         ease: optionalString(record.ease, `${path}.ease`),
       });
     case 'follow': {
-      expectKeys(record, path, ['mode', 'operation', 'target', 'offset', 'smoothing', 'durationSeconds']);
+      expectKeys(record, path, ['mode', 'operation', 'target', 'offset', 'smoothing']);
       const operation = expectOneOf(record.operation, `${path}.operation`, ['start', 'stop']);
-      if (operation === 'stop' && Object.prototype.hasOwnProperty.call(record, 'durationSeconds')) {
-        throw new Error(`Follow stop does not accept durationSeconds at ${path}.durationSeconds`);
-      }
       return compact({
         mode,
         operation,
         target: optionalDiagnosticString(record.target, `${path}.target`),
         offset: optionalVec2(record.offset, `${path}.offset`),
         smoothing: optionalFiniteNumber(record.smoothing, `${path}.smoothing`),
-        durationSeconds: optionalNonNegativeNumber(record.durationSeconds, `${path}.durationSeconds`),
       });
     }
     case 'path':

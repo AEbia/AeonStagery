@@ -21,7 +21,7 @@ function makeInput(trajectory: CameraAnchorTrajectory, sceneTime: number, smooth
   const timeline = [
     action('initial-position', 'cameraMotion', 0, { move: 'pan', target: [0.2, 0.25], duration: 0 }),
     action('wide-reference', 'cameraMotion', 0, { zoom: 100, duration: 0, _cameraProperties: ['zoom'] }),
-    action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing, duration: 20, offset }),
+    action('follow', 'cameraFollow', 0, { characterId: 'hero', smoothing, offset }),
   ];
   return {
     timeline,
@@ -113,7 +113,6 @@ describe('prepared history query work', () => {
       { time: 0, position: { x: 0.2, y: 0.3 } }, { time: 600, position: { x: 0.8, y: 0.7 } },
     ]);
     const input = makeInput(trajectory, 599.12345, 0);
-    input.timeline[2].params.duration = undefined;
     const output = evaluateCameraChannels(input);
     expect(output.position.x).toBeCloseTo(0.2 + 0.6 * 599.12345 / 600, 12);
     expect(getCameraFollowHistoryDiagnostics(trajectory).anchorQueries).toBeLessThan(10);
@@ -157,9 +156,6 @@ it('bounds retained complete checkpoints during integer-only export schedules', 
     { time: 0, position: { x: 0.7, y: 0.6 } }, { time: 301, position: { x: 0.7, y: 0.6 } },
   ]);
   const input = makeInput(trajectory, 0, 0.8);
-  // Keep one unbounded follow for a long schedule, rather than the fixture's
-  // default finite twenty-second follow.
-  input.timeline[2].params.duration = undefined;
   for (let time = 1; time <= 300; time++) evaluateCameraChannels({ ...input, sceneTime: time });
   expect(getCameraFollowHistoryDiagnostics(trajectory).checkpoints).toBeLessThanOrEqual(256);
 });

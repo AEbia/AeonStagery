@@ -44,6 +44,70 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     return { compiled: bundle.compiled, master: engine.getMasterTimeline()! };
   }
 
+  it('keeps follow start and stop instantaneous at the scene boundary', async () => {
+    const { compiled, master } = await load([
+      { id: 'follow', type: 'camera', time: 8,
+        params: { mode: 'follow', operation: 'start', target: 'hero' } },
+      { id: 'stop', type: 'camera', time: 8,
+        params: { mode: 'follow', operation: 'stop' } },
+    ], 8);
+    expect(compiled.durationSeconds).toBe(8);
+    expect(compiled.actions.map(action => action.action)).toEqual(['cameraFollow', 'cameraUnfollow']);
+    expect(compiled.actions[0].params).not.toHaveProperty('duration');
+    expect(master.duration()).toBeCloseTo(8, 2);
+  });
+
+  it.each([true, false])('clears standalone shake on seek (forceReconstruct=%s) while retaining authored shake', async forceReconstruct => {
+    await load([
+      { id: 'scene-shake', type: 'camera', time: 1,
+        params: { mode: 'shake', durationSeconds: 2, intensity: 0.5 } },
+    ]);
+    await engine.seek(1.25, forceReconstruct);
+    const authored = engine.getCurrentCamera();
+    expect(authored.shakeOffset).toBeDefined();
+
+    const preview = cameraController.shake({ duration: 10, intensity: 1 });
+    preview.pause().time(0.25, false);
+    expect(engine.getCurrentCamera().shakeOffset).not.toEqual(authored.shakeOffset);
+    await engine.seek(1.25, forceReconstruct);
+    expect(engine.getCurrentCamera()).toEqual(authored);
+    expect(cameraController.getShakeTimeline()).toBeNull();
+
+    await engine.seek(4, forceReconstruct);
+    expect(engine.getCurrentCamera().shakeOffset).toBeUndefined();
+    const master = engine.getMasterTimeline()!;
+    master.seek(1.25, false);
+    expect(engine.getCurrentCamera()).toEqual(authored);
+  });
+
+  it.each([true, false])('cancels delayed standalone follow on seek (forceReconstruct=%s) while retaining authored follow', async forceReconstruct => {
+    const anchorFor = (id: string) => id === 'hero' ? { x: 0.7, y: 0.6 } : { x: 0.3, y: 0.4 };
+    vi.spyOn(live2DManager, 'getPoint').mockImplementation(anchorFor);
+    vi.spyOn(live2DManager, 'getPosition').mockImplementation(anchorFor);
+    const { master } = await load([
+      { id: 'zoom', type: 'camera', time: 0,
+        params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
+      { id: 'follow', type: 'camera', time: 1,
+        params: { mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing: 0 } },
+    ]);
+    const start = gsap.globalTimeline.time();
+    cameraController.executeMotion({
+      move: 'follow', easing: 'linear', characterId: 'other', duration: 0, delay: 5, offset: [0, 0], smoothing: 0,
+    });
+
+    await engine.seek(2, forceReconstruct);
+    const authored = engine.getCurrentCamera();
+    expect(authored.position).toEqual({ x: 0.7, y: 0.6 });
+
+    gsap.globalTimeline.time(start + 6, false);
+    cameraController.tickFollow(true);
+    expect(engine.getCurrentCamera()).toEqual(authored);
+
+    master.seek(2.1, false);
+    cameraController.tickFollow(true);
+    expect(engine.getCurrentCamera()).toEqual(authored);
+  });
+
   it('starts follow from an earlier same-time position write and retains that entry frame', async () => {
     vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.5, y: 0.5 });
     vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
@@ -230,6 +294,15 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.55, 8), y: expect.closeTo(0.45, 8) });
 
     await load(statements);
+    expect(engine.getMasterTimeline()).toBe(master);
+    master.seek(2.5, false);
+    expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.65, 8), y: expect.closeTo(0.35, 8) });
+    await engine.seek(4, true);
+    expect(cameraController.getState().position).toEqual({ x: 0.7, y: 0.3 });
+
+    // Changing the authored scene extent installs a new timeline and invalidates captures.
+    await load(statements, 11);
+    expect(engine.getMasterTimeline()).not.toBe(master);
     await engine.seek(4, true);
     expect(cameraController.getState().position).toEqual({ x: 0.9, y: 0.8 });
   });
