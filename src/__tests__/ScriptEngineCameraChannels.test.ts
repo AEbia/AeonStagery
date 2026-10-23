@@ -44,6 +44,101 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     return { compiled: bundle.compiled, master: engine.getMasterTimeline()! };
   }
 
+  it('starts follow from an earlier same-time position write and retains that entry frame', async () => {
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.5, y: 0.5 });
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
+    const { master } = await load([
+      { id: 'position', type: 'camera', time: 1,
+        params: { mode: 'move', position: [0.8, 0.2], durationSeconds: 0 } },
+      { id: 'follow', type: 'camera', time: 1,
+        params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 1 } },
+    ]);
+    master.seek(0.99, false);
+    master.seek(1, false);
+    const entry = engine.getCurrentCamera();
+    expect(entry.position).toEqual({ x: 0.8, y: 0.2 });
+    master.seek(1.1, false);
+    expect(engine.getCurrentCamera()).toEqual(entry);
+    await engine.seek(1, true);
+    expect(engine.getCurrentCamera()).toEqual(entry);
+  });
+
+  it('enters follow at the previous motion value at its start and then retains live pursuit', async () => {
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.5, y: 0.5 });
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
+    const { master } = await load([
+      { id: 'position', type: 'camera', time: 0,
+        params: { mode: 'move', position: [0.9, 0.1], durationSeconds: 2, ease: 'linear' } },
+      { id: 'follow', type: 'camera', time: 1,
+        params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 0.5 } },
+    ]);
+    master.seek(0.75, false);
+    master.seek(1.05, false);
+    expect(engine.getCurrentCamera().position).toEqual({ x: 0.7, y: 0.3 });
+    cameraController.tickFollow(false, 1 / 60);
+    const pursued = engine.getCurrentCamera();
+    expect(pursued.position).toEqual({ x: 0.6, y: 0.4 });
+    master.seek(1.1, false);
+    expect(engine.getCurrentCamera()).toEqual(pursued);
+  });
+
+  it('applies an intervening position write when a second follow has identical settings', async () => {
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.5, y: 0.5 });
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
+    const { master } = await load([
+      { id: 'first-position', type: 'camera', time: 1,
+        params: { mode: 'move', position: [0.8, 0.2], durationSeconds: 0 } },
+      { id: 'first-follow', type: 'camera', time: 1,
+        params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 1 } },
+      { id: 'second-position', type: 'camera', time: 2,
+        params: { mode: 'move', position: [0.2, 0.8], durationSeconds: 0 } },
+      { id: 'second-follow', type: 'camera', time: 2,
+        params: { mode: 'follow', operation: 'start', target: 'hero', smoothing: 1 } },
+    ]);
+    master.seek(1, false);
+    expect(engine.getCurrentCamera().position).toEqual({ x: 0.8, y: 0.2 });
+    master.seek(2, false);
+    expect(engine.getCurrentCamera().position).toEqual({ x: expect.closeTo(0.2, 12), y: 0.8 });
+  });
+
+  it('skips focus on an unmaterialized model instead of capturing its proxy estimate', async () => {
+    const { master } = await load([
+      { id: 'enter', type: 'characterPresence', time: 0,
+        params: { mode: 'enter', id: 'hero', position: [0.8, 0.9], durationSeconds: 0 } },
+      { id: 'focus', type: 'camera', time: 1,
+        params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 0,
+          zoom: { kind: 'absolute', value: 2 } } },
+    ]);
+    expect(live2DManager.hasCharacter('hero')).toBe(false);
+    master.seek(2, false);
+    expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 2 });
+    expect(engine.getCameraEvaluation()?.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'missing-focus-anchor',
+    }));
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.7, y: 0.3 });
+    master.seek(3, false);
+    expect(engine.getCurrentCamera().position).toEqual({ x: 0.5, y: 0.5 });
+    await engine.seek(2, true);
+    expect(engine.getCurrentCamera().position).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it('returns rotation diagnostics before a future character focus and missing-anchor diagnostics afterwards', async () => {
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue(null);
+    const { master } = await load([
+      { id: 'rotation', type: 'camera', time: 0,
+        params: { mode: 'move', rotation: 45, durationSeconds: 0 } },
+      { id: 'focus', type: 'camera', time: 8,
+        params: { mode: 'focus', target: 'hero', durationSeconds: 1 } },
+    ]);
+    master.seek(1, false);
+    expect(engine.getCameraEvaluation()?.diagnostics.map(({ code }) => code)).toEqual(['rotation-edge-exposure']);
+    master.seek(9, false);
+    expect(engine.getCameraEvaluation()?.diagnostics.map(({ code }) => code))
+      .toEqual(['missing-focus-anchor', 'rotation-edge-exposure']);
+    await engine.seek(1, true);
+    expect(engine.getCameraEvaluation()?.diagnostics.map(({ code }) => code)).toEqual(['rotation-edge-exposure']);
+  });
+
   it.each(['zoom', 'position', 'rotation', 'focus'] as const)('preserves a standalone %s preview across rendering reads', async kind => {
     await load([]);
     if (kind === 'zoom') cameraController.zoomTo(3, 1, 'linear').progress(1);

@@ -194,7 +194,7 @@ export class Live2DCharacterGeometry {
           return point;
         }
       } catch {
-        // Retain the established proxy estimate when runtime geometry is absent.
+        // Try the model's measured bounds when local runtime geometry is absent.
       }
     }
 
@@ -274,6 +274,7 @@ export class Live2DCharacterGeometry {
           }
           const normalizedX = x / STAGE_WIDTH;
           const normalizedY = y / STAGE_HEIGHT;
+          if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return null;
           if (out) {
             out.x = normalizedX;
             out.y = normalizedY;
@@ -282,40 +283,13 @@ export class Live2DCharacterGeometry {
           return { x: normalizedX, y: normalizedY };
         }
       } catch {
-        // Fall back to proxy-based estimation below.
+        // Unavailable geometry is a missing anchor.
       }
     }
 
-    // 2. When the live model cannot provide bounds, fall back to the pure proxy estimate.
-    // This keeps seek/scrub stable even before the model is fully available.
-    const proxies = this.getSceneContext()?.transformationProxies;
-    if (proxies) {
-      const proxy = proxies.get(id);
-      if (proxy) {
-        const nx = proxy.x / STAGE_WIDTH;
-        const ny = proxy.y / STAGE_HEIGHT;
-        const scale = proxy.scale !== undefined ? proxy.scale : 1.0;
-
-        let targetY = ny;
-        switch (pointName) {
-          case 'head':   targetY = ny - 0.60 * scale; break;
-          case 'chest':  targetY = ny - 0.38 * scale; break;
-          case 'center': targetY = ny - 0.40 * scale; break;
-          case 'feet':   targetY = ny; break;
-        }
-
-        if (out) {
-          out.x = nx;
-          out.y = targetY;
-          return out;
-        }
-        return { x: nx, y: targetY };
-      }
-    }
-
-    // Final fallback.
-    if (!entry || !entry.model) return null;
-    return { x: 0.5, y: 0.5 };
+    // Authored origins and guessed body proportions are not posed anchors.
+    // Focus must capture the absence rather than freeze an invented target.
+    return null;
   }
 
   getStableSampleBounds(id: string, camera: CharacterCamera | null): PIXI.Rectangle | null {

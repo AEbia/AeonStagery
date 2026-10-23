@@ -3,7 +3,7 @@ import type { CameraFollowConfig, CameraState } from '../../api/types/camera';
 import { computeCameraStateAtTime, findFollowReleaseInstant, type CameraPosition, type CameraStateResolverDeps } from '../CameraStateResolver';
 import { resolveVec2 } from '../utils/math';
 import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
-import { evaluateCameraChannels, getPreparedCameraZoomResolver, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
+import { collectCameraDiagnostics, evaluateCameraChannels, getPreparedCameraZoomResolver, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
 
 /** Whether all camera channels can be evaluated without live character geometry. */
 export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineAction[]): boolean {
@@ -50,6 +50,7 @@ export class CameraCoordinator {
   private focusRevision?: string | number;
   private readonly focusAnchors = new Map<string, CameraPosition | null>();
   private activeFollowKey?: string;
+  private activeFollowAction?: RuntimeTimelineAction;
   // Only the current pursuit and its last release frame are retained. These
   // are live playback state, never a prepared trajectory or a seek history.
   private liveFollow?: { action: RuntimeTimelineAction; releaseTime: number };
@@ -65,25 +66,30 @@ export class CameraCoordinator {
       this.focusTimeline = timeline;
       this.focusRevision = deps.revision;
       this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
       this.liveFollow = undefined;
       this.followRelease = undefined;
     }
     return {
       ...deps,
-      resolveFocusPosition: (characterId, start, part) => {
-        const key = JSON.stringify([characterId, start, part]);
-        if (!this.focusAnchors.has(key)) {
-          const anchor = deps.resolveFocusPosition
-            ? deps.resolveFocusPosition(characterId, start, part)
-            : deps.resolveCharacterPositionAtTime
-              ? deps.resolveCharacterPositionAtTime(characterId, start, part)
-              : deps.resolveCharacterPosition?.(characterId, part) ?? null;
-          if (deps.captureFocus === false) return anchor;
-          this.focusAnchors.set(key, anchor ? { ...anchor } : null);
-        }
-        return this.focusAnchors.get(key) ?? null;
-      },
+      resolveFocusPosition: (characterId, start, part) =>
+        this.resolveFocusPosition(characterId, start, part, deps, deps.captureFocus !== false),
     };
+  }
+
+  private resolveFocusPosition(
+    characterId: string, start: number, part: string | undefined, deps: CameraCoordinatorDeps, capture: boolean,
+  ): CameraPosition | null {
+    const key = JSON.stringify([characterId, start, part]);
+    if (this.focusAnchors.has(key)) return this.focusAnchors.get(key) ?? null;
+    const anchor = deps.resolveFocusPosition
+      ? deps.resolveFocusPosition(characterId, start, part)
+      : deps.resolveCharacterPositionAtTime
+        ? deps.resolveCharacterPositionAtTime(characterId, start, part)
+        : deps.resolveCharacterPosition?.(characterId, part) ?? null;
+    const point = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? { ...anchor } : null;
+    if (capture) this.focusAnchors.set(key, point);
+    return point;
   }
 
   /**
@@ -98,7 +104,7 @@ export class CameraCoordinator {
     time: number,
     timeline: readonly RuntimeTimelineAction[],
     deps: CameraCoordinatorDeps = {},
-  ): CameraEvaluationOutput | undefined {
+  ): CameraEvaluationOutput {
     if (deps.anchorTrajectories !== undefined || usesUnifiedCameraChannels(timeline)) {
       const resolved = evaluateCameraChannels({
         timeline,
@@ -110,6 +116,7 @@ export class CameraCoordinator {
       });
       this.controller.unfollow();
       this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
       this.controller.applyShakeOffset(resolved.shake);
       this.controller.applyResolvedState(resolved);
       return resolved;
@@ -122,28 +129,42 @@ export class CameraCoordinator {
       this.followRelease = { ...this.liveFollow, position: resolveVec2(this.controller.getState().position) };
       this.liveFollow = undefined;
     }
-    const resolved = computeCameraStateAtTime(timeline, time, {
+    const resolverDeps: CameraStateResolverDeps = {
       ...evaluationDeps,
       resolveZoomAtTime: deps.resolveZoomAtTime ?? getPreparedCameraZoomResolver({ timeline, revision: deps.revision }),
       resolveLiveFollowRelease: (action, atTime) => this.followRelease?.action === action && atTime >= this.followRelease.releaseTime
         ? this.followRelease.position : null,
-    });
+    };
+    const resolved = computeCameraStateAtTime(timeline, time, resolverDeps);
 
     // Keep pursuit on the live follow ticker. Scene-time reads must not snap
     // it to the reconstruction approximation or re-register it every frame.
     if (resolved.follow) {
       const followKey = JSON.stringify(resolved.follow);
-      if (!deps.retainFollowPosition || this.activeFollowKey !== followKey) {
+      let action: RuntimeTimelineAction | undefined;
+      for (const candidate of timeline) {
+        if (candidate.action === 'cameraFollow' && candidate.params.characterId
+          && (candidate.time ?? 0) <= time && (!action || (candidate.time ?? 0) >= (action.time ?? 0))) action = candidate;
+      }
+      const enteringFollow = action !== this.activeFollowAction;
+      if (deps.retainFollowPosition && enteringFollow && action) {
+        const start = action.time ?? 0;
+        const actionIndex = timeline.indexOf(action);
+        const prefix = timeline.filter((candidate, index) => (candidate.time ?? 0) < start
+          || ((candidate.time ?? 0) === start && index < actionIndex));
+        const entry = computeCameraStateAtTime(prefix, start, resolverDeps);
+        this.controller.applyResolvedState({ position: entry.position });
+      }
+      if (!deps.retainFollowPosition || this.activeFollowKey !== followKey || enteringFollow) {
         this.controller.follow(resolved.follow.characterId, {
           offset: [resolved.follow.offset.x, resolved.follow.offset.y],
           smoothing: resolved.follow.smoothing,
         });
         this.activeFollowKey = followKey;
       }
+      this.activeFollowAction = action;
       if (!deps.retainFollowPosition) this.controller.tickFollow(true);
       if (deps.retainFollowPosition && !this.liveFollow) {
-        const action = timeline.filter(candidate => candidate.action === 'cameraFollow' && (candidate.time ?? 0) <= time)
-          .sort((left, right) => (left.time ?? 0) - (right.time ?? 0)).at(-1);
         if (action) {
           const duration = typeof action.params.duration === 'number' ? action.params.duration : Infinity;
           this.liveFollow = { action, releaseTime: Math.min((action.time ?? 0) + duration, findFollowReleaseInstant(timeline, action)) };
@@ -152,11 +173,13 @@ export class CameraCoordinator {
     } else {
       this.controller.unfollow();
       this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
       this.liveFollow = undefined;
     }
 
     // 2. Reconstruct finite shake without killing any scheduled timeline.
-    this.controller.applyShakeOffset(computeCameraShakeAtTime(timeline, time));
+    const shake = computeCameraShakeAtTime(timeline, time);
+    this.controller.applyShakeOffset(shake);
 
     // Property tracks and captured focus destinations share the same current-
     // time evaluation for playback and seeks. Only live pursuit owns position
@@ -166,6 +189,15 @@ export class CameraCoordinator {
       zoom: resolved.zoom,
       rotation: resolved.rotation,
     });
-    return undefined;
+    return {
+      ...resolved,
+      ...(deps.retainFollowPosition && resolved.follow
+        ? { position: resolveVec2(this.controller.getState().position) } : {}),
+      shake,
+      diagnostics: collectCameraDiagnostics({ timeline, sceneTime: time,
+        logicalReferenceSize: deps.logicalReferenceSize ?? { width: 1920, height: 1080 } }, resolved,
+      // Reading diagnostics cannot capture a previously unqueried focus.
+      (characterId, start, part) => this.resolveFocusPosition(characterId, start, part, deps, false)),
+    };
   }
 }

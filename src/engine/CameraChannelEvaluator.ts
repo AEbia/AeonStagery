@@ -85,11 +85,6 @@ function focusPart(params: Record<string, unknown>): string {
     ?? 'head';
 }
 
-function followPart(params: Record<string, unknown>): string {
-  const part = readRecord(params.focus)?.part;
-  return typeof part === 'string' && part.length > 0 ? part : 'center';
-}
-
 function getTrajectory(
   trajectories: readonly CameraAnchorTrajectory[],
   characterId: string,
@@ -156,9 +151,40 @@ function estimateRotationEdgeExposure(
   return state.zoom + 1e-8 < minimumZoom;
 }
 
+/** Share diagnostics between explicit trajectories and captured live anchors. */
+export function collectCameraDiagnostics(
+  input: Pick<CameraEvaluationInput, 'timeline' | 'sceneTime' | 'logicalReferenceSize'>,
+  state: ResolvedCameraState,
+  resolveFocusPosition: NonNullable<CameraStateResolverDeps['resolveFocusPosition']>,
+): readonly CameraEvaluationDiagnostic[] {
+  const diagnostics: CameraEvaluationDiagnostic[] = [];
+  for (const action of input.timeline) {
+    if (action.action !== 'cameraHitchcock') continue;
+    diagnostics.push({ code: 'retired-camera-channel', severity: 'warning', actionId: action._id,
+      message: 'The Hitchcock camera channel has been retired and was omitted from evaluation.' });
+  }
+  for (const action of input.timeline) {
+    if (!hasFocusWriter(action, input.sceneTime)) continue;
+    const characterId = focusCharacter(action.params);
+    if (!characterId) continue;
+    const part = focusPart(action.params);
+    const anchor = resolveFocusPosition(characterId, action.time ?? 0, part);
+    if (!anchor || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) {
+      diagnostics.push({
+        code: 'missing-focus-anchor', severity: 'warning', actionId: action._id,
+        message: `Focus anchor ${characterId}/${part} is unavailable at the action start; position was skipped.`,
+      });
+    }
+  }
+  if (estimateRotationEdgeExposure(state, input.logicalReferenceSize)) {
+    diagnostics.push({ code: 'rotation-edge-exposure', severity: 'warning',
+      message: 'Camera rotation and zoom may expose uncovered frame edges.' });
+  }
+  return diagnostics;
+}
+
 /** Pure camera channel evaluation for an arbitrary scene-time sample. */
 export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEvaluationOutput {
-  const diagnostics: CameraEvaluationDiagnostic[] = [];
   const side = input.anchorEventSide ?? 'right';
   const anchorAt = (characterId: string, time: number, part?: string): CameraPosition | null => {
     const trajectory = getTrajectory(input.anchorTrajectories, characterId, part ?? 'head');
@@ -185,47 +211,13 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
     followEventSide: side,
   };
 
-  const supportedTimeline = input.timeline.filter((action) => {
-    if (action.action !== 'cameraHitchcock') return true;
-    diagnostics.push({
-      code: 'retired-camera-channel',
-      severity: 'warning',
-      actionId: action._id,
-      message: 'The Hitchcock camera channel has been retired and was omitted from evaluation.',
-    });
-    return false;
-  });
+  const supportedTimeline = input.timeline.filter((action) => action.action !== 'cameraHitchcock');
   const runtimeTimeline: readonly RuntimeTimelineAction[] = supportedTimeline;
   const state = computeCameraStateAtTime(runtimeTimeline, input.sceneTime, deps);
-
-  for (const action of supportedTimeline) {
-    if (!hasFocusWriter(action, input.sceneTime)) continue;
-    const characterId = focusCharacter(action.params);
-    if (!characterId) continue;
-    const part = action.action === 'cameraFollow' ? followPart(action.params) : focusPart(action.params);
-    const trajectory = getTrajectory(input.anchorTrajectories, characterId, part);
-    const start = action.time ?? 0;
-    if (!trajectory || sampleCameraAnchorTrajectory(trajectory, start, side) === null) {
-      diagnostics.push({
-        code: 'missing-focus-anchor',
-        severity: 'warning',
-        actionId: action._id,
-        message: `Focus anchor ${characterId}/${part} is unavailable at the action start; position was skipped.`,
-      });
-    }
-  }
-
-  if (estimateRotationEdgeExposure(state, input.logicalReferenceSize)) {
-    diagnostics.push({
-      code: 'rotation-edge-exposure',
-      severity: 'warning',
-      message: 'Camera rotation and zoom may expose uncovered frame edges.',
-    });
-  }
 
   return {
     ...state,
     shake: computeCameraShakeAtTime(input.timeline, input.sceneTime),
-    diagnostics,
+    diagnostics: collectCameraDiagnostics(input, state, anchorAt),
   };
 }

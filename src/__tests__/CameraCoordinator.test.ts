@@ -8,6 +8,7 @@ function createMockCameraController() {
     kill: vi.fn(),
   };
   return {
+    getState: vi.fn(() => ({ position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 0 })),
     follow: vi.fn(),
     unfollow: vi.fn(),
     tickFollow: vi.fn(),

@@ -203,7 +203,7 @@ describe('Live2DManager.getPoint', () => {
     });
   });
 
-  it('falls back to transformation proxies when model bounds are invalid and returns null for an unknown character', async () => {
+  it('returns missing anchors for invalid model bounds and unmaterialized characters even with proxies', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();
     live2DStageState(manager).characters = new Map([[
@@ -213,15 +213,16 @@ describe('Live2DManager.getPoint', () => {
         model: { getBounds: () => ({ x: 0, y: 0, width: 0, height: 100 }) },
       },
     ]]);
-    (manager as any)._scriptEngine = {
-      transformationProxies: new Map([['soyo', { x: 960, y: 900, scale: 1.5 }]]),
-    };
+    const proxies = new ProxyRegistry();
+    proxies.set('soyo', { x: 960, y: 900, scale: 1.5 });
+    proxies.set('unloaded', { x: 1200, y: 700, scale: 1 });
+    manager.setScriptEngine({ transformationProxies: proxies });
 
-    expect(manager.getPoint('soyo', 'head')).toEqual({
-      x: 0.5,
-      y: 900 / 1080 - 0.6 * 1.5,
-    });
-    expect(manager.getPoint('missing', 'center')).toBeNull();
+    for (const id of ['soyo', 'unloaded', 'missing']) {
+      for (const part of ['head', 'chest', 'center', 'feet'] as const) {
+        expect(manager.getPoint(id, part)).toBeNull();
+      }
+    }
   });
 
   it('keeps focus anchors in stage space after camera and editor viewport transforms', async () => {

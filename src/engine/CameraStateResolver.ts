@@ -133,8 +133,9 @@ function toOrderedEvents(timeline: readonly RuntimeTimelineAction[], time: numbe
   return events;
 }
 
-/** Latest property writers suffice at a query; their starts still see the full prefix. */
-function contributingEvents(events: readonly TimelineEvent[]): Set<number> {
+/** Index writers only; no camera poses or future frames are evaluated here. */
+function contributingEventPrefixes(events: readonly TimelineEvent[]): readonly (readonly number[])[] {
+  const prefixes: number[][] = [[]];
   let x = -1;
   let y = -1;
   let zoom = -1;
@@ -159,8 +160,10 @@ function contributingEvents(events: readonly TimelineEvent[]): Set<number> {
       if (compiledPathWritesProperty(params, 'zoom')) zoom = index;
       if (compiledPathWritesProperty(params, 'rotation')) rotation = index;
     }
+    prefixes.push([...new Set([x, y, zoom, rotation, unfollow])]
+      .filter((writer) => writer >= 0).sort((left, right) => left - right));
   }
-  return new Set([x, y, zoom, rotation, unfollow]);
+  return prefixes;
 }
 
 interface MotionChannels extends CameraPosition { zoom: number; rotation: number }
@@ -169,9 +172,10 @@ interface MotionChannels extends CameraPosition { zoom: number; rotation: number
  * Resolve the deterministic camera state at `time`.
  */
 interface ResolverEvaluationContext {
-  readonly actionIds: WeakMap<object, number>;
-  readonly states: Map<string, ResolvedCameraState>;
-  nextActionId: number;
+  readonly events: readonly TimelineEvent[];
+  readonly contributors: readonly (readonly number[])[] | null;
+  readonly releaseTimes: ReadonlyMap<RuntimeTimelineAction, number>;
+  readonly states: Map<number, ResolvedCameraState>;
 }
 
 export function computeCameraStateAtTime(
@@ -182,8 +186,50 @@ export function computeCameraStateAtTime(
   const evaluationDeps: CameraStateResolverDeps = deps.compiledChannelOwnership === undefined
     ? { ...deps, compiledChannelOwnership: true }
     : deps;
-  const context: ResolverEvaluationContext = { actionIds: new WeakMap(), states: new Map(), nextActionId: 0 };
-  return computeCameraStateAtTimeInternal(timeline, time, evaluationDeps, context);
+  const events = toOrderedEvents(timeline, time);
+  const releaseTimes = new Map<RuntimeTimelineAction, number>();
+  let nextRelease = Infinity;
+  for (let index = events.length - 1; index >= 0; index--) {
+    const { action, time: start } = events[index];
+    const params = action.params ?? {};
+    const validFollow = action.action === 'cameraFollow' && typeof params.characterId === 'string' && params.characterId.length > 0;
+    if (validFollow) releaseTimes.set(action, nextRelease);
+    if (validFollow || action.action === 'cameraUnfollow' || action.action === 'cameraReset'
+      || (action.action === 'cameraMotion' && compiledMotionWritesPosition(params))
+      || (action.action === 'cameraPath' && compiledPathWritesPosition(params))) nextRelease = start;
+  }
+  const context: ResolverEvaluationContext = {
+    events,
+    contributors: evaluationDeps.compiledChannelOwnership && evaluationDeps.resolveZoomAtTime
+      ? contributingEventPrefixes(events) : null,
+    releaseTimes,
+    states: new Map(),
+  };
+
+  // Resolve only requested start states. The explicit stack shares one event
+  // list and avoids recursive prefix copies, scans and JavaScript stack depth.
+  // Every index and memoized state belongs to this query and is then discarded.
+  const pending = [{ end: events.length,
+    evaluation: evaluateCameraStatePrefix(events.length, time, evaluationDeps, context) }];
+  let step = pending[0].evaluation.next();
+  while (true) {
+    if (step.done) {
+      const completed = pending.pop()!;
+      if (pending.length === 0) return step.value;
+      context.states.set(completed.end, step.value);
+      step = pending[pending.length - 1].evaluation.next(step.value);
+    } else {
+      const end = step.value;
+      const cached = context.states.get(end);
+      if (cached) {
+        step = pending[pending.length - 1].evaluation.next(cached);
+      } else {
+        const evaluation = evaluateCameraStatePrefix(end, events[end].time, evaluationDeps, context);
+        pending.push({ end, evaluation });
+        step = evaluation.next();
+      }
+    }
+  }
 }
 
 /**
@@ -277,24 +323,12 @@ function createPreparedCameraZoomWriter(
   };
 }
 
-function computeCameraStateAtTimeInternal(
-  timeline: readonly RuntimeTimelineAction[],
+function* evaluateCameraStatePrefix(
+  end: number,
   time: number,
   deps: CameraStateResolverDeps,
   context: ResolverEvaluationContext,
-): ResolvedCameraState {
-  const timelineKey = timeline.map((action) => {
-    let id = context.actionIds.get(action);
-    if (id === undefined) {
-      id = context.nextActionId++;
-      context.actionIds.set(action, id);
-    }
-    return id;
-  }).join(',');
-  const cacheKey = `${time}|${timelineKey}`;
-  const cached = context.states.get(cacheKey);
-  if (cached) return cached;
-
+): Generator<number, ResolvedCameraState, ResolvedCameraState> {
   const channels: MotionChannels = {
     x: STAGE_DEFAULT_CAMERA_POSITION.x,
     y: STAGE_DEFAULT_CAMERA_POSITION.y,
@@ -306,19 +340,12 @@ function computeCameraStateAtTimeInternal(
   let composedFollowFrame: CameraPosition | null = null;
   const coverage: CameraChannelCoverage = { position: false, zoom: false, rotation: false };
 
-  const orderedEvents = toOrderedEvents(timeline, time);
-  // Prepared zoom makes follow clamping independent of which earlier events
-  // remain visible. Legacy callers without that curve retain full replay.
-  const contributing = deps.compiledChannelOwnership && deps.resolveZoomAtTime
-    ? contributingEvents(orderedEvents) : null;
-  for (const [eventIndex, event] of orderedEvents.entries()) {
-    if (contributing && !contributing.has(eventIndex)) continue;
+  const indexes = context.contributors?.[end] ?? Array.from({ length: end }, (_, index) => index);
+  for (const eventIndex of indexes) {
+    const event = context.events[eventIndex];
     const { action, time: start } = event;
     const sampleTime = time;
-    const resolveStartState = () => {
-      const state = computeCameraStateAtTimeInternal(
-        orderedEvents.slice(0, eventIndex).map(({ action: previous }) => previous), start, deps, context,
-      );
+    const inheritStartCoverage = (state: ResolvedCameraState) => {
       // Coverage describes all writes in the elapsed prefix, including a
       // predecessor hidden by a later missing-anchor position writer.
       coverage.position ||= state.coverage.position;
@@ -327,7 +354,7 @@ function computeCameraStateAtTimeInternal(
       return state;
     };
     if (deps.compiledChannelOwnership && action.action === 'cameraFollow') {
-      const startState = resolveStartState();
+      const startState = inheritStartCoverage(yield eventIndex);
       channels.x = startState.position.x;
       channels.y = startState.position.y;
     }
@@ -358,7 +385,7 @@ function computeCameraStateAtTimeInternal(
         // the settled anchor. The transient decays from the pre-follow channel
         // state toward the tracked anchor, measured against the anchor as it
         // was at the follow start.
-        const releaseAt = Math.min(duration === Infinity ? Infinity : start + duration, findFollowReleaseInstant(timeline, action));
+        const releaseAt = Math.min(start + duration, context.releaseTimes.get(action) ?? Infinity);
         const followTime = Math.min(sampleTime, releaseAt);
         const trajectory = deps.anchorTrajectories?.find((candidate) =>
           candidate.characterId === activeFollow.characterId && candidate.part === (activeFollow.part ?? 'center'));
@@ -399,7 +426,7 @@ function computeCameraStateAtTimeInternal(
         // Duration-expired follow: playback's auto-unfollow latches the last
         // tracked glide frame — write that through so release semantics match
         // the explicit-unfollow path instead of reverting to pre-follow values.
-        const releaseAt = Math.min(start + duration, findFollowReleaseInstant(timeline, action));
+        const releaseAt = Math.min(start + duration, context.releaseTimes.get(action) ?? Infinity);
         const followPart = typeof params.focus?.part === 'string' ? params.focus.part : 'center';
         const trajectory = deps.anchorTrajectories?.find((candidate) =>
           candidate.characterId === params.characterId && candidate.part === followPart);
@@ -446,7 +473,7 @@ function computeCameraStateAtTimeInternal(
       follow = null;
       composedFollowFrame = null;
       if (deps.compiledChannelOwnership) {
-        const startState = resolveStartState();
+        const startState = inheritStartCoverage(yield eventIndex);
         channels.x = startState.position.x;
         channels.y = startState.position.y;
         channels.zoom = startState.zoom;
@@ -464,7 +491,7 @@ function computeCameraStateAtTimeInternal(
         const writesZoom = compiledMotionWritesZoom(params);
         const writesRotation = compiledMotionWritesRotation(params);
         if (writesX || writesY || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
-          const startState = resolveStartState();
+          const startState = inheritStartCoverage(yield eventIndex);
           if (writesX) channels.x = startState.position.x;
           if (writesY) channels.y = startState.position.y;
           if (writesZoom && !deps.resolveZoomAtTime) channels.zoom = startState.zoom;
@@ -487,7 +514,7 @@ function computeCameraStateAtTimeInternal(
         const writesZoom = compiledPathWritesProperty(params, 'zoom');
         const writesRotation = compiledPathWritesProperty(params, 'rotation');
         if (writesPosition || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
-          const startState = resolveStartState();
+          const startState = inheritStartCoverage(yield eventIndex);
           if (writesPosition) {
             channels.x = startState.position.x;
             channels.y = startState.position.y;
@@ -534,7 +561,6 @@ function computeCameraStateAtTimeInternal(
     follow,
     coverage,
   };
-  context.states.set(cacheKey, resolved);
   return resolved;
 }
 

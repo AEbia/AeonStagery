@@ -16,6 +16,29 @@ function action(
 }
 
 describe('evaluateCameraChannels', () => {
+  it('queries completed position histories with linear input reads and no retained pose preparation', () => {
+    const count = 512;
+    let reads = 0;
+    const params = Array.from({ length: count }, (_, index) => ({
+      move: 'pan', duration: 1, target: [0.3 + (index % 5) / 10, 0.5],
+      easing: 'linear', _cameraProperties: ['position'],
+    }));
+    const timeline: RuntimeTimelineAction[] = params.map((value, index) => ({
+      _id: `move-${index}`, action: 'cameraMotion', time: index * 2,
+      get params() { reads++; return value; },
+    }));
+    for (const index of [count - 1, count / 2, count - 1]) {
+      reads = 0;
+      const output = evaluateCameraChannels({ timeline, sceneTime: index * 2 + 1,
+        logicalReferenceSize: referenceSize, anchorTrajectories: [] });
+      expect(output.position).toEqual({ x: expect.closeTo(params[index].target[0], 12), y: 0.5 });
+      expect(reads).toBeLessThan(count * 32);
+      // A subsequent query consumes changed input without preparing a scene
+      // revision or reusing previously evaluated camera poses.
+      params[count - 1].target = [0.9, 0.5];
+    }
+  });
+
   it('matches complete prefix replay for mixed ownership, stops, missing focus and takeover', () => {
     const trajectory: CameraAnchorTrajectory = { version: 1, revision: 1, characterId: 'hero', part: 'center',
       validity: [{ start: 0, end: 10 }], events: [], samples: [
