@@ -26,14 +26,14 @@ describe('createStageAnchorResolver', () => {
     expect(resolve('tomori', 'head')).toEqual({ x: 0.5, y: 0.3 });
   });
 
-  it('falls back to the statement base when model anchors are unavailable', () => {
+  it('keeps a missing part anchor unavailable even with a statement base', () => {
     const resolve = createStageAnchorResolver({
       desiredPosition: () => ({ x: 0.6, y: 0.78 }),
       getPoint: () => null,
       getPosition: () => null,
     });
 
-    expect(resolve('tomori', 'chest')).toEqual({ x: 0.6, y: 0.78 });
+    expect(resolve('tomori', 'chest')).toBeNull();
     expect(resolve('tomori')).toEqual({ x: 0.6, y: 0.78 });
   });
 
@@ -59,7 +59,7 @@ describe('createStageAnchorResolver', () => {
       getPosition: () => ({ x: 0.6, y: 0.78 }),
     });
 
-    expect(resolve('tomori', 'torso' as any)).toEqual({ x: 0.6, y: 0.78 });
+    expect(resolve('tomori', 'torso')).toBeNull();
     expect(requestedPart).toBe('center');
   });
 

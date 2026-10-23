@@ -99,10 +99,8 @@ describe('runtime source seam guard', () => {
   });
 
   it('keeps runtime bake on the prepared runtime timeline adapter', () => {
-    const facade = fs.readFileSync(BAKE_ENGINE_PATH, 'utf8');
-    expect(facade).toContain('this.simulation.bakePreparedRange');
-    expect(facade).not.toContain('CameraAnchor');
-    const content = fs.readFileSync(path.join(ROOT, 'engine', 'IsolatedLive2DSimulation.ts'), 'utf8');
+    const content = fs.readFileSync(BAKE_ENGINE_PATH, 'utf8');
+    expect(content).not.toContain('CameraAnchor');
 
     expect(content).toContain('preparedSceneToRuntimeTimelineScene(scene)');
     expect(content).toContain("from './RuntimeSceneState'");

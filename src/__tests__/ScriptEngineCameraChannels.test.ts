@@ -6,10 +6,12 @@ import { cameraController } from '../engine/CameraController';
 import { subtitleRenderer } from '../engine/SubtitleRenderer';
 import { textLayerManager } from '../engine/TextLayerManager';
 import { stageManager } from '../engine/StageManager';
+import { live2DManager } from '../engine/Live2DManager';
 import { preBakeDaemon } from '../engine/daemons/PreBakeDaemon';
 import { SemanticScenePipeline } from '../services/semantic-scene/SemanticScenePipeline';
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 import { hookSystem } from '../api/hooks';
+import { CameraAdapter } from '../api/adapters/CameraAdapter';
 
 describe('formal camera channels (real engine, scheduler, controller and coordinator)', () => {
   let engine: ScriptEngine;
@@ -41,6 +43,101 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     await engine.loadPreparedScene(bundle.prepared);
     return { compiled: bundle.compiled, master: engine.getMasterTimeline()! };
   }
+
+  it.each(['zoom', 'position', 'rotation', 'focus'] as const)('preserves a standalone %s preview across rendering reads', async kind => {
+    await load([]);
+    if (kind === 'zoom') cameraController.zoomTo(3, 1, 'linear').progress(1);
+    if (kind === 'position') cameraController.panTo([0.8, 0.9], 1, 'linear').progress(1);
+    if (kind === 'rotation') cameraController.rotateTo(30, 1, 'linear').progress(1);
+    if (kind === 'focus') {
+      vi.spyOn(live2DManager, 'getPoint').mockReturnValue({ x: 0.8, y: 0.9 });
+      new CameraAdapter().focusOn('hero', 'head');
+      for (const tween of gsap.getTweensOf([cameraController.state, cameraController.state.position])) {
+        (tween.parent ?? tween).progress(1);
+      }
+    }
+    const preview = cameraController.getState();
+    expect(preview).toMatchObject(kind === 'zoom' ? { zoom: 3 }
+      : kind === 'rotation' ? { rotation: 30 } : { position: { x: 0.8, y: 0.9 } });
+    for (let read = 0; read < 3; read++) expect(engine.getCurrentCamera()).toEqual(preview);
+    await engine.seek(2, true);
+    expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 0 });
+  });
+
+  it('skips a missing part anchor with an authored character position and never recaptures it', async () => {
+    const point = vi.spyOn(live2DManager, 'getPoint').mockReturnValue(null);
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.8, y: 0.9 });
+    const { master } = await load([
+      { id: 'enter', type: 'characterPresence', time: 0,
+        params: { mode: 'enter', id: 'hero', position: [0.8, 0.9], durationSeconds: 0 } },
+      { id: 'focus', type: 'camera', time: 1,
+        params: { mode: 'focus', target: 'hero', targetPart: 'head', zoom: { kind: 'absolute', value: 2 },
+          durationSeconds: 1, ease: 'linear' } },
+    ]);
+    master.seek(2, false);
+    expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 2 });
+    point.mockReturnValue({ x: 0.7, y: 0.3 });
+    master.seek(3, false);
+    expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 2 });
+    await engine.seek(2, true);
+    expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 2 });
+  });
+
+  it('preserves property ownership before a later character focus during playback and seek', async () => {
+    const { master } = await load([
+      { id: 'move', type: 'camera', time: 1, params: { mode: 'move', position: [0.8, 0.2], durationSeconds: 1, ease: 'linear' } },
+      { id: 'zoom', type: 'camera', time: 3, params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 1, ease: 'linear' } },
+      { id: 'focus', type: 'camera', time: 8, params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 1, ease: 'linear' } },
+    ]);
+    master.seek(2, false);
+    master.seek(3.5, false);
+    const playback = cameraController.getState();
+    expect(playback).toMatchObject({ position: { x: 0.8, y: 0.2 }, zoom: 1.5 });
+    await engine.seek(3.5, true);
+    expect(cameraController.getState()).toEqual(playback);
+  });
+
+  it('preserves sparse path timing before a later character focus during playback and seek', async () => {
+    const { master } = await load([
+      { id: 'path', type: 'camera', time: 1, params: { mode: 'path', ease: 'linear', keyframes: [
+        { time: 1, zoom: 2 }, { time: 3, zoom: 4, rotation: 30 },
+      ] } },
+      { id: 'focus', type: 'camera', time: 8, params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 1, ease: 'linear' } },
+    ]);
+    master.seek(1.5, false);
+    const playback = cameraController.getState();
+    expect(playback).toMatchObject({ zoom: 1.5, rotation: 5 });
+    await engine.seek(1.5, true);
+    expect(cameraController.getState()).toEqual(playback);
+  });
+
+  it('preserves the playback focus destination while the character animates and the playhead seeks', async () => {
+    const point = { x: 0.7, y: 0.3 };
+    vi.spyOn(live2DManager, 'getPoint').mockImplementation(() => point);
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
+    const statements: CurrentSceneDocument['statements'] = [{
+      id: 'focus', type: 'camera', time: 1,
+      params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 2, ease: 'linear' },
+    }];
+    const { master } = await load(statements);
+    master.seek(1.5, false);
+    expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.55, 8), y: expect.closeTo(0.45, 8) });
+
+    point.x = 0.9;
+    point.y = 0.8;
+    master.seek(2, false);
+    expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.6, 8), y: expect.closeTo(0.4, 8) });
+    await engine.seek(2, true);
+    expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.6, 8), y: expect.closeTo(0.4, 8) });
+    await engine.seek(4, true);
+    expect(cameraController.getState().position).toEqual({ x: 0.7, y: 0.3 });
+    await engine.seek(1.5, true);
+    expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.55, 8), y: expect.closeTo(0.45, 8) });
+
+    await load(statements);
+    await engine.seek(4, true);
+    expect(cameraController.getState().position).toEqual({ x: 0.9, y: 0.8 });
+  });
 
   it('plays a sparse path from the default pose before its nonzero first keyframe and seeks to the same subframe', async () => {
     const { master } = await load([{

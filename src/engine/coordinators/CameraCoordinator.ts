@@ -1,10 +1,11 @@
 import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
-import type { CameraFollowConfig } from '../../api/types/camera';
-import { computeCameraStateAtTime, type CameraStateResolverDeps } from '../CameraStateResolver';
+import type { CameraFollowConfig, CameraState } from '../../api/types/camera';
+import { computeCameraStateAtTime, findFollowReleaseInstant, type CameraPosition, type CameraStateResolverDeps } from '../CameraStateResolver';
+import { resolveVec2 } from '../utils/math';
 import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
-import { evaluateCameraChannels, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
+import { evaluateCameraChannels, getPreparedCameraZoomResolver, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
 
-/** Whether a timeline can evaluate without a prepared historical anchor bundle. */
+/** Whether all camera channels can be evaluated without live character geometry. */
 export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineAction[]): boolean {
   return !timeline.some(({ action, params }) => {
     if (action === 'cameraFollow' || action === 'cameraUnfollow' || action === 'cameraHitchcock') return true;
@@ -21,6 +22,10 @@ interface CameraCoordinatorDeps extends CameraStateResolverDeps {
   logicalReferenceSize?: CameraLogicalReferenceSize;
   revision?: string | number;
   trajectoryRevision?: string | number;
+  /** Preliminary seeks run before visible models have been materialized. */
+  captureFocus?: boolean;
+  /** Frame reads retain live pursuit, including its frozen position on pause. */
+  retainFollowPosition?: boolean;
 }
 
 interface ResolvedStatePatch {
@@ -30,6 +35,7 @@ interface ResolvedStatePatch {
 }
 
 interface CameraMuscle {
+  getState(): CameraState;
   follow(characterId: string, config?: CameraFollowConfig): void;
   unfollow(): void;
   tickFollow(forceUpdate?: boolean): void;
@@ -40,18 +46,53 @@ interface CameraMuscle {
 
 export class CameraCoordinator {
   private controller: CameraMuscle;
+  private focusTimeline?: readonly RuntimeTimelineAction[];
+  private focusRevision?: string | number;
+  private readonly focusAnchors = new Map<string, CameraPosition | null>();
+  private activeFollowKey?: string;
+  // Only the current pursuit and its last release frame are retained. These
+  // are live playback state, never a prepared trajectory or a seek history.
+  private liveFollow?: { action: RuntimeTimelineAction; releaseTime: number };
+  private followRelease?: { action: RuntimeTimelineAction; releaseTime: number; position: CameraPosition };
 
   constructor(controller: CameraMuscle) {
     this.controller = controller;
+  }
+
+  private withCapturedFocus(timeline: readonly RuntimeTimelineAction[], deps: CameraCoordinatorDeps): CameraStateResolverDeps {
+    if (this.focusTimeline !== timeline || this.focusRevision !== deps.revision) {
+      this.focusAnchors.clear();
+      this.focusTimeline = timeline;
+      this.focusRevision = deps.revision;
+      this.activeFollowKey = undefined;
+      this.liveFollow = undefined;
+      this.followRelease = undefined;
+    }
+    return {
+      ...deps,
+      resolveFocusPosition: (characterId, start, part) => {
+        const key = JSON.stringify([characterId, start, part]);
+        if (!this.focusAnchors.has(key)) {
+          const anchor = deps.resolveFocusPosition
+            ? deps.resolveFocusPosition(characterId, start, part)
+            : deps.resolveCharacterPositionAtTime
+              ? deps.resolveCharacterPositionAtTime(characterId, start, part)
+              : deps.resolveCharacterPosition?.(characterId, part) ?? null;
+          if (deps.captureFocus === false) return anchor;
+          this.focusAnchors.set(key, anchor ? { ...anchor } : null);
+        }
+        return this.focusAnchors.get(key) ?? null;
+      },
+    };
   }
 
   /**
    * Scan the timeline at the given time and determine the correct
    * camera follow + shake state.
    *
-   * Formal scenes always supply a prepared trajectory bundle and share one
-   * authority for playback and seek. The callback fallback is retained for
-   * standalone preview callers until their evaluator migration.
+   * Basic channels use pure evaluation. Character cameras use the visible
+   * stage anchors and the existing follow controller; they never request
+   * isolated model simulation. Explicit trajectory callers remain supported.
    */
   sync(
     time: number,
@@ -68,37 +109,60 @@ export class CameraCoordinator {
         trajectoryRevision: deps.trajectoryRevision,
       });
       this.controller.unfollow();
+      this.activeFollowKey = undefined;
       this.controller.applyShakeOffset(resolved.shake);
       this.controller.applyResolvedState(resolved);
       return resolved;
     }
-    const resolved = computeCameraStateAtTime(timeline, time, deps);
+    const evaluationDeps = this.withCapturedFocus(timeline, deps);
+    if (!deps.retainFollowPosition) {
+      this.liveFollow = undefined;
+      this.followRelease = undefined;
+    } else if (this.liveFollow && time >= this.liveFollow.releaseTime) {
+      this.followRelease = { ...this.liveFollow, position: resolveVec2(this.controller.getState().position) };
+      this.liveFollow = undefined;
+    }
+    const resolved = computeCameraStateAtTime(timeline, time, {
+      ...evaluationDeps,
+      resolveZoomAtTime: deps.resolveZoomAtTime ?? getPreparedCameraZoomResolver({ timeline, revision: deps.revision }),
+      resolveLiveFollowRelease: (action, atTime) => this.followRelease?.action === action && atTime >= this.followRelease.releaseTime
+        ? this.followRelease.position : null,
+    });
 
-    // 1. Reconcile Camera Follow (ticker stays registered so forward playback
-    // keeps tracking smoothly).
+    // Keep pursuit on the live follow ticker. Scene-time reads must not snap
+    // it to the reconstruction approximation or re-register it every frame.
     if (resolved.follow) {
-      this.controller.follow(resolved.follow.characterId, {
-        offset: [resolved.follow.offset.x, resolved.follow.offset.y],
-        smoothing: resolved.follow.smoothing,
-      });
-      // Snap to the live anchor first; the deterministic hard-set below wins
-      // for this landing frame.
-      this.controller.tickFollow(true);
+      const followKey = JSON.stringify(resolved.follow);
+      if (!deps.retainFollowPosition || this.activeFollowKey !== followKey) {
+        this.controller.follow(resolved.follow.characterId, {
+          offset: [resolved.follow.offset.x, resolved.follow.offset.y],
+          smoothing: resolved.follow.smoothing,
+        });
+        this.activeFollowKey = followKey;
+      }
+      if (!deps.retainFollowPosition) this.controller.tickFollow(true);
+      if (deps.retainFollowPosition && !this.liveFollow) {
+        const action = timeline.filter(candidate => candidate.action === 'cameraFollow' && (candidate.time ?? 0) <= time)
+          .sort((left, right) => (left.time ?? 0) - (right.time ?? 0)).at(-1);
+        if (action) {
+          const duration = typeof action.params.duration === 'number' ? action.params.duration : Infinity;
+          this.liveFollow = { action, releaseTime: Math.min((action.time ?? 0) + duration, findFollowReleaseInstant(timeline, action)) };
+        }
+      }
     } else {
       this.controller.unfollow();
+      this.activeFollowKey = undefined;
+      this.liveFollow = undefined;
     }
 
     // 2. Reconstruct finite shake without killing any scheduled timeline.
     this.controller.applyShakeOffset(computeCameraShakeAtTime(timeline, time));
 
-    // 3. Hard-set the full reconstructed state. GSAP only re-renders tweens
-    // whose window the playhead actually crosses, so a jump landing in the
-    // post-region of every camera tween (e.g. seeking back out of a long
-    // follow) would otherwise keep whatever the follow ticker or an earlier
-    // render left behind. The resolver output IS the timeline truth for
-    // seek/export; GSAP remains authoritative only while playing forward.
+    // Property tracks and captured focus destinations share the same current-
+    // time evaluation for playback and seeks. Only live pursuit owns position
+    // during frame reads; a seek/export restores its approximate landing frame.
     this.controller.applyResolvedState({
-      position: { ...resolved.position },
+      ...(!deps.retainFollowPosition || !resolved.follow ? { position: { ...resolved.position } } : {}),
       zoom: resolved.zoom,
       rotation: resolved.rotation,
     });

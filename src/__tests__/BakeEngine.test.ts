@@ -3,8 +3,6 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as PIXI from 'pixi.js';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
 import { BakeEngine } from '../engine/BakeEngine';
-import { IsolatedLive2DSimulation } from '../engine/IsolatedLive2DSimulation';
-import { CameraAnchorSampler } from '../engine/CameraAnchorSampler';
 import * as runtimeAdapter from '../engine/Live2DRuntimeAdapter';
 import * as runtimeResolver from '../engine/Live2DRuntimeResolver';
 import { captureModelSnapshot } from '../engine/Live2DConfig';
@@ -782,7 +780,7 @@ describe('BakeEngine runtime routing', () => {
   });
 
   it('records dialogue mouth parameters in the live injected-parameter source', () => {
-    const engine = new IsolatedLive2DSimulation(createApp());
+    const engine = new BakeEngine(createApp());
     const entry = {
       id: 'rana',
       injectedParams: {},
@@ -805,110 +803,5 @@ describe('BakeEngine runtime routing', () => {
     );
 
     expect(entry.injectedParams).toEqual({ PARAM_MOUTH_OPEN_Y: 0, ParamMouthOpenY: 0 });
-  });
-
-  it('prepares posed historical anchors independently of snapshot Bake', async () => {
-    const modelPath = 'figure/rana/rana.model3.json';
-    let posedOffset = 0;
-    let poseTimeSeconds = 0;
-    let currentSceneTime: number | null = null;
-    const posesAtBoundsRefresh: number[] = [];
-    const models: PIXI.Container[] = [];
-    const updateDrawableBounds = vi.fn(() => { posesAtBoundsRefresh.push(posedOffset); });
-    const createModel = vi.fn(async () => {
-      const values = new Float32Array([0]);
-      const model = Object.assign(new PIXI.Container(), {
-        anchor: new PIXI.ObservablePoint({ _onUpdate: () => {} }, 0, 0),
-        internalModel: {
-          coreModel: { getParameterValues: () => values, getPartOpacities: () => values },
-          parameterValues: values,
-          partOpacities: values,
-          settings: { motions: {}, expressions: {} },
-          motionManager: { stopAllMotions: vi.fn(), state: { queue: [] as unknown[] } },
-        },
-        update: vi.fn(),
-        render: vi.fn(),
-        startMotion: vi.fn(async () => true),
-        updateDrawableBounds,
-        getLocalBounds: () => ({ x: posedOffset + 20, y: -20, width: 100, height: 200 }),
-      });
-      models.push(model);
-      return model;
-    });
-    vi.spyOn(runtimeResolver, 'resolveLive2DRuntimeDescriptor').mockReturnValue({
-      runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true,
-    });
-    const controls = mockControls({
-      setSceneTime: vi.fn((_model, sceneTimeSeconds) => { currentSceneTime = sceneTimeSeconds; }),
-      stepBakeFrame: vi.fn((_model, deltaMs) => {
-        if (currentSceneTime === null) return;
-        poseTimeSeconds += deltaMs / 1000;
-        posedOffset = poseTimeSeconds * 100;
-      }),
-      getHeadAnchor: vi.fn(() => ({ x: 0.8, y: 0.3 })),
-    });
-    vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(mockAdapter({
-      id: 'untitled-pixi-live2d-engine-cubism',
-      createModel,
-      createTestControls: () => controls,
-    }));
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ FileReferences: { Moc: 'rana.moc3' } }),
-    })));
-
-    const base = createBasePreparedScene(modelPath);
-    const duration = 0.15;
-    const eventTime = 0.05;
-    const scene: PreparedCompiledScene = {
-      ...base,
-      durationSeconds: duration,
-      actions: [
-        { ...base.actions[0], params: { ...base.actions[0].params, position: [0.5, 0.5], scale: 2, rotation: 90, flipX: true, duration } },
-        {
-          id: 'instant-transform', time: eventTime, action: 'transformCharacter',
-          params: { id: 'rana', position: [0.7, 0.4], duration: 0 },
-          source: { statementId: 'instant-transform', outputKey: 'primary' },
-        },
-        {
-          id: 'focus-head', time: 0, action: 'cameraMotion',
-          params: { move: 'pan', duration: 0, focus: { character: 'rana', part: 'head' } },
-          source: { statementId: 'focus-head', outputKey: 'primary' },
-        },
-      ],
-    };
-    const engine = new CameraAnchorSampler(createApp());
-    try {
-      const result = await engine.prepareCameraAnchorsPrepared(scene, new Map([[modelPath, modelPath]]), 7);
-      const head = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'head');
-      const center = result.anchorTrajectories?.find((track) => track.characterId === 'rana' && track.part === 'center');
-      const transition = head?.events.find((event) => event.time === eventTime);
-      const modelPivot = models[0].pivot;
-      const initialHeadOffsetX = (posesAtBoundsRefresh[0] + 20 + 100 * 0.8 - modelPivot.x) / 200;
-      const eventHeadOffsetX = (posesAtBoundsRefresh[1] + 20 + 100 * 0.8 - modelPivot.x) / 200;
-
-      expect(head?.version).toBe(1);
-      expect(head?.revision).toEqual(expect.any(String));
-      expect(head?.samples).toHaveLength(5);
-      expect(head?.samples[0].position).not.toEqual(head?.samples[1].position);
-      expect(head?.samples[0].position.y).toBeCloseTo(0.5 - 2 * initialHeadOffsetX, 6);
-      expect(head?.samples[0].position.y).not.toBeCloseTo(0.5 + 2 * initialHeadOffsetX, 3);
-      expect(posesAtBoundsRefresh).toHaveLength(5);
-      expect(posesAtBoundsRefresh[0]).toBeCloseTo(0, 6);
-      expect(posesAtBoundsRefresh[1]).toBeCloseTo(eventTime * 100, 6);
-      expect(transition).toBeDefined();
-      expect(transition?.left.x).toBeCloseTo(transition!.right.x - 0.2, 6);
-      expect(transition?.left.y).toBeCloseTo(transition!.right.y + 0.1, 6);
-      expect(transition?.left.y).toBeCloseTo(0.5 - 2 * eventHeadOffsetX, 6);
-      expect(transition?.right.y).toBeCloseTo(0.4 - 2 * eventHeadOffsetX, 6);
-      expect(center?.samples).toHaveLength(5);
-      expect(center?.samples[0].position.x).toBeCloseTo(0.05, 6);
-      expect(center?.samples[0].position.y).toBeLessThan(0.5);
-      expect(updateDrawableBounds).toHaveBeenCalledTimes(5);
-      expect(result).not.toHaveProperty('cameraStates');
-    } finally {
-      engine.destroy();
-      vi.unstubAllGlobals();
-    }
   });
 });

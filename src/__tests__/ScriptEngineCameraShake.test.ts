@@ -27,7 +27,7 @@ describe('scene camera shake playback and seek', () => {
     ];
     const scene: RuntimeTimelineScene = { sceneId: 'shake', meta: { title: 'Shake', characters: [] }, timeline: actions };
     const master = gsap.timeline({ paused: true });
-    const context = { tl: master } as SchedulerContext;
+    const context = { tl: master, cameraStateDriven: true } as SchedulerContext;
     for (const action of actions) {
       if (action.action === 'cameraShake') scheduleCameraShake(context, action);
       else scheduleCameraReset(context, action);
@@ -36,6 +36,9 @@ describe('scene camera shake playback and seek', () => {
     Reflect.set(engine, 'masterTimeline', master);
     const project = () => projectToScreen({ x: 960, y: 540, scale: 1 }, engine.getCurrentCamera(), { w: 1920, h: 1080 });
     const coordinator = new CameraCoordinator(cameraController);
+    // Like the engine, synchronize scene-owned effects on timeline updates;
+    // rendering reads only consume the resulting camera state.
+    master.eventCallback('onUpdate', () => { coordinator.sync(master.time(), actions); });
 
     master.seek(1.2, false);
     const playback = project();

@@ -3,6 +3,26 @@ import { computeCameraStateAtTime, prepareCameraZoomResolver } from '../engine/C
 import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('computeCameraStateAtTime', () => {
+  it.each(['stop', 'duration'] as const)('holds the release-time anchor after follow %s without a trajectory', operation => {
+    const timeline: RuntimeTimelineAction[] = [
+      { _id: 'zoom', action: 'cameraMotion', time: 0, params: { zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
+      { _id: 'follow', action: 'cameraFollow', time: 1,
+        params: { characterId: 'hero', smoothing: 0.85, ...(operation === 'duration' ? { duration: 1 } : {}) } },
+      ...(operation === 'stop' ? [{ _id: 'stop', action: 'cameraUnfollow' as const, time: 2, params: {} }] : []),
+    ];
+    const anchorAt = (time: number) => ({ x: 0.4 + time * 0.1, y: 0.5 });
+    // Cold direct seek, forward export samples, then out-of-order seeks.
+    for (const time of [3, 2, 2.5, 3, 4, 2.25]) {
+      const state = computeCameraStateAtTime(timeline, time, {
+        resolveCharacterPosition: () => anchorAt(time),
+        resolveCharacterPositionAtTime: (_id, atTime) => anchorAt(atTime),
+      });
+      expect(state.follow).toBeNull();
+      expect(state.position.x).toBeCloseTo(0.6, 8);
+      expect(state.position.y).toBe(0.5);
+    }
+  });
+
   it('prepares a zoom-only history that matches motion, path, relative zoom, and reset sampling', () => {
     const timeline: RuntimeTimelineAction[] = [
       { _id: 'zoom-start', action: 'cameraMotion', time: 0, params: { zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },

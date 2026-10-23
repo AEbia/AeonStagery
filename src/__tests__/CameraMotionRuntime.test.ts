@@ -68,6 +68,7 @@ describe('camera motion runtime', () => {
 
   it('delegates character push focus and offsets to camera moveTo', () => {
     const returnedTimeline = { kill: vi.fn() };
+    const resolveFocusPosition = vi.fn(() => ({ x: 0.7, y: 0.3 }));
     const camera = {
       moveTo: vi.fn(() => returnedTimeline),
     } as unknown as CameraController;
@@ -79,7 +80,8 @@ describe('camera motion runtime', () => {
       focus: { offsetX: 0.1, offsetY: -0.2 },
       duration: 1.5,
       delay: 0.25,
-    } satisfies CameraMotionConfig, 'power2.out');
+      resolveFocusPosition,
+    }, 'power2.out');
 
     expect(timeline).toBe(returnedTimeline);
     expect(camera.moveTo).toHaveBeenCalledWith({
@@ -91,7 +93,7 @@ describe('camera motion runtime', () => {
       duration: 1.5,
       ease: 'power2.out',
       delay: 0.25,
-    });
+    }, resolveFocusPosition);
   });
 
   it('computes the missing dolly scale end from the zoom ratio', () => {

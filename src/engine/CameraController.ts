@@ -30,7 +30,7 @@ import type {
 } from '../api/types/camera';
 import { resolveVec2 } from './utils/math';
 import { CAMERA_EASING_MAP } from './utils/cameraEasing';
-import { MOVE_HANDLERS } from './MoveHandlers';
+import { MOVE_HANDLERS, type CameraFocusPositionResolver } from './MoveHandlers';
 import { sampleCameraShake, type CameraShakeOffset } from './CameraShake';
 import { normalizeCharacterEase } from './CharacterAnimationContract';
 
@@ -53,6 +53,7 @@ class CameraController {
   private followTarget: string | null = null;
   private followConfig: CameraFollowConfig = {};
   private followTicker: (() => void) | null = null;
+  private followTickerEnabled = true;
 
   /** Active shake animation */
   private shakeTimeline: gsap.core.Timeline | null = null;
@@ -161,7 +162,7 @@ class CameraController {
    * or its animation settles between construction and playback, the camera
    * moves to the correct live position.
    */
-  moveTo(config: CameraMoveConfig): gsap.core.Tween {
+  moveTo(config: CameraMoveConfig, resolveFocusPosition?: CameraFocusPositionResolver): gsap.core.Tween {
     const duration = config.duration ?? 1;
     const ease = config.ease ?? 'power3.inOut';
     const delay = config.delay ?? 0;
@@ -188,16 +189,18 @@ class CameraController {
       const ox = config.offsetX ?? 0;
       const oy = config.offsetY ?? 0;
 
+      tl.call(() => this.unfollow(), undefined, delay);
+
       // Character focus must center the authored anchor at every zoom,
       // including 1x. A viewport clamp would lock 1x focus to (0.5, 0.5).
       tl.to(this.state.position as { x: number; y: number }, {
         x: () => {
-          const p = live2DManager.getPoint(charId, part);
+          const p = resolveFocusPosition ? resolveFocusPosition(charId, part) : live2DManager.getPoint(charId, part);
           if (p) return p.x + ox;
           return (this.state.position as { x: number; y: number }).x;
         },
         y: () => {
-          const p = live2DManager.getPoint(charId, part);
+          const p = resolveFocusPosition ? resolveFocusPosition(charId, part) : live2DManager.getPoint(charId, part);
           if (p) return p.y + oy;
           return (this.state.position as { x: number; y: number }).y;
         },
@@ -375,7 +378,7 @@ class CameraController {
    * Multiple motions overlapping on the same timeline compose naturally —
    * each affects different camera properties (zoom, position, rotation, shake).
    */
-  executeMotion(config: CameraMotionConfig): gsap.core.Tween | gsap.core.Timeline {
+  executeMotion(config: CameraMotionConfig, resolveFocusPosition?: CameraFocusPositionResolver): gsap.core.Tween | gsap.core.Timeline {
     const gsapEasing = CAMERA_EASING_MAP[config.easing] || 'power2.inOut';
 
     // Resolve focus: explicit `focus` field takes precedence over legacy flat params
@@ -397,7 +400,7 @@ class CameraController {
       target: effectivePoint,
     };
 
-    const result = handler.call(this, resolved, gsapEasing);
+    const result = handler.call(this, { ...resolved, resolveFocusPosition }, gsapEasing);
     hookSystem.execute('camera:move', { type: 'motion', config: resolved });
     return result;
   }
@@ -551,6 +554,19 @@ class CameraController {
     merged.smoothing = merged.smoothing ?? 0.85;
     this.followConfig = merged;
 
+    this.registerFollowTicker();
+  }
+
+  /** Keep the active follow target while playback is paused or seeking. */
+  setFollowTickerEnabled(enabled: boolean): void {
+    this.followTickerEnabled = enabled;
+    if (enabled) this.registerFollowTicker();
+    else this.removeFollowTicker();
+  }
+
+  private registerFollowTicker(): void {
+    if (!this.followTickerEnabled || !this.followTarget || this.followTicker) return;
+
     const app = stageManager.getApp();
     const tickerFn = (ticker?: { deltaTime?: number }) => {
       // PixiJS ticker.deltaTime is scalar frames (60fps baseline) → seconds.
@@ -559,6 +575,13 @@ class CameraController {
     };
     app.ticker.add(tickerFn as any);
     this.followTicker = tickerFn as any;
+  }
+
+  private removeFollowTicker(): void {
+    if (!this.followTicker) return;
+    const app = stageManager.getApp();
+    app.ticker.remove(this.followTicker as any);
+    this.followTicker = null;
   }
 
   /**
@@ -600,11 +623,7 @@ class CameraController {
    * Stop following a character.
    */
   unfollow(): void {
-    if (this.followTicker) {
-      const app = stageManager.getApp();
-      app.ticker.remove(this.followTicker as any);
-      this.followTicker = null;
-    }
+    this.removeFollowTicker();
     this.followTarget = null;
   }
 

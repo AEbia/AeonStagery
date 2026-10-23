@@ -5,9 +5,11 @@ import { resolveVec2 } from './utils/math';
 
 export type MoveHandlerFn = (
   this: CameraController,
-  config: CameraMotionConfig,
+  config: CameraMotionConfig & { resolveFocusPosition?: CameraFocusPositionResolver },
   ease: string
 ) => gsap.core.Tween | gsap.core.Timeline;
+
+export type CameraFocusPositionResolver = (characterId: string, part: string) => { x: number; y: number } | null;
 
 export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
@@ -28,7 +30,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const targetZoom = config.zoom !== undefined ? config.zoom : `+=0.3`;
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.4], zoom: targetZoom as any, duration, ease, delay });
   },
@@ -49,7 +51,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const targetZoom = config.zoom !== undefined ? config.zoom : `-=0.3`;
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.5], zoom: targetZoom as any, duration, ease, delay });
   },
@@ -66,7 +68,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     const tl = gsap.timeline({ delay });
@@ -147,7 +149,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const ox = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetX : undefined) ?? 0;
     const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.5], zoom, duration, ease, delay });
   },
@@ -164,7 +166,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       : angle;
 
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     if (target) {

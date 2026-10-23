@@ -243,6 +243,24 @@ describe('CameraController public state', () => {
     });
   });
 
+  it('releases prior tracking when a fixed character focus starts', () => {
+    const camera = new CameraController();
+    cameraMocks.getPosition.mockReturnValue({ x: 0.5, y: 0.5 });
+    camera.follow('hero');
+    cameraMocks.getPoint.mockReturnValue({ x: 0.7, y: 0.3 });
+    const motion = camera.executeMotion({
+      move: 'pan', easing: 'linear', duration: 2, focus: { character: 'hero', part: 'head' },
+    });
+    motion.seek(1, false);
+    expect(cameraMocks.tickerRemove).toHaveBeenCalledTimes(1);
+
+    cameraMocks.getPoint.mockReturnValue({ x: 0.9, y: 0.8 });
+    cameraMocks.getPosition.mockReturnValue({ x: 0.9, y: 0.8 });
+    camera.tickFollow(true);
+    motion.seek(2, false);
+    expect(camera.getState().position).toEqual({ x: 0.7, y: 0.3 });
+  });
+
   it('applies the built-in follow offset when callers pass undefined config fields', () => {
     const camera = new CameraController();
     // Mild push-in so the composed follow target sits inside the viewport.

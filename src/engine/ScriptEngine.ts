@@ -34,9 +34,9 @@ import type { RimLightStyleState } from '../api/types/visual';
 import { SnapshotStore } from './SnapshotStore';
 import { preBakeDaemon } from './daemons/PreBakeDaemon';
 import { CameraCoordinator, usesUnifiedCameraChannels } from './coordinators/CameraCoordinator';
-import { CameraHistoricalRuntime, type CameraAnchorPreparerFactory } from './CameraHistoricalRuntime';
+import { createStageAnchorResolver } from './cameraAnchorResolver';
+import type { CameraStateResolverDeps } from './CameraStateResolver';
 import type { CameraEvaluationOutput } from './CameraChannelEvaluator';
-import type { WmdlConfigRegistry } from './WmdlConfigRegistry';
 import { CharacterSynchronizer } from './coordinators/CharacterSynchronizer';
 import { DialogueCoordinator } from './coordinators/DialogueCoordinator';
 import { AudioCoordinator } from './coordinators/AudioCoordinator';
@@ -82,14 +82,11 @@ class ScriptEngine {
   private customMotionPreviewUpdates: Promise<void> = Promise.resolve();
 
   private cameraCoordinator = new CameraCoordinator(cameraController);
-  private readonly historicalCamera: CameraHistoricalRuntime;
   private sceneLoadVersion = 0;
   private scenePreparation: Promise<void> = Promise.resolve();
   private scenePreparing = false;
   private seekRequestVersion = 0;
   private requestedSeekTime = 0;
-  private cameraPlaybackPreparation: Promise<void> | null = null;
-  private lastProjectedTime = 0;
   private playbackIntentVersion = 0;
   private cameraEvaluation: CameraEvaluationOutput | undefined;
   private characterSynchronizer = new CharacterSynchronizer(live2DManager);
@@ -104,8 +101,7 @@ class ScriptEngine {
     this.syncLive2DTransformsFromTimeline();
   };
 
-  constructor(createCameraAnchorPreparer?: CameraAnchorPreparerFactory) {
-    this.historicalCamera = new CameraHistoricalRuntime(createCameraAnchorPreparer);
+  constructor() {
     live2DManager.setScriptEngine(this);
   }
 
@@ -148,20 +144,26 @@ class ScriptEngine {
     this.customMotionPreviewUpdates = Promise.allSettled([this.customMotionPreviewUpdates, updating]).then(() => {});
     await updating;
   }
+  /** Rendering reads preserve standalone previews and the live pursuit frame. */
   getCurrentCamera(): CameraState {
-    const timeline = this.currentScene?.timeline;
-    if (timeline && (usesUnifiedCameraChannels(timeline) || this.historicalCamera.covers(this.getCurrentTime()))) {
-      this.cameraEvaluation = this.cameraCoordinator.sync(this.masterTimeline?.time() ?? 0, timeline, this.buildCameraResolverDeps());
-    }
     return cameraController.getState();
   }
+
+  /** Formal scene writes run on timeline updates; seeks synchronize explicitly. */
+  private syncCameraFromTimeline(): void {
+    const time = this.getCurrentTime();
+    const timeline = this.currentScene?.timeline;
+    if (timeline) {
+      this.cameraEvaluation = this.cameraCoordinator.sync(time, timeline, {
+        ...this.buildCameraResolverDeps(time),
+        captureFocus: !this.isReconstructing,
+        retainFollowPosition: !this.isReconstructing,
+      });
+    }
+  }
+
   /** Diagnostics are data for the caller to present and deduplicate. */
   getCameraEvaluation(): CameraEvaluationOutput | undefined { return this.cameraEvaluation; }
-
-  setWmdlConfigRegistry(registry: WmdlConfigRegistry): void {
-    this.historicalCamera.setWmdlConfigRegistry(registry);
-    this.currentSceneAuxSignature = null;
-  }
 
   setBasePath(path: string): void { this.basePath = path; }
   getBasePath(): string { return this.basePath; }
@@ -182,6 +184,7 @@ class ScriptEngine {
   }
 
   private setPlaying(playing: boolean): void {
+    cameraController.setFollowTickerEnabled(playing);
     if (this.playing === playing) return;
     this.playing = playing;
     this._playingCallbacks.forEach(callback => callback(playing));
@@ -237,8 +240,8 @@ class ScriptEngine {
     return preparation;
   }
 
-  /** Await the current scene revision; an export must never switch histories mid-frame. */
-  async prepareForExport(signal?: AbortSignal, throughTime?: number): Promise<{ assertCurrent(): void }> {
+  /** Await the current scene revision; an export must never switch scenes mid-frame. */
+  async prepareForExport(signal?: AbortSignal): Promise<{ assertCurrent(): void }> {
     const version = this.sceneLoadVersion;
     const referenceSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
     let onAbort: (() => void) | undefined;
@@ -248,8 +251,6 @@ class ScriptEngine {
         (async () => {
           await this.scenePreparation;
           signal?.throwIfAborted();
-          if (version !== this.sceneLoadVersion) return;
-          if (throughTime !== undefined) await this.historicalCamera.ensureAt(throughTime);
         })(),
         new Promise<never>((_resolve, reject) => {
           if (!signal) return;
@@ -262,7 +263,7 @@ class ScriptEngine {
     }
     const assertCurrent = () => {
       signal?.throwIfAborted();
-      if (version !== this.sceneLoadVersion || !this.masterTimeline || !this.historicalCamera.input
+      if (version !== this.sceneLoadVersion || !this.masterTimeline
         || referenceSize !== `${STAGE_WIDTH}x${STAGE_HEIGHT}`) {
         throw new Error('Prepared camera scene changed during export.');
       }
@@ -274,7 +275,6 @@ class ScriptEngine {
   private async loadPreparedSceneRuntime(scene: PreparedCompiledScene): Promise<void> {
     const loadVersion = ++this.sceneLoadVersion;
     const seekRequestVersion = this.seekRequestVersion;
-    this.historicalCamera.cancelPreparation();
     const stageSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
     if (this.loadedStageSize !== '' && this.loadedStageSize !== stageSize) {
       this.currentSceneAuxSignature = null;
@@ -369,10 +369,6 @@ class ScriptEngine {
     // header fields (meta/audio/visual) that are not part of any action.
     if (
       isSameScene
-      && this.historicalCamera.input !== null
-      // Posed resource contents may change without changing camera statements.
-      // Until resources expose content revisions, role scenes re-prepare on reload.
-      && usesUnifiedCameraChannels(compiledScript.timeline)
       && previousScene !== null
       && this.currentSceneDurationOverride === durationOverride
       && this.currentSceneAuxSignature === sceneAuxSignature(compiledScript)
@@ -383,18 +379,7 @@ class ScriptEngine {
       return;
     }
 
-    // Keep the committed scene and its frozen pose intact while the isolated
-    // history is prepared. Clearing the timeline here used to discard seeks
-    // and expose a zero-time camera for the entire preparation window.
-    await this.prewarmModels(compiledScript);
-    if (loadVersion !== this.sceneLoadVersion) return;
-    let oldTime = this.seekRequestVersion === seekRequestVersion ? this.getCurrentTime() : this.requestedSeekTime;
-    if (!await this.historicalCamera.prepare(preparedScene, !usesUnifiedCameraChannels(compiledScript.timeline), oldTime)) return;
-    if (loadVersion !== this.sceneLoadVersion) return;
-    if (this.seekRequestVersion !== seekRequestVersion) {
-      oldTime = this.requestedSeekTime;
-      if (!await this.historicalCamera.ensureAt(oldTime) || loadVersion !== this.sceneLoadVersion) return;
-    }
+    const oldTime = this.seekRequestVersion === seekRequestVersion ? this.getCurrentTime() : this.requestedSeekTime;
     const wasPlaying = this.playing;
 
     this.currentScene = compiledScript;
@@ -402,8 +387,10 @@ class ScriptEngine {
     this.currentSceneAuxSignature = sceneAuxSignature(compiledScript);
     this.currentSceneDurationOverride = durationOverride;
     // Full cleanup if SceneID changed; soft cleanup otherwise (retain models for speed)
-    this.cleanup(!isSameScene, invalidationTime, true);
+    this.cleanup(!isSameScene, invalidationTime);
     this.initMasterTimeline(compiledScript, durationOverride);
+    await this.prewarmModels(compiledScript);
+    if (loadVersion !== this.sceneLoadVersion) return;
     this.masterTimeline?.seek(oldTime, true);
 
     // Restore state for the editor. Incomplete image drafts are a script
@@ -462,11 +449,7 @@ class ScriptEngine {
         // PreBakeDaemon auto-resumes via scene:end event listener
       },
       onUpdate: () => {
-        if (!this.scenePreparing && this.currentScene && !usesUnifiedCameraChannels(this.currentScene.timeline)
-          && !this.historicalCamera.covers(this.getCurrentTime())) {
-          this.prepareCameraPlaybackFrame();
-          return;
-        }
+        this.syncCameraFromTimeline();
         const cam = this.syncLive2DTransformsFromTimeline();
         const time = this.masterTimeline?.time() ?? 0;
         const stateAtTime = this.isReconstructing ? null : this.computeStateAtTime(time);
@@ -706,40 +689,9 @@ class ScriptEngine {
         live2DManager.applyProxyTransform(id, proxy, undefined, cam);
       }
     });
-    this.lastProjectedTime = this.getCurrentTime();
 
     return cam;
   }
-
-  private prepareCameraPlaybackFrame(): void {
-    if (this.cameraPlaybackPreparation || !this.masterTimeline) return;
-    const timeline = this.masterTimeline;
-    const time = timeline.time();
-    const version = this.sceneLoadVersion;
-    const request = this.seekRequestVersion;
-    timeline.pause();
-    live2DManager.setAutoUpdate(false);
-    live2DManager.pauseAllTweens();
-    // Rewind only the unprojected tick. Keep the last committed frame visible
-    // until its requested historical input exists; no zero-time fallback.
-    timeline.seek(this.lastProjectedTime, true);
-    const preparing = this.historicalCamera.ensureAt(time, 2).then(ready => {
-      if (!ready || version !== this.sceneLoadVersion || request !== this.seekRequestVersion || timeline !== this.masterTimeline) return;
-      if (!this.playing) return;
-      timeline.seek(time, false);
-      this.play();
-    }).catch(error => {
-      if (version === this.sceneLoadVersion) {
-        this.pause();
-        this.logger.error('Could not prepare historical camera input', error);
-      }
-    }).finally(() => {
-      if (this.cameraPlaybackPreparation === preparing) this.cameraPlaybackPreparation = null;
-    });
-    this.cameraPlaybackPreparation = preparing;
-  }
-
-
 
   private takeSnapshot(time: number): void {
     if (this.customMotionPreview) return;
@@ -835,11 +787,6 @@ class ScriptEngine {
     const wasPlaying = this.playing;
     const playbackIntent = this.playbackIntentVersion;
     eventBus.emit('scene:seek:start', { time });
-    if (this.currentScene && !usesUnifiedCameraChannels(this.currentScene.timeline) && !this.historicalCamera.covers(time)) {
-      this.pauseForSeek({ emitLifecycle: !suppressSeekSideEffects });
-      if (!await this.historicalCamera.ensureAt(time) || seekVersion !== this._seekVersion) return;
-    }
-
     // 核心优化：即使外部请求了 forceReconstruct = false，
     // 如果我们检测到目标时间点 desired 角色集合与当前已加载角色集合不一致，
     // 我们必须自动提升为 forceReconstruct = true，以确保角色能正确登场/退场！
@@ -891,7 +838,9 @@ class ScriptEngine {
         // creation. The first visible frame must use the same camera that the
         // post-load synchronization pass will use.
         this.masterTimeline.seek(time, true);
-        this.cameraCoordinator.sync(time, this.currentScene?.timeline ?? [], this.buildCameraResolverDeps());
+        this.cameraEvaluation = this.cameraCoordinator.sync(time, this.currentScene?.timeline ?? [], {
+          ...this.buildCameraResolverDeps(time), captureFocus: false,
+        });
         live2DManager.currentCamera = this.getCurrentCamera();
 
         // ─── Maginot Line: All Character asset load must completely finish first ───
@@ -1050,13 +999,43 @@ class ScriptEngine {
     );
   }
 
-  /** Historical trajectories never read or advance the active character runtime. */
-  private buildCameraResolverDeps() {
+  /**
+   * Live anchor source for camera reconstruction. The coordinator captures
+   * each focus destination once and shares it with playback. A first seek
+   * into an uncaptured segment composes its authored start position with
+   * the currently available part geometry; no historical pose is simulated.
+   */
+  private buildCameraResolverDeps(time: number): CameraStateResolverDeps & {
+    logicalReferenceSize: { width: number; height: number };
+    revision: number;
+  } {
+    const base = { logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT }, revision: this.sceneLoadVersion };
+    if (usesUnifiedCameraChannels(this.currentScene?.timeline ?? [])) return base;
+    const resolveAtTime = (atTime: number) => {
+      const desiredCharacters = this.computeStateAtTime(atTime).characters;
+      return createStageAnchorResolver({
+        desiredPosition: (characterId) => {
+          const desired = desiredCharacters.get(characterId);
+          return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
+        },
+        getPoint: (characterId, pointName) =>
+          typeof live2DManager.getPoint === 'function'
+            ? live2DManager.getPoint(characterId, pointName)
+            : null,
+        getPosition: (characterId) =>
+          typeof live2DManager.getPosition === 'function'
+            ? live2DManager.getPosition(characterId)
+            : null,
+        getOrigin: (characterId) => {
+          const proxy = this.transformationProxies.get(characterId);
+          return proxy ? { x: proxy.x / STAGE_WIDTH, y: proxy.y / STAGE_HEIGHT } : null;
+        },
+      });
+    };
     return {
-      ...this.historicalCamera.input,
-      anchorTrajectories: this.historicalCamera.input?.anchorTrajectories ?? [],
-      logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT },
-      revision: this.sceneLoadVersion,
+      ...base,
+      resolveCharacterPosition: resolveAtTime(time),
+      resolveCharacterPositionAtTime: (characterId, atTime, part) => resolveAtTime(atTime)(characterId, part),
     };
   }
 
@@ -1163,7 +1142,7 @@ class ScriptEngine {
   ): Promise<void> {
     // 1. Reconcile Camera Controller & transform immediately
     if (this.currentScene) {
-      this.cameraCoordinator.sync(time, this.currentScene.timeline, this.buildCameraResolverDeps());
+      this.cameraEvaluation = this.cameraCoordinator.sync(time, this.currentScene.timeline, this.buildCameraResolverDeps(time));
     }
     const cam = this.getCurrentCamera();
     live2DManager.currentCamera = cam;
@@ -1468,12 +1447,8 @@ class ScriptEngine {
     return normalized;
   }
 
-  private cleanup(full: boolean = true, invalidationTime: number = 0, retainCameraHistory = false): void {
+  private cleanup(full: boolean = true, invalidationTime: number = 0): void {
     this._seekVersion++;
-    if (!retainCameraHistory) {
-      if (full) this.historicalCamera.dispose();
-      else this.historicalCamera.cancel();
-    }
     this.cameraEvaluation = undefined;
     if (full) this.customMotionPreview = null;
     this.masterTimeline?.kill(); this.masterTimeline = null; this.setPlaying(false);

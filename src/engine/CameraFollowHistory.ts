@@ -182,6 +182,17 @@ export function evaluateCameraFollowHistory(
       ? clampTarget({ x: target.x + offset.x, y: target.y + offset.y }, options.zoomAt(startTime))
       : { ...initialPosition };
   }
+  // An immediately following camera has no pursuit history while its target
+  // is available. Missing targets still use reconstruction to retain the last
+  // valid position, including the zoom at the time it was acquired.
+  if (smoothing === 0) {
+    const right = sampleCameraAnchorTrajectory(trajectory, queryTime, 'right');
+    if (right) {
+      const leftEvent = options.eventSide === 'left' && trajectory.events.some(event => event.time === queryTime);
+      const target = leftEvent ? sampleCameraAnchorTrajectory(trajectory, queryTime, 'left') ?? right : right;
+      return clampTarget({ x: target.x + offset.x, y: target.y + offset.y }, options.zoomAt(queryTime));
+    }
+  }
   const gridHz = options.gridHz ?? CAMERA_FOLLOW_HISTORY_GRID_HZ;
   const requestedCheckpointSeconds = options.checkpointSeconds ?? CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;
   const checkpointSeconds = requestedCheckpointSeconds > 0 ? requestedCheckpointSeconds : CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;

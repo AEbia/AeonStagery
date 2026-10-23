@@ -110,12 +110,15 @@ function hasFocusWriter(action: RuntimeTimelineAction, queryTime: number): boole
 
 interface PreparedZoomResolverEntry {
   readonly signature: string;
-  readonly resolveAt: (time: number) => number;
+  readonly resolveAt: ReturnType<typeof prepareCameraZoomResolver>;
 }
 
 const preparedZoomResolvers = new WeakMap<object, PreparedZoomResolverEntry>();
 
-function getPreparedZoomResolver(input: CameraEvaluationInput): (time: number) => number {
+/** Shared authored zoom curve for pure evaluation and live character cameras. */
+export function getPreparedCameraZoomResolver(
+  input: Pick<CameraEvaluationInput, 'timeline' | 'revision'>,
+): ReturnType<typeof prepareCameraZoomResolver> {
   const zoomTimeline = input.timeline.filter((action) => action.action === 'cameraReset'
     || (action.action === 'cameraMotion' && (action.params.zoom !== undefined || action.params.move === 'zoom'
       || action.params.move === 'push' || action.params.move === 'pull' || action.params.move === 'rotate'))
@@ -161,7 +164,7 @@ export function evaluateCameraChannels(input: CameraEvaluationInput): CameraEval
     const trajectory = getTrajectory(input.anchorTrajectories, characterId, part ?? 'head');
     return trajectory ? sampleCameraAnchorTrajectory(trajectory, time, side) : null;
   };
-  const zoomAt = getPreparedZoomResolver(input);
+  const zoomAt = getPreparedCameraZoomResolver(input);
   const trajectoryIdentity = input.anchorTrajectories.map((trajectory) =>
     `${identityOf(trajectory)}:${trajectory.revision ?? 'unversioned'}`).join(',');
   const followCacheKey = [

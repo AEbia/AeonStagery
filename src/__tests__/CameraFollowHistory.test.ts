@@ -108,6 +108,16 @@ describe('historical camera follow through the public evaluator', () => {
 });
 
 describe('prepared history query work', () => {
+  it('samples an available zero-smoothing target without traversing its history', () => {
+    const trajectory = history([{ start: 0, end: 601 }], [
+      { time: 0, position: { x: 0.2, y: 0.3 } }, { time: 600, position: { x: 0.8, y: 0.7 } },
+    ]);
+    const input = makeInput(trajectory, 599.12345, 0);
+    input.timeline[2].params.duration = undefined;
+    const output = evaluateCameraChannels(input);
+    expect(output.position.x).toBeCloseTo(0.2 + 0.6 * 599.12345 / 600, 12);
+    expect(getCameraFollowHistoryDiagnostics(trajectory).anchorQueries).toBeLessThan(10);
+  });
   it('reuses the immutable trajectory index across repeated public evaluations', () => {
     let reads = 0;
     const samples = Array.from({ length: 151 }, (_, index) => {
