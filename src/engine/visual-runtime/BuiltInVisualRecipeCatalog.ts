@@ -185,9 +185,9 @@ function cloneOverlayList(overlays?: VisualColorOverlayPayload[]): VisualColorOv
   return overlays?.map((entry) => ({ ...entry }));
 }
 
-function mergeRecipePayload<T extends Record<string, any>>(base: T | null, overlay: T | undefined): T | null {
+function mergeRecipePayload<T extends Record<string, unknown>>(base: T | null, overlay: T | undefined): T | null {
   if (!base && !overlay) return null;
-  const next: Record<string, any> = { ...(base || {}) };
+  const next: Record<string, unknown> = { ...(base || {}) };
   for (const [key, value] of Object.entries(overlay || {})) {
     if (
       value &&
@@ -212,7 +212,7 @@ function getSceneRecipeRecord(scene: SceneVisualBlock | undefined, recipeId?: Re
   return scene.recipeOverlay?.[recipeId] ?? null;
 }
 
-function resolveSceneRecipePayload<T extends Record<string, any>>(
+function resolveSceneRecipePayload<T extends Record<string, unknown>>(
   scene: SceneVisualBlock | undefined,
   stack: 'lens' | 'composite',
   slot: string,
@@ -286,10 +286,10 @@ export function resolveLensRecipePayload(
   if (recipeId.startsWith('scene:')) {
     const resolved = resolveSceneRecipePayload(scene, 'lens', slot, recipeId);
     if (slot === 'atmosphere' && resolved?.overlays) {
-      resolved.overlays = cloneOverlayList(resolved.overlays);
+      resolved.overlays = cloneOverlayList(resolved.overlays as VisualColorOverlayPayload[]);
     }
     if (slot === 'texture' && resolved?.overlays) {
-      resolved.overlays = cloneOverlayList(resolved.overlays);
+      resolved.overlays = cloneOverlayList(resolved.overlays as VisualColorOverlayPayload[]);
     }
     return resolved;
   }

@@ -48,7 +48,9 @@
 
 /** Hook pair contributed by one guard owner; composed into a single wrapper. */
 export interface RenderGuardHooks {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   before?(renderer: any): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   after?(renderer: any): void;
 }
 
@@ -61,6 +63,7 @@ interface RegisteredGuardHooks extends RenderGuardHooks {
 export type RenderGuardAnchorKey = 'renderLive2D' | 'render' | '_render';
 
 export interface RenderGuardAnchor {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   target: any;
   key: RenderGuardAnchorKey;
 }
@@ -76,6 +79,7 @@ const PIPE_PREPARE_GUARDED = '__aeonstageryPrepareGuarded';
  * cubism2 build still in circulation — on a v8 model they are absent, which is
  * exactly why the v7-only anchors used to skip the guard in silence.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function findRenderGuardAnchor(model: any): RenderGuardAnchor | null {
   if (!model || (typeof model !== 'object' && typeof model !== 'function')) {
     return null;
@@ -97,6 +101,7 @@ export function findRenderGuardAnchor(model: any): RenderGuardAnchor | null {
  * v8 seam: GlShaderSystem.resetState() clears `_activeProgram`. v7's
  * shader.reset() is gone, so optional-chaining it silently did nothing.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function resetPixiShaderState(renderer: any): void {
   renderer?.shader?.resetState?.();
 }
@@ -110,6 +115,7 @@ export function resetPixiShaderState(renderer: any): void {
  * (`pixelHeight - height - y`). Re-deriving that rule here would couple us to a
  * private detail; the raw tuple restores exactly what will be clobbered.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function capturePixiViewport(renderer: any): readonly [number, number, number, number] | null {
   try {
     const gl = renderer?.gl;
@@ -135,6 +141,7 @@ export function capturePixiViewport(renderer: any): readonly [number, number, nu
  * to reach mid-pass (unlike the renderer-level fan-out).
  */
 export function restorePixiViewport(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   renderer: any,
   captured: readonly [number, number, number, number] | null,
 ): void {
@@ -190,6 +197,7 @@ export function restorePixiViewport(
  * Every system access is optional-chained: WebGPU (no `gl`, no GL systems)
  * passes `run()` straight through, consistent with the rest of the seam.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function guardExternalGl<T>(renderer: any, run: () => T): T {
   const gl = renderer?.gl;
   const viewport = capturePixiViewport(renderer);
@@ -250,6 +258,7 @@ export function guardExternalGl<T>(renderer: any, run: () => T): T {
  *
  * @returns true if this call installed the guard.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function guardLive2DPipe(renderer: any): boolean {
   const pipe = renderer?.renderPipes?.live2d;
   if (!pipe || typeof pipe.execute !== 'function') return false;
@@ -257,6 +266,7 @@ export function guardLive2DPipe(renderer: any): boolean {
   pipe[PIPE_PREPARE_GUARDED] = true;
 
   const originalExecute = pipe.execute.bind(pipe);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   pipe.execute = (...args: any[]) => {
     const instruction = args[0];
     if (
@@ -279,11 +289,13 @@ export function guardLive2DPipe(renderer: any): boolean {
  * (not an own field); the shadow restores it per instance and never touches the
  * prototype (sibling models keep their own copies).
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function guardCollectRenderables(model: any): void {
   if (!model || typeof model.collectRenderables !== 'function') return;
   if (Object.prototype.hasOwnProperty.call(model, 'collectRenderables')) return;
 
   const original = model.collectRenderables.bind(model);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   model.collectRenderables = (instructionSet: any, renderer: any, currentLayer: any) => {
     // The vendor registers `renderPipes.live2d` INSIDE its own collect — so the
     // guard can only be installed after the original has run. Safe: collect is
@@ -308,6 +320,7 @@ function guardCollectRenderables(model: any): void {
  * @returns true when the boundary is wrapped (or was already).
  */
 export function wrapRenderBoundary(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   model: any,
   hooks: RenderGuardHooks,
   owner: string,
@@ -341,6 +354,7 @@ export function wrapRenderBoundary(
   guardCollectRenderables(model);
 
   const original = anchor.target[anchor.key].bind(anchor.target);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   anchor.target[anchor.key] = (renderer: any) => {
     // Non-GL arguments (a plain object from a test, or null) are not ours to
     // interpret — hand them straight to the original.
@@ -375,6 +389,7 @@ export function wrapRenderBoundary(
  * on a method that no longer exists degrades to nothing at all, and does so
  * without a word. Say it out loud once per model in development builds.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function warnMissingAnchorOnce(model: any, tag: string): void {
   if (!model || typeof model !== 'object') return;
   if (model[MISSING_ANCHOR_WARNED]) return;

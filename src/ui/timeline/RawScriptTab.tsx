@@ -31,11 +31,11 @@ export const RawScriptTab: React.FC<{ action?: TimelineAction, semanticSnapshot?
   const filePath = React.useSyncExternalStore(subscribePath, getPath);
   const { undo, redo } = useEditorState();
   const { settings } = useSettings();
-  const editorRef = useRef<any>(null);
-  const monacoRef = useRef<any>(null);
+  const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<MonacoApi | null>(null);
   const decorationsRef = useRef<string[]>([]);
-  const lastSavedObjRef = useRef<any>(null);
-  const pendingSaveTimeoutRef = useRef<any>(null);
+  const lastSavedObjRef = useRef<unknown>(null);
+  const pendingSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTextRef = useRef<string>('');
   const isProgrammaticChange = useRef(false);
   const [monacoRuntime, setMonacoRuntime] = useState<MonacoRuntime | null>(null);
@@ -174,7 +174,7 @@ export const RawScriptTab: React.FC<{ action?: TimelineAction, semanticSnapshot?
     applyAeonStageryMonacoTheme(monacoRef.current, settings.theme || 'dark');
   }, [settings.theme]);
 
-  const handleEditorDidMount = (editor: any, monacoApi: any) => {
+  const handleEditorDidMount = (editor: import('monaco-editor').editor.IStandaloneCodeEditor, monacoApi: MonacoApi) => {
     editorRef.current = editor;
     monacoRef.current = monacoApi;
 

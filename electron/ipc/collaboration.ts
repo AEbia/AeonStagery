@@ -25,8 +25,8 @@ export function registerCollaborationHandlers(windows: IpcWindowContext) {
         port: Number(input.port ?? 12345),
       });
       return { success: true, ...result };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -35,8 +35,8 @@ export function registerCollaborationHandlers(windows: IpcWindowContext) {
     try {
       await embeddedCollaborationServer.stop();
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -53,8 +53,8 @@ export function registerCollaborationHandlers(windows: IpcWindowContext) {
         embeddedCollaborationServer.getStatus()?.dataDir,
       );
       return { success: true, sessions };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -67,8 +67,8 @@ export function registerCollaborationHandlers(windows: IpcWindowContext) {
         clearedCount: result.cleared.length,
         skippedActiveCount: result.skippedActive.length,
       };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 

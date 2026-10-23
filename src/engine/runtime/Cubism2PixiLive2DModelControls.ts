@@ -78,6 +78,7 @@ function mergePerformanceCompatibility(
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 type Cubism2SamplingTarget = { readonly internalModel: any; readonly motionManager: any };
 
 export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort {
@@ -100,6 +101,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     // is always reached through the same opaque seam.
     this.clockProvider = context.clock ?? (() => {
       if (typeof window === 'undefined') return null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
       const utSystem = (window as any).UtSystem;
       return utSystem && typeof utSystem.getUserTimeMSec === 'function' ? utSystem : null;
     });
@@ -113,12 +115,14 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
    * 'Idle') when the runtime exposes one, else null. Shared by the load-time
    * flush, the idle restart and the hard reset so the detection exists once.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 passes legacy model and Pixi renderer objects through its pre-v8 two-argument render hook.
   private resolveIdleMotionGroup(internalModel: any): string | null {
     const motions = internalModel?.settings?.motions;
     if (!motions) return null;
     return motions['idle'] ? 'idle' : motions['Idle'] ? 'Idle' : null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getConcreteModels(model: any): any[] {
     if (!model) return [];
     if (typeof model.getAllModels === 'function') {
@@ -134,11 +138,13 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return [model];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getCoreModel(model: any): any | null {
     const internal = model?.internalModel;
     return internal?.coreModel ?? null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   describeInvalidState(model: any): string | null {
     const models = this.getConcreteModels(model);
     for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
@@ -173,6 +179,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getAvailableMotions(model: any): string[] {
     const motions = new Set<string>();
     for (const target of this.getConcreteModels(model)) {
@@ -185,6 +192,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return Array.from(motions);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getAvailableExpressions(model: any): string[] {
     const expressions = new Set<string>();
     for (const target of this.getConcreteModels(model)) {
@@ -197,6 +205,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return Array.from(expressions);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getMotionDuration(model: any, motionKey: string): number {
     try {
       const internalModel = model?.internalModel;
@@ -215,6 +224,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getMotionDebugState(model: any): Record<string, unknown> | null {
     const internalModel = model?.internalModel;
     const mm = internalModel?.motionManager;
@@ -230,6 +240,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getParameterValues(model: any): Array<{ index: number; name: string; value: number }> | null {
     const internalModel = model?.internalModel;
     const coreModel = internalModel?.coreModel;
@@ -261,6 +272,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return values;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getParameterMetadata(model: any): readonly Live2DParameterMetadata[] | null {
     const values = this.getParameterValues(model);
     if (!values) return null;
@@ -283,6 +295,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   clearMotionState(model: any): void {
     for (const target of this.getConcreteModels(model)) {
       const motionManager = target?.internalModel?.motionManager;
@@ -303,6 +316,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   stopAllMotions(model: any): void {
     for (const target of this.getConcreteModels(model)) {
       const motionManager = target?.internalModel?.motionManager;
@@ -317,6 +331,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   async preloadMotion(model: any, motionKey: string): Promise<void> {
     const tasks = this.getConcreteModels(model).map((target) => {
       const internalModel = target?.internalModel;
@@ -329,6 +344,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async registerExternalMotion(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     runtimeKey: string,
     source: PreparedAssetRef,
@@ -338,6 +354,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async registerExternalExpression(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     runtimeKey: string,
     source: PreparedAssetRef,
@@ -346,6 +363,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return this.registerExternalPerformance(model, 'expression', runtimeKey, source, metadata);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   unregisterExternalPerformance(model: any, runtimeKey: string): void {
     for (const target of this.getConcreteModels(model)) {
       target?.unregisterExternalPerformance?.(runtimeKey);
@@ -353,6 +371,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   private async registerExternalPerformance(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     kind: 'motion' | 'expression',
     runtimeKey: string,
@@ -407,11 +426,13 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return report;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   setExpression(model: any, expressionName: string | null): void {
     this.expressions.set(model, expressionName);
   }
 
   setExpressionForSeek(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     expressionName: string | null,
     elapsedSeconds: number,
@@ -424,6 +445,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   setInjectedParameter(model: any, paramName: string, value: number): void {
     const coreModel = this.getCoreModel(model);
     if (!coreModel?.getParamIndex || !coreModel?.setParamFloat) return;
@@ -440,16 +462,19 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   syncInputParameters(model: any): void {
     if (model && typeof model.syncInputParameters === 'function') {
       model.syncInputParameters();
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   captureSnapshot(id: string, model: any, motionStartTime?: number): ModelSnapshot | null {
     return captureModelSnapshot(id, model, motionStartTime);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   applySnapshot(model: any, snapshot: ModelSnapshot): void {
     const internalModel = model?.internalModel;
     if (!internalModel) return;
@@ -472,6 +497,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   async restoreSeekState(model: any, input: Live2DSeekRestoreInput): Promise<Live2DSeekRestoreResult> {
     const isCurrent = input.isCurrent ?? (() => true);
     if (!isCurrent()) return { status: 'cancelled', tierUsed: 'unsupported' };
@@ -490,6 +516,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   renderForBake(model: any, renderer: any, _label?: string, renderTexture?: any): void {
     if (renderTexture && typeof renderer?.render === 'function') {
       // Cubism 2 renders through raw WebGL programs while PIXI's offscreen
@@ -510,12 +537,14 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     model?.render?.(renderer);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   advanceFrame(model: any, deltaMs: number): void {
     if (model && typeof model.update === 'function') {
       model.update(deltaMs);
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   advanceMotionOnly(model: any, utTimeMs: number): void {
     const targets = this.getConcreteModels(model)
       .map((target) => ({
@@ -530,8 +559,10 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   stepBakeFrame(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     deltaMs: number,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     renderer?: any,
     _label?: string,
     flushCore: boolean = true,
@@ -554,6 +585,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     //    still-bound batch VAO (a poisoned VAO is not self-healing: `bind()`
     //    only re-selects it, it never re-uploads the attribute state).
     const internalModel = model.internalModel;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     if (deltaMs > 0 && internalModel && (internalModel as any).gl && typeof internalModel.update === 'function') {
       guardExternalGl(renderer, () => internalModel.update());
     }
@@ -580,6 +612,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private renderBakeModel(model: any, renderer: any): void {
     if (!renderer || !model || model.visible === false || model.renderable === false) {
       return;
@@ -620,6 +653,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     model?.render?.(renderer);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private renderToBakeTexture(model: any, renderer: any, renderTexture: PIXI.RenderTexture | null): void {
     if (renderTexture && typeof renderer?.render === 'function') {
       // Same v8 seam as renderForBake(): renderer.resetState(), not v7's reset().
@@ -634,6 +668,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     model?.render?.(renderer);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private advanceCubism2BakeModelWithoutRender(model: any, renderer?: any): boolean {
     let advanced = false;
     guardExternalGl(renderer, () => {
@@ -659,6 +694,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async flushIdleState(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     isCurrent: () => boolean = () => true,
     transaction?: Live2DClockTransaction,
@@ -707,6 +743,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   async restartIdleMotion(model: any): Promise<void> {
     for (const target of this.getConcreteModels(model)) {
       const internalModel = target?.internalModel;
@@ -724,6 +761,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async resetModelToIdle(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     options: Live2DModelResetOptions = {},
     isCurrent: () => boolean = () => true,
@@ -749,8 +787,10 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
           if (internalModel.motionManager.state) {
             internalModel.motionManager.state.currentGroup = undefined;
             internalModel.motionManager.state.reservedGroup = undefined;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
             (internalModel.motionManager.state as any).queue = [];
             if (internalModel.motionManager._motionQueueManager) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
               (internalModel.motionManager._motionQueueManager as any)._userTimeMSec = 0;
             }
           }
@@ -802,6 +842,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }, transaction);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   applyIdleBaseline(model: any, idleSnapshot: Pick<ModelSnapshot, 'params' | 'opacities'> | null): void {
     if (!model) return;
     for (const target of this.getConcreteModels(model)) {
@@ -815,6 +856,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   captureIdleSnapshot(model: any): { params: Float32Array; opacities: Float32Array } | null {
     const internalModel = model?.internalModel;
     const coreModel = internalModel?.coreModel;
@@ -844,6 +886,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   hasMotionGroup(model: any, motionKey: string): boolean {
     for (const target of this.getConcreteModels(model)) {
       const motions = target?.internalModel?.settings?.motions;
@@ -853,6 +896,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async startMotion(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     motionKey: string,
     priority: number,
@@ -924,6 +968,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   #getMotionSamplingTargets(model: any): readonly Cubism2SamplingTarget[] {
     const targets: Cubism2SamplingTarget[] = [];
     for (const instance of this.getConcreteModels(model)) {
@@ -936,6 +981,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   async sampleMotion(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     motionKey: string,
     options: Live2DMotionSamplingOptions,
@@ -976,6 +1022,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   installCustomMotionStage(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     model: any,
     input: Omit<InstallCustomMotionStageInput, 'targets'>,
   ): CustomMotionStageHandle | null {
@@ -990,6 +1037,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   quiesceModel(model: any): void {
     if (!model) return;
     this.expressions.clear(model);
@@ -1005,6 +1053,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   disposeModel(model: any, options: Live2DDisposeOptions): void {
     if (!model) return;
     this.expressions.clear(model);
@@ -1075,9 +1124,11 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   prepareModel(model: any, options: Live2DModelPrepareOptions): void {
     const { id, mode, isExportMode = false, injectedParamsSource, applyProxyTransform } = options;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     (model as any)._characterEntry = injectedParamsSource;
 
     for (const concrete of this.getConcreteModels(model)) {
@@ -1085,7 +1136,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       const coreModel = internalModel?.coreModel;
       if (!internalModel || !coreModel) continue;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
       applyBehaviorFixes(injectedParamsSource as any, internalModel, coreModel);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
       applyParameterOverride(injectedParamsSource as any, coreModel, internalModel, isExportMode);
 
       if (mode === 'bake') {
@@ -1101,10 +1154,12 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   prepareModelResources(model: any): void {
     for (const concreteModel of this.getConcreteModels(model)) this.isolateMask(concreteModel);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   isolateMask(model: any): void {
     const internalModel = model?.internalModel;
     const maskSize = Math.max(1, Math.floor(this.maskSizeProvider()));
@@ -1115,16 +1170,19 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       // that texture can make every clipped draw resolve as a dark silhouette.
       // Renew the buffer: destroy only textures created by this isolation
       // hook; model-owned textures must remain untouched.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
       const previousTexture = maskSprite.texture as any;
       if (previousTexture?.__aeonstageryMaskIsolationTexture) {
         previousTexture.destroy?.(true);
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
       const texture = PIXI.RenderTexture.create({ width: maskSize, height: maskSize }) as any;
       texture.__aeonstageryMaskIsolationTexture = true;
       maskSprite.texture = texture;
       console.log(`[Live2D] Isolated mask buffer (${maskSize}x${maskSize})`);
       return;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     const deepMask = model?.children?.find((child: any) => child.name === 'maskSprite' || child.isMask);
     if (deepMask?.texture) {
       console.log('[Live2D] Found deep mask sprite');
@@ -1134,8 +1192,10 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   /** Destroy the isolation buffer `isolateMask` created for one concrete model. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private releaseIsolatedMask(model: any): void {
     const sprite = findMaskSprite(model?.internalModel);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     const texture = sprite?.texture as any;
     if (texture?.__aeonstageryMaskIsolationTexture) {
       texture.destroy?.(true);
@@ -1143,6 +1203,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   installBakeRenderGuards(model: any): void {
     if (!this.bakeCore) return;
     for (const concrete of this.getConcreteModels(model)) {
@@ -1151,6 +1212,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   setBlink(model: any, enabled: boolean, intervalMs: number = 4000, sceneTimeSeconds?: number, startTimeSeconds?: number, intervalRangeMs?: number): void {
     const internalModel = model?.internalModel;
     const eyeBlink = internalModel?.eyeBlink;
@@ -1205,6 +1267,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   applyFocus(model: any, input: Live2DFocusInput): void {
     const rawDuration = input.duration ?? 0.5;
     const duration = Number.isFinite(rawDuration)
@@ -1223,7 +1286,9 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getFocusControllers(model: any): any[] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     const controllers: any[] = [];
     for (const target of this.getConcreteModels(model)) {
       const focusController = target?.internalModel?.focusController;
@@ -1232,6 +1297,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     return controllers;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   manageFocusAnimations(model: any, action: Live2DFocusAnimationAction): void {
     for (const focusController of this.getFocusControllers(model)) {
       if (action === 'stop') {
@@ -1246,6 +1312,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getHeadAnchor(model: any, target: 'head' | 'main' = 'main'): { x: number; y: number } | null {
     // Shared hit-area math — see resolveHeadAnchorFromSettings (used by both
     // runtime adapters so the layout math cannot drift apart).
@@ -1258,6 +1325,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   private static readonly DEFAULT_LOOK_AT_EASE = 'power1.out';
 
   private applyLookAtFrame(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     fc: any,
     targetX: number,
     targetY: number,
@@ -1282,6 +1350,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     fc.vy = 0;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private restoreLookAtFocusUpdate(fc: any): void {
     if (fc.__aeonOriginalFocusUpdate) {
       fc.update = fc.__aeonOriginalFocusUpdate;
@@ -1289,6 +1358,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   private takeLookAtFocusUpdateOwnership(fc: any): void {
     if (!fc.__aeonOriginalFocusUpdate && typeof fc.update === 'function') {
       fc.__aeonOriginalFocusUpdate = fc.update;
@@ -1297,6 +1367,7 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
   }
 
   private applyLookAtToFocusController(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
     fc: any,
     targetX: number,
     targetY: number,

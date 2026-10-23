@@ -1412,7 +1412,7 @@ export class ProjectAgentCoordinator {
    * Provider configuration errors suspend immediately; 3× transient → provider_unavailable suspension.
    */
   async runModelTurn(): Promise<{
-    status: any;
+    status: 'scheduling_stopped' | 'suspended' | 'tools_executed' | 'settled';
     task: ProjectAgentTaskSnapshot;
     barrier?: ProjectAgentTurnBarrierResult;
     assistant?: AiAssistantMessage;

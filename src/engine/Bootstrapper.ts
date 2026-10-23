@@ -299,8 +299,8 @@ export interface BootstrapContext {
 export function bootstrap(options?: {
   stores?: { document?: DocumentStore; playback?: PlaybackStore; editor?: EditorStore };
   getScriptEngine?: () => ScriptEngine;
-  getLightingSystem?: () => any;
-  getLive2DManager?: () => any;
+  getLightingSystem?: () => typeof defaultLightingSystem;
+  getLive2DManager?: () => typeof live2DManager;
   aiProse?: BootstrapAiProseOptions;
 }): BootstrapContext {
   const getScriptEngine = options?.getScriptEngine ?? (() => defaultScriptEngine);
@@ -1060,6 +1060,7 @@ export function bootstrap(options?: {
 
   // 4. Daemons & Sync
   const autoSaveDaemon = new AutoSaveDaemon();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AutoSaveDaemon uses DocumentStore's legacy private listener set; keep this adapter boundary explicit without exposing private store internals.
   const disposeDaemon = autoSaveDaemon.attach(documentStore as any, {
     forceSave: async () => {
       const result = await sceneFileService.save();
@@ -1129,6 +1130,7 @@ export function bootstrap(options?: {
   );
 
   if (typeof window !== 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This legacy bootstrap bridge patches runtime internals incrementally; typing it as a complete public object would misrepresent the initialization state.
     const publicApi = (window.AeonStagery || {}) as any;
     publicApi.character = characterAdapter;
     publicApi.camera = cameraAdapter;

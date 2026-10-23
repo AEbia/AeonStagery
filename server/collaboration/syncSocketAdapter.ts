@@ -337,9 +337,9 @@ export class CollaborationSyncSocketAdapterV2 {
 
     void applyPromise.then(() => {
       this.broadcastBinary(update, socket);
-    }).catch((error: any) => {
+    }).catch((error: unknown) => {
       const message = error && typeof error === 'object' && 'code' in error
-        ? 'Internal collaboration server error' : error?.message || 'Invalid collaboration update';
+        ? 'Internal collaboration server error' : (error instanceof Error ? error.message : undefined) || 'Invalid collaboration update';
       if (socket.readyState === WebSocket.OPEN) {
         this.send(socket, JSON.stringify({ type: 'collaboration:error', message }));
       }
@@ -365,14 +365,14 @@ export class CollaborationSyncSocketAdapterV2 {
       case 'lease:acquire': {
         const result = acquireCollaborationLeaseV2(this.leases, socket, clientId, requestId, target);
         if (result.granted) {
-          return [{ type: 'lease:acquired', schemaVersion, requestId, target } as any];
+          return [{ type: 'lease:acquired', schemaVersion, requestId, target }];
         }
-        return [{ type: 'lease:denied', schemaVersion, requestId, target, heldByClientId: result.heldByClientId } as any];
+        return [{ type: 'lease:denied', schemaVersion, requestId, target, heldByClientId: result.heldByClientId }];
       }
       case 'lease:renew': {
         const renewed = renewCollaborationLeaseV2(this.leases, socket, clientId, requestId, target);
         return renewed
-          ? [{ type: 'lease:acquired', schemaVersion, requestId, target } as any]
+          ? [{ type: 'lease:acquired', schemaVersion, requestId, target }]
           : [];
       }
       case 'lease:release': {

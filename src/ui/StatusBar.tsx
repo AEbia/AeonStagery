@@ -73,14 +73,15 @@ export const StatusBar = () => {
       }
     });
 
-    let timer: any = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     const unsubStart = eventBus.on('pb-daemon:start', () => {
       if (timer) clearTimeout(timer);
       setBakeStatus('baking');
       setBakeProgress(1);
     });
-    const unsubProgress = eventBus.on('pb-daemon:progress', (payload: any) => {
+    const unsubProgress = eventBus.on('pb-daemon:progress', (event) => {
+      const payload = event as { progress: number };
       if (timer) clearTimeout(timer);
       setBakeStatus('baking');
       setBakeProgress(Math.round(payload.progress * 100));

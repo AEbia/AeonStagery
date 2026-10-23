@@ -107,7 +107,7 @@ describe('CharacterBlink Compilation and RuntimeSceneState (Seam 2)', () => {
       } as any;
 
       const state = computeSceneStateAtTime(characterScene, 1.5);
-      const tomoriBlink = state.characters.get('tomori').blink;
+      const tomoriBlink = state.characters.get('tomori')!.blink;
 
       expect(tomoriBlink).toEqual({
         enabled: true,

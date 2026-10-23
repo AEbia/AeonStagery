@@ -82,7 +82,7 @@ export function useEditorSelection() {
   const store = useEditorStore();
   const timelineAdapter = useTimelineAdapter();
   const getSelectedIds = useCallback(
-    () => (store as any).selectedActionIdsSnapshot ?? store.selectedActionIds,
+    () => store.selectedActionIdsSnapshot ?? store.selectedActionIds,
     [store]
   );
   const selectedIds = useSyncExternalStore(
@@ -99,7 +99,7 @@ export function useEditorSelection() {
 export function useSelectedActionCount() {
   const store = useEditorStore();
   const getSelectedCount = useCallback(
-    () => ((store as any).selectedCount as number) ?? Object.keys(store.selectedActionIds).length,
+    () => (store.selectedCount as number) ?? Object.keys(store.selectedActionIds).length,
     [store]
   );
 
@@ -112,7 +112,7 @@ export function useSelectedActionCount() {
 export function useFirstSelectedActionId() {
   const store = useEditorStore();
   const getFirstSelectedId = useCallback(() => {
-    const explicit = (store as any).firstSelectedId as string | null | undefined;
+    const explicit = store.firstSelectedId as string | null | undefined;
     if (explicit !== undefined) return explicit;
     const selectedIds = store.selectedActionIds;
     for (const id of Object.keys(selectedIds)) {
@@ -310,8 +310,8 @@ export function useEditorState() {
         if (res.success) {
           showToast('已加载默认示例剧本', 'success');
           if (res.issues && res.issues.length > 0) {
-            const errors = res.issues.filter((i: any) => i.severity === 'error');
-            const warnings = res.issues.filter((i: any) => i.severity === 'warning');
+            const errors = res.issues.filter((i) => i.severity === 'error');
+            const warnings = res.issues.filter((i) => i.severity === 'warning');
             const parts: string[] = [];
             if (errors.length) parts.push(`${errors.length} 个错误`);
             if (warnings.length) parts.push(`${warnings.length} 个警告`);
@@ -330,8 +330,8 @@ export function useEditorState() {
         if (res.success) {
           showToast('剧本加载成功！', 'success');
           if (res.issues && res.issues.length > 0) {
-            const errors = res.issues.filter((i: any) => i.severity === 'error');
-            const warnings = res.issues.filter((i: any) => i.severity === 'warning');
+            const errors = res.issues.filter((i) => i.severity === 'error');
+            const warnings = res.issues.filter((i) => i.severity === 'warning');
             const parts: string[] = [];
             if (errors.length) parts.push(`${errors.length} 个错误`);
             if (warnings.length) parts.push(`${warnings.length} 个警告`);

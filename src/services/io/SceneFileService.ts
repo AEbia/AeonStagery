@@ -146,8 +146,8 @@ export class SceneFileService implements ISceneFileService {
         path,
         issues: outcome.warnings.map((message): ValidationIssue => ({ severity: 'warning', message })),
       };
-    } catch (err: any) {
-      return { success: false, path, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -162,8 +162,8 @@ export class SceneFileService implements ISceneFileService {
     try {
       const { data, path } = await this.fileAccess.readAsset('start.json');
       return await this.loadJson(data, path, 'raw');
-    } catch (err: any) {
-      return { success: false, path: 'start.json', error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path: 'start.json', error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -172,8 +172,8 @@ export class SceneFileService implements ISceneFileService {
       const result = await this.fileAccess.showOpenDialog();
       if (!result) return { success: false, cancelled: true };
       return await this.loadPathContents(result.data, result.path);
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -181,8 +181,8 @@ export class SceneFileService implements ISceneFileService {
     try {
       const { data } = await this.fileAccess.readFile(path);
       return await this.loadPathContents(data, path);
-    } catch (err: any) {
-      return { success: false, path, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -213,8 +213,8 @@ export class SceneFileService implements ISceneFileService {
         document,
         compiled,
       };
-    } catch (err: any) {
-      return { success: false, path, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -227,9 +227,9 @@ export class SceneFileService implements ISceneFileService {
       await this.fileAccess.writeFile(path, JSON.stringify(serialized, null, 2));
       this.saveStatus.setSaveStatus('idle');
       return { success: true, path };
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.saveStatus.setSaveStatus('error');
-      return { success: false, path, error: err.message || String(err) };
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -261,8 +261,8 @@ export class SceneFileService implements ISceneFileService {
       this.compatibleSession = outcome.session;
       const bundle = await this.applyReplacementDocument(outcome.session.projection, path);
       return { success: true, path, document: bundle.source };
-    } catch (err: any) {
-      return { success: false, path, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -270,8 +270,8 @@ export class SceneFileService implements ISceneFileService {
     try {
       const { data } = await this.fileAccess.readFile(path);
       return this.loadCurrentSceneDocumentFromRawJson(data, path);
-    } catch (err: any) {
-      return { success: false, path, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, path, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -294,9 +294,9 @@ export class SceneFileService implements ISceneFileService {
       const result = await this.saveCurrentSceneDocument(semanticDocument, path);
       if (result.success) this.documentFilePath.setFilePath(path);
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.saveStatus.setSaveStatus('error');
-      return { success: false, error: err.message || String(err) };
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

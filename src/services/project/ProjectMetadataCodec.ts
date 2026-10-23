@@ -237,7 +237,7 @@ function parseTemplates(input: unknown): ProjectTemplateConfiguration | undefine
     : undefined;
 
   const dialoguePresentation = input.dialoguePresentation && isRecord(input.dialoguePresentation)
-    ? (cloneJson(input.dialoguePresentation) as any)
+    ? (cloneJson(input.dialoguePresentation) as unknown as NonNullable<ProjectTemplateConfiguration['dialoguePresentation']>)
     : undefined;
 
   return Object.freeze({
@@ -356,7 +356,7 @@ function parseWebGalImport(input: unknown): ProjectWebGalImportReceipt | undefin
     sceneTitle: input.sceneTitle,
     scenePath: input.scenePath,
     generatedAt: input.generatedAt,
-    ...(input.report ? { report: cloneJson(input.report) as any } : {}),
+    ...(input.report ? { report: cloneJson(input.report) as ProjectWebGalImportReceipt['report'] } : {}),
   });
 }
 

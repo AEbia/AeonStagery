@@ -29,7 +29,7 @@ const LENS_FILTER_ACTIONS = new Set([
   'resetLensFilters',
 ]);
 
-function stringParam(params: Record<string, any>, key: string): string | undefined {
+function stringParam(params: Record<string, unknown>, key: string): string | undefined {
   return typeof params[key] === 'string' && params[key] ? params[key] : undefined;
 }
 

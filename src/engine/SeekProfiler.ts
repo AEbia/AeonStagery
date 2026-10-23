@@ -142,7 +142,7 @@ class SeekProfiler {
    */
   private applyWindowOverride(): void {
     if (typeof window === 'undefined') return;
-    const override = (window as any).__AEON_SEEK_PROFILER;
+    const override = window.__AEON_SEEK_PROFILER;
     if (typeof override === 'boolean') this.enabled = override;
   }
 

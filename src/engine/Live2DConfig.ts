@@ -129,10 +129,11 @@ export function describeInvalidModelSnapshot(
  */
 export function captureModelSnapshot(
   id: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Snapshot capture probes version-specific Cubism model/motion internals; an invented common SDK shape would hide those differences.
   model: any,
   motionStartTime?: number,
 ): ModelSnapshot | null {
-  const internalModel = (model as any).internalModel;
+  const internalModel = model.internalModel;
   if (!internalModel) return null;
   const coreModel = internalModel.coreModel;
   if (!coreModel) return null;
@@ -153,7 +154,7 @@ export function captureModelSnapshot(
   }
 
   const mm = internalModel.motionManager;
-  let motionInfo: any = undefined;
+  let motionInfo: ModelSnapshot['motion'] = undefined;
   if (mm && mm.state && mm.state.currentGroup) {
     motionInfo = {
       key: mm.state.currentGroup,
@@ -191,6 +192,7 @@ export function captureModelSnapshot(
 
 export interface CharacterEntry {
   id: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Snapshot capture probes version-specific Cubism model/motion internals; an invented common SDK shape would hide those differences.
   model: any;
   modelPath: string;
   modelUrl: string;
@@ -284,6 +286,7 @@ export interface CustomMotionRuntimeState {
  * Reset a Cubism 2 coreModel's parameters to their idle defaults.
  * Prefers core.loadParam() snapshot if available; falls back to manual reset.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Snapshot capture probes version-specific Cubism model/motion internals; an invented common SDK shape would hide those differences.
 export function resetCoreParams(core: any): void {
   if (!core) return;
   if (typeof core.loadParam === 'function') {

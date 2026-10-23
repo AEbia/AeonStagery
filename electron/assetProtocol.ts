@@ -107,8 +107,8 @@ export async function handleAssetProtocolRequest(request: Request): Promise<Resp
 
     try {
       data = await fs.promises.readFile(normalPath);
-    } catch (error: any) {
-      if (error.code !== 'ENOENT') throw error;
+    } catch (error: unknown) {
+      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error;
 
       const dir = path.dirname(normalPath);
       let ext = path.extname(normalPath).toLowerCase();

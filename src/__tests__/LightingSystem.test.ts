@@ -383,11 +383,13 @@ describe('LightingSystem transient effect rebuilds', () => {
   it('reconcile keeps overlays removed after a removeColorOverlay action', () => {
     lightingSystem.reconcile(2, [
       {
+        _id: 'add-overlay',
         action: 'addColorOverlay',
         time: 0,
         params: { color: '#000000', mode: 'multiply', intensity: 0.7, duration: 0 },
       },
       {
+        _id: 'remove-overlay',
         action: 'removeColorOverlay',
         time: 1,
         params: { duration: 0 },

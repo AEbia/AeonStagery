@@ -166,7 +166,7 @@ export function useBatchDrag({
         // High priority: synchronous DOM updates for all selected blocks
         if (b.el) {
           b.el.style.left = `${finalTime * pps}px`;
-          (b.el as any)._dragTime = finalTime;
+          (b.el as HTMLElement & { _dragTime?: number })._dragTime = finalTime;
         }
 
         nextTransientStates[b.id] = { time: finalTime };

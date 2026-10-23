@@ -353,7 +353,7 @@ class CustomAnimHost {
   /**
    * Send a command to a custom animation iframe.
    */
-  sendCommand(animId: string, command: { type: string; [key: string]: any }): void {
+  sendCommand(animId: string, command: { type: string; [key: string]: unknown }): void {
     const anim = this.activeAnims.get(animId);
     if (!anim || !anim.iframe.contentWindow) return;
 
@@ -703,6 +703,7 @@ class CustomAnimHost {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Embedded animations return extensible postMessage payloads; keep dynamic decoding here rather than claim every iframe implements one fixed response.
   private resolveSeekAck(anim: ActiveCustomAnim, data: any): void {
     const responseRequestId = typeof data.requestId === 'string' ? data.requestId : undefined;
     const responseTime = typeof data.time === 'number'
@@ -750,6 +751,7 @@ class CustomAnimHost {
   }
 
   private async normalizeCaptureFrame(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Embedded animations return extensible postMessage payloads; keep dynamic decoding here rather than claim every iframe implements one fixed response.
     data: any,
     width: number,
     height: number,

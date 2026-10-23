@@ -2,6 +2,7 @@ import type { SceneMarker, SceneMeta } from '../../api/types/scene-common';
 
 export interface LensSegmentTimelineAction {
   readonly time?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical lens actions use recipe-specific fields selected at runtime; retain the open decoding input while producing typed lens segments.
   readonly params: Record<string, any>;
 }
 

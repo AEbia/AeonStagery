@@ -111,8 +111,8 @@ async function summarizePath(targetPath: string): Promise<DirectorySummary> {
 async function readSessionEntries(rootPath: string): Promise<Dirent[]> {
   try {
     return await fs.readdir(rootPath, { withFileTypes: true });
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') return [];
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
     throw error;
   }
 }

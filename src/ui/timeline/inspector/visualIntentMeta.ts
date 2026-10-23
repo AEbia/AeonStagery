@@ -6,6 +6,7 @@
 export interface VisualTargetOption { value: string; label: string; disabled?: boolean; }
 
 export function computeRimLightTargetOptions(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>,
   characterVisualTargetOptions: VisualTargetOption[],
 ): VisualTargetOption[] {
@@ -23,6 +24,7 @@ export function computeRimLightTargetOptions(
 export function computePrimaryVisualQuickKeys(
   isPrimaryVisualIntentBlock: boolean,
   actionType: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>,
 ): string[] {
   if (!isPrimaryVisualIntentBlock) return [];
@@ -37,6 +39,7 @@ export function computePrimaryVisualQuickKeys(
 
 export function computeVisualTargetLabel(
   actionType: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>,
   visualTargetOptions: VisualTargetOption[],
 ): string {
@@ -48,6 +51,7 @@ export function computeVisualTargetLabel(
 
 export function computePrimaryVisualDescription(
   actionType: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>,
 ): string {
   if (actionType === 'setCompositeRecipe' && actionParams.slot === 'grounding') {

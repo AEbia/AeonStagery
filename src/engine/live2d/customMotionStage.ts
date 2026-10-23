@@ -33,6 +33,7 @@ export interface RuntimeParameterTarget {
 
 export interface CustomMotionStageTarget {
   /** Concrete model InternalModel; must be the emitter that owns coreModel updates. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   readonly internalModel: any;
   /** Optional runtime-specific parameter writer (used by Cubism 3+). */
   readonly parameterTarget?: RuntimeParameterTarget;
@@ -61,12 +62,14 @@ export interface InstallCustomMotionStageInput {
 }
 
 interface AttachedTarget {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   readonly internalModel: any;
   readonly handler: () => void;
   readonly restoredEyeBlink: { value: unknown } | null;
 }
 
 /** A target is attachable only when the stage can actually drive its parameters. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function hasWritableCubism2Core(internalModel: any): boolean {
   const coreModel = internalModel?.coreModel;
   return !!coreModel

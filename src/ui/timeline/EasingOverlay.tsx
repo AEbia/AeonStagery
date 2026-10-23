@@ -32,11 +32,11 @@ function getNormalizedEasingPath(gsapEaseStr: string): string | null {
   
   let fn: (t: number) => number;
   try {
-    const parsed = gsap.parseEase(gsapEaseStr);
+    const parsed: unknown = gsap.parseEase(gsapEaseStr);
     if (typeof parsed === 'function') {
       fn = parsed as (t: number) => number;
-    } else if (parsed && typeof (parsed as any).getRatio === 'function') {
-      fn = (t: number) => (parsed as any).getRatio(t);
+    } else if (parsed && typeof parsed === 'object' && 'getRatio' in parsed && typeof parsed.getRatio === 'function') {
+      fn = (t: number) => (parsed.getRatio as (value: number) => number)(t);
     } else {
       easingPathCache.set(gsapEaseStr, null);
       return null;
@@ -171,13 +171,13 @@ const EasingTooltip = React.memo(
 );
 
 interface EasingOverlayProps {
-  action: any;
+  action: import('./semanticTimelineTypes').TimelineAction;
   width: number;
 }
 
 export const EasingOverlay = React.memo(({ action, width }: EasingOverlayProps) => {
   const [showTooltip, setShowTooltip] = useState(false);
-  const hoverTimer = useRef<any>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sourceParams = action.sourceParams ?? {};
 
   const easingParam: string | undefined =
@@ -194,7 +194,7 @@ export const EasingOverlay = React.memo(({ action, width }: EasingOverlayProps) 
   }, [hasCurve]);
 
   const onMouseLeave = useCallback(() => {
-    clearTimeout(hoverTimer.current);
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current);
     setShowTooltip(false);
   }, []);
 

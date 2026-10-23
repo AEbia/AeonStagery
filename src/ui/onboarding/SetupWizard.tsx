@@ -9,12 +9,12 @@ export const SetupWizard = ({ onComplete }: { onComplete: () => void }) => {
 
   const handleSelectExternal = async () => {
     try {
-      const api = (window as any).aeonStageryAPI;
+      const api = window.aeonStageryAPI;
       const result = await (api.dialog?.showOpen || api.app?.showOpenDialog)?.({
         title: '选择外部资源库目录',
         properties: ['openDirectory']
       });
-      if (result && !result.canceled && result.filePaths?.length > 0) {
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         setSetting('assetsPath', result.filePaths[0]);
         onComplete();
       }
@@ -25,13 +25,13 @@ export const SetupWizard = ({ onComplete }: { onComplete: () => void }) => {
 
   const handleCreateNew = async () => {
     try {
-      const api = (window as any).aeonStageryAPI;
+      const api = window.aeonStageryAPI;
       const result = await (api.dialog?.showOpen || api.app?.showOpenDialog)?.({
         title: '选择一个空文件夹作为新库',
         properties: ['openDirectory']
       });
       
-      if (result && !result.canceled && result.filePaths?.length > 0) {
+      if (result && !result.canceled && result.filePaths && result.filePaths.length > 0) {
         setLoading(true);
         const basePath = result.filePaths[0];
         

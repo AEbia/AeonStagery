@@ -270,7 +270,8 @@ describe('applyRenderHook', () => {
   });
 
   it('syncs the transformation proxy at the draw boundary', () => {
-    setScriptEngineForSetup({ transformationProxies: new Map([['soyo', { id: 'proxy' }]]) });
+    const proxy = { id: 'proxy', x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, z: 0 };
+    setScriptEngineForSetup({ getCurrentTime: () => 0, transformationProxies: new Map([['soyo', proxy]]) });
     const renderer = createV8GuardRenderer();
     const applyProxyTransform = vi.fn();
     const model: any = { renderLive2D: vi.fn(), _characterEntry: { id: 'soyo' } };
@@ -278,7 +279,7 @@ describe('applyRenderHook', () => {
     applyRenderHook('soyo', model, applyProxyTransform);
     model.renderLive2D(renderer);
 
-    expect(applyProxyTransform).toHaveBeenCalledWith('soyo', { id: 'proxy' });
+    expect(applyProxyTransform).toHaveBeenCalledWith('soyo', proxy);
     setScriptEngineForSetup(null);
   });
 

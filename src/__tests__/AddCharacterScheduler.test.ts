@@ -59,9 +59,9 @@ describe('scheduleAddCharacter', () => {
       ],
     } as any;
 
-    expect(computeSceneStateAtTime(scene, 2).characters.get('char1').opacity).toBe(0);
-    expect(computeSceneStateAtTime(scene, 2.5).characters.get('char1').opacity).toBeCloseTo(0.65625);
-    expect(computeSceneStateAtTime(scene, 3.5).characters.get('char1').opacity).toBeCloseTo(0.75);
+    expect(computeSceneStateAtTime(scene, 2).characters.get('char1')!.opacity).toBe(0);
+    expect(computeSceneStateAtTime(scene, 2.5).characters.get('char1')!.opacity).toBeCloseTo(0.65625);
+    expect(computeSceneStateAtTime(scene, 3.5).characters.get('char1')!.opacity).toBeCloseTo(0.75);
   });
 
   it('uses explicit opacity as the entrance target rather than the first-frame value', () => {
@@ -106,8 +106,8 @@ describe('scheduleAddCharacter', () => {
       ],
     } as any;
 
-    expect(computeSceneStateAtTime(scene, 2).characters.get('char1').opacity).toBeCloseTo(0.8);
-    expect(computeSceneStateAtTime(scene, 2.5).characters.get('char1').opacity).toBeCloseTo(0.8);
+    expect(computeSceneStateAtTime(scene, 2).characters.get('char1')!.opacity).toBeCloseTo(0.8);
+    expect(computeSceneStateAtTime(scene, 2.5).characters.get('char1')!.opacity).toBeCloseTo(0.8);
 
     const proxy = { x: 960, y: 540, scale: 1, rotation: 0, opacity: 1, z: 0 };
     const ctx = createContext(proxy);

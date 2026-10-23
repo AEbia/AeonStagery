@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportProgress, ExportResult } from '../api/types/export';
 import { DEFAULT_PROJECT_ASSET_ROOTS, type ProjectState } from '../api/types/project';
@@ -148,7 +148,7 @@ describe('ExportDialog cancellation', () => {
 
     const revealBtn = screen.getByRole('button', { name: '打开所在文件夹' });
     fireEvent.click(revealBtn);
-    expect(showItemInFolder).toHaveBeenCalledWith('/output/test.mp4');
+    await waitFor(() => expect(showItemInFolder).toHaveBeenCalledWith('/output/test.mp4'));
 
     const againBtn = screen.getByRole('button', { name: '再导出一份' });
     fireEvent.click(againBtn);

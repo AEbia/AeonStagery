@@ -2,15 +2,16 @@ import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import { resolveVec2 } from '../utils/math';
 import { DEFAULT_CHARACTER_TRANSFORM_EASE, normalizeCharacterEase } from '../CharacterAnimationContract';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
-export function scheduleMoveCharacter(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleMoveCharacter(ctx: SchedulerContext, action: RuntimeActionContract<'transformCharacter'>): void {
   const { tl, transformationProxies } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
   const proxy = transformationProxies.get(params.id);
   if (proxy) {
-    const anim: any = {
+    const anim: gsap.TweenVars = {
       duration: params.duration ?? 1,
       ease: normalizeCharacterEase(params.ease, DEFAULT_CHARACTER_TRANSFORM_EASE),
     };
