@@ -15,6 +15,7 @@ import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blink
 
 // ─── Mask sprite discovery ────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
 export function findMaskSprite(obj: any): any {
   if (!obj) return null;
   if (obj.maskSprite) return obj.maskSprite;
@@ -46,6 +47,7 @@ const EXPRESSION_MOTION_PATCH_MARK = '__aeonstageryExpressionMotionPatched';
  * is active for the current frame so a later default expression can release
  * control back to a motion that changed underneath it.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
 function applyExpressionFadeFix(internalModel: any): void {
   const expressionManager = internalModel?.motionManager?.expressionManager;
   if (
@@ -58,6 +60,7 @@ function applyExpressionFadeFix(internalModel: any): void {
 
   const originalSetExpression = expressionManager._setExpression;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   expressionManager._setExpression = function (motion: any) {
     if (
       motion
@@ -66,6 +69,7 @@ function applyExpressionFadeFix(internalModel: any): void {
       && !motion[EXPRESSION_MOTION_PATCH_MARK]
     ) {
       const originalUpdateParamExe = motion.updateParamExe;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
       motion.updateParamExe = function (model: any, time: number, weight: number, motionQueueEntry: any) {
         const params = this.params;
         if (!Array.isArray(params) || typeof model?.getParamFloat !== 'function' || typeof model?.setParamFloat !== 'function') {
@@ -99,7 +103,9 @@ function applyExpressionFadeFix(internalModel: any): void {
 
 export function applyBehaviorFixes(
   entry: CharacterEntry,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   internalModel: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   coreModel: any,
 ): void {
   if (!internalModel) return;
@@ -159,7 +165,9 @@ export function applyBehaviorFixes(
     .filter(target => target.idx !== undefined && target.idx !== -1);
 
   // Store targets and indices for the coreModel.update hook
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   (internalModel as any)._eyeTargets = eyeTargets;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   (internalModel as any)._eyeIndices = eyeTargets.map(t => t.idx);
 
   if (internalModel.eyeBlink) {
@@ -205,6 +213,7 @@ export function applyBehaviorFixes(
   console.log(`[Live2D] Fixed head/eye behaviors for "${entry.id}"`);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
 function getConcreteModels(model: any): any[] {
   if (!model) return [];
   if (typeof model.getAllModels === 'function') {
@@ -213,6 +222,7 @@ function getConcreteModels(model: any): any[] {
   return [model];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
 export function applyBehaviorFixesToModelTree(entry: CharacterEntry, model: any): void {
   for (const concreteModel of getConcreteModels(model)) {
     const internalModel = concreteModel.internalModel;
@@ -227,7 +237,9 @@ export function applyBehaviorFixesToModelTree(entry: CharacterEntry, model: any)
 
 export function applyParameterOverride(
   entry: CharacterEntry,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   coreModel: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   internalModel: any,
   isExportMode: boolean,
 ): void {
@@ -290,6 +302,7 @@ export function applyParameterOverride(
   // UtSystem 的当前值。如果在此处将 UtSystem 设为更早的时间，
   // 下一次 model.update() 物理引擎会算出负 dt → NaN → 角色坍缩（"两个小点"）。
   const UtSystem = typeof window !== 'undefined'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
     ? (window as any).UtSystem
     : undefined;
   if (UtSystem && !isExportMode) {
@@ -324,16 +337,20 @@ export { resetPixiShaderState };
  */
 export function applyRenderHook(
   characterId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   model: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
   applyProxyTransform: (id: string, proxy: any) => void,
 ): void {
   wrapRenderBoundary(model, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
     before: (renderer: any) => {
       // Sync proxy transforms at the draw boundary so the camera/TL writer's
       // values reach the model right before Cubism 2 issues its GL calls.
       try {
         const scriptEngine = getScriptEngineForSetup();
         if (scriptEngine?.transformationProxies) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
           const currentId = (model as any)._characterEntry?.id || characterId;
           const proxy = scriptEngine.transformationProxies.get(currentId);
           if (proxy) {
@@ -344,6 +361,7 @@ export function applyRenderHook(
 
       resetPixiShaderState(renderer);
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
     after: (renderer: any) => {
       // A following filter/sibling draw must rebind its own program.
       resetPixiShaderState(renderer);
@@ -353,6 +371,7 @@ export function applyRenderHook(
 
 // ─── Bake breathing fix (deterministic, no Date.now()) ─────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- These compatibility fixes patch private Cubism motion/render hooks across runtime versions; published SDK types do not describe those hooks.
 export function applyBakeBreathingFix(internalModel: any, coreModel: any): void {
   if (!internalModel || !coreModel) return;
   const breathParamIndex = internalModel.breathParamIndex;

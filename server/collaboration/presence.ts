@@ -147,7 +147,7 @@ export function handlePresenceSocketMessageV2<SocketKey>(
     return { handled: false, socketMessages: [], broadcastMessages: [] };
   }
 
-  const schemaVersion = (message as any).schemaVersion ?? defaultSchemaVersion;
+  const schemaVersion = message.schemaVersion ?? defaultSchemaVersion;
   if (schemaVersion !== defaultSchemaVersion) {
     // Exact-version collaboration: reject presence messages from the other
     // wire protocol instead of silently re-branding them.

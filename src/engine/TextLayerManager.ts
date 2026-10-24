@@ -156,6 +156,7 @@ class TextLayerManager {
 
   public reconcileLayers(
     activeLayers: ReadonlyMap<string, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reconciliation carries heterogeneous compiled text-style fields into the existing runtime layer API; preserve extension fields at this presentation seam.
       config: Record<string, any>;
       position: [number, number];
       scale: number;
@@ -433,7 +434,7 @@ class TextLayerManager {
     const { id, position, scale, rotation, opacity, duration, ease = 'power2.inOut' } = config;
     
     const proxy = this.getProxy(id);
-    const target: any = {};
+    const target: gsap.TweenVars = {};
     if (position) {
       target.x = position[0] * STAGE_WIDTH;
       target.y = position[1] * STAGE_HEIGHT;

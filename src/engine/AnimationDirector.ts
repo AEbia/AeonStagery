@@ -29,7 +29,8 @@ type ExitPreset = 'fadeOut' | 'slideToLeft' | 'slideToRight' | 'slideToTop' |
   'flyUp' | 'dissolve' | 'zoomOut' | 'none';
 
 /** Custom animation preset factory */
-type AnimPresetFactory = (target: any, config: any) => gsap.core.Timeline;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Custom presets accept author-defined target/config fields; a closed shape would restrict the plugin API and GSAP property dispatch.
+type AnimPresetFactory = (target: gsap.TweenTarget, config: any) => gsap.core.Timeline;
 
 class AnimationDirector {
   private masterTimeline: gsap.core.Timeline;
@@ -74,6 +75,7 @@ class AnimationDirector {
     preset: EnterPreset = 'fadeIn',
     duration: number = 0.8,
     ease: string = DEFAULT_CHARACTER_ENTER_EASE,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Custom presets accept author-defined target/config fields; a closed shape would restrict the plugin API and GSAP property dispatch.
     proxy?: any,
     targetOpacity?: number
   ): gsap.core.Timeline {
@@ -168,6 +170,7 @@ class AnimationDirector {
     preset: ExitPreset = 'fadeOut',
     duration: number = 0.6,
     ease: string = DEFAULT_CHARACTER_EXIT_EASE,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Custom presets accept author-defined target/config fields; a closed shape would restrict the plugin API and GSAP property dispatch.
     proxy?: any
   ): gsap.core.Timeline {
     // Keep the compact legacy spelling usable for scenes created before the
@@ -329,7 +332,8 @@ class AnimationDirector {
   /**
    * Play a registered preset.
    */
-  playPreset(name: string, target: any, config?: any): gsap.core.Timeline | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Custom presets accept author-defined target/config fields; a closed shape would restrict the plugin API and GSAP property dispatch.
+  playPreset(name: string, target: gsap.TweenTarget, config?: any): gsap.core.Timeline | null {
     const factory = this.customPresets.get(name);
     if (!factory) {
       console.warn(`[AnimationDirector] Preset "${name}" not found`);
@@ -341,7 +345,7 @@ class AnimationDirector {
   /**
    * Add a tween to the master timeline at a specific time.
    */
-  addTween(time: number, target: any, vars: any): gsap.core.Tween {
+  addTween(time: number, target: gsap.TweenTarget, vars: gsap.TweenVars): gsap.core.Tween {
     const tween = gsap.to(target, vars);
     this.masterTimeline.add(tween, time);
     return tween;

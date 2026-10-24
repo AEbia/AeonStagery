@@ -9,6 +9,7 @@ export function finiteOrUndefined(value: unknown): number | undefined {
  * implementation. Returns null when the model exposes no usable head
  * hit-area/layout.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 export function resolveHeadAnchorFromSettings(settings: any): { x: number; y: number } | null {
   const hitAreas = settings?.hit_areas_custom;
   const headX = hitAreas?.head_x;
@@ -49,6 +50,7 @@ function normalizeParameterId(value: unknown): string | undefined {
   return undefined;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 export function getCubism2ModelContext(coreModel: any): any | null {
   try {
     return coreModel?.getModelContext?.() ?? coreModel?._$5S ?? null;
@@ -65,9 +67,12 @@ export function getCubism2ModelContext(coreModel: any): any | null {
  * handoff snapshots use the same IDs as authored custom-motion tracks.
  */
 export function resolveCubism2ParameterId(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   coreModel: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   settings: any,
   index: number,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   modelContext: any = getCubism2ModelContext(coreModel),
 ): string {
   const direct = [
@@ -94,6 +99,7 @@ export function resolveCubism2ParameterId(
     ?? `Param_${index}`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 export function resolveCubismParameterId(value: any): string | undefined {
   return normalizeParameterId(value) ?? value?.getString?.()?.s;
 }

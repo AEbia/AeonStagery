@@ -26,7 +26,7 @@ export interface CollaborativeDocumentLayerV3Options {
   documentStore?: DocumentStore;
   getSceneDocument?: () => SceneDocumentV5 | null;
   subscribeLocal?: (listener: () => void) => () => void;
-  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: any, path?: string) => Promise<unknown> };
+  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: SceneDocumentV5, path?: string, options?: { coalesce?: boolean }) => Promise<unknown> };
   applyDocument?: (document: SceneDocumentV5, path?: string) => Promise<unknown> | unknown;
   client: CollaborativeClientPortV3;
   collaborationProjectId: string;

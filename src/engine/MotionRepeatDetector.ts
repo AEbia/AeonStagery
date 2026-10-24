@@ -28,7 +28,7 @@ function resolveMotionKey(value: unknown): string {
  * @returns RepeatWarning[] — each entry describes a pair of repeated motions
  */
 export function detectMotionRepeats(
-  timeline: Array<{ action: string; time?: number; params: Record<string, any> }>,
+  timeline: Array<{ action: string; time?: number; params: Record<string, unknown> }>,
   minGapSeconds: number = 30,
 ): RepeatWarning[] {
   // Collect all playMotion actions grouped by character

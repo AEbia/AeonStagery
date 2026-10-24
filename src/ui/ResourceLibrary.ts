@@ -145,10 +145,10 @@ export async function readMergedDirectory(subDir: string): Promise<DirEntry[]> {
 export async function readRootDirectories(): Promise<DirEntry[]> {
   const stdDirs = ['animation', 'background', 'bgm', 'figure', 'images', 'project', 'sfx', 'template', 'vocal'];
   const roots = getLibraryRoots();
-  const api = (window as any).aeonStageryAPI;
+  const api = window.aeonStageryAPI;
   const templates = getTemplateResourceFileService();
   const directories = await Promise.all(stdDirs.map(async (dir) => {
-    for (const root of api?.fs?.exists ? roots : []) {
+    for (const root of typeof api?.fs?.exists === 'function' ? roots : []) {
       const path = `${root.replace(/\\/g, '/')}/${dir}`;
       try {
         if (await api.fs.exists(path)) return { name: dir, isDirectory: true, path };

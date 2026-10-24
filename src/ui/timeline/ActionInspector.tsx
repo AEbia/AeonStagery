@@ -81,6 +81,7 @@ export interface ActionInspectorProps {
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector patches are selected by semantic family and runtime field key; the authoring service validates the resulting heterogeneous parameter changes.
   updateAction: (id: string, updates: any, isTransient?: boolean) => void;
   updateParam: (id: string, key: string, val: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   onNumericGestureStart?: NumericInputGestureRegistrar;

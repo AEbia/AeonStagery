@@ -655,7 +655,7 @@ export function useSemanticCollaborationSession({
             throw new Error(`保存协作场景的本地副本失败：${formatError(error)}`);
           }
           if (contextValue.services.sceneFile.saveCurrentSceneDocument) {
-            const result = await contextValue.services.sceneFile.saveCurrentSceneDocument(document as any, targetPath);
+            const result = await contextValue.services.sceneFile.saveCurrentSceneDocument(document, targetPath);
             if (!result.success) {
               throw new Error(`保存协作场景的本地副本失败：${'error' in result ? result.error : '未知错误'}`);
             }

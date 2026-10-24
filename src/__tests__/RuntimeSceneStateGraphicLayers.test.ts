@@ -177,16 +177,16 @@ describe('RuntimeSceneState graphic layer reconstruction', () => {
       ],
     } as any;
 
-    const entranceMid = computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori');
+    const entranceMid = computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori')!;
     expect(entranceMid.opacity).toBeCloseTo(0.0625, 6);
     expect(entranceMid.opacity).not.toBeCloseTo(0.5, 3);
 
-    const transformMid = computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori');
+    const transformMid = computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori')!;
     expect(transformMid.position).toEqual([0.275, 0.45]);
     expect(transformMid.scale).toBeCloseTo(1.125, 6);
     expect(transformMid.opacity).toBeCloseTo(0.975, 6);
 
-    const exitMid = computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori');
+    const exitMid = computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori')!;
     expect(exitMid.opacity).toBeCloseTo(0.7, 6);
     expect(computeSceneStateAtTime(characterScene, 3).characters.has('tomori')).toBe(false);
   });
@@ -214,11 +214,11 @@ describe('RuntimeSceneState graphic layer reconstruction', () => {
       ],
     } as any;
 
-    expect(computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori').blink)
+    expect(computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori')!.blink)
       .toBeNull();
-    expect(computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori').blink)
+    expect(computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori')!.blink)
       .toEqual({ enabled: false, intervalMs: 2500, startTime: 1 });
-    expect(computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori').blink)
+    expect(computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori')!.blink)
       .toEqual({ enabled: true, intervalMs: 1500, startTime: 2 });
   });
 
@@ -245,17 +245,17 @@ describe('RuntimeSceneState graphic layer reconstruction', () => {
       ],
     } as any;
 
-    const before = computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori');
+    const before = computeSceneStateAtTime(characterScene, 0.5).characters.get('tomori')!;
     expect(before.lookAt).toBeNull();
 
-    const atStart = computeSceneStateAtTime(characterScene, 1).characters.get('tomori').lookAt;
+    const atStart = computeSceneStateAtTime(characterScene, 1).characters.get('tomori')!.lookAt!;
     expect(atStart.startTime).toBe(1);
     expect(atStart.duration).toBe(1);
     expect(atStart.fromFocus).toEqual([0, 0]);
     expect(atStart.toFocus).toEqual([1, 0]);
     expect(atStart.focus[0]).toBeCloseTo(0, 6);
 
-    const mid = computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori').lookAt;
+    const mid = computeSceneStateAtTime(characterScene, 1.5).characters.get('tomori')!.lookAt!;
     expect(mid.startTime).toBe(1);
     expect(mid.duration).toBe(1);
     expect(mid.toFocus).toEqual([1, 0]);
@@ -263,7 +263,7 @@ describe('RuntimeSceneState graphic layer reconstruction', () => {
     expect(mid.focus[0]).toBeCloseTo(easedMid, 6);
     expect(mid.focus[1]).toBeCloseTo(0, 6);
 
-    const after = computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori').lookAt;
+    const after = computeSceneStateAtTime(characterScene, 2.5).characters.get('tomori')!.lookAt!;
     expect(after.focus[0]).toBeCloseTo(1, 6);
   });
 
@@ -300,14 +300,14 @@ describe('RuntimeSceneState graphic layer reconstruction', () => {
       ],
     } as any;
 
-    const initial = computeSceneStateAtTime(followScene, 1).characters.get('self').lookAt;
+    const initial = computeSceneStateAtTime(followScene, 1).characters.get('self')!.lookAt!;
     expect(initial.focus[0]).toBeCloseTo(-0.6, 6);
 
     // Target is exactly level with self at t=2 → neutral gaze, not initial/final.
-    const mid = computeSceneStateAtTime(followScene, 2).characters.get('self').lookAt;
+    const mid = computeSceneStateAtTime(followScene, 2).characters.get('self')!.lookAt!;
     expect(mid.focus[0]).toBeCloseTo(0, 6);
 
-    const final = computeSceneStateAtTime(followScene, 3).characters.get('self').lookAt;
+    const final = computeSceneStateAtTime(followScene, 3).characters.get('self')!.lookAt!;
     expect(final.focus[0]).toBeCloseTo(0.6, 6);
   });
 });

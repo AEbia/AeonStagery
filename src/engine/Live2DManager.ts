@@ -68,6 +68,7 @@ class Live2DManager {
   private basePath: string = '';
   private _isExportMode: boolean = false; // Only used by ExportDialog (fast export path). Bake uses BakeEngine with independent models.
   private _initPromise: Promise<void> | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   private _scriptEngine: any = null;
 
   /**
@@ -182,6 +183,7 @@ class Live2DManager {
   /**
    * Link the ScriptEngine to this manager for transformation proxy synchronization.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   setScriptEngine(engine: any): void {
     this._scriptEngine = engine;
     setScriptEngineForSetup(engine);
@@ -658,7 +660,7 @@ class Live2DManager {
    * Live2D focus following the target in real time instead of locking the gaze
    * direction captured when the lookAt action first fired.
    */
-  syncLookAtFollows(characterStates: Map<string, any>): void {
+  syncLookAtFollows(characterStates: ReadonlyMap<string, { lookAt?: { target?: string; focus?: readonly [number, number] } | null }>): void {
     if (!this._shouldUpdate && !this._scriptEngine?.isReconstructing) return;
     for (const [id, state] of characterStates) {
       const lookAt = state?.lookAt;
@@ -991,6 +993,7 @@ class Live2DManager {
     console.groupEnd();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   setEngine(engine: any): void {
     this._scriptEngine = engine;
   }

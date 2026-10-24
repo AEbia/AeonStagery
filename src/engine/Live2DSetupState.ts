@@ -1,9 +1,14 @@
-let scriptEngineForSetup: any = null;
+type SetupSceneClock = {
+  getCurrentTime(): number;
+  transformationProxies?: { get(id: string): import('./actions/types').TransformationProxy | undefined };
+};
 
-export function setScriptEngineForSetup(engine: any): void {
+let scriptEngineForSetup: SetupSceneClock | null = null;
+
+export function setScriptEngineForSetup(engine: SetupSceneClock | null): void {
   scriptEngineForSetup = engine;
 }
 
-export function getScriptEngineForSetup(): any {
+export function getScriptEngineForSetup(): SetupSceneClock | null {
   return scriptEngineForSetup;
 }

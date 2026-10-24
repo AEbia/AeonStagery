@@ -1,4 +1,5 @@
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 import {
   configureAudioElement,
   isAudioElementDisposed,
@@ -8,7 +9,7 @@ import {
 
 let generatedAudioKey = 0;
 
-export function schedulePlayAudio(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function schedulePlayAudio(ctx: SchedulerContext, action: RuntimeActionContract<'playAudio'>): void {
   const { resolvePath, resolvePathAsync, audioElements } = ctx;
   const { time, params } = action;
   const t = finiteNumber(time) ?? 0;
@@ -39,7 +40,7 @@ export function schedulePlayAudio(ctx: SchedulerContext, action: { time?: number
   });
 }
 
-export function scheduleStopAudio(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleStopAudio(ctx: SchedulerContext, action: RuntimeActionContract<'stopAudio'>): void {
   const { tl, isReconstructing, audioElements } = ctx;
   const { time, params } = action;
   const t = finiteNumber(time) ?? 0;
@@ -58,7 +59,7 @@ export function scheduleStopAudio(ctx: SchedulerContext, action: { time?: number
   });
 }
 
-export function scheduleSetBGM(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleSetBGM(ctx: SchedulerContext, action: RuntimeActionContract<'setBGM'>): void {
   const { resolvePath, resolvePathAsync, audioElements } = ctx;
   const { time, params } = action;
   const t = finiteNumber(time) ?? 0;
@@ -134,10 +135,10 @@ function createScheduledAudio(
     markAudioElementDisposed(audio);
     console.error(`[Audio] Failed to load audio asset "${file}" from "${audio.src}"`);
   };
-  if (typeof (audio as any).addEventListener === 'function') {
+  if (typeof audio.addEventListener === 'function') {
     audio.addEventListener('error', reportLoadFailure, { once: true });
   } else {
-    (audio as any).onerror = reportLoadFailure;
+    audio.onerror = reportLoadFailure;
   }
 
   if (resolvePathAsync) {

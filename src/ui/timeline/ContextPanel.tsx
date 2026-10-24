@@ -20,7 +20,7 @@ export interface ContextPanelProps {
   semanticSnapshot?: SemanticTimelineSnapshot;
   sceneMeta: SceneMeta;
   actionCount: number;
-  globalIssues: any[];
+  globalIssues: import('../../api/types/validation').ValidationIssue[];
   action?: TimelineAction;
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;

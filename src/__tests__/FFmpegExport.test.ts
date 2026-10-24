@@ -6,11 +6,12 @@ const ffmpegMocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => any>(),
   spawn: vi.fn(),
   createOutput: vi.fn(),
+  getAllWindows: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
   BrowserWindow: {
-    getAllWindows: vi.fn(() => []),
+    getAllWindows: ffmpegMocks.getAllWindows,
   },
   dialog: {
     showSaveDialog: vi.fn(),
@@ -85,6 +86,7 @@ describe('FFmpeg export failure seam', () => {
     vi.restoreAllMocks();
     ffmpegMocks.handlers.clear();
     ffmpegMocks.spawn.mockReset();
+    ffmpegMocks.getAllWindows.mockReset().mockReturnValue([]);
     ffmpegMocks.createOutput.mockReset().mockImplementation(async (outputPath: string) => ({
       partialPath: outputPath.replace(/(\.[^/.]+)$/, '.partial$1'),
       recordChild: vi.fn().mockResolvedValue(undefined),
@@ -257,6 +259,18 @@ describe('FFmpeg export failure seam', () => {
       expect(output.commit).not.toHaveBeenCalled();
       expect(output.cleanup).toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('forwards encoder diagnostics through the Electron window bridge', async () => {
+    const child = new FakeChild();
+    const send = vi.fn();
+    ffmpegMocks.spawn.mockReturnValue(child);
+    ffmpegMocks.getAllWindows.mockReturnValue([{ webContents: { send } }]);
+    await handler('ffmpeg:startStreamExport')(null, '/tmp/output.mp4');
+
+    child.stderr.emit('data', Buffer.from('hevc_nvenc: No capable devices found'));
+
+    expect(send).toHaveBeenCalledWith('ffmpeg:log', 'hevc_nvenc: No capable devices found');
   });
 
   it('preserves late encoder diagnostics after an initial broken pipe', async () => {

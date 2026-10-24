@@ -259,6 +259,7 @@ export function computeCameraStateAtTime(
 function applyCameraReset(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -294,6 +295,7 @@ function applyCameraReset(
 function applyCameraMotion(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -440,13 +442,16 @@ function applyCameraMotion(
 function applyCameraPath(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   params: Record<string, any>,
   start: number,
   time: number,
 ): void {
   const raw = Array.isArray(params.keyframes) ? params.keyframes : [];
   const keyframes = raw
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
     .filter((kf: any) => kf && Number.isFinite(kf.time))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
     .sort((a: any, b: any) => a.time - b.time) as Array<Record<string, any>>;
   if (keyframes.length === 0) return;
 
@@ -455,6 +460,7 @@ function applyCameraPath(
   if (keyframes.some((kf) => kf.rotation !== undefined)) coverage.rotation = true;
 
   const local = time - start;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   const setFields = (target: MotionChannels, kf: Record<string, any>) => {
     const point = kf.position !== undefined ? normalizePoint(kf.position) : null;
     if (point) { target.x = point.x; target.y = point.y; }
@@ -512,6 +518,7 @@ function applyCameraPath(
 function applyCameraHitchcock(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -560,7 +567,7 @@ function applyCameraHitchcock(
   channels.y = targetY;
 }
 
-function normalizePoint(value: unknown): CameraPosition | null {  const point = resolveVec2(value as any);
+function normalizePoint(value: unknown): CameraPosition | null {  const point = resolveVec2(value as import('../api/types/common').Vec2 | undefined);
   return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? { x: point.x, y: point.y } : null;
 }
 
@@ -583,6 +590,7 @@ export function resolveZoomValue(raw: unknown, currentZoom: number): number | un
 }
 
 function resolvePanTarget(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical camera actions and keyframes have runtime-selected channels; keep their open decoding boundary while returning typed camera state.
   params: Record<string, any>,
   from: MotionChannels,
   _deps: CameraStateResolverDeps,

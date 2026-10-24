@@ -403,7 +403,7 @@ class SubtitleRenderer {
       const context = canvas.getContext('2d');
       if (context) {
         context.font = `${textStyle.fontStyle} ${textStyle.fontVariant} ${textStyle.fontWeight} ${textStyle.fontSize}px ${textStyle.fontFamily}`;
-        if ('letterSpacing' in context) (context as any).letterSpacing = `${textStyle.letterSpacing}px`;
+        if ('letterSpacing' in context) context.letterSpacing = `${textStyle.letterSpacing}px`;
 
         metrics.lines.forEach((line) => {
           const widths: number[] = [0];
@@ -728,9 +728,9 @@ class SubtitleRenderer {
     }
     // PIXI.Assets caches by URI; skip already-materialized textures so an
     // unchanged scene preload is a pure Map lookup instead of a load resolve.
-    const loadAssets = (PIXI.Assets as any)?.load as ((uri: string) => Promise<unknown>) | undefined;
+    const loadAssets = PIXI.Assets?.load as ((uri: string) => Promise<unknown>) | undefined;
     if (typeof loadAssets === 'function') {
-      const missingUris = [...imageUris].filter((uri) => !(PIXI.Assets as any)?.cache?.has?.(uri));
+      const missingUris = [...imageUris].filter((uri) => !PIXI.Assets?.cache?.has?.(uri));
       if (missingUris.length > 0) {
         await Promise.all(missingUris.map((uri) => loadAssets(uri)));
       }

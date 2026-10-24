@@ -223,7 +223,7 @@ const LifecycleBoundaryOpacityOverlay = React.memo(({
 
 LifecycleBoundaryOpacityOverlay.displayName = 'LifecycleBoundaryOpacityOverlay';
 
-export function getActionDisplayLabel(actionType: string, params?: Record<string, any>): string {
+export function getActionDisplayLabel(actionType: string, params?: Record<string, unknown>): string {
   switch (actionType) {
     case 'dialogue':
       return '对话';
@@ -403,7 +403,7 @@ export const TrackBlock = React.memo(({
   };
 
   const getIcon = () => {
-    const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
+    const IconComp = ActionIcons[(action.semanticIconKey ?? action.action) as keyof typeof ActionIcons] || ActionIcons.default;
     return <IconComp aria-hidden="true" width={isCompact ? 16 : 14} height={isCompact ? 16 : 14} style={{ opacity: 0.8 }} />;
   };
 
@@ -641,7 +641,7 @@ export const TrackSummaryBlock = React.memo(({
     action: segment.dominantActionType,
     semanticCategory: segment.dominantCategory as TimelineAction['semanticCategory'],
   });
-  const IconComp = (ActionIcons as any)[segment.dominantIconKey ?? segment.dominantActionType] || ActionIcons.default;
+  const IconComp = ActionIcons[(segment.dominantIconKey ?? segment.dominantActionType) as keyof typeof ActionIcons] || ActionIcons.default;
   const statusSeverity = segment.issueSeverity ?? (segment.hasRepeatWarning ? 'warning' : null);
   const compactMode = width < 34;
   const showIcon = width >= 38;

@@ -1,4 +1,5 @@
 import type { CharacterMotionOutput } from '../api/types/semantic-scene';
+import type { DialogueConfig } from './DialogueTemplates';
 import type { RuntimeTimelineScene } from './RuntimeTimelineScene';
 import type { EnvironmentLayerRenderState } from './environmentLayerModel';
 import { reconstructEnvironmentAtTime } from './EnvironmentLayerRuntime';
@@ -14,6 +15,7 @@ import {
 } from './CharacterAnimationContract';
 
 import { STAGE_HEIGHT } from './StageDimensions';
+import type { RuntimeActionParams } from '../api/types/semantic-scene';
 const DEFAULT_CHARACTER_POSITION: [number, number] = [0.5, 0.5];
 const DEFAULT_CHARACTER_SCALE = 1;
 const DEFAULT_CHARACTER_ROTATION = 0;
@@ -32,7 +34,7 @@ export interface RuntimeImageLayerState {
   opacity: number;
   zIndex: number;
   z?: number;
-  config: Record<string, any>;
+  config: RuntimeActionParams;
   removing?: boolean;
 }
 
@@ -43,30 +45,139 @@ export interface RuntimeTextLayerState {
   scale: number;
   rotation: number;
   opacity: number;
-  config: Record<string, any>;
+  config: RuntimeActionParams;
   typewriterProgress?: number;
   removing?: boolean;
 }
 
+interface RuntimeSceneActionParams extends RuntimeActionParams {
+  id?: string;
+  model?: string;
+  position?: [number, number] | { x: number; y: number } | 'bottom' | 'top' | 'center';
+  scale?: number;
+  rotation?: number;
+  opacity?: number;
+  z?: number;
+  zIndex?: number;
+  enter?: string;
+  exit?: string;
+  duration?: number;
+  enterDuration?: number;
+  exitDuration?: number;
+  enterEase?: string;
+  exitEase?: string;
+  ease?: string;
+  target?: string;
+  point?: [number, number] | { x: number; y: number };
+  focusX?: number;
+  focusY?: number;
+  focus?: [number, number];
+  fromFocus?: [number, number];
+  toFocus?: [number, number];
+  enabled?: boolean;
+  intensity?: number;
+  interval?: number;
+  intervalRange?: number;
+  motion?: CharacterMotionOutput | string;
+  priority?: number;
+  expression?: string | null;
+  file?: string;
+  text?: string;
+  style?: string;
+  speakerId?: string;
+  speaker?: string;
+  speakerColor?: string;
+  textColor?: string;
+  template?: string;
+  presentation?: DialogueConfig['presentation'];
+  visible?: boolean;
+  voice?: string;
+  lipSync?: boolean | 'audio' | 'text' | 'none';
+  fontSize?: number;
+  durationSeconds?: number;
+}
+
 interface RuntimeLookAtState {
-  params: Record<string, any>;
+  params: RuntimeSceneActionParams & { id: string };
   startTime: number;
   duration: number;
   fromFocus: [number, number];
   toFocus: [number, number];
 }
 
-function normalizePosition(value: any, fallback: [number, number] = [0.5, 0.5]): [number, number] {
+interface RuntimeEvaluatedLookAt extends RuntimeActionParams {
+  id: string;
+  target?: string;
+  point?: [number, number];
+  focusX?: number;
+  focusY?: number;
+  enabled?: boolean;
+  intensity?: number;
+  startTime: number;
+  duration: number;
+  fromFocus: [number, number];
+  toFocus: [number, number];
+  focus: [number, number];
+}
+
+interface RuntimeDialogueState extends DialogueConfig {
+  _id: string;
+  startTime: number;
+  duration: number;
+  voice?: string;
+  lipSync?: boolean | 'audio' | 'text' | 'none';
+}
+
+function resolveDialogueStyle(value: unknown): DialogueConfig['style'] {
+  switch (value) {
+    case 'typewriter':
+    case 'fadeIn':
+    case 'cinematic':
+    case 'instant':
+      return value;
+    default:
+      // Unsupported legacy strings rendered as a static reveal in SubtitleRenderer.
+      return value === undefined ? undefined : 'instant';
+  }
+}
+
+function resolveDialoguePosition(value: unknown): DialogueConfig['position'] {
+  return value === 'top' || value === 'center' || value === 'bottom' ? value : undefined;
+}
+
+interface RuntimeCharacterState {
+  model?: string;
+  config: RuntimeActionParams;
+  lifecycleStartTime: number;
+  motion: { output: CharacterMotionOutput; priority: number; time: number } | null;
+  expression: { key: string | null | undefined; time: number; previousKey?: string | null } | null;
+  lookAt: RuntimeEvaluatedLookAt | null;
+  blink: {
+    enabled: boolean;
+    intervalMs: number;
+    intervalRangeMs?: number;
+    startTime: number;
+  } | null;
+  position: [number, number];
+  scale: number;
+  rotation: number;
+  opacity: number;
+  z: number;
+}
+
+function normalizePosition(value: unknown, fallback: [number, number] = [0.5, 0.5]): [number, number] {
   if (Array.isArray(value)) {
+    const coordinates = value as unknown[];
     return [
-      typeof value[0] === 'number' ? value[0] : fallback[0],
-      typeof value[1] === 'number' ? value[1] : fallback[1],
+      typeof coordinates[0] === 'number' ? coordinates[0] : fallback[0],
+      typeof coordinates[1] === 'number' ? coordinates[1] : fallback[1],
     ];
   }
   if (value && typeof value === 'object') {
+    const point = value as { x?: unknown; y?: unknown };
     return [
-      typeof value.x === 'number' ? value.x : fallback[0],
-      typeof value.y === 'number' ? value.y : fallback[1],
+      typeof point.x === 'number' ? point.x : fallback[0],
+      typeof point.y === 'number' ? point.y : fallback[1],
     ];
   }
   return [...fallback] as [number, number];
@@ -98,7 +209,7 @@ function normalizeDuration(value: unknown, fallback: number): number {
 }
 
 function resolveLookAtFocusTuple(
-  params: Record<string, any>,
+  params: RuntimeSceneActionParams,
   lookup: LookAtPointLookup | undefined,
   selfId: string,
 ): [number, number] {
@@ -107,8 +218,8 @@ function resolveLookAtFocusTuple(
 }
 
 function resolveSceneLookAtFocusTuple(
-  params: Record<string, any>,
-  characters: Map<string, any>,
+  params: RuntimeSceneActionParams,
+  characters: Map<string, RuntimeCharacterState>,
   selfId: string,
 ): [number, number] {
   const lookup: LookAtPointLookup = (id) => {
@@ -126,8 +237,8 @@ function resolveSceneLookAtFocusTuple(
 function evaluateLookAtState(
   state: RuntimeLookAtState,
   time: number,
-  characters: Map<string, any>,
-): Record<string, any> {
+  characters: Map<string, RuntimeCharacterState>,
+): RuntimeEvaluatedLookAt {
   const target = typeof state.params.target === 'string' && state.params.target.trim()
     ? state.params.target.trim()
     : '';
@@ -144,6 +255,7 @@ function evaluateLookAtState(
     : 1;
   return {
     ...state.params,
+    point: state.params.point === undefined ? undefined : normalizePosition(state.params.point),
     startTime: state.startTime,
     duration: state.duration,
     fromFocus: [...state.fromFocus] as [number, number],
@@ -162,7 +274,7 @@ function evaluateLookAtState(
  * the cache key used when the dialogue timeline was originally scheduled.
  */
 function resolveDialogueSpeaker(
-  params: Record<string, any>,
+  params: RuntimeSceneActionParams,
   script: RuntimeTimelineScene,
 ): { speaker: string | undefined; speakerColor: string | undefined } {
   const speakerId = params.speakerId;
@@ -185,7 +297,7 @@ export function evaluateGsapEase(ease: string | undefined, progress: number): nu
 }
 
 /** Semantic/UI values are seconds; the runtime Live2D contract is milliseconds. */
-export function resolveBlinkIntervalMilliseconds(params: Record<string, any>): number {
+export function resolveBlinkIntervalMilliseconds(params: Pick<RuntimeSceneActionParams, 'interval'>): number {
   const seconds = typeof params.interval === 'number'
     ? params.interval
     : DEFAULT_BLINK_INTERVAL_SECONDS;
@@ -193,7 +305,7 @@ export function resolveBlinkIntervalMilliseconds(params: Record<string, any>): n
     * MILLISECONDS_PER_SECOND;
 }
 
-export function resolveBlinkIntervalRangeMilliseconds(params: Record<string, any>): number {
+export function resolveBlinkIntervalRangeMilliseconds(params: Pick<RuntimeSceneActionParams, 'intervalRange'>): number {
   const seconds = typeof params.intervalRange === 'number'
     ? params.intervalRange
     : 0;
@@ -201,7 +313,7 @@ export function resolveBlinkIntervalRangeMilliseconds(params: Record<string, any
     * MILLISECONDS_PER_SECOND;
 }
 
-function hasCharacterEntrance(params: Record<string, any>): boolean {
+function hasCharacterEntrance(params: Pick<RuntimeSceneActionParams, 'enter' | 'duration' | 'enterDuration'>): boolean {
   return params.enter !== 'none' && (
     (params.enter && params.enter !== 'none') ||
     params.duration !== undefined ||
@@ -218,7 +330,7 @@ function normalizeExitPreset(value: unknown): string {
 }
 
 function materializeCharacterEntrance(
-  params: Record<string, any>,
+  params: Pick<RuntimeSceneActionParams, 'position' | 'scale' | 'opacity' | 'enter' | 'duration' | 'enterDuration' | 'enterEase'>,
   startTime: number,
   time: number,
 ): { position: [number, number]; scale: number; opacity: number } {
@@ -286,20 +398,20 @@ export function computeSceneStateAtTime(
   time: number,
   lookAtPointLookup?: LookAtPointLookup,
 ): {
-  characters: Map<string, any>;
+  characters: Map<string, RuntimeCharacterState>;
   images: Map<string, RuntimeImageLayerState>;
   textLayers: Map<string, RuntimeTextLayerState>;
-  background: any;
+  background: EnvironmentLayerRenderState | null;
   environmentLayers: Map<string, EnvironmentLayerRenderState>;
-  dialogue: any;
+  dialogue: RuntimeDialogueState | null;
   dialogueVisible: boolean;
   dialogueOpacity: number;
 } {
-  const characters = new Map<string, any>();
+  const characters = new Map<string, RuntimeCharacterState>();
   const images = new Map<string, RuntimeImageLayerState>();
   const textLayers = new Map<string, RuntimeTextLayerState>();
   const lookAtStates = new Map<string, RuntimeLookAtState>();
-  let dialogue: any = null;
+  let dialogue: RuntimeDialogueState | null = null;
   let dialogueVisible = true;
   let visibilityTransition = { startTime: 0, duration: 0, from: 1, to: 1 };
   const dialogueOpacityAt = (targetTime: number): number => {
@@ -311,12 +423,12 @@ export function computeSceneStateAtTime(
   const timeline = [...script.timeline].sort((left, right) => (left.time || 0) - (right.time || 0));
   for (const action of timeline) {
     if ((action.time || 0) > time) break;
-    const p = action.params;
+    const p: RuntimeSceneActionParams = action.params;
     switch (action.action) {
       case 'setDialogueVisibility': {
         const startTime = action.time || 0;
         const from = dialogueOpacityAt(startTime);
-        dialogueVisible = p.visible;
+        dialogueVisible = p.visible === true;
         visibilityTransition = {
           startTime, duration: normalizeDuration(p.duration, 0), from, to: dialogueVisible ? 1 : 0,
         };
@@ -327,6 +439,7 @@ export function computeSceneStateAtTime(
       case 'removeEnvironmentLayer':
         break;
       case 'addCharacter': {
+        if (!p.id) break;
         const startTime = action.time || 0;
         const entrance = materializeCharacterEntrance(p, startTime, time);
         lookAtStates.delete(p.id);
@@ -353,7 +466,7 @@ export function computeSceneStateAtTime(
       case 'transformCharacter': {
         const startTime = action.time || 0;
         const duration = normalizeDuration(p.duration, 1);
-        const entry = characters.get(p.id);
+        const entry = p.id ? characters.get(p.id) : undefined;
         if (entry) {
           const progress = duration > 0
             ? clamp01((time - startTime) / duration)
@@ -385,6 +498,7 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'removeCharacter': {
+        if (!p.id) break;
         const startTime = action.time || 0;
         const preset = normalizeExitPreset(p.exit);
 
@@ -451,31 +565,36 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'playMotion':
-        if (characters.has(p.id)) {
+        if (p.id) {
+          const character = characters.get(p.id);
+          if (!character) break;
           const motion = p.motion as CharacterMotionOutput | undefined;
-          characters.get(p.id).motion = motion
+          character.motion = motion
             ? {
                 output: motion,
                 priority: p.priority ?? 3,
-                time: action.time,
+                time: action.time ?? 0,
               }
             : null;
         }
         break;
       case 'setExpression':
-        if (characters.has(p.id)) {
-          const previous: { key: string | null; time: number; previousKey?: string | null } | null = characters.get(p.id).expression;
-          characters.get(p.id).expression = {
+        if (p.id) {
+          const character = characters.get(p.id);
+          if (!character) break;
+          const startTime = action.time ?? 0;
+          const previous = character.expression;
+          character.expression = {
             key: p.expression,
-            time: action.time,
+            time: startTime,
             // Same-time replacements share the expression from before that
             // timestamp, matching Seek's predecessor lookup.
-            previousKey: previous && previous.time === action.time ? previous.previousKey ?? null : previous?.key ?? null,
+            previousKey: previous && previous.time === startTime ? previous.previousKey ?? null : previous?.key ?? null,
           };
         }
         break;
       case 'characterLookAt': {
-        if (!characters.has(p.id)) break;
+        if (!p.id || !characters.has(p.id)) break;
         const startTime = action.time || 0;
         const previous = lookAtStates.get(p.id);
         const fromFocus: [number, number] = previous
@@ -484,7 +603,7 @@ export function computeSceneStateAtTime(
         const toFocus = resolveLookAtFocusTuple(p, lookAtPointLookup, p.id);
         const duration = normalizeDuration(p.duration, DEFAULT_LOOK_AT_DURATION_SECONDS);
         lookAtStates.set(p.id, {
-          params: p,
+          params: { ...p, id: p.id },
           startTime,
           duration,
           fromFocus,
@@ -493,13 +612,15 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'characterBlink':
-        if (characters.has(p.id)) {
+        if (p.id) {
+          const character = characters.get(p.id);
+          if (!character) break;
           const hasRange = typeof p.intervalRange === 'number' && Number.isFinite(p.intervalRange);
-          characters.get(p.id).blink = {
+          character.blink = {
             enabled: p.enabled !== false,
             intervalMs: resolveBlinkIntervalMilliseconds(p),
             ...(hasRange ? { intervalRangeMs: resolveBlinkIntervalRangeMilliseconds(p) } : {}),
-            startTime: action.time,
+            startTime: action.time ?? 0,
           };
         }
         break;
@@ -520,7 +641,7 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'transformImage': {
-        const entry = images.get(p.id);
+        const entry = p.id ? images.get(p.id) : undefined;
         if (!entry) break;
 
         const startTime = action.time || 0;
@@ -555,13 +676,15 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'removeImage': {
-        const entry = images.get(p.id);
+        const id = p.id;
+        if (!id) break;
+        const entry = images.get(id);
         if (!entry) break;
 
         const startTime = action.time || 0;
         const duration = Math.max(0, typeof p.duration === 'number' ? p.duration : 0);
         if (duration <= 0 || time >= startTime + duration) {
-          images.delete(p.id);
+          images.delete(id);
         } else if (time >= startTime) {
           const progress = clamp01((time - startTime) / duration);
           entry.opacity = interpolateNumber(entry.opacity, 0, progress);
@@ -600,7 +723,7 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'transformTextLayer': {
-        const entry = textLayers.get(p.id);
+        const entry = p.id ? textLayers.get(p.id) : undefined;
         if (!entry) break;
 
         const startTime = action.time || 0;
@@ -629,13 +752,15 @@ export function computeSceneStateAtTime(
         break;
       }
       case 'removeTextLayer': {
-        const entry = textLayers.get(p.id);
+        const id = p.id;
+        if (!id) break;
+        const entry = textLayers.get(id);
         if (!entry) break;
 
         const startTime = action.time || 0;
         const duration = Math.max(0, typeof p.duration === 'number' ? p.duration : 0.5);
         if (duration <= 0 || time >= startTime + duration) {
-          textLayers.delete(p.id);
+          textLayers.delete(id);
         } else if (time >= startTime) {
           const progress = clamp01((time - startTime) / duration);
           entry.opacity = interpolateNumber(entry.opacity, 0, progress);
@@ -650,11 +775,14 @@ export function computeSceneStateAtTime(
           const { speaker, speakerColor } = resolveDialogueSpeaker(p, script);
           dialogue = {
             ...p,
-            speaker,
+            text: typeof p.text === 'string' ? p.text : '',
+            speaker: speaker ?? '',
             speakerColor,
+            style: resolveDialogueStyle(p.style),
+            position: resolveDialoguePosition(p.position),
             startTime,
             duration,
-            _id: (action as any)._id,
+            _id: action._id,
           };
         }
         break;
@@ -666,9 +794,8 @@ export function computeSceneStateAtTime(
   // gaze resolves against the character positions at the requested time rather
   // than the positions captured when the lookAt action was first processed.
   for (const [id, state] of lookAtStates) {
-    if (characters.has(id)) {
-      characters.get(id).lookAt = evaluateLookAtState(state, time, characters);
-    }
+    const character = characters.get(id);
+    if (character) character.lookAt = evaluateLookAtState(state, time, characters);
   }
 
   return { characters, images, textLayers, background, environmentLayers, dialogue, dialogueVisible, dialogueOpacity: dialogueOpacityAt(time) };

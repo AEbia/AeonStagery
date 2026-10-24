@@ -35,7 +35,7 @@ export interface Live2DRuntimeDescriptor {
   supported: boolean;
 }
 
-export function resolveLive2DRuntimeDescriptor(modelPath: string, parsedJson?: any): Live2DRuntimeDescriptor {
+export function resolveLive2DRuntimeDescriptor(modelPath: string, parsedJson?: unknown): Live2DRuntimeDescriptor {
   const entry = describeLive2DModelEntrypoint(modelPath, parsedJson);
 
   if (entry.runtimeFamily === 'cubism2' || entry.runtimeFamily === 'wmdl') {

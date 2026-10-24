@@ -3,6 +3,7 @@
  * The private _$pb array contains PARAMETER IDS, never opacity values. Writing
  * snapshots there destroys name-to-index lookup while leaving parts unchanged.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function exposedOpacities(internalModel: any): number[] | Float32Array | undefined {
   const core = internalModel?.coreModel;
   const candidates = [
@@ -15,11 +16,13 @@ function exposedOpacities(internalModel: any): number[] | Float32Array | undefin
     && Array.from(values).every(value => typeof value === 'number'));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function partCount(core: any): number | undefined {
   const context = core?.getModelContext?.() ?? core?._$5S;
   return context?._$Hr?.length;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function readPartOpacities(internalModel: any): ArrayLike<number> | null {
   const exposed = exposedOpacities(internalModel);
   if (exposed) return exposed;
@@ -29,6 +32,7 @@ export function readPartOpacities(internalModel: any): ArrayLike<number> | null 
   return Float32Array.from({ length: count }, (_, index) => core.getPartsOpacity(index));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function writePartOpacities(internalModel: any, values: ArrayLike<number>): boolean {
   const exposed = exposedOpacities(internalModel);
   if (exposed) {

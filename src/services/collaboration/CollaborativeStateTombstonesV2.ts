@@ -134,8 +134,8 @@ function addDeletedIdsToTombstoneSection(
 
 function addDeletedCompanionsToTombstones(
   tombstones: CollaborativeTombstonesV2,
-  previousState: CollaborativeSceneStateV2,
-  nextState: CollaborativeSceneStateV2,
+  previousState: Pick<CollaborativeSceneStateV2, 'companionGroupsByStatementId'>,
+  nextState: Pick<CollaborativeSceneStateV2, 'companionGroupsByStatementId'>,
   deletedAt: string,
 ): boolean {
   const companionTombstones = cloneJson(tombstones.companions ?? {});
@@ -271,8 +271,8 @@ export function addCollaborativeTombstonesForDeletedRecordsV3(
   ) || changed;
   changed = addDeletedCompanionsToTombstones(
     tombstones,
-    previousState as any,
-    nextState as any,
+    previousState,
+    nextState,
     deletedAt,
   ) || changed;
   changed = addDeletedIdsToTombstoneSection(

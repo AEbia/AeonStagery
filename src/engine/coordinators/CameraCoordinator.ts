@@ -8,7 +8,7 @@ interface ResolvedStatePatch {
 }
 
 interface CameraMuscle {
-  follow(characterId: string, config?: { offset?: any; smoothing?: number }): void;
+  follow(characterId: string, config?: { offset?: import('../../api/types/common').Vec2; smoothing?: number }): void;
   unfollow(): void;
   tickFollow(forceUpdate?: boolean): void;
   resetShake(): void;

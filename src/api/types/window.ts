@@ -152,6 +152,7 @@ export interface AeonStageryElectronAPI {
     getProjectPath(): Promise<string>;
     getUserDataPath(): Promise<string>;
     getDefaultProjectsPath(): Promise<string>;
+    showOpenDialog?(options: OpenDialogOptions): Promise<{ canceled: boolean; filePaths?: string[] }>;
     restart(): Promise<{ success: boolean }>;
     openExternal?(url: string): Promise<{ success: boolean }>;
   };
@@ -394,17 +395,17 @@ export interface AeonStageryPublicAPI {
   export: ExportAPI;
   hooks: HookAPI;
   stage: StageAPI;
-  adapters?: any;
-  stores?: any;
-  services?: any;
+  adapters?: import('../../engine/Bootstrapper').BootstrapContext['adapters'];
+  stores?: import('../../engine/Bootstrapper').BootstrapContext['stores'];
+  services?: import('../../engine/Bootstrapper').BootstrapContext['services'];
 }
 
 export interface StageAPI {
-  getApp(): any; // PixiJS Application
+  getApp(): import('pixi.js').Application; // PixiJS Application
   getWidth(): number;
   getHeight(): number;
   /** Get a named layer container for advanced compositing */
-  getLayer(name: LayerName): any;
+  getLayer(name: LayerName): import('pixi.js').Container;
 }
 
 export interface CharacterAPI {
@@ -518,15 +519,15 @@ export interface AnimationAPI {
   /** Play a custom HTML animation */
   playCustom(htmlFile: string, duration: number, layer?: LayerName): void;
   /** Get the GSAP master timeline for advanced control */
-  getMasterTimeline(): any;
+  getMasterTimeline(): gsap.core.Timeline;
   /** Create a sub-timeline that can be composed into the master */
-  createTimeline(label?: string): any;
+  createTimeline(label?: string): gsap.core.Timeline;
   /** Add a GSAP tween to the master timeline at a specific time */
-  addTween(time: number, target: any, vars: any): void;
+  addTween(time: number, target: gsap.TweenTarget, vars: gsap.TweenVars): void;
   /** Register a custom animation preset */
-  registerPreset(name: string, factory: (target: any, config: any) => any): void;
+  registerPreset: (typeof import('../../engine/AnimationDirector').animationDirector)['registerPreset'];
   /** Play a registered preset */
-  playPreset(name: string, target: any, config?: any): void;
+  playPreset: (typeof import('../../engine/AnimationDirector').animationDirector)['playPreset'];
 }
 
 export interface SceneAPI {
@@ -549,5 +550,5 @@ export interface HookAPI {
   /** Remove a hook handler */
   off(event: HookEvent, handler: (ctx: HookContext) => void | Promise<void>): void;
   /** Emit a custom event */
-  emit(event: string, payload?: any): void;
+  emit(event: string, payload?: unknown): void;
 }

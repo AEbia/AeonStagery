@@ -110,7 +110,7 @@ export function useBlockDrag({
         const element = blockRefs.current?.get(next.id);
         if (!element) continue;
         element.style.left = `${next.time * pps}px`;
-        (element as any)._dragTime = next.time;
+        (element as HTMLElement & { _dragTime?: number })._dragTime = next.time;
       }
 
       // Low priority: defer lanes recomputation for surrounding blocks

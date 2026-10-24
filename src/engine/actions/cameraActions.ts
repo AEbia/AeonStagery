@@ -1,10 +1,11 @@
 import { cameraController } from '../CameraController';
 import type { SchedulerContext } from './types';
-import type { CameraMotionConfig } from '../../api/types/camera';
+import type { CameraHitchcockConfig, CameraMotionConfig } from '../../api/types/camera';
+import type { RuntimeActionContract } from './contracts';
 
 // ── Backward-compat: route cameraFollow through executeMotion ──
 
-export function scheduleCameraFollow(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraFollow(ctx: SchedulerContext, action: RuntimeActionContract<'cameraFollow'>): void {
   const { tl } = ctx;
   const { time, params } = action;
 
@@ -28,14 +29,14 @@ export function scheduleCameraFollow(ctx: SchedulerContext, action: { time?: num
   tl.add(camTl, time);
 }
 
-export function scheduleCameraPath(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraPath(ctx: SchedulerContext, action: RuntimeActionContract<'cameraPath'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const camTl = cameraController.createPath(params.keyframes, { defaultEase: params.ease, loop: params.loop, repeat: params.repeat, yoyo: params.yoyo });
   tl.add(camTl, time);
 }
 
-export function scheduleCameraShake(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraShake(ctx: SchedulerContext, action: RuntimeActionContract<'cameraShake'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const camTl = cameraController.shake(params);
@@ -43,14 +44,14 @@ export function scheduleCameraShake(ctx: SchedulerContext, action: { time?: numb
 }
 
 // Releasing a follow only stops position tracking — never a full camera reset.
-export function scheduleCameraUnfollow(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraUnfollow(ctx: SchedulerContext, action: RuntimeActionContract<'cameraUnfollow'>): void {
   const { tl } = ctx;
   const { time } = action;
   const camTl = cameraController.stopFollow();
   tl.add(camTl, time);
 }
 
-export function scheduleCameraReset(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraReset(ctx: SchedulerContext, action: RuntimeActionContract<'cameraReset'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const duration = typeof params.duration === 'number'
@@ -63,16 +64,20 @@ export function scheduleCameraReset(ctx: SchedulerContext, action: { time?: numb
   tl.add(camTl, time);
 }
 
-export function scheduleCameraHitchcock(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraHitchcock(ctx: SchedulerContext, action: RuntimeActionContract<'cameraHitchcock'>): void {
   const { tl } = ctx;
   const { time, params } = action;
-  const camTl = cameraController.hitchcockZoom(params as any);
+  // Preserve the legacy pass-through payload. Older projects may have authored
+  // partial Hitchcock keys, and CameraController owns its runtime defaults.
+  const camTl = cameraController.hitchcockZoom(params as CameraHitchcockConfig);
   tl.add(camTl, time);
 }
 
-export function scheduleCameraMotion(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCameraMotion(ctx: SchedulerContext, action: RuntimeActionContract<'cameraMotion'>): void {
   const { tl } = ctx;
   const { time, params } = action;
-  const camTl = cameraController.executeMotion(params as any);
+  // Runtime defaults are applied by the selected move handler; keep the
+  // compiler-produced legacy payload intact at this controller boundary.
+  const camTl = cameraController.executeMotion(params as CameraMotionConfig);
   tl.add(camTl, time);
 }

@@ -113,14 +113,14 @@ export class VoiceAuthoringService {
         voiceProfileId: profile.id,
       });
       return { success: true, profile };
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (profilesPersisted && this.projectWorkspace) {
         await this.projectWorkspace.updateVoiceProfiles(previousProfiles).catch(() => undefined);
       }
       await Promise.all(importedReferencePaths.map((path) =>
         this.projectResources.removeProjectResource(path).catch(() => undefined),
       ));
-      return { success: false, error: error?.message || String(error) };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -174,11 +174,11 @@ export class VoiceAuthoringService {
         patch: { params },
       });
       return { success: true, relativePath: imported.relativePath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (importedRelativePath) {
         await this.projectResources.removeProjectResource(importedRelativePath).catch(() => undefined);
       }
-      return { success: false, error: error?.message || String(error) };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 }

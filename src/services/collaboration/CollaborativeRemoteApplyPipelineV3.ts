@@ -5,7 +5,7 @@ import { materializeCollaborativeSceneDocumentV5 } from './CollaborativeSceneSta
 import { CollaborationRemoteStateRejectedError } from './CollaborationErrors';
 
 export interface CollaborativeRemoteApplyPipelineV3Options {
-  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: any, path?: string) => Promise<unknown> };
+  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: SceneDocumentV5, path?: string, options?: { coalesce?: boolean }) => Promise<unknown> };
   applyDocument?: (document: SceneDocumentV5, path?: string) => Promise<unknown> | unknown;
   beforeApplyState?: (
     state: CollaborativeSceneStateV3,
@@ -61,7 +61,7 @@ export class CollaborativeRemoteApplyPipelineV3 {
         // coalesce:false — a remote state change must always be projected and
         // stored; it can never be absorbed and dropped by the coordinator's
         // latest-wins batch coalescing of concurrent local commits.
-        await (this.options.coordinator as any).applyDocument(document, applyPath, { coalesce: false });
+        await this.options.coordinator.applyDocument(document, applyPath, { coalesce: false });
         documentApplied = true;
       }
       if (documentApplied) options.onDocumentApplied?.();

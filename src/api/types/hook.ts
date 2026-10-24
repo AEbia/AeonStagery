@@ -20,7 +20,7 @@ export type HookEvent =
 export interface HookContext {
   event: string;
   timestamp: number;
-  data?: any;
+  data?: unknown;
   /** Cancel the default behavior (if applicable) */
   preventDefault(): void;
   prevented: boolean;

@@ -10,13 +10,14 @@ type CustomMotionConversionState = ReturnType<typeof useCustomMotionAuthoring>;
 
 export interface CustomMotionConversionDeps {
   action: TimelineAction;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
   customMotionConversion: CustomMotionConversionState['customMotionConversion'];
   customMotionTarget: CustomMotionConversionState['customMotionTarget'];
   conversionDialog: CustomMotionConversionState['conversionDialog'];
   setConversionDialog: CustomMotionConversionState['setConversionDialog'];
   setIsConverting: CustomMotionConversionState['setIsConverting'];
-  characterAdapter?: any;
+  characterAdapter?: Pick<import('../../../api/interfaces/ICharacterAdapter').ICharacterAdapter, 'getMotionDuration'>;
 }
 
 export function createCustomMotionConversion(deps: CustomMotionConversionDeps) {

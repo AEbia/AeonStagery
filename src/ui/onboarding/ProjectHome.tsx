@@ -462,8 +462,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       const next = [...webgalScriptFiles, ...loaded];
       setWebgalScriptFiles(next);
       setWebgalScriptReport(mergeScriptsReport(next, webgalSpeed, webgalChapterTransition));
-    } catch (error: any) {
-      window.alert(`读取 WebGAL 剧本失败：${error?.message || String(error)}`);
+    } catch (error: unknown) {
+      window.alert(`读取 WebGAL 剧本失败：${(error instanceof Error ? error.message : String(error))}`);
     } finally {
       setIsReadingWebgalScript(false);
     }

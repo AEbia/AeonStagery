@@ -115,6 +115,7 @@ function addItem(
         boundary: lifecycle.boundary,
       }
     : undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The read model projects all statement/companion families into a common presentation record while preserving their family-specific fields.
   const sourceParams = source.params as Record<string, any>;
   const displayAction: TimelineAction = compiledAction
     ? {

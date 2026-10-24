@@ -140,7 +140,7 @@ class CameraController {
    * or its animation settles between construction and playback, the camera
    * moves to the correct live position.
    */
-  moveTo(config: CameraMoveConfig): gsap.core.Tween {
+  moveTo(config: CameraMoveConfig): gsap.core.Timeline {
     const duration = config.duration ?? 1;
     const ease = config.ease ?? 'power3.inOut';
     const delay = config.delay ?? 0;
@@ -149,7 +149,7 @@ class CameraController {
 
     // ── Zoom + Rotation ────────────────────────────────────
     if (config.zoom !== undefined || config.rotation !== undefined) {
-      const anim: any = {};
+      const anim: gsap.TweenVars = {};
       if (config.zoom !== undefined) anim.zoom = config.zoom;
       if (config.rotation !== undefined) anim.rotation = config.rotation;
 
@@ -173,8 +173,8 @@ class CameraController {
           if (p) {
             let Z = this.state.zoom ?? 1;
             if (typeof config.zoom === 'number') Z = config.zoom;
-            else if (typeof (config.zoom as any) === 'string') {
-              const zStr = config.zoom as any as string;
+            else if (typeof config.zoom === 'string') {
+              const zStr = config.zoom as string;
               if (zStr.startsWith('+=')) Z += parseFloat(zStr.slice(2));
               else if (zStr.startsWith('-=')) Z -= parseFloat(zStr.slice(2));
               else Z = parseFloat(zStr);
@@ -190,8 +190,8 @@ class CameraController {
           if (p) {
             let Z = this.state.zoom ?? 1;
             if (typeof config.zoom === 'number') Z = config.zoom;
-            else if (typeof (config.zoom as any) === 'string') {
-              const zStr = config.zoom as any as string;
+            else if (typeof config.zoom === 'string') {
+              const zStr = config.zoom as string;
               if (zStr.startsWith('+=')) Z += parseFloat(zStr.slice(2));
               else if (zStr.startsWith('-=')) Z -= parseFloat(zStr.slice(2));
               else Z = parseFloat(zStr);
@@ -209,8 +209,8 @@ class CameraController {
       const targetPos = resolveVec2(config.target || config.position);
       
       // GSAP relative string support
-      let tx: any = targetPos.x;
-      let ty: any = targetPos.y;
+      let tx: number | string = targetPos.x;
+      let ty: number | string = targetPos.y;
       
       if (typeof config.target === 'string' && (config.target as string).startsWith('+=')) tx = config.target;
       if (typeof config.target === 'string' && (config.target as string).startsWith('-=')) tx = config.target;
@@ -223,7 +223,7 @@ class CameraController {
     }
 
     hookSystem.execute('camera:move', { type: 'moveTo', config });
-    return tl as any;
+    return tl;
   }
 
   /**
@@ -584,8 +584,8 @@ class CameraController {
       const dt = typeof ticker?.deltaTime === 'number' ? ticker.deltaTime / 60 : undefined;
       this.tickFollow(false, dt);
     };
-    app.ticker.add(tickerFn as any);
-    this.followTicker = tickerFn as any;
+    app.ticker.add(tickerFn);
+    this.followTicker = tickerFn;
   }
 
   /**
@@ -629,7 +629,7 @@ class CameraController {
   unfollow(): void {
     if (this.followTicker) {
       const app = stageManager.getApp();
-      app.ticker.remove(this.followTicker as any);
+      app.ticker.remove(this.followTicker);
       this.followTicker = null;
     }
     this.followTarget = null;

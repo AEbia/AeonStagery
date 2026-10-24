@@ -558,7 +558,7 @@ class LightingSystem {
     });
   }
 
-  deriveLightingSnapshotAtTime(time: number, timeline: readonly any[], visualOverlay: VisualLightingOverlay | null = null): LightingSnapshot {
+  deriveLightingSnapshotAtTime(time: number, timeline: Parameters<typeof deriveLightingSnapshotForTime>[1], visualOverlay: VisualLightingOverlay | null = null): LightingSnapshot {
     return deriveLightingSnapshotForTime(time, timeline, visualOverlay);
   }
 
@@ -675,12 +675,12 @@ class LightingSystem {
 
     if (!this.scenePostOverlay) {
       this.scenePostOverlay = new PIXI.Graphics();
-      (this.scenePostOverlay as any).name = 'panorama-post-processing-overlay';
-      (this.scenePostOverlay as any).zIndex = Number.MAX_SAFE_INTEGER;
-      if (typeof (scene as any).addChild === 'function') {
+      this.scenePostOverlay.name = 'panorama-post-processing-overlay';
+      this.scenePostOverlay.zIndex = Number.MAX_SAFE_INTEGER;
+      if (typeof scene.addChild === 'function') {
         scene.addChild(this.scenePostOverlay);
       }
-    } else if (this.scenePostOverlay.parent !== scene && typeof (scene as any).addChild === 'function') {
+    } else if (this.scenePostOverlay.parent !== scene && typeof scene.addChild === 'function') {
       scene.addChild(this.scenePostOverlay);
     }
 
@@ -689,8 +689,8 @@ class LightingSystem {
       ? state.overlayColor
       : parseInt(String(state.overlayColor).replace(/^#/, '0x'), 16);
     const safeColor = Number.isFinite(color) ? color : 0;
-    if (typeof (overlay as any).clear === 'function') {
-      (overlay as any).clear();
+    if (typeof overlay.clear === 'function') {
+      overlay.clear();
     }
     overlay.beginFill(safeColor, 1);
     overlay.drawRect(0, 0, stageManager.getWidth(), stageManager.getHeight());
@@ -698,7 +698,7 @@ class LightingSystem {
     overlay.alpha = intensity;
     overlay.visible = intensity > 0.001;
     overlay.blendMode = state.overlayBlendMode;
-    (overlay as any)._filtersDirty = true;
+    (overlay as typeof overlay & { _filtersDirty?: boolean })._filtersDirty = true;
   }
 
   private shouldSuspendSceneFiltersForWarmup(): boolean {
@@ -1073,7 +1073,7 @@ class LightingSystem {
    * at any given time in the timeline. Highly performant, linear interpolation-aware,
    * and completely deterministic for seek/scrubbing compatibility.
    */
-  reconcile(time: number, timeline: any[]): void {
+  reconcile(time: number, timeline: Parameters<typeof deriveLightingSnapshotForTime>[1]): void {
     this.applySnapshot(this.deriveLightingSnapshotAtTime(time, timeline, this.visualOverlayState));
 
     // Re-trigger continuous godray animation during playback if needed

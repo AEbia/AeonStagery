@@ -48,7 +48,7 @@ export class ProjectCompatibilityEnvelopeService {
     private readonly fileAccess: EnvelopeFileAccess,
     resolver?: ProjectPathResolver,
   ) {
-    this.resolver = resolver ?? new ProjectPathResolver((window as any).aeonStageryAPI);
+    this.resolver = resolver ?? new ProjectPathResolver(window.aeonStageryAPI);
   }
 
   async buildSceneEntry(
@@ -71,7 +71,7 @@ export class ProjectCompatibilityEnvelopeService {
       const { data } = await this.fileAccess.readFile(fullPath);
       const sourceHash = await calculateSourceHash(data);
 
-      let parsed: any;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(data);
       } catch {
@@ -84,7 +84,7 @@ export class ProjectCompatibilityEnvelopeService {
       }
 
       const sceneSchemaVersion =
-        typeof parsed?.schemaVersion === 'number' && Number.isInteger(parsed.schemaVersion)
+        parsed !== null && typeof parsed === 'object' && 'schemaVersion' in parsed && typeof parsed.schemaVersion === 'number' && Number.isInteger(parsed.schemaVersion)
           ? parsed.schemaVersion
           : 0;
       const hasUnknownFields = CompatibleSceneSession.detectUnknownFields(parsed);

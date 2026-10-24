@@ -32,8 +32,8 @@ export function registerBetaStateHandlers(windows: IpcWindowContext) {
       await fs.promises.mkdir(directory, { recursive: true });
       await fs.promises.writeFile(path.join(directory, fileName), JSON.stringify(value), 'utf8');
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 }

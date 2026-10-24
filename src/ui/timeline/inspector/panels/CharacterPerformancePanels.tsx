@@ -10,9 +10,11 @@ import type { TimelineAction, TimelineScene } from '../../semanticTimelineTypes'
 export interface CharacterPerformancePanelsProps {
   action: TimelineAction;
   actionType: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
   actionId: string;
   sceneData: TimelineScene;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   updateAuthoringParam: (key: string, value: any, isTransient?: boolean) => void;
   canRemoveCharacterPerformanceField: (field: 'lookAt' | 'blink') => boolean;
 }
@@ -27,11 +29,13 @@ export function CharacterLookAtPanel(props: Omit<CharacterPerformancePanelsProps
   const hasLookAt = actionParams.lookAt !== undefined || actionType === 'characterLookAt';
   if (!hasLookAt) return null;
   const lookAt = actionParams.lookAt && typeof actionParams.lookAt === 'object' && !Array.isArray(actionParams.lookAt)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
     ? actionParams.lookAt as Record<string, any>
     : {};
   const point = Array.isArray(lookAt.point) && lookAt.point.length === 2
     ? lookAt.point as [number, number]
     : [0, 0] as [number, number];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   const updateLookAt = (key: string, value: any, isTransient?: boolean) => {
     updateAuthoringParam('lookAt', { ...lookAt, [key]: value }, isTransient);
   };
@@ -109,8 +113,10 @@ export function CharacterBlinkPanel(props: CharacterPerformancePanelsProps) {
   const hasBlink = actionParams.blink !== undefined || actionType === 'characterBlink';
   if (!hasBlink) return null;
   const blink = actionParams.blink && typeof actionParams.blink === 'object' && !Array.isArray(actionParams.blink)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
     ? actionParams.blink as Record<string, any>
     : {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   const updateBlink = (key: string, value: any, isTransient?: boolean) => {
     updateAuthoringParam('blink', { ...blink, [key]: value }, isTransient);
   };

@@ -2,7 +2,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-function deleteParamPath(target: Record<string, any>, path: string): Record<string, any> {
+function deleteParamPath(target: Record<string, unknown>, path: string): Record<string, unknown> {
   const segments = path.split('.').filter(Boolean);
   if (segments.length === 0) return target;
 
@@ -28,17 +28,17 @@ function deleteParamPath(target: Record<string, any>, path: string): Record<stri
 }
 
 export function deepMergeParams(
-  existing: Record<string, any> | null | undefined,
-  patch: Record<string, any> | null | undefined,
+  existing: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown> | null | undefined,
   paramsDelete?: string[],
-): Record<string, any> {
+): Record<string, unknown> {
   if (patch === null || patch === undefined) {
     return {};
   }
 
   const safeExisting = existing ?? {};
 
-  let result: Record<string, any> = {};
+  let result: Record<string, unknown> = {};
 
   // Start with all keys from existing
   for (const key of Object.keys(safeExisting)) {

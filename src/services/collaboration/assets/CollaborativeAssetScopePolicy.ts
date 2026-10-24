@@ -17,6 +17,7 @@ export interface LegacyCollaborativeSceneTimelineAction {
   readonly _id?: string;
   readonly action: string;
   readonly time?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy compiled actions carry different asset fields by action name; the collector preserves the open input shape while returning typed asset references.
   readonly params?: Record<string, any>;
 }
 

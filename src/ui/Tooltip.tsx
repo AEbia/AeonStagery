@@ -216,11 +216,14 @@ export const Tooltip: React.FC<TooltipProps> = ({
     return children;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The trigger is an arbitrary caller-owned React element; cloning its props and composing its ref must preserve the caller-specific prop shape.
   const childProps = children.props as Record<string, any>;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The trigger is an arbitrary caller-owned React element; cloning its props and composing its ref must preserve the caller-specific prop shape.
   const triggerElement = React.cloneElement(children as React.ReactElement<any>, {
     ref: (node: HTMLElement | null) => {
       triggerRef.current = node;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The trigger is an arbitrary caller-owned React element; cloning its props and composing its ref must preserve the caller-specific prop shape.
       const originalRef = (children as any).ref;
       if (typeof originalRef === 'function') {
         originalRef(node);

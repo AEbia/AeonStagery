@@ -24,6 +24,7 @@ export interface SceneAction {
   /** Legacy action type */
   action: LegacyActionType;
   /** Action-specific parameters */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical scene payloads predate the current schemas and may contain extension fields; keep dynamic access confined to the migration boundary.
   params: Record<string, any>;
   /** Internal tracker for parameters explicitly set by the user. */
   _explicit?: string[];

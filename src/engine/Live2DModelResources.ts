@@ -538,7 +538,7 @@ export class Live2DModelResources {
     let fullPath = this.normalizeFilesystemPath(modelPath);
     const isAbsolute = fullPath.startsWith('asset://') || fullPath.startsWith('file://') || /^[a-zA-Z]:[/\\]/.test(fullPath) || fullPath.startsWith('/');
     if (!isAbsolute && !(this.purpose === 'bake' && !this.getBasePath())) {
-      const projectResources = (window as any).AeonStagery?.services?.projectResources;
+      const projectResources = window.AeonStagery?.services?.projectResources;
       if (projectResources?.getCurrentProject?.()) {
         fullPath = await projectResources.resolveForRead(fullPath);
       } else {
@@ -576,11 +576,12 @@ export class Live2DModelResources {
     return `${baseDir}/${child}`.replace(/\/+/g, '/');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Raw model/WMDL JSON supports multiple SDK and extension formats; dynamic access stays in resource decoding before typed metadata is returned.
   private async readModelJson(modelPath: string, resolvedFullPath?: string): Promise<{ fullPath: string; json: any } | null> {
     if (!modelPath) return null;
 
     const fullPath = resolvedFullPath ?? await this.resolveModelFilePath(modelPath);
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
 
     try {
       if (api && api.fs && api.fs.readTextFile) {
@@ -640,6 +641,7 @@ export class Live2DModelResources {
       const childPaths = [
         config.modelRelativePath,
         ...(Array.isArray(config.subModels)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Raw model/WMDL JSON supports multiple SDK and extension formats; dynamic access stays in resource decoding before typed metadata is returned.
           ? config.subModels.map((subModel: any) => subModel?.modelRelativePath).filter(Boolean)
           : []),
       ];
@@ -689,7 +691,7 @@ export class Live2DModelResources {
 
     // Direct composed model (.wmdl) check - pure in-memory lookup
     if (modelPath.endsWith('.wmdl')) {
-      const wmdlConfig = this.wmdlConfigRegistry?.get(modelPath);
+      const wmdlConfig = this.getWmdlConfig(modelPath);
       if (wmdlConfig && wmdlConfig.modelRelativePath) {
         return this.getModelDataFromPath(wmdlConfig.modelRelativePath);
       }
