@@ -14,6 +14,10 @@ export interface RuntimeTimelineAction {
   readonly _seq?: number;
   readonly time?: number;
   readonly action: RuntimeActionType;
+  // Runtime actions pass through legacy camera/environment readers outside
+  // this scheduler boundary, which still depend on open-ended payload fields.
+  // Keep that compatibility shape until those readers can narrow it together.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- compiled payloads are extensible and downstream readers remain dynamic
   readonly params: Record<string, any>;
   readonly _explicit?: readonly string[];
 }

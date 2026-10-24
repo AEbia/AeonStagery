@@ -227,12 +227,13 @@ export const ToastContainer: React.FC = () => {
   useEffect(() => {
     const timerMap = timerMapRef.current;
     const exitTimers = exitTimersRef.current;
-    const handler = (payload: any) => {
+    const handler = (event: unknown) => {
+      const payload = event as Partial<ToastItem> | null;
       if (!payload || typeof payload !== 'object') return;
       const rawMessage = String(payload.message ?? '');
       const localizedMessage = localizeToastMessage(rawMessage);
-      const type: ToastType = (['success', 'error', 'info', 'warning'] as const).includes(payload.type)
-        ? payload.type
+      const type: ToastType = (['success', 'error', 'info', 'warning'] as const).includes(payload.type ?? 'info')
+        ? payload.type ?? 'info'
         : 'info';
       const duration = typeof payload.duration === 'number' && payload.duration > 0
         ? payload.duration

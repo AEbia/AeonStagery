@@ -32,6 +32,7 @@ import {
   AiProseSceneApplicator,
   type AiProseCompositeCommit,
 } from './AiProseSceneApplicator';
+import type { DialogueDefaultsReader } from '../timeline-authoring/dialogueDefaults';
 
 export interface AiProseAuthoringCompositionOptions {
   fileAccess: AiProseDraftFileAccess;
@@ -48,6 +49,7 @@ export interface AiProseAuthoringCompositionOptions {
     pathAccess?: AiProseDraftPathAccess,
   ) => AiProseDraftPersistence;
   pipelineOptions?: Partial<AiProsePipelineOptions>;
+  dialogueDefaults?: DialogueDefaultsReader;
   commitApplied: AiProseCompositeCommit;
 }
 
@@ -89,6 +91,7 @@ export function createAiProseAuthoringComposition(
   });
   const applicator = new AiProseSceneApplicator({
     commitApplied: options.commitApplied,
+    dialogueDefaults: options.dialogueDefaults,
   });
 
   return {

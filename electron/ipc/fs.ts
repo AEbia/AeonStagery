@@ -69,8 +69,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       const buffer = await fs.promises.readFile(absolutePath);
       const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       return { success: true, data };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -82,8 +82,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
         : path.resolve(app.getAppPath(), filePath);
       const text = fs.readFileSync(absolutePath, 'utf-8');
       return { success: true, data: text };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -103,8 +103,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
           path: path.join(absolutePath, e.name),
         })),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -125,8 +125,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
           mtimeMs: lstat.mtimeMs,
         },
       };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -137,8 +137,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
         ? filePath
         : path.resolve(app.getAppPath(), filePath);
       return { success: true, data: fs.realpathSync(absolutePath) };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -160,8 +160,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, Buffer.from(data));
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -175,8 +175,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, data, 'utf-8');
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -187,8 +187,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
         : path.resolve(app.getAppPath(), dirPath);
       fs.mkdirSync(absolutePath, { recursive: true });
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -203,8 +203,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       await fs.promises.mkdir(path.dirname(absoluteDest), { recursive: true });
       await fs.promises.copyFile(absoluteSource, absoluteDest);
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -214,8 +214,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
       const absoluteDestination = resolveFileSystemPath(destinationPath);
       await replaceFileWithPlatformCompatibility(absoluteSource, absoluteDestination);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -223,8 +223,8 @@ export function registerFileSystemHandlers(windows?: IpcWindowContext) {
     try {
       await fs.promises.rm(filePath, { force: true });
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 }

@@ -34,6 +34,7 @@ export interface EnvironmentLayerRuntimeSnapshot {
 type TimedEnvironmentAction = RuntimeTimelineAction & {
   _originalIndex: number;
   time: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Compiled environment actions have heterogeneous animatable parameter bags; the runtime selects and materializes their fields by action kind.
   params: Record<string, any>;
 };
 
@@ -55,6 +56,7 @@ function clampProgress(value: number): number {
 function applyInterpolatedTransform(
   entry: EnvironmentLayerRenderState,
   source: EnvironmentLayerRenderState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Compiled environment actions have heterogeneous animatable parameter bags; the runtime selects and materializes their fields by action kind.
   target: Record<string, any>,
   progress: number,
 ): void {
@@ -83,6 +85,7 @@ function getLayerId(action: RuntimeTimelineAction): string {
 }
 
 function inheritDefinedParams(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Compiled environment actions have heterogeneous animatable parameter bags; the runtime selects and materializes their fields by action kind.
   target: Record<string, any>,
   source: EnvironmentLayerState,
   keys: Array<keyof EnvironmentLayerState>,
@@ -127,6 +130,7 @@ export function createEnvironmentLayerCompileState(): EnvironmentLayerCompileSta
 
 export function applyEnvironmentActionCompileDefaults(
   action: RuntimeTimelineAction,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Compiled environment actions have heterogeneous animatable parameter bags; the runtime selects and materializes their fields by action kind.
   compiledParams: Record<string, any>,
   state: EnvironmentLayerCompileState,
 ): void {

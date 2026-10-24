@@ -1093,6 +1093,7 @@ export const TrackArea = React.memo(({
     setBlankMenu(null);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Track editing bridges runtime-selected library payloads and heterogeneous action parameters into the authoring service.
   const handleSelectActionFromLibrary = async (type: 'statement' | 'template', data: any) => {
     if (blockOfflineAuthoring()) return;
     if (!semanticAuthoring || !blankMenu) return;
@@ -1198,6 +1199,7 @@ export const TrackArea = React.memo(({
     if (transient.duration === undefined) return { ...action, time };
 
     const authoringParams = action.sourceParams ?? action.params;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Track editing bridges runtime-selected library payloads and heterogeneous action parameters into the authoring service.
     const nextParams: Record<string, any> = { ...action.params, duration: transient.duration };
     let nextSourceParams = action.sourceParams;
     const motion = authoringParams.motion;

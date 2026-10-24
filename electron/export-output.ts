@@ -1,10 +1,17 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { FFmpegStreamOptions } from '../src/api/types/export';
 
 export const EXPORT_DISK_RESERVE_BYTES = 64 * 1024 * 1024;
+
+const DEFAULT_EXPORT_TASKS_ROOT = path.join(tmpdir(), 'aeonstagery-export', 'tasks');
+const LEGACY_EXPORT_TEMP_DIRECTORY = path.join(
+  process.env.TEMP || process.env.TMP || '/tmp',
+  'aeonstagery-export',
+);
+const LEGACY_TEMP_VIDEO_PATTERN = /^(?:video_|size-sample-)[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(?:mp4|mov|webm|mkv)$/i;
 
 /** Only bitrate-controlled output has a useful advance size estimate. */
 export function estimateStreamBytes(options: FFmpegStreamOptions): number {
@@ -55,18 +62,27 @@ function partialPathFor(outputPath: string, id: string): string {
 
 /** Main-process ownership records survive renderer crashes and application restarts. */
 export class ExportOutputTasks {
-  constructor(private readonly root = path.join(tmpdir(), 'aeonstagery-export', 'tasks')) {}
+  private orphanRetryTimer?: ReturnType<typeof setTimeout>;
+  private orphanRetryCount = 0;
+
+  constructor(private readonly root = DEFAULT_EXPORT_TASKS_ROOT) {}
 
   async recover(): Promise<void> {
     await fs.mkdir(this.root, { recursive: true });
     const entries = await fs.readdir(this.root, { withFileTypes: true });
+    let retryForOrphanedChild = false;
     for (const entry of entries) {
       if (!entry.isDirectory() || !/^[\da-f-]{36}$/.test(entry.name)) continue;
       const directory = path.join(this.root, entry.name);
       try {
         const value: unknown = JSON.parse(await fs.readFile(path.join(directory, 'manifest.json'), 'utf8'));
         if (!isManifest(value) || value.id !== entry.name) continue;
-        if (isProcessAlive(value.ownerPid) || (value.childPid && isProcessAlive(value.childPid))) continue;
+        const ownerAlive = isProcessAlive(value.ownerPid);
+        const childAlive = value.childPid !== undefined && isProcessAlive(value.childPid);
+        if (ownerAlive || childAlive) {
+          if (!ownerAlive && childAlive) retryForOrphanedChild = true;
+          continue;
+        }
         await fs.rm(value.partialPath, { force: true });
         await fs.rm(directory, { recursive: true, force: true });
       } catch (error) {
@@ -74,6 +90,32 @@ export class ExportOutputTasks {
         console.error('[Export] Orphan cleanup failed:', directory, error);
       }
     }
+
+    // Previous export implementations wrote intermediate videos directly into
+    // this directory without an ownership manifest. They cannot be associated
+    // with a still-running export, so remove only the exact generated filename
+    // pattern from the app-owned temp directory during startup recovery.
+    if (path.resolve(this.root) === path.resolve(DEFAULT_EXPORT_TASKS_ROOT)) {
+      await removeLegacyTemporaryVideos(LEGACY_EXPORT_TEMP_DIRECTORY);
+    }
+
+    if (retryForOrphanedChild) {
+      this.scheduleOrphanRetry();
+    } else {
+      this.orphanRetryCount = 0;
+      if (this.orphanRetryTimer) clearTimeout(this.orphanRetryTimer);
+      this.orphanRetryTimer = undefined;
+    }
+  }
+
+  private scheduleOrphanRetry(): void {
+    if (this.orphanRetryTimer || this.orphanRetryCount >= 40) return;
+    this.orphanRetryCount += 1;
+    this.orphanRetryTimer = setTimeout(() => {
+      this.orphanRetryTimer = undefined;
+      void this.recover().catch(error => console.error('[Export] Orphan cleanup retry failed:', error));
+    }, 15000);
+    this.orphanRetryTimer.unref();
   }
 
   async create(outputPath: string, options: FFmpegStreamOptions): Promise<ExportOutput> {
@@ -92,6 +134,31 @@ export class ExportOutputTasks {
     try { await output.recordChild(); }
     catch (error) { await output.cleanup(); throw error; }
     return output;
+  }
+}
+
+async function removeLegacyTemporaryVideos(directory: string): Promise<void> {
+  let entries: Dirent[];
+  try {
+    const directoryInfo = await fs.lstat(directory);
+    if (!directoryInfo.isDirectory()) return;
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return;
+    console.error('[Export] Could not scan legacy temp directory:', directory, error);
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !LEGACY_TEMP_VIDEO_PATTERN.test(entry.name)) continue;
+    const filePath = path.join(directory, entry.name);
+    try {
+      await fs.rm(filePath, { force: true });
+      console.info('[Export] Removed stale temporary video:', filePath);
+    } catch (error) {
+      // Keep the file for a later startup retry if the OS still has it open.
+      console.error('[Export] Legacy temp video cleanup failed:', filePath, error);
+    }
   }
 }
 

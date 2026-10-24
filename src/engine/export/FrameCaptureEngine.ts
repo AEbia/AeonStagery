@@ -1,6 +1,8 @@
 import type { ICaptureBackend, CaptureResult } from './ICaptureBackend';
 import type { ExportProgress, ExportVideoCodec, FFmpegVideoOptions, FFmpegStreamMuxOptions } from '../../api/types/export';
 import type { VisualLightingOverlay } from '../visual-runtime/VisualRuntimeResolver';
+import type { LightingSnapshot } from '../LightingSnapshot';
+import type { RuntimeActionType } from '../../api/types/semantic-scene';
 import gsap from 'gsap';
 import { objectCompositeRuntimeController } from '../visual-runtime/ObjectCompositeRuntimeController';
 import { customAnimHost } from '../CustomAnimHost';
@@ -26,17 +28,23 @@ interface PlaybackSubsystem {
   pause(): void;
   getDuration(): number;
   setSilentMode(v: boolean): void;
-  getMasterTimeline(): gsap.core.Timeline | null;
+  getMasterTimeline(): gsap.core.Timeline | null | undefined;
   prepareForExport?(signal?: AbortSignal): Promise<{ assertCurrent(): void }>;
+}
+
+interface FrameCaptureTimelineAction {
+  readonly action: RuntimeActionType;
+  readonly time?: number;
+  readonly params?: Readonly<Record<string, unknown>> | null;
 }
 
 interface LightingSubsystem {
   reset(): void;
   resetRuntimeState?(): void;
   syncEffects(): void;
-  deriveLightingSnapshotAtTime?(time: number, timeline: readonly any[], visualOverlay: VisualLightingOverlay | null): unknown;
-  applySnapshot?(snapshot: unknown): void;
-  reconcile?(time: number, timeline: readonly any[]): void;
+  deriveLightingSnapshotAtTime?(time: number, timeline: readonly FrameCaptureTimelineAction[], visualOverlay: VisualLightingOverlay | null): LightingSnapshot;
+  applySnapshot?(snapshot: LightingSnapshot): void;
+  reconcile?(time: number, timeline: readonly FrameCaptureTimelineAction[]): void;
   applyVisualOverlay?(overlay: VisualLightingOverlay | null): void;
 }
 
@@ -52,7 +60,7 @@ interface CameraSubsystem {
 }
 
 export interface FrameCaptureVisualRuntime {
-  readonly timeline?: readonly any[];
+  readonly timeline?: readonly FrameCaptureTimelineAction[];
   applyCompositeAtTime(time: number): void;
   resolveLightingOverlayAtTime(time: number): VisualLightingOverlay | null;
 }
@@ -382,11 +390,12 @@ export class FrameCaptureEngine {
       };
 
       renderCaptureTarget();
-      const nextFrame = typeof requestAnimationFrame !== 'undefined'
-        ? requestAnimationFrame
-        : (cb: any) => setTimeout(cb, 16);
-      await new Promise(resolve => nextFrame(resolve));
-      await new Promise(resolve => nextFrame(resolve));
+      const nextFrame = (callback: () => void): void => {
+        if (typeof requestAnimationFrame !== 'undefined') requestAnimationFrame(callback);
+        else setTimeout(callback, 16);
+      };
+      await new Promise<void>((resolve) => nextFrame(resolve));
+      await new Promise<void>((resolve) => nextFrame(resolve));
       gsap.globalTimeline.pause();
 
       // ── Performance Lockdown ──
@@ -448,8 +457,8 @@ export class FrameCaptureEngine {
         // A further frame step would export the next fade weight instead.
         await live2D.updateAll(0, true, time * 1000);
 
-        if (!renderSubtitlesOnly && typeof (customAnimHost as any).seek === 'function') {
-          await (customAnimHost as any).seek(time);
+        if (!renderSubtitlesOnly && typeof customAnimHost.seek === 'function') {
+          await customAnimHost.seek(time);
         }
 
         // WebGL state reset (Live2D Cubism 2.1 pollutes global state).
@@ -467,10 +476,10 @@ export class FrameCaptureEngine {
         let customFrame: CustomAnimationCaptureFrame | null = null;
         const activeCustomAnimationCount = renderSubtitlesOnly
           ? 0
-          : typeof (customAnimHost as any).getActiveAnimationCount === 'function'
-            ? (customAnimHost as any).getActiveAnimationCount()
+          : typeof customAnimHost.getActiveAnimationCount === 'function'
+            ? customAnimHost.getActiveAnimationCount()
             : 0;
-        if (!renderSubtitlesOnly && typeof (customAnimHost as any).captureFrame === 'function') {
+        if (!renderSubtitlesOnly && typeof customAnimHost.captureFrame === 'function') {
           try {
             customFrame = await customAnimHost.captureFrame(
               Math.round(contentWidth * viewport.scale), Math.round(contentHeight * viewport.scale), time,

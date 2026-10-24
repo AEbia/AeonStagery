@@ -337,9 +337,9 @@ export class BakeEngine {
             if (entry && targetResolvedPath && entry.modelPath !== targetResolvedPath) {
               motionRuntime.releaseCharacter(id, entry.injectedParams);
               this.removeModel(id);
-              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model!) ?? state.model!, isCurrent);
             } else if (!entry && targetResolvedPath) {
-              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model!) ?? state.model!, isCurrent);
             }
 
             if (!isCurrent()) break;
@@ -358,7 +358,7 @@ export class BakeEngine {
                 const expressionTime = state.expression?.time;
                 expressionUpdates.set(id, {
                   key: expressionKey,
-                  elapsedSeconds: Number.isFinite(expressionTime) ? Math.max(0, simTime - expressionTime) : Number.POSITIVE_INFINITY,
+                  elapsedSeconds: Number.isFinite(expressionTime) ? Math.max(0, simTime - expressionTime!) : Number.POSITIVE_INFINITY,
                   previousKey: state.expression?.previousKey,
                 });
               }
@@ -713,8 +713,8 @@ export class BakeEngine {
 
   private applyDialogueInjectedParams(
     entry: BakeModel,
-    dialogue: any,
-    characters: Map<string, any>,
+    dialogue: ReturnType<typeof computeSceneStateAtTime>['dialogue'],
+    characters: ReturnType<typeof computeSceneStateAtTime>['characters'],
     simTime: number,
   ): void {
     const isActiveSpeaker = dialogue?.speakerId === entry.id && characters.has(entry.id);
@@ -740,8 +740,8 @@ export class BakeEngine {
    */
   private applyBakeMotionState(
     entry: BakeModel,
-    state: any,
-    dialogue: any,
+    state: NonNullable<ReturnType<ReturnType<typeof computeSceneStateAtTime>['characters']['get']>>,
+    dialogue: ReturnType<typeof computeSceneStateAtTime>['dialogue'],
     simTime: number,
     motionRuntime: BakeMotionRuntime,
   ): void {
@@ -764,7 +764,7 @@ export class BakeEngine {
       intent: {
         output: state.motion.output,
         priority: state.motion.priority,
-        time: state.motion.time,
+        time: state.motion.time!,
       },
       simTime,
       injectedParams: entry.injectedParams,

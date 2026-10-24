@@ -307,7 +307,7 @@ function extractUnknownFieldPaths(
   try {
     const currentShape = cloneJson(source);
     if (!currentShape || typeof currentShape !== 'object') return [];
-    (currentShape as any).schemaVersion = SCENE_SCHEMA_VERSION;
+    (currentShape as { schemaVersion?: unknown }).schemaVersion = SCENE_SCHEMA_VERSION;
     const diag = codec.parseKnownProjectionWithDiagnostics(currentShape);
     return diag.removedPaths;
   } catch {

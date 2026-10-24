@@ -3,6 +3,8 @@ import { BACKGROUND_LAYER_ID } from '../environmentLayerModel';
 import { eventBus } from '../../api/events';
 import { getLogger } from '../Logger';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
+import type { TransformationProxy } from './types';
 
 const logger = getLogger('EnvironmentLayerAction');
 let environmentLayerErrorCounter = 0;
@@ -40,10 +42,10 @@ function animateEnvironmentProxy(
   ctx: SchedulerContext,
   layerId: string,
   time: number,
-  params: Record<string, any>,
+  params: RuntimeActionContract<'transformEnvironmentLayer'>['params'],
 ): void {
   const proxy = getEnvironmentProxy(ctx, layerId);
-  const anim: any = { duration: params.duration ?? 1, ease: params.ease ?? 'power2.inOut' };
+  const anim: gsap.TweenVars = { duration: params.duration ?? 1, ease: params.ease ?? 'power2.inOut' };
   if (params.x !== undefined) anim.x = params.x;
   if (params.y !== undefined) anim.y = params.y;
   if (params.scale !== undefined) anim.scale = params.scale;
@@ -53,7 +55,10 @@ function animateEnvironmentProxy(
   ctx.tl.to(proxy, anim, time);
 }
 
-function createResolvedEnvironmentTransform(proxy: Record<string, any>, params: Record<string, any>) {
+function createResolvedEnvironmentTransform(
+  proxy: TransformationProxy,
+  params: RuntimeActionContract<'setEnvironmentLayer'>['params'],
+): TransformationProxy {
   return {
     x: params.x ?? proxy.x,
     y: params.y ?? proxy.y,
@@ -64,7 +69,7 @@ function createResolvedEnvironmentTransform(proxy: Record<string, any>, params: 
   };
 }
 
-export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: RuntimeActionContract<'setEnvironmentLayer'>): void {
   const { tl, resolvePath, resolvePathAsync } = ctx;
   const { time, params } = action;
   const t = time || 0;
@@ -114,13 +119,13 @@ export function scheduleSetEnvironmentLayer(ctx: SchedulerContext, action: { tim
   if (duration > 0) tl.to({}, { duration }, t);
 }
 
-export function scheduleTransformEnvironmentLayer(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleTransformEnvironmentLayer(ctx: SchedulerContext, action: RuntimeActionContract<'transformEnvironmentLayer'>): void {
   const { time, params } = action;
   const t = time || 0;
   animateEnvironmentProxy(ctx, String(params.layerId || BACKGROUND_LAYER_ID), t, params);
 }
 
-export function scheduleRemoveEnvironmentLayer(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleRemoveEnvironmentLayer(ctx: SchedulerContext, action: RuntimeActionContract<'removeEnvironmentLayer'>): void {
   if (ctx.environmentStateDriven) return;
   const { tl } = ctx;
   const { time, params } = action;

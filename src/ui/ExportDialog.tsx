@@ -375,7 +375,7 @@ export default function ExportDialog({ onClose }: Props) {
     if (!outputPath) return;
     try {
       await revealFileInManager({ path: outputPath });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to reveal file:', err);
     }
   }, [outputPath]);

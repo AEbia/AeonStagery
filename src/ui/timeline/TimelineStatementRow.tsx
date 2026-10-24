@@ -111,9 +111,11 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     commitInlineParams(action, patch);
   }, [action, commitInlineParams]);
   const inspectorCommands = useMemo(() => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inline editing forwards family-specific patches through the shared inspector; the authoring service owns schema validation.
     updateAction: (_id: string, updates: any, isTransient?: boolean) => {
       if (!isTransient && updates.params) commitInlineParams(action, updates.params, true);
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inline editing forwards family-specific patches through the shared inspector; the authoring service owns schema validation.
     updateParam: (_id: string, key: string, val: any, isTransient?: boolean) => {
       if (!isTransient) commitInlineParams(action, { [key]: val });
     },
@@ -134,7 +136,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
   let title: string = action.semanticLabel ?? action.action;
   let typeClass = getTimelineItemClassForSemanticCategory(action.semanticCategory);
   const canDragRootStatement = !searchActive && readModelItem?.locator.kind === 'statement';
-  const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
+  const IconComp = ActionIcons[(action.semanticIconKey ?? action.action) as keyof typeof ActionIcons] || ActionIcons.default;
 
   if (action.semanticType === 'filterAdd') {
     title = '添加滤镜';

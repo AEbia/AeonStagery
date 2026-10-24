@@ -299,8 +299,8 @@ export interface CollaborativeSceneStateV3 {
 export function isCollaborativeSceneStateV2(value: unknown): value is CollaborativeSceneStateV2 {
   return !!value
     && typeof value === 'object'
-    && (value as any).schemaVersion === COLLABORATION_SCHEMA_VERSION_V2
-    && (value as any).sceneSchemaVersion === SCENE_SCHEMA_VERSION_V4;
+    && 'schemaVersion' in value && value.schemaVersion === COLLABORATION_SCHEMA_VERSION_V2
+    && 'sceneSchemaVersion' in value && value.sceneSchemaVersion === SCENE_SCHEMA_VERSION_V4;
 }
 
 export function assertCollaborativeSceneStateV2(value: unknown): asserts value is CollaborativeSceneStateV2 {
@@ -312,8 +312,8 @@ export function assertCollaborativeSceneStateV2(value: unknown): asserts value i
 export function isCollaborativeSceneStateV3(value: unknown): value is CollaborativeSceneStateV3 {
   return !!value
     && typeof value === 'object'
-    && (value as any).schemaVersion === COLLABORATION_SCHEMA_VERSION_V3
-    && (value as any).sceneSchemaVersion === SCENE_SCHEMA_VERSION_V5;
+    && 'schemaVersion' in value && value.schemaVersion === COLLABORATION_SCHEMA_VERSION_V3
+    && 'sceneSchemaVersion' in value && value.sceneSchemaVersion === SCENE_SCHEMA_VERSION_V5;
 }
 
 export function assertCollaborativeSceneStateV3(value: unknown): asserts value is CollaborativeSceneStateV3 {

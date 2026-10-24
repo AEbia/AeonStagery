@@ -155,7 +155,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
       const result = await window.aeonStageryAPI.gptSovits.status(settings.gptSovits);
       setVoiceStatus(result);
       setVoiceMessage(result.success ? `连接可用：${result.apiBaseUrl}` : (result.error || 'GPT-SoVITS 连接不可用。'));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setVoiceStatus(createVoiceOperationErrorStatus(settings.gptSovits.rootPath, error));
       setVoiceMessage(`GPT-SoVITS 连接测试失败：${getErrorMessage(error)}`);
     } finally {
@@ -170,7 +170,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
       const result = await window.aeonStageryAPI.gptSovits.start(settings.gptSovits);
       setVoiceStatus(result);
       setVoiceMessage(result.success ? `启动命令已发送：${result.apiBaseUrl}` : (result.error || 'GPT-SoVITS API 启动失败。'));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setVoiceStatus(createVoiceOperationErrorStatus(settings.gptSovits.rootPath, error));
       setVoiceMessage(`GPT-SoVITS API 启动失败：${getErrorMessage(error)}`);
     } finally {
@@ -185,7 +185,7 @@ export const SettingsDialog = ({ isOpen, isClosing = false, initialTab = 'genera
       const result = await window.aeonStageryAPI.gptSovits.stop();
       setVoiceStatus({ success: result.success, configured: !!settings.gptSovits.rootPath, state: result.state, logs: result.logs, error: result.error });
       setVoiceMessage(result.success ? 'GPT-SoVITS API 已停止。' : (result.error || '停止 GPT-SoVITS API 失败。'));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setVoiceStatus(createVoiceOperationErrorStatus(settings.gptSovits.rootPath, error));
       setVoiceMessage(`停止 GPT-SoVITS API 失败：${getErrorMessage(error)}`);
     } finally {
@@ -1305,7 +1305,7 @@ function formatCompactNumber(value: number, maxFractionDigits: number): string {
   });
 }
 
-const SegmentedControl = ({ options, value, onChange, ariaLabel }: { options: { label: string; value: any }[]; value: any; onChange: (value: any) => void; ariaLabel?: string }) => (
+const SegmentedControl = <T extends string | number | boolean,>({ options, value, onChange, ariaLabel }: { options: { label: string; value: T }[]; value: T; onChange: (value: T) => void; ariaLabel?: string }) => (
   <div role="group" aria-label={ariaLabel} className="settings-dialog__segmented">
     {options.map((option) => (
       <button

@@ -48,7 +48,7 @@ export class GlobalErrorBoundary extends React.Component<
 
     this.setState({ hasError: true, report });
 
-    const api = (window as unknown as { aeonStageryAPI?: any }).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     if (api?.crash?.record) {
       api.crash.record(report).catch((err: unknown) => {
         console.error('[AeonStagery] Failed to record manual crash via IPC:', err);
@@ -80,9 +80,9 @@ export class GlobalErrorBoundary extends React.Component<
     this.setState({ report });
 
     // Automatically persist report in background via IPC if available
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     if (api?.crash?.record) {
-      api.crash.record(report).catch((err: any) => {
+      api.crash.record(report).catch((err: unknown) => {
         console.error('[AeonStagery] Failed to record crash via IPC:', err);
       });
     }
@@ -114,7 +114,7 @@ export function setupGlobalCrashHandlers(surface: CrashSurface = 'renderer-globa
         tier: 2,
         surface,
       });
-      const api = (window as any).aeonStageryAPI;
+      const api = window.aeonStageryAPI;
       if (api?.crash?.record) {
         api.crash.record(report);
       }
@@ -130,7 +130,7 @@ export function setupGlobalCrashHandlers(surface: CrashSurface = 'renderer-globa
         tier: 2,
         surface,
       });
-      const api = (window as any).aeonStageryAPI;
+      const api = window.aeonStageryAPI;
       if (api?.crash?.record) {
         api.crash.record(report);
       }

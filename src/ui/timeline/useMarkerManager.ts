@@ -3,7 +3,7 @@ import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import { useSemanticAuthoringService } from '../context/AppContext';
 import { createSemanticTimelineCorrelationId } from './semanticTimelineEditing';
 
-export function useMarkerManager(documentStore: any) {
+export function useMarkerManager(documentStore: Pick<import('../store/DocumentStore').DocumentStore, 'getCurrentSceneDocumentSnapshot'>) {
   const [markerPrompt, setMarkerPrompt] = useState<{ time: number } | null>(null);
   const semanticAuthoring = useSemanticAuthoringService();
 

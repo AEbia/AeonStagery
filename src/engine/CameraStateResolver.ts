@@ -575,6 +575,7 @@ function compiledPathWritesProperty(params: Record<string, unknown>, property: '
 function applyCameraReset(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Camera statements remain extensible at this runtime boundary.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -610,6 +611,7 @@ function applyCameraReset(
 function applyCameraMotion(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Camera statements remain extensible at this runtime boundary.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -856,6 +858,7 @@ function applyCompiledCameraMotion(
 function applyCameraPath(
   channels: MotionChannels,
   coverage: CameraChannelCoverage,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy camera paths remain extensible at this runtime boundary.
   params: Record<string, any>,
   start: number,
   time: number,
@@ -958,7 +961,7 @@ function createPreparedCameraPath(
 }
 
 function normalizePoint(value: unknown): CameraPosition | null {
-  const point = resolveVec2(value as any);
+  const point = resolveVec2(value as import('../api/types/common').Vec2 | undefined);
   return Number.isFinite(point?.x) && Number.isFinite(point?.y) ? { x: point.x, y: point.y } : null;
 }
 
@@ -981,6 +984,7 @@ export function resolveZoomValue(raw: unknown, currentZoom: number): number | un
 }
 
 function resolvePanTarget(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy camera motion parameters remain extensible at this runtime boundary.
   params: Record<string, any>,
   from: MotionChannels,
   _deps: CameraStateResolverDeps,

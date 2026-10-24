@@ -48,7 +48,7 @@ export function parse(urlStr: string) {
   }
 }
 
-export function format(urlObj: any): string {
+export function format(urlObj: string | Partial<Pick<URL, 'protocol' | 'hostname' | 'port' | 'pathname' | 'search' | 'hash' | 'href'>>): string {
   if (typeof urlObj === 'string') return urlObj;
   try {
     const u = new URL('http://placeholder');

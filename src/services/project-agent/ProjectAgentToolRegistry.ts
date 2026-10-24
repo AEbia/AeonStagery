@@ -268,7 +268,7 @@ export class ProjectAgentToolRegistry {
   private registerAll(): void {
     this.register(
       'readProjectOverview',
-      'Return cleaned project name, version, active scene, scene list, asset roots, and template info.',
+      'Return cleaned project name, version, active scene, scene list, asset roots, template info, default dialogue style and available dialogue styles.',
       true,
       { type: 'object', additionalProperties: false, properties: {} },
       (args) => this.readTools.readProjectOverview(args),

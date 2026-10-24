@@ -30,8 +30,8 @@ export function PlayerView() {
           setSceneInfo(`${parsed.meta?.title ?? 'Untitled'} — ${parsed.timeline?.length ?? 0} actions`);
           await sceneFileService?.loadFromPath(result.filePaths[0]);
         }
-      } catch (err: any) {
-        setSceneInfo(`Error: ${err.message}`);
+      } catch (err: unknown) {
+        setSceneInfo(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }, [sceneFileService]);

@@ -16,7 +16,9 @@ export interface InspectorMutationsDeps {
   appContext: ReturnType<typeof useApp>;
   action: TimelineAction;
   actionId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   sourceParams: Record<string, any>;
   usesSourceParamForm: boolean;
   sceneData: TimelineScene;
@@ -166,8 +168,8 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
         throw new Error(`Dialogue style is unavailable: ${value}`);
       }
       replaceSourceParams(actionId, nextParams);
-    } catch (error: any) {
-      showToast(`对话框样式应用失败：${error?.message || String(error)}`, 'error');
+    } catch (error: unknown) {
+      showToast(`对话框样式应用失败：${(error instanceof Error ? error.message : String(error))}`, 'error');
     }
   };
 

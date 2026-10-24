@@ -5,7 +5,8 @@ export interface UpdateChannel {
   checkForUpdates(): Promise<UpdateCheckResult | null>;
   downloadUpdate(): Promise<string[]>;
   quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void;
-  on(event: string, listener: (...args: any[]) => void): unknown;
+  on(event: 'download-progress', listener: (progress: { percent: number }) => void): unknown;
+  on(event: 'error', listener: (error: Error) => void): unknown;
 }
 
 export function isUpdateNetworkError(error: unknown): boolean {

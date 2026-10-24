@@ -163,8 +163,8 @@ export function registerGptSovitsHandlers(): void {
         relativePath: relativePath.replace(/\\/g, '/'),
         absolutePath,
       };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -243,8 +243,8 @@ async function generateCandidate(input: GenerateVoiceCandidateRequest): Promise<
       durationSeconds,
     }, null, 2), 'utf8');
     return { success: true, candidateId, absolutePath, seed, byteLength: bytes.byteLength, durationSeconds };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -350,8 +350,8 @@ async function pingApi(apiBaseUrl: string): Promise<{ ok: true } | { ok: false; 
     const response = await fetch(`${apiBaseUrl}/`, { method: 'GET' });
     if (response.ok || response.status === 404 || response.status === 405) return { ok: true };
     return { ok: false, error: `${response.status} ${await safeResponseText(response)}` };
-  } catch (error: any) {
-    return { ok: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -407,8 +407,8 @@ async function requestJson(url: string, body: Record<string, unknown>): Promise<
     });
     if (response.ok) return { ok: true };
     return { ok: false, error: `${response.status} ${await safeResponseText(response)}` };
-  } catch (error: any) {
-    return { ok: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -417,8 +417,8 @@ async function requestGet(url: string): Promise<{ ok: true } | { ok: false; erro
     const response = await fetch(url, { method: 'GET' });
     if (response.ok) return { ok: true };
     return { ok: false, error: `${response.status} ${await safeResponseText(response)}` };
-  } catch (error: any) {
-    return { ok: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 

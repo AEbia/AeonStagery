@@ -42,6 +42,7 @@ export class CollaborativeRemoteApplyPipelineV2 {
       // coalesce:false — a remote state change must always be projected and
       // stored; it can never be absorbed and dropped by the coordinator's
       // latest-wins batch coalescing of concurrent local commits.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy v2 pipeline materializes historical v4 documents for the coordinator bridge; retain its compatibility boundary without changing migration behavior.
       await this.options.coordinator.applyDocument(document as any, applyPath, { coalesce: false });
       await this.options.afterApplyState?.(state, document, applyPath);
       return document;

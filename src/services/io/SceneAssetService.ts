@@ -47,6 +47,7 @@ export interface AssetReferenceTimelineAction {
   readonly _id?: string;
   readonly time?: number;
   readonly action: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Resource hydration handles legacy action bags and WMDL extension fields, including prepared references; preserve that open import boundary.
   readonly params: Record<string, any>;
 }
 
@@ -191,7 +192,7 @@ export class SceneAssetService implements SceneAssetHooks {
     private getBasePath: () => string,
     private readonly onResourceChanged: () => void = () => {},
   ) {
-    this.pathResolver = new ProjectPathResolver(typeof window !== 'undefined' ? (window as any).aeonStageryAPI : null);
+    this.pathResolver = new ProjectPathResolver(typeof window !== 'undefined' ? window.aeonStageryAPI : null);
   }
 
   async importAssetPath(sourcePath: string, kind: ResourceImportKind, mode: 'copy' | 'mount' = 'mount'): Promise<string> {
@@ -403,6 +404,7 @@ export class SceneAssetService implements SceneAssetHooks {
         const resolvedConfig = {
           ...wmdlData,
           modelRelativePath: await resolveWmdlLocalPath(wmdlData.modelRelativePath),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Resource hydration handles legacy action bags and WMDL extension fields, including prepared references; preserve that open import boundary.
           subModels: await Promise.all((wmdlData.subModels || []).map(async (sub: any) => ({
             ...sub,
             modelRelativePath: await resolveWmdlLocalPath(sub.modelRelativePath),

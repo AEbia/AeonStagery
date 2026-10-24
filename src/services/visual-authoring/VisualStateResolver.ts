@@ -174,6 +174,7 @@ function toLensFilterStack(baseline?: LensStyleBaseline): LensFilterStack {
   return baseline ? cloneLensFilterStack(baseline) : {};
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual projection reads historical and extended action parameters by runtime key; the resulting visual state remains typed.
 function resolveFilterOverride(params: Record<string, any>): SemanticStyleOverride | undefined {
   const override: SemanticStyleOverride = {};
   for (const key of ['intensity', 'warmth', 'bloom', 'rgbSplit', 'blend', 'contamination'] as const) {
@@ -216,6 +217,7 @@ function resolveLensFilterStackAtTime(
     if (actionTime < segmentStart) continue;
 
     hasFilterAction = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual projection reads historical and extended action parameters by runtime key; the resulting visual state remains typed.
     const params = action.params as Record<string, any>;
     const from = cloneLensFilterStack(stack);
     const to = cloneLensFilterStack(stack);

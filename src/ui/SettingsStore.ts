@@ -116,6 +116,15 @@ export interface AppSettings {
   keyboardShortcuts: KeyboardShortcutsSettings;
 }
 
+type ObjectEntry<T extends object> = {
+  [K in keyof T]-?: [K, T[K]]
+}[keyof T];
+
+// Object.entries erases the relationship between each settings key and its value.
+function typedEntries<T extends object>(value: T): ObjectEntry<T>[] {
+  return Object.entries(value) as ObjectEntry<T>[];
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   lowPerformance: false,
   showTimelineSelectionBar: true,
@@ -217,8 +226,8 @@ class SettingsManager {
 
   update(patch: Partial<AppSettings>) {
     const normalizedPatch = this.normalizePatch(patch);
-    const changedEntries = Object.entries(normalizedPatch).filter(([key, value]) => (
-      !Object.is(this.settings[key as keyof AppSettings], value)
+    const changedEntries = typedEntries(normalizedPatch).filter(([key, value]) => (
+      !Object.is(this.settings[key], value)
     ));
     if (changedEntries.length === 0) {
       return;
@@ -227,9 +236,9 @@ class SettingsManager {
     this.settings = { ...this.settings, ...normalizedPatch };
     this.save();
     changedEntries.forEach(([key, value]) => {
-      this.apply(key as keyof AppSettings, value as any);
+      this.apply(key, value);
     });
-    this._notify(changedEntries.map(([key]) => key as keyof AppSettings));
+    this._notify(changedEntries.map(([key]) => key));
   }
 
   subscribe(listener: () => void): () => void {
@@ -355,8 +364,8 @@ class SettingsManager {
       console.error('Failed to load settings', e);
     }
 
-    Object.entries(this.settings).forEach(([key, value]) => {
-      this.apply(key as keyof AppSettings, value as any);
+    typedEntries(this.settings).forEach(([key, value]) => {
+      this.apply(key, value);
     });
   }
 
@@ -370,14 +379,14 @@ class SettingsManager {
     }
   }
 
-  private apply(key: keyof AppSettings, value: any) {
+  private apply<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     if (typeof document === 'undefined') return;
     switch (key) {
       case 'lowPerformance':
         document.documentElement.setAttribute('data-perf', value ? 'low' : 'high');
         break;
       case 'theme':
-        this.applyTheme(value);
+        this.applyTheme(value === 'dark' || value === 'system' ? value : 'light');
         break;
     }
   }

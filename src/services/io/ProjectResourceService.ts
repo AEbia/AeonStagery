@@ -110,7 +110,7 @@ export class ProjectResourceService {
     private readCurrentProject: () => ProjectState | null = () => null,
     private getProjectExternalLibraryBindings: () => ProjectExternalLibraryBindings = () => ({}),
   ) {
-    this.resolver = resolver ?? new ProjectPathResolver((window as any).aeonStageryAPI);
+    this.resolver = resolver ?? new ProjectPathResolver(window.aeonStageryAPI);
     this.envelopeService = new ProjectCompatibilityEnvelopeService(this.fileAccess, this.resolver);
     this.projectAdapter = new ProjectMetadataArtifactCompatibilityAdapter();
     this.coordinator = new CompatibilityCoordinator({

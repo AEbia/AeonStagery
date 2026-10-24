@@ -36,11 +36,13 @@ export class Cubism2BakeRenderCore {
     this.bakeRenderTexture = null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   getBakeRenderTexture(renderer: any): PIXI.RenderTexture | null {
     if (typeof renderer?.render !== 'function') {
       return null;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
     if (!this.bakeRenderTexture || (this.bakeRenderTexture as any).destroyed) {
       const width = Math.max(1, Math.ceil(renderer.width ?? renderer.screen?.width ?? 1920));
       const height = Math.max(1, Math.ceil(renderer.height ?? renderer.screen?.height ?? 1080));
@@ -65,6 +67,7 @@ export class Cubism2BakeRenderCore {
    * isolates the shared framebuffer/mask globals the same way a real render
    * would, so this is safe to call outside the render boundary.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   ensureBakeContextBound(concreteModel: any, renderer: any): void {
     if (!concreteModel || !renderer?.gl) return;
     const internalModel = concreteModel.internalModel;
@@ -108,6 +111,7 @@ export class Cubism2BakeRenderCore {
    * `drawParamWebGL.textures[]` for the clip/setupClip pass. Uses the original
    * textures (no LOD) — the bake mask only needs a valid bound texture.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   private ensureBakeTexturesBound(concreteModel: any, internalModel: any, renderer: any): void {
     const textures = concreteModel.textures;
     if (!Array.isArray(textures) || typeof internalModel.bindTexture !== 'function') {
@@ -168,12 +172,15 @@ export class Cubism2BakeRenderCore {
    *   (reported by the seam) — callers that treat guarding as mandatory can
    *   fail loudly instead of rendering unguarded.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   installRenderGuard(model: any): boolean {
     return wrapRenderBoundary(model, {
       // FilterSystem.push() can sync a cached program right before the model
       // draws, and a bake filter may bind one while Cubism 2 has the GL. Force
       // Pixi to rebind its own program on both sides of the draw.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
       before: (renderer: any) => resetPixiShaderState(renderer),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
       after: (renderer: any) => resetPixiShaderState(renderer),
     }, 'Cubism2BakeRenderCore.installRenderGuard');
   }
@@ -183,6 +190,7 @@ export class Cubism2BakeRenderCore {
    * and clip manager for the bake context so shared framebuffer/mask globals
    * are not cleared for models still alive on the visible stage.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   installInternalModelGuard(internalModel: any): void {
     if (!internalModel || internalModel.__aeonstageryBakeWebGLGuardApplied) {
       return;
@@ -193,6 +201,7 @@ export class Cubism2BakeRenderCore {
       : null;
     internalModel.__aeonstageryBakeWebGLGuardApplied = true;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
     internalModel.updateWebGLContext = (gl: any, glContextID: number) => {
       try {
         const coreModel = internalModel.coreModel;
@@ -243,7 +252,9 @@ export class Cubism2BakeRenderCore {
     return slot;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   private getWebGLBufferCtor(): any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
     const ctor = (globalThis as any).WebGLBuffer;
     if (typeof ctor === 'function') {
       return ctor;

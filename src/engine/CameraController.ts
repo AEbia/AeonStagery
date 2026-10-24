@@ -169,7 +169,7 @@ class CameraController {
    * or its animation settles between construction and playback, the camera
    * moves to the correct live position.
    */
-  moveTo(config: CameraMoveConfig, resolveFocusPosition?: CameraFocusPositionResolver): gsap.core.Tween {
+  moveTo(config: CameraMoveConfig, resolveFocusPosition?: CameraFocusPositionResolver): gsap.core.Timeline {
     const duration = config.duration ?? 1;
     const ease = config.ease ?? 'power3.inOut';
     const delay = config.delay ?? 0;
@@ -218,8 +218,8 @@ class CameraController {
       const targetPos = resolveVec2(config.target || config.position);
       
       // GSAP relative string support
-      let tx: any = targetPos.x;
-      let ty: any = targetPos.y;
+      let tx: number | string = targetPos.x;
+      let ty: number | string = targetPos.y;
       
       if (typeof config.target === 'string' && (config.target as string).startsWith('+=')) tx = config.target;
       if (typeof config.target === 'string' && (config.target as string).startsWith('-=')) tx = config.target;
@@ -232,7 +232,7 @@ class CameraController {
     }
 
     hookSystem.execute('camera:move', { type: 'moveTo', config });
-    return tl as any;
+    return tl;
   }
 
   /**
@@ -581,14 +581,14 @@ class CameraController {
       const dt = typeof ticker?.deltaTime === 'number' ? ticker.deltaTime / 60 : undefined;
       this.tickFollow(false, dt);
     };
-    app.ticker.add(tickerFn as any);
-    this.followTicker = tickerFn as any;
+    app.ticker.add(tickerFn);
+    this.followTicker = tickerFn;
   }
 
   private removeFollowTicker(): void {
     if (!this.followTicker) return;
     const app = stageManager.getApp();
-    app.ticker.remove(this.followTicker as any);
+    app.ticker.remove(this.followTicker);
     this.followTicker = null;
   }
 

@@ -5,7 +5,7 @@
  * timeline audio using bundled FFmpeg.
  */
 
-import { ipcMain, dialog } from 'electron';
+import { BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process';
@@ -140,7 +140,6 @@ function streamFailure(state: StreamState, fallback: string): Error {
 
 function emitFFmpegLog(message: string): void {
   try {
-    const { BrowserWindow } = require('electron');
     const win = BrowserWindow.getAllWindows()[0];
     if (win) win.webContents.send('ffmpeg:log', message);
   } catch {

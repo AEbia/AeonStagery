@@ -2,7 +2,10 @@ import type {
   CharacterVariantImportMode,
   ProjectTemplateConfiguration,
 } from '../../api/types/project';
-import type { CurrentSceneDocument, SceneSchemaVersion } from '../../api/types/semantic-scene';
+import type {
+  CurrentSceneDocument,
+  SceneSchemaVersion,
+} from '../../api/types/semantic-scene';
 import { SCENE_SCHEMA_VERSION } from '../../api/types/semantic-scene';
 import type { SceneMeta } from '../../api/types/scene-common';
 import type { ResourceImportKind } from '../../api/types/project';
@@ -16,21 +19,50 @@ import type {
 
 type SceneCharacter = NonNullable<SceneMeta['characters']>[number];
 
+type TemplateSceneInitializationOptions<Version extends SceneSchemaVersion = SceneSchemaVersion> = {
+  templateConfiguration?: ProjectTemplateConfiguration;
+  templatePackages?: LoadedTemplatePackage[];
+  schemaVersion?: Version;
+};
+
+type TemplateSceneDocument<Version extends SceneSchemaVersion = SceneSchemaVersion> = Omit<
+  CurrentSceneDocument,
+  'schemaVersion'
+> & { schemaVersion: Version };
+
+type TemplateSceneResult<Version extends SceneSchemaVersion> =
+  Version extends CurrentSceneDocument['schemaVersion']
+    ? CurrentSceneDocument
+    : TemplateSceneDocument<Version>;
+
+type CurrentTemplateSceneInitializationOptions = Omit<
+  TemplateSceneInitializationOptions,
+  'schemaVersion'
+> & { schemaVersion?: CurrentSceneDocument['schemaVersion'] };
+
+export function createTemplateInitializedScene<Version extends SceneSchemaVersion>(
+  title: string,
+  options: TemplateSceneInitializationOptions<Version> & { schemaVersion: Version },
+): TemplateSceneResult<Version>;
 export function createTemplateInitializedScene(
   title: string,
-  options: {
-    templateConfiguration?: ProjectTemplateConfiguration;
-    templatePackages?: LoadedTemplatePackage[];
-    schemaVersion?: SceneSchemaVersion;
-  } = {},
-): CurrentSceneDocument {
-  return {
-    schemaVersion: (options.schemaVersion ?? SCENE_SCHEMA_VERSION) as any,
+  options?: CurrentTemplateSceneInitializationOptions,
+): CurrentSceneDocument;
+export function createTemplateInitializedScene(
+  title: string,
+  options: TemplateSceneInitializationOptions | undefined,
+): TemplateSceneDocument;
+export function createTemplateInitializedScene(
+  title: string,
+  options: TemplateSceneInitializationOptions = {},
+): TemplateSceneDocument {
+  const resolution: [number, number] = [1920, 1080];
+  const scene = {
     sceneId: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     meta: {
       title,
       fps: 60,
-      resolution: [1920, 1080],
+      resolution,
       characters: createInitialCharactersFromTemplates(
         options.templatePackages ?? [],
         options.templateConfiguration,
@@ -39,6 +71,9 @@ export function createTemplateInitializedScene(
     },
     statements: [],
   };
+
+  const schemaVersion = options.schemaVersion ?? SCENE_SCHEMA_VERSION;
+  return { ...scene, schemaVersion };
 }
 
 export function createInitialCharactersFromTemplates(
@@ -67,8 +102,10 @@ export function createInitialCharactersFromTemplates(
   });
 }
 
-export async function importInitialTemplateCharacterAssets(
-  scene: CurrentSceneDocument,
+export async function importInitialTemplateCharacterAssets<
+  TScene extends TemplateSceneDocument,
+>(
+  scene: TScene,
   templatePackages: LoadedTemplatePackage[],
   templateConfiguration: ProjectTemplateConfiguration | undefined,
   importTemplateAssetPath: (
@@ -77,7 +114,7 @@ export async function importInitialTemplateCharacterAssets(
     kind: ResourceImportKind,
   ) => Promise<string>,
   joinPath: (...parts: string[]) => Promise<string>,
-): Promise<CurrentSceneDocument> {
+): Promise<TScene> {
   const selectedIds = templateConfiguration?.selectedCharacterPresetIds ?? [];
   if (selectedIds.length === 0 || templatePackages.length === 0) return scene;
 

@@ -312,7 +312,7 @@ export class ValidationDaemon {
   }
 
   private async checkFileOnDisk(targetPath: string): Promise<boolean> {
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     let fullPath: string;
     try {
       fullPath = await this.resolveProjectAwarePath(targetPath);
@@ -343,8 +343,9 @@ export class ValidationDaemon {
     return resolved.replace(/\\/g, '/');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Validation inspects raw Cubism 2/3 and composed-model JSON before a model has been loaded; no single SDK model schema describes that input.
   private async loadJsonFile(fullPath: string): Promise<any> {
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     try {
       if (api?.fs?.exists) {
         const exists = await api.fs.exists(fullPath);
@@ -419,7 +420,7 @@ export class ValidationDaemon {
   }
 
   private async readModelDataFromJson(fullPath: string): Promise<{ motions: string[]; expressions: string[] }> {
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     let jsonStr = '';
 
     if (api?.fs?.readTextFile) {
@@ -480,6 +481,7 @@ function isAggregateMountStatus(resolution: ResourceResolution | null): boolean 
   return resolution?.status === 'mount-unbound' || resolution?.status === 'mount-root-missing';
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Validation inspects raw Cubism 2/3 and composed-model JSON before a model has been loaded; no single SDK model schema describes that input.
 function extractMotionsAndExpressions(json: any): { motions: string[], expressions: string[] } {
   const { motions, expressions } = extractLive2DModelData(json);
   return { motions, expressions };

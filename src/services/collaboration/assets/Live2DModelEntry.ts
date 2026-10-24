@@ -35,6 +35,7 @@ function isKnownLive2DJsonEntrypoint(pathValue: string): boolean {
     base.endsWith('.model3.json');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Runtime detection inspects multiple vendor JSON formats before schema selection; keep the small format-probing boundary dynamic.
 function inferRuntimeFamilyFromJson(modelJson: any): Live2DRuntimeFamily {
   if (!modelJson || typeof modelJson !== 'object') return 'unknown';
   if (typeof modelJson.modelRelativePath === 'string') return 'wmdl';
@@ -59,6 +60,7 @@ function inferRuntimeFamilyFromJson(modelJson: any): Live2DRuntimeFamily {
 
 export function describeLive2DModelEntrypoint(
   pathValue: string | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Runtime detection inspects multiple vendor JSON formats before schema selection; keep the small format-probing boundary dynamic.
   parsedJson?: any,
 ): Live2DModelEntryDescriptor {
   const path = normalizedPath(pathValue);

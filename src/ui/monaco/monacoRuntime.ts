@@ -20,6 +20,7 @@ export function loadMonacoRuntime(): Promise<MonacoRuntime> {
   ]).then(([editorModule, monacoApi, _jsonContribution, editorWorkerModule, jsonWorkerModule]) => {
     const Editor = editorModule.default;
     editorModule.loader.config({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- editor.api plus separately loaded language contributions supplies the runtime; the loader types require editor.main and its unused bundled languages.
       monaco: monacoApi as any,
     });
 

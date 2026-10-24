@@ -60,7 +60,7 @@ class EventBus {
   /**
    * Emit an event with optional payload.
    */
-  async emit(event: string, payload?: any): Promise<void> {
+  async emit(event: string, payload?: unknown): Promise<void> {
     // Fire specific handlers
     const handlers = this.handlers.get(event);
     if (handlers) {

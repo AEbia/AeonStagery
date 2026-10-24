@@ -101,8 +101,8 @@ export function registerAiProseHandlers(
         }
         const decrypted = safeStorage.decryptString(Buffer.from(parsed.ciphertext, 'base64'));
         if (decrypted.trim().length > 0) aiProseCredential = decrypted;
-      } catch (error: any) {
-        if (error?.code !== 'ENOENT') {
+      } catch (error: unknown) {
+        if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) {
           console.warn('[AI prose] Stored credential could not be loaded.');
         }
       }
@@ -139,9 +139,9 @@ export function registerAiProseHandlers(
       aiProseCredential = value;
       aiProseCredentialLoaded = true;
       return { success: true };
-    } catch (error: any) {
+    } catch (error: unknown) {
       await fs.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
-      return { success: false, error: error?.message ?? String(error) };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -152,8 +152,8 @@ export function registerAiProseHandlers(
       aiProseCredential = undefined;
       aiProseCredentialLoaded = true;
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message ?? String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

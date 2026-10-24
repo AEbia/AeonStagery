@@ -10,6 +10,7 @@ import type { TimelineAction } from '../semanticTimelineTypes';
 export interface HiddenParamKeysInput {
   action: TimelineAction;
   actionType: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
   usesSourceParamForm: boolean;
   isLensFilterSourceAction: boolean;

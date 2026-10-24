@@ -15,6 +15,7 @@ interface BlankContextMenuProps {
   hasCopyBuffer: boolean;
   templates?: SourcedSemanticAuthoringCombo[];
   onPaste: (time: number) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared selection callback carries either a statement block or a template payload chosen at runtime; preserve the existing menu callback boundary.
   onSelectAction: (type: 'statement' | 'template', data: any) => void;
   availableLifecycleEndCommandIds?: ReadonlySet<string>;
   availableStateSpanDependencyCommandIds?: ReadonlySet<string>;

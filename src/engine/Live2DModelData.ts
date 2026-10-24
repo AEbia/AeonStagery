@@ -6,6 +6,7 @@ export interface Live2DModelData {
   runtimeFamily: 'cubism2' | 'cubism3-plus' | 'wmdl' | 'unknown';
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Model metadata comes from heterogeneous Cubism 2/3 JSON schemas with extension fields; this adapter only projects motion and expression names.
 export function extractLive2DModelData(json: any, entrypointPath = ''): Live2DModelData {
   const descriptor = describeLive2DModelEntrypoint(entrypointPath, json);
   let motions: string[] = [];
@@ -17,6 +18,7 @@ export function extractLive2DModelData(json: any, entrypointPath = ''): Live2DMo
     }
     if (json.FileReferences.Expressions && Array.isArray(json.FileReferences.Expressions)) {
       expressions = json.FileReferences.Expressions
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Model metadata comes from heterogeneous Cubism 2/3 JSON schemas with extension fields; this adapter only projects motion and expression names.
         .map((expression: any) => expression.Name || expression.name)
         .filter(Boolean);
     }
@@ -27,6 +29,7 @@ export function extractLive2DModelData(json: any, entrypointPath = ''): Live2DMo
     if (json?.expressions) {
       if (Array.isArray(json.expressions)) {
         expressions = json.expressions
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Model metadata comes from heterogeneous Cubism 2/3 JSON schemas with extension fields; this adapter only projects motion and expression names.
           .map((expression: any) => expression.name || expression.Name)
           .filter(Boolean);
       } else {
