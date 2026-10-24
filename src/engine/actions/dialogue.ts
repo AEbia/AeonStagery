@@ -1,7 +1,8 @@
 import { subtitleRenderer } from '../SubtitleRenderer';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
-export function scheduleDialogue(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleDialogue(ctx: SchedulerContext, action: RuntimeActionContract<'dialogue'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
@@ -14,8 +15,8 @@ export function scheduleDialogue(ctx: SchedulerContext, action: { time?: number;
 
   // 1. Dialogue Animation Timeline
   const dialogueTl = subtitleRenderer.showDialogue({
-    _id: (action as any)._id || `${params.speaker}_${params.text}_${t}`,
-    speaker: finalSpeaker, speakerId: params.speakerId, text: params.text,
+    _id: action._id || `${params.speaker}_${params.text}_${t}`,
+    speaker: finalSpeaker ?? '', speakerId: params.speakerId, text: params.text,
     style: params.style ?? 'typewriter', duration: params.duration ?? 3,
     speakerColor: finalSpeakerColor, textColor: params.textColor,
     fontSize: params.fontSize, position: params.position,

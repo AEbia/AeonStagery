@@ -55,6 +55,8 @@ function createMockLightingSystem() {
 
 function createMockLive2DManager() {
   return {
+    setLipSyncParameter: vi.fn(),
+    clearLipSyncParameters: vi.fn(),
     setExportMode: vi.fn(),
     waitForAllLoaded: vi.fn().mockResolvedValue(undefined),
     updateAll: vi.fn().mockResolvedValue(undefined),

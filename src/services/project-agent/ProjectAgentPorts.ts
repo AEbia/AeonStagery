@@ -1,5 +1,6 @@
 import type { ResourceKind } from '../../api/types/project';
 import type { CurrentSceneDocument } from '../../api/types/semantic-scene';
+import type { DialogueDefaultsReader } from '../timeline-authoring/dialogueDefaults';
 import type {
   AgentRunTerminalCommandArgs,
   AgentRunTerminalCommandResult,
@@ -208,6 +209,7 @@ export interface ProjectAgentReadPorts {
 }
 
 export interface ProjectAgentWritePorts {
+  readonly dialogueDefaults?: DialogueDefaultsReader;
   readonly scene: ProjectAgentSceneSnapshotPort;
   readonly validation: ProjectAgentSceneValidationPort;
   readonly authoring: ProjectAgentAuthoringPort;

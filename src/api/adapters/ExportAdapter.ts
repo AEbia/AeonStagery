@@ -11,15 +11,28 @@ import { createPreparedFrameCaptureVisualRuntime } from '../../engine/export/Pre
 import { ExportVoiceLipSync } from '../../engine/export/ExportVoiceLipSync';
 import { lipSyncEngine } from '../../engine/LipSyncEngine';
 import { validateVideoFormat } from '../types/video-format';
+import type { ElectronCapability } from '../interfaces/ElectronCapability';
 import { estimateExportSizeFromBitrate, planExportSizeSamples, type ExportSizeEstimateConfig } from '../exportSizeEstimate';
 import { sampleExportSize } from '../../engine/export/ExportSizeSampler';
+
+type FrameCaptureDependencies = ConstructorParameters<typeof FrameCaptureEngine>;
+type ExportPlaybackAdapter = FrameCaptureDependencies[1] & {
+  getCurrentTime(): number;
+  getBasePath?(): string;
+};
+type ExportVoiceLipSyncTarget = ConstructorParameters<typeof ExportVoiceLipSync>[0];
+type ResolveDependency<Dependency> = Dependency extends () => infer Resolved ? Resolved : Dependency;
+type ResolvedFrameCaptureLive2DManager = ResolveDependency<FrameCaptureDependencies[3]>;
+type ExportLive2DManager = ResolvedFrameCaptureLive2DManager & ExportVoiceLipSyncTarget;
+type ExportLive2DDependency = ExportLive2DManager | (() => ExportLive2DManager);
+type ExportElectronAPI = Pick<ElectronCapability, 'fs' | 'export' | 'path'>;
 
 export class ExportAdapter implements IExportAdapter {
   private captureEngine: FrameCaptureEngine;
   private audioMixer: AudioMixer;
-  private playbackAdapter: any;
+  private playbackAdapter: ExportPlaybackAdapter;
   private documentStore: DocumentStore;
-  private electronAPI: any;
+  private electronAPI: ExportElectronAPI | null;
   private operationInProgress = false;
 
   /**
@@ -32,13 +45,13 @@ export class ExportAdapter implements IExportAdapter {
    * @param electronAPI     — window.aeonStageryAPI for IPC (fs/dialog/export/path)
    */
   constructor(
-    stageAdapter: any,
-    cameraAdapter: any,
-    playbackAdapter: any,
-    lightingSystem: any,
-    private readonly live2DManager: any,
+    stageAdapter: FrameCaptureDependencies[0],
+    cameraAdapter: FrameCaptureDependencies[4],
+    playbackAdapter: ExportPlaybackAdapter,
+    lightingSystem: FrameCaptureDependencies[2],
+    private readonly live2DManager: ExportLive2DDependency,
     documentStore: DocumentStore,
-    electronAPI: any,
+    electronAPI: ExportElectronAPI | null,
     projectResources?: ProjectResourceService | null,
   ) {
     this.playbackAdapter = playbackAdapter;
@@ -89,7 +102,7 @@ export class ExportAdapter implements IExportAdapter {
       return await sampleExportSize(config, {
         exportVideo: (sample, sampleSignal) => this.runExport(sample, () => {}, sampleSignal, true),
         playback: this.playbackAdapter,
-        electron: this.electronAPI,
+        electron: this.electronAPI!,
       }, signal);
     } finally { this.operationInProgress = false; }
   }
@@ -104,7 +117,7 @@ export class ExportAdapter implements IExportAdapter {
     let removeLogListener: (() => void) | undefined;
     let encodingInfo: ExportEncodingInfo | undefined;
     const cancel = () => {
-      cancellation ??= Promise.resolve().then(() => this.electronAPI.export.cancelExport());
+      cancellation ??= Promise.resolve().then(() => this.electronAPI!.export.cancelExport());
       void cancellation.catch(() => {});
       return cancellation;
     };
@@ -132,7 +145,7 @@ export class ExportAdapter implements IExportAdapter {
       let ffmpegFallbackReason: string | undefined;
       // Compiled-in availability is advisory; initialization can still fail on a
       // machine without the corresponding GPU/driver and is retried below.
-      const capabilities = await Promise.resolve(this.electronAPI.export.getEncodingCapabilities?.()).catch(() => undefined);
+      const capabilities = await Promise.resolve(this.electronAPI!.export.getEncodingCapabilities?.()).catch(() => undefined);
       const ffmpegEncoders = isSubtitleOnly || isSubtitleChroma
         ? [getSoftwareEncoder(settings.videoCodec)]
         : getFFmpegEncoderCandidates(settings, capabilities?.success ? capabilities.encoders : undefined);
@@ -170,7 +183,7 @@ export class ExportAdapter implements IExportAdapter {
         }
       }
       for (const encoder of ffmpegEncoders) attempts.push({ native: false, intermediate: false, encoder, videoCodec: settings.videoCodec });
-      if (ffmpegLogCallback) removeLogListener = this.electronAPI.export.onLog(ffmpegLogCallback);
+      if (ffmpegLogCallback) removeLogListener = this.electronAPI!.export.onLog(ffmpegLogCallback);
       let captured = false;
       let sizeBytes: number | undefined;
       for (let index = 0; index < attempts.length; index++) {
@@ -183,10 +196,11 @@ export class ExportAdapter implements IExportAdapter {
           attempt: index + 1, ...(attemptReason ? { fallbackReason: attemptReason } : {}),
         };
         onProgress({ phase: 'capture', percent: 0, frame: 0, totalFrames, encoding: encodingInfo });
-        const backendAPI = { ...this.electronAPI.export, cancelExport: cancel };
+        const backendAPI = { ...this.electronAPI!.export, cancelExport: cancel };
         const backend = attempt.native ? new WebCodecsBackend(backendAPI) : new RawPixelsBackend(backendAPI);
         const mouthTarget = typeof this.live2DManager === 'function' ? this.live2DManager() : this.live2DManager;
-        const voiceLipSync = new ExportVoiceLipSync(mouthTarget, (speaker) => lipSyncEngine.stop(speaker),
+        const voiceLipSync = new ExportVoiceLipSync(mouthTarget,
+          (speaker) => lipSyncEngine.stop(speaker),
           (text, duration, offset) => lipSyncEngine.computeTextMouthOpenness(text, duration, offset));
         try {
           if (!isSubtitleOnly && !isSubtitleChroma) {
@@ -195,7 +209,7 @@ export class ExportAdapter implements IExportAdapter {
               signal?.throwIfAborted();
               const source = sources.find((candidate) => candidate.path);
               if (!source) throw new Error('Voice audio is unavailable for export lip sync.');
-              const result = await this.electronAPI.fs.readFile(source.path);
+              const result = await this.electronAPI!.fs.readFile(source.path);
               if (!result.success || !result.data) throw new Error(result.error || 'Cannot read voice audio for export lip sync.');
               return result.data;
             });

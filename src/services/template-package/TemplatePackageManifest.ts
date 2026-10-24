@@ -25,6 +25,7 @@ export interface ComboTemplate {
   id: string;
   name: string;
   category: AuthoringDefinitionCategory;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy template action payloads predate the semantic schemas and retain arbitrary extension fields for migration.
   actions: Array<{ action: LegacyTemplateActionName; params: Record<string, any>; delay: number }>;
   source?: {
     scope: TemplatePackageScope;

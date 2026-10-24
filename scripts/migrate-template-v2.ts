@@ -14,6 +14,7 @@ async function main(): Promise<void> {
     ? positional[0]
     : path.join(positional[0], 'manifest.json');
   const outputPath = positional[1] ?? path.join(path.dirname(inputPath), 'manifest.v2.json');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The migration reads pre-schema template JSON and preserves extension fields while transforming known keys.
   const raw = JSON.parse(await readFile(inputPath, 'utf8')) as Record<string, any>;
   const parsed = parseTemplatePackageManifest(raw);
   if ((parsed.manifestSchemaVersion ?? 1) === 2) {

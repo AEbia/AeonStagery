@@ -160,6 +160,7 @@ export class CollaborativeServerSceneSafetyPathAdapterV2 {
 
     await this.fileAccess.ensureDir(await this.fileAccess.dirname(backupPath));
     if (document) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The retained v2 agreement adapter crosses the historical v4/current codec seam; keep that legacy bridge explicit without claiming the schemas are identical.
       const prepared = sceneDocumentCodec.prepareForSave(document as any);
       await this.fileAccess.writeFile(backupPath, JSON.stringify(prepared, null, 2));
     } else {
@@ -174,6 +175,7 @@ export class CollaborativeServerSceneSafetyPathAdapterV2 {
   ): Promise<CollaborativeServerSceneSafetyPaths> {
     const resolvedPaths = paths ?? await this.plan();
     await this.fileAccess.ensureDir(await this.fileAccess.dirname(resolvedPaths.targetScenePath));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The retained v2 agreement adapter crosses the historical v4/current codec seam; keep that legacy bridge explicit without claiming the schemas are identical.
     const prepared = sceneDocumentCodec.prepareForSave(document as any);
     await this.fileAccess.writeFile(resolvedPaths.targetScenePath, JSON.stringify(prepared, null, 2));
     return resolvedPaths;

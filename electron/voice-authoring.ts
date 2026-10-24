@@ -44,8 +44,8 @@ export function registerVoiceAuthoringHandlers(): void {
       const reference = preset?.references.find((item) => item.id === referenceId);
       if (!reference) throw new Error('托管参考音频不存在。');
       return { success: true, absolutePath: resolveManagedPath(reference.managedPath) };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
   ipcMain.handle('voiceAuthoring:savePreset', (_event, request: SaveLocalVoicePresetRequest) => savePreset(request));
@@ -91,8 +91,8 @@ export async function scanVoiceCatalog(request: ScanVoiceCatalogRequest): Promis
     let stat: fs.Stats;
     try {
       stat = await fs.promises.lstat(cleanRoot);
-    } catch (error: any) {
-      issues.push({ code: 'missing-root', root: cleanRoot, message: error?.message || '目录不存在。' });
+    } catch (error: unknown) {
+      issues.push({ code: 'missing-root', root: cleanRoot, message: (error instanceof Error ? error.message : undefined) || '目录不存在。' });
       return;
     }
     if (!stat.isDirectory()) {
@@ -107,8 +107,8 @@ export async function scanVoiceCatalog(request: ScanVoiceCatalogRequest): Promis
     let real: string;
     try {
       real = await fs.promises.realpath(directory);
-    } catch (error: any) {
-      issues.push({ code: 'unreadable-root', root: directory, message: error?.message || '无法解析目录。' });
+    } catch (error: unknown) {
+      issues.push({ code: 'unreadable-root', root: directory, message: (error instanceof Error ? error.message : undefined) || '无法解析目录。' });
       return;
     }
     const realKey = `${mode}:${normalizeCase(real)}`;
@@ -118,8 +118,8 @@ export async function scanVoiceCatalog(request: ScanVoiceCatalogRequest): Promis
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(directory, { withFileTypes: true });
-    } catch (error: any) {
-      issues.push({ code: 'unreadable-root', root: directory, message: error?.message || '无法读取目录。' });
+    } catch (error: unknown) {
+      issues.push({ code: 'unreadable-root', root: directory, message: (error instanceof Error ? error.message : undefined) || '无法读取目录。' });
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -236,12 +236,12 @@ export async function savePreset(request: SaveLocalVoicePresetRequest) {
     }
     if (backupDirectory) await fs.promises.rm(backupDirectory, { recursive: true, force: true });
     return { success: true, preset };
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (stagingDirectory) await fs.promises.rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
     if (backupDirectory && fs.existsSync(backupDirectory) && !fs.existsSync(finalDirectory)) {
       await fs.promises.rename(backupDirectory, finalDirectory).catch(() => {});
     }
-    return { success: false, error: error?.message || String(error) };
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -256,8 +256,8 @@ async function mutatePreset(presetId: string, update: (preset: LocalVoicePreset)
     library.presets[index] = next;
     await writeLibrary(library);
     return { success: true, preset: next };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -277,8 +277,8 @@ async function duplicatePreset(presetId: string, name?: string) {
     library.presets.push(preset);
     await writeLibrary(library);
     return { success: true, preset };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -293,8 +293,8 @@ export async function deletePreset(presetId: string) {
     library.presets.splice(index, 1);
     await writeLibrary(library);
     return { success: true, library };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -311,6 +311,7 @@ export async function publishTemplateProfile(presetId: string) {
     if (fs.existsSync(packageRoot)) await fs.promises.cp(packageRoot, stagingRoot, { recursive: true });
     else await fs.promises.mkdir(stagingRoot, { recursive: true });
     const existing = await readJsonIfExists(manifestPath);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This edits a persisted manifest before parseTemplatePackageManifest validates it; dynamic extension fields must survive the round trip.
     const manifest: any = existing ?? {
       template: { id: 'aeonstagery.user-voices', name: 'User Voice Profiles', version: '1.0.0', category: 'voice' },
       assets: { root: 'assets', index: [] },
@@ -331,6 +332,7 @@ export async function publishTemplateProfile(presetId: string) {
       assertInside(stagingRoot, target);
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
       await fs.promises.copyFile(source, target);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This edits a persisted manifest before parseTemplatePackageManifest validates it; dynamic extension fields must survive the round trip.
       manifest.assets.index = manifest.assets.index.filter((asset: any) => asset?.id !== assetId);
       manifest.assets.index.push({ id: assetId, path: assetPath, kind: 'audio', label: reference.label });
       templateReferences.push({
@@ -346,6 +348,7 @@ export async function publishTemplateProfile(presetId: string) {
       references: templateReferences,
       inferenceDefaults: { ...preset.inferenceDefaults },
     };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This edits a persisted manifest before parseTemplatePackageManifest validates it; dynamic extension fields must survive the round trip.
     manifest.voiceProfiles = manifest.voiceProfiles.filter((item: any) => item?.id !== preset.id);
     manifest.voiceProfiles.push(profile);
     try {
@@ -371,8 +374,8 @@ export async function publishTemplateProfile(presetId: string) {
       throw error;
     }
     return { success: true, templateId: manifest.template.id, profileId: preset.id, manifestPath };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -382,16 +385,16 @@ async function clearSession(sessionId: string) {
     assertInside(getWorkbenchRoot(), target);
     await fs.promises.rm(target, { recursive: true, force: true });
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 async function readLibraryResult() {
   try {
     return { success: true, library: await readLibrary() };
-  } catch (error: any) {
-    return { success: false, error: error?.message || String(error) };
+  } catch (error: unknown) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -403,8 +406,8 @@ export async function readLibrary(): Promise<VoiceLibraryDocument> {
       throw new Error('用户语音库 schemaVersion 不受支持。');
     }
     return { schemaVersion: VOICE_LIBRARY_SCHEMA_VERSION, presets: parsed.presets };
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') return { schemaVersion: VOICE_LIBRARY_SCHEMA_VERSION, presets: [] };
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return { schemaVersion: VOICE_LIBRARY_SCHEMA_VERSION, presets: [] };
     throw error;
   }
 }
@@ -423,9 +426,10 @@ async function writeLibrary(library: VoiceLibraryDocument): Promise<void> {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- This edits a persisted manifest before parseTemplatePackageManifest validates it; dynamic extension fields must survive the round trip.
 async function readJsonIfExists(filePath: string): Promise<any | null> {
   try { return JSON.parse(await fs.promises.readFile(filePath, 'utf8')); }
-  catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
+  catch (error: unknown) { if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return null; throw error; }
 }
 
 async function writeJsonAtomic(target: string, value: unknown): Promise<void> {

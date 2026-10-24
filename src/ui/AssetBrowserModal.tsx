@@ -271,7 +271,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
               ) : filteredEntries.length === 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', gap: 6 }}>
                   <div>当前目录下没有匹配资源</div>
-                  {!(window as any).aeonStageryAPI?.fs?.readDir && (
+                  {!window.aeonStageryAPI?.fs?.readDir && (
                     <div style={{ fontSize: 11, opacity: 0.7 }}>当前环境缺少本地目录读取 API，请手动输入路径。</div>
                   )}
                 </div>
@@ -349,7 +349,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
   );
 };
 
-const TextInput = ({ value, onChange, placeholder, style, inputStyle, icon }: any) => {
+const TextInput = ({ value, onChange, placeholder, style, inputStyle, icon }: { value: string; onChange: (value: string) => void; placeholder?: string; style?: React.CSSProperties; inputStyle?: React.CSSProperties; icon?: React.ReactNode }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 

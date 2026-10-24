@@ -20,21 +20,26 @@ import {
 export const TARGET_POST_PROCESSING_OWNER = '__targetPostProcessingOwnedFilter';
 const TARGET_POST_PROCESSING_KIND = '__targetPostProcessingKind';
 
+type OwnedTargetFilter = PIXI.Filter & {
+  [TARGET_POST_PROCESSING_OWNER]?: boolean;
+  [TARGET_POST_PROCESSING_KIND]?: TargetPostFilterKind;
+};
+
 type TargetPostFilterKind = 'adjustment' | 'bloom' | 'godray' | 'rgbSplit' | 'overlay';
 
 function markOwnedFilter<T extends PIXI.Filter>(filter: T, kind: TargetPostFilterKind): T {
   filter.resolution = 'inherit';
-  (filter as any)[TARGET_POST_PROCESSING_OWNER] = true;
-  (filter as any)[TARGET_POST_PROCESSING_KIND] = kind;
+  (filter as OwnedTargetFilter)[TARGET_POST_PROCESSING_OWNER] = true;
+  (filter as OwnedTargetFilter)[TARGET_POST_PROCESSING_KIND] = kind;
   return filter;
 }
 
 function isOwnedFilter(filter: PIXI.Filter): boolean {
-  return Boolean((filter as any)[TARGET_POST_PROCESSING_OWNER]);
+  return Boolean((filter as OwnedTargetFilter)[TARGET_POST_PROCESSING_OWNER]);
 }
 
 function getFilterKind(filter: PIXI.Filter): TargetPostFilterKind | null {
-  const kind = (filter as any)[TARGET_POST_PROCESSING_KIND];
+  const kind = (filter as OwnedTargetFilter)[TARGET_POST_PROCESSING_KIND];
   return kind === 'adjustment' || kind === 'bloom' || kind === 'godray' || kind === 'rgbSplit' || kind === 'overlay'
     ? kind
     : null;
@@ -133,7 +138,7 @@ function isDefaultPostProcessing(state: LightingPostProcessingSnapshot): boolean
 }
 
 function destroyFilter(filter: PIXI.Filter): void {
-  const destroy = (filter as any).destroy;
+  const destroy = (filter as OwnedTargetFilter).destroy;
   if (typeof destroy === 'function') destroy.call(filter);
 }
 
@@ -196,9 +201,9 @@ class TargetPostProcessingController {
   }
 
   private getTargetDisplayObject(targetId: string): PIXI.Container | null {
-    if (typeof (live2DManager as any).hasCharacter === 'function' && live2DManager.hasCharacter(targetId)) {
-      if (typeof (live2DManager as any).canApplyContainerFilters === 'function'
-        && !(live2DManager as any).canApplyContainerFilters(targetId)) {
+    if (typeof live2DManager.hasCharacter === 'function' && live2DManager.hasCharacter(targetId)) {
+      if (typeof live2DManager.canApplyContainerFilters === 'function'
+        && !live2DManager.canApplyContainerFilters(targetId)) {
         return null;
       }
       return live2DManager.getContainer(targetId);
@@ -305,7 +310,7 @@ class TargetPostProcessingController {
     }
     const filters = [...externalFilters, ...nextOwned];
     displayObject.filters = filters.length > 0 ? filters : null;
-    (displayObject as any)._filtersDirty = true;
+    (displayObject as typeof displayObject & { _filtersDirty?: boolean })._filtersDirty = true;
     return true;
   }
 
@@ -316,7 +321,7 @@ class TargetPostProcessingController {
     const remaining = filters.filter((filter) => !isOwnedFilter(filter));
     filters.filter((filter) => isOwnedFilter(filter)).forEach(destroyFilter);
     displayObject.filters = remaining.length > 0 ? remaining : null;
-    (displayObject as any)._filtersDirty = true;
+    (displayObject as typeof displayObject & { _filtersDirty?: boolean })._filtersDirty = true;
   }
 }
 

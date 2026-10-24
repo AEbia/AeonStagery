@@ -5,6 +5,7 @@ import { ProjectAgentReadTools } from '../services/project-agent/ProjectAgentRea
 import { ProjectAgentTaskState } from '../services/project-agent/ProjectAgentTaskState';
 import { ProjectAgentImageSessionCache } from '../services/project-agent/ProjectAgentImageSessionCache';
 import type { PerformanceCapabilityCatalogV1 } from '../services/ai-authoring/performance/PerformanceProfileTypes';
+import { describeProjectAgentDialogueStyles } from '../services/project-agent-service/ProjectAgentDialogueStyles';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -281,6 +282,21 @@ function createPorts(overrides: Partial<ProjectAgentReadPorts> = {}): ProjectAge
 }
 
 describe('ProjectAgentReadTools', () => {
+  it('returns dialogue style discovery through the existing project overview tool', async () => {
+    const ports = createPorts();
+    const overview = await ports.overview.getOverview();
+    const dialogueStyles = describeProjectAgentDialogueStyles({ enabledTemplateIds: [], dialogueTemplate: 'classic' });
+    const tools = new ProjectAgentReadTools({
+      ports: { ...ports, overview: { getOverview: () => ({ ...overview, dialogueStyles }) } },
+      taskState: new ProjectAgentTaskState(),
+    });
+    const result = await tools.readProjectOverview();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.dialogueStyles).toEqual(dialogueStyles);
+    expect(result.data.dialogueStyles).not.toBe(dialogueStyles);
+  });
+
   it('returns cleaned project overview without internal ids', async () => {
     const tools = new ProjectAgentReadTools({
       ports: createPorts(),

@@ -15,6 +15,9 @@ import {
   type StandaloneAgentProviderConfig,
 } from '../services/project-agent-standalone/StandaloneProjectAgentEngine';
 import { createProjectAgentBenchmarkScene } from '../services/project-agent-benchmark/ProjectAgentBenchmarkFixture';
+import { sceneDocumentCodec } from '../services/semantic-scene';
+import type { DialogueImagePresentation } from '../api/types/semantic-scene';
+import { projectMetadataCodec } from '../services/project/ProjectMetadataCodec';
 
 const PROVIDER: StandaloneAgentProviderConfig = {
   endpoint: 'https://ai.example.test/v1',
@@ -156,6 +159,30 @@ afterEach(() => {
 });
 
 describe('StandaloneProjectAgentEngine.open', () => {
+  it('leaves project assets untouched when only a dialogue style ID is saved', async () => {
+    const project = trackTempProject(createTempProject());
+    const metadata = projectMetadataCodec.parseKnownProjection(JSON.parse(fs.readFileSync(project.projectFilePath, 'utf-8')));
+    const projectJson = JSON.stringify({
+      ...metadata,
+      templates: {
+        enabledTemplateIds: ['aeonstagery.default'],
+        defaults: { dialogueStyleId: 'pink-nameplate' },
+      },
+    });
+    fs.writeFileSync(project.projectFilePath, projectJson);
+    const engine = await StandaloneProjectAgentEngine.open({
+      projectDir: project.dir, sceneRelPath: project.sceneRelPath,
+      journalDirectory: path.join(project.dir, 'journal'), provider: PROVIDER,
+    });
+    if (!(engine instanceof StandaloneProjectAgentEngine)) throw new Error('Engine did not open');
+    try {
+      expect(fs.existsSync(path.join(project.dir, 'images'))).toBe(false);
+      expect(fs.readFileSync(project.projectFilePath, 'utf-8')).toBe(projectJson);
+    } finally {
+      engine.close();
+    }
+  });
+
   it('fails with invalid_project when project.json is missing', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-engine-missing-'));
     tempProjects.push({ dir, projectFilePath: path.join(dir, 'project.json'), sceneRelPath: 'scenes/start.json' });
@@ -219,6 +246,112 @@ describe('StandaloneProjectAgentEngine.open', () => {
 });
 
 describe('StandaloneProjectAgentEngine rounds', () => {
+  it('uses the saved project image snapshot without loading its template package', async () => {
+    const project = trackTempProject(createTempProject());
+    const metadata = projectMetadataCodec.parseKnownProjection(JSON.parse(fs.readFileSync(project.projectFilePath, 'utf-8')));
+    const presentation: DialogueImagePresentation = {
+      renderer: 'image-dialogue-v1', styleId: 'project.subtitle',
+      textbox: { image: 'images/textbox.svg', x: 0, y: 760, width: 1920 },
+      text: { x: 100, y: 800, maxWidth: 1720 },
+    };
+    fs.mkdirSync(path.join(project.dir, 'images'));
+    fs.writeFileSync(path.join(project.dir, 'images/textbox.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="320"/>');
+    fs.writeFileSync(project.projectFilePath, JSON.stringify({
+      ...metadata,
+      templates: {
+        enabledTemplateIds: ['external.subtitle-package'],
+        defaults: { dialogueStyleId: 'project.subtitle' },
+        dialoguePresentation: presentation,
+      },
+    }));
+    const transport = createScriptedTransport([
+      () => assistantTools([{ name: 'readScene', arguments: { startLine: 1, lineCount: 1 } }]),
+      () => assistantTools([{
+        name: 'insertStatement', arguments: {
+          time: 0, statement: { type: 'dialogue', params: { text: 'Saved image style', durationSeconds: 1 } },
+        },
+      }]),
+      () => assistantText('完成'),
+    ]);
+    const engine = await StandaloneProjectAgentEngine.open({
+      projectDir: project.dir, sceneRelPath: project.sceneRelPath,
+      journalDirectory: path.join(project.dir, 'journal'), provider: PROVIDER, transport,
+    });
+    if (!(engine instanceof StandaloneProjectAgentEngine)) throw new Error('Engine did not open');
+
+    const result = await engine.run('添加一句使用项目默认样式的对白');
+    expect(result.ok).toBe(true);
+    expect(result.committedReceipts).toHaveLength(1);
+    const persisted = sceneDocumentCodec.parseAndValidate(readSceneDocument(project.dir, project.sceneRelPath));
+    const inserted = persisted.statements.find((statement) => statement.type === 'dialogue'
+      && statement.params.text === 'Saved image style');
+    expect(inserted?.type).toBe('dialogue');
+    if (inserted?.type !== 'dialogue') return;
+    expect(inserted.params.presentation).toEqual(presentation);
+    expect(inserted.params).not.toHaveProperty('template');
+  });
+
+  it('uses the saved built-in renderer when style is omitted', async () => {
+    const project = trackTempProject(createTempProject());
+    const metadata = projectMetadataCodec.parseKnownProjection(JSON.parse(fs.readFileSync(project.projectFilePath, 'utf-8')));
+    fs.writeFileSync(project.projectFilePath, JSON.stringify({
+      ...metadata,
+      templates: {
+        enabledTemplateIds: [],
+        dialogueTemplate: 'minimal',
+      },
+    }));
+    const transport = createScriptedTransport([
+      () => assistantTools([{ name: 'readScene', arguments: { startLine: 1, lineCount: 1 } }]),
+      () => assistantTools([{
+        name: 'insertStatement', arguments: {
+          time: 0, statement: { type: 'dialogue', params: { text: 'Fallback style dialogue', durationSeconds: 1 } },
+        },
+      }]),
+      () => assistantText('完成'),
+    ]);
+    const engine = await StandaloneProjectAgentEngine.open({
+      projectDir: project.dir, sceneRelPath: project.sceneRelPath,
+      journalDirectory: path.join(project.dir, 'journal'), provider: PROVIDER, transport,
+    });
+    if (!(engine instanceof StandaloneProjectAgentEngine)) throw new Error('Engine did not open');
+
+    const result = await engine.run('添加一句对白');
+    expect(result.ok).toBe(true);
+    expect(result.committedReceipts).toHaveLength(1);
+    const persisted = sceneDocumentCodec.parseAndValidate(readSceneDocument(project.dir, project.sceneRelPath));
+    expect(persisted.statements.find((statement) => statement.type === 'dialogue'
+      && statement.params.text === 'Fallback style dialogue')?.params).toMatchObject({ template: 'minimal' });
+  });
+
+  it('persists new dialogue with the project default style when style is omitted', async () => {
+    const project = trackTempProject(createTempProject());
+    const metadata = projectMetadataCodec.parseKnownProjection(JSON.parse(fs.readFileSync(project.projectFilePath, 'utf-8')));
+    fs.writeFileSync(project.projectFilePath, JSON.stringify({
+      ...metadata, templates: { enabledTemplateIds: [], defaults: { dialogueStyleId: 'minimal' } },
+    }));
+    const transport = createScriptedTransport([
+      () => assistantTools([{ name: 'readScene', arguments: { startLine: 1, lineCount: 1 } }]),
+      () => assistantTools([{
+        name: 'insertStatement', arguments: {
+          time: 0, statement: { type: 'dialogue', params: { text: 'Default style dialogue', durationSeconds: 1 } },
+        },
+      }]),
+      () => assistantText('完成'),
+    ]);
+    const engine = await StandaloneProjectAgentEngine.open({
+      projectDir: project.dir, sceneRelPath: project.sceneRelPath,
+      journalDirectory: path.join(project.dir, 'journal'), provider: PROVIDER, transport,
+    });
+    if (!(engine instanceof StandaloneProjectAgentEngine)) throw new Error('Engine did not open');
+    const result = await engine.run('添加一句使用默认样式的对白');
+    expect(result.ok).toBe(true);
+    expect(result.committedReceipts).toHaveLength(1);
+    const persisted = sceneDocumentCodec.parseAndValidate(readSceneDocument(project.dir, project.sceneRelPath));
+    expect(persisted.statements.find((statement) => statement.type === 'dialogue'
+      && statement.params.text === 'Default style dialogue')?.params).toMatchObject({ template: 'minimal' });
+  });
+
   it('runs a full write round: readScene → updateStatement → scene file persisted with the change', async () => {
     const project = trackTempProject(createTempProject());
     const transport = createScriptedTransport([

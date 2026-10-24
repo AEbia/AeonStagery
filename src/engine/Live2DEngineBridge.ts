@@ -7,9 +7,14 @@ import * as PIXI from 'pixi.js';
 import { waitForLive2DRuntimeBootstrap } from './Live2DRuntimeAvailability';
 import { isLive2DCubism2RuntimeAvailable } from './Live2DRuntimeResolver';
 
+export type { Live2DModel } from 'untitled-pixi-live2d-engine';
+
 export interface Live2DEngineModule {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
   Live2DModel?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
   Live2DPlugin?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
   config?: any;
   [key: string]: unknown;
 }
@@ -70,6 +75,7 @@ export async function loadCubismEngineModule(): Promise<typeof import('untitled-
 
 function hasCubismCore(): boolean {
   return typeof window !== 'undefined'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
     && typeof (window.Live2DCubismCore as any)?.Version?.csmGetVersion === 'function';
 }
 
@@ -91,6 +97,7 @@ export async function ensureLive2DRenderPipe(): Promise<void> {
   }
   if (legacy && modern) {
     class CombinedLive2DPipe extends base.Live2DPlugin {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
       execute(instruction: any): void {
         if (instruction instanceof legacy!.Live2DModel || instruction instanceof modern!.Live2DModel) {
           if (instruction.visible && instruction.alpha > 0) instruction.renderLive2D(this.renderer);
@@ -99,6 +106,7 @@ export async function ensureLive2DRenderPipe(): Promise<void> {
         }
       }
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
     PIXI.extensions.add(CombinedLive2DPipe as any);
   } else {
     PIXI.extensions.add(base.Live2DPlugin);

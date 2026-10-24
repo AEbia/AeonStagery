@@ -63,8 +63,8 @@ export function SequentialFlowPanel() {
       });
       await semanticAuthoring.author(intent);
       showToast(`场景节奏档位已切换为${SCENE_PACE_TIER_LABELS[tier]}`, 'success');
-    } catch (err: any) {
-      setErrorLog(err?.message || String(err));
+    } catch (err: unknown) {
+      setErrorLog((err instanceof Error ? err.message : String(err)));
     } finally {
       setIsApplying(false);
     }
@@ -109,8 +109,8 @@ export function SequentialFlowPanel() {
       showToast(`顺序铺排已追加 ${nextReceipt.createdStatementIds.length} 条对白`, 'success');
       if (text === sourceText) setSourceText('');
       if (text === singleLine) setSingleLine('');
-    } catch (err: any) {
-      setErrorLog(err?.message || String(err));
+    } catch (err: unknown) {
+      setErrorLog((err instanceof Error ? err.message : String(err)));
     } finally {
       setIsApplying(false);
     }
@@ -226,10 +226,10 @@ export function SequentialFlowPanel() {
                   >
                     <span style={{ color: 'var(--text-muted)' }}>{(preview.anchorTime + (statement.time ?? 0)).toFixed(1)}s</span>
                     <span style={{ color: 'var(--text-secondary)' }}>
-                      {((statement.params as any).durationSeconds ?? 0).toFixed(1)}s
+                      {((statement.params as { durationSeconds?: number }).durationSeconds ?? 0).toFixed(1)}s
                     </span>
                     <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {(statement.params as any).text}
+                      {(statement.params as { text?: string }).text}
                     </span>
                   </div>
                 ))}

@@ -105,7 +105,7 @@ export class CollaborativeDocumentSyncLoopV3 {
       return this.options.getSceneDocument();
     }
     if (this.options.documentStore) {
-      const snap = (this.options.documentStore as any).getSceneDocumentV5Snapshot?.()
+      const snap = (this.options.documentStore as DocumentStore & { getSceneDocumentV5Snapshot?: () => SceneDocumentV5 | null }).getSceneDocumentV5Snapshot?.()
         ?? this.options.documentStore.getCurrentSceneDocumentSnapshot();
       return (snap && snap.schemaVersion === 5) ? snap as SceneDocumentV5 : null;
     }

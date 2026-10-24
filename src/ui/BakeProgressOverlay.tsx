@@ -7,14 +7,16 @@ export function BakeProgressOverlay() {
   const [status, setStatus] = useState('');
 
   useEffect(() => {
-    const unsubStart = eventBus.on('bake:start', (data: any) => {
+    const unsubStart = eventBus.on('bake:start', (payload) => {
+      const data = payload as { title?: string };
       setVisible(true);
       setProgress(0);
       setStatus(`正在预烘焙: ${data.title || '当前剧本'}`);
     });
 
     let lastUpdate = 0;
-    const unsubProgress = eventBus.on('bake:progress', (data: any) => {
+    const unsubProgress = eventBus.on('bake:progress', (payload) => {
+      const data = payload as { progress: number };
       const now = Date.now();
       // Throttle progress updates to ~10fps to save CPU for the engine
       if (now - lastUpdate > 100) {

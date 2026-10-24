@@ -68,6 +68,7 @@ export function isEnvironmentMutationAction(action: { action: string }): boolean
   ].includes(action.action);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Environment state is projected from heterogeneous historical action bags; keep the decoding input open and the returned EnvironmentLayerState typed.
 export function createEnvironmentState(params: Record<string, any>): EnvironmentLayerState {
   const defaults = getDefaultEnvironmentTransform();
   return {

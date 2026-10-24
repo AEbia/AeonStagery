@@ -147,7 +147,7 @@ export function useBlockResize({
       // High priority: synchronous DOM style width update
       const newWidth = Math.max(4, finalDuration * pps);
       blockEl.style.width = `${newWidth}px`;
-      (blockEl as any)._resizeDuration = finalDuration;
+      (blockEl as HTMLElement & { _resizeDuration?: number })._resizeDuration = finalDuration;
 
       const relatedStates = getRelatedResizeStates?.(id, initialTime, finalDuration) ?? {};
       for (const [relatedId, relatedState] of Object.entries(relatedStates)) {
@@ -180,7 +180,7 @@ export function useBlockResize({
 
     const restoreAuthoritativeStyles = () => {
       blockEl.style.width = `${Math.max(4, initialDuration * pps)}px`;
-      delete (blockEl as any)._resizeDuration;
+      delete (blockEl as HTMLElement & { _resizeDuration?: number })._resizeDuration;
     };
 
     const clearTransient = () => {

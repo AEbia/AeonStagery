@@ -20,8 +20,10 @@ const PARAMETER_CURVE_TYPE = 0;
 
 interface Cubism2MotionSamplerTarget {
   /** pixi-live2d-display internalModel (holds coreModel + motionManager). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   readonly internalModel: any;
   /** pixi-live2d-display motion manager (Cubism2MotionManager). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   readonly motionManager: any;
   /** Runtime marker used by the shared resource-motion cache. */
   readonly kind?: 'cubism3-plus';
@@ -84,6 +86,7 @@ export interface Cubism2MotionMeta {
  * ids carry the `VISIBLE:`/`LAYOUT:` prefixes — the same prefixes the parameter
  * enumerator skips during sampling.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 export function motionHasNonParameterCurves(motion: any): boolean {
   const entries = motion?.motions;
   if (!Array.isArray(entries)) return false;
@@ -167,7 +170,9 @@ async function fetchMotionFile(url: string): Promise<ArrayBuffer> {
 async function loadIsolatedMotion(
   source: ResolvedMotionSource,
   options: Cubism2MotionFileOptions & { readonly zeroSourceFades?: boolean },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 ): Promise<any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   const Live2DMotion = (window as any).Live2DMotion;
   console.log(`[CustomMotionSampler] loadIsolatedMotion: window.Live2DMotion 可用=${typeof Live2DMotion?.loadMotion === 'function'}`);
   if (!Live2DMotion || typeof Live2DMotion.loadMotion !== 'function') {
@@ -187,6 +192,7 @@ async function loadIsolatedMotion(
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   let motion: any;
   try {
     motion = Live2DMotion.loadMotion(buffer);
@@ -227,6 +233,7 @@ export async function resolveCubism2MotionMeta(
     throw new Cubism2MotionSamplingError(`Motion "${motionKey}" not found in model`, 'motion-not-found');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   let motion: any;
   try {
     motion = await motionManager.loadMotion(motionKey, 0);
@@ -338,6 +345,7 @@ export async function sampleCubism2MotionCurves(
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function enumerateMotionParameterIds(motion: any): string[] {
   const entries = motion?.motions;
   if (!Array.isArray(entries)) return [];
@@ -353,6 +361,7 @@ function enumerateMotionParameterIds(motion: any): string[] {
   return Array.from(new Set(ids));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
 function createSamplingModel(coreModel: any, parameterIds: readonly string[]) {
   const idByIndex = new Map<number, string>();
   const currentValues = new Map<string, number>();
@@ -413,13 +422,17 @@ function createSamplingModel(coreModel: any, parameterIds: readonly string[]) {
 }
 
 async function sampleIsolatedMotion(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   coreModel: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   motion: any,
   parameterIds: readonly string[],
   options: Cubism2MotionSamplingOptions,
   transaction?: Live2DClockTransaction,
 ): Promise<Record<string, number[]> | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   const MotionQueueManager = (window as any).MotionQueueManager;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   const UtSystem = (window as any).UtSystem;
   if (typeof MotionQueueManager !== 'function' || !UtSystem) return null;
   if (typeof UtSystem.getUserTimeMSec !== 'function' || typeof UtSystem.setUserTimeMSec !== 'function') return null;

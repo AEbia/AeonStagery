@@ -75,6 +75,7 @@ export function useTimelineListEditing(
     await commands.delete([id]);
   }, [commands]);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared library callback receives either statement or legacy/template data selected at runtime; decoding stays at the authoring boundary.
   const handleSelectActionFromLibrary = useCallback(async (type: 'statement' | 'template', data: any) => {
     if (blockOfflineAuthoring()) return;
     if (!semanticAuthoring || !activeGapMenu || gapInsertPendingRef.current) return;

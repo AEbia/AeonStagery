@@ -2,9 +2,13 @@ import * as PIXI from 'pixi.js';
 import { CUBISM2_DEFAULT_PARAMS } from './Live2DConfig';
 
 export class Live2DCompositeModel extends PIXI.Container {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public mainModel: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public subModels: any[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public internalModel: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public idleSnapshot: any;
 
   private _anchor = new PIXI.ObservablePoint({
@@ -25,6 +29,7 @@ export class Live2DCompositeModel extends PIXI.Container {
     this.pivot.y = bounds.y + this._anchor.y * bounds.height;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   constructor(mainModel: any, subModels: any[]) {
     super();
     this.mainModel = mainModel;
@@ -78,6 +83,7 @@ export class Live2DCompositeModel extends PIXI.Container {
   /**
    * Enumerate all concrete Live2D model instances managed by this composite.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public getAllModels(): any[] {
     return [this.mainModel, ...this.subModels].filter(Boolean);
   }
@@ -131,6 +137,7 @@ export class Live2DCompositeModel extends PIXI.Container {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composite models delegate to different Cubism SDK model families whose internal APIs are incompatible and only known at runtime.
   public syncSubModelParameters(subModel: any): void {
     const mainCore = this.mainModel?.internalModel?.coreModel;
     const subCore = subModel?.internalModel?.coreModel;
@@ -180,7 +187,7 @@ export class Live2DCompositeModel extends PIXI.Container {
     }
 
     // 2. Dynamic sync loop for real-time injected parameter overrides (e.g. lip sync, custom sways)
-    const entry = (this as any)._characterEntry;
+    const entry = (this as typeof this & { _characterEntry?: Pick<import('./Live2DConfig').CharacterEntry, 'id' | 'injectedParams'> })._characterEntry;
     if (entry && entry.injectedParams) {
       for (const key in entry.injectedParams) {
         const subIndex = subCore.getParamIndex(key);
@@ -198,7 +205,7 @@ export class Live2DCompositeModel extends PIXI.Container {
   /**
    * Safely destroys both the composite container and all constituent models
    */
-  public destroy(options?: any): void {
+  public destroy(options?: Parameters<PIXI.Container['destroy']>[0]): void {
     // 1. Remove all children from this container first to prevent double-destruction
     this.removeChildren();
 

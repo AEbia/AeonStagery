@@ -48,6 +48,28 @@ const UI_LAYERS: LayerName[] = [
   'overlay',
 ];
 
+/** Metadata owned by the stage and attached to Pixi display objects. */
+type StageDisplay = PIXI.Container & {
+  imageTargetId?: string;
+  z?: number;
+  x_orig?: number;
+  y_orig?: number;
+  scale_orig?: number;
+  rotation_orig?: number;
+  parallaxDepth?: number;
+  drawOrder?: number;
+  __imageKey?: string;
+  __baseAlpha?: number;
+  __transitionAlpha?: number;
+  __layoutMode?: EnvironmentLayerRenderState['layoutMode'];
+  __tileScaleX?: number;
+  __tileScaleY?: number;
+  __tileOffsetX?: number;
+  __tileOffsetY?: number;
+  __outgoingEnvironmentTransform?: Partial<EnvironmentLayerRenderState>;
+  __environmentTransform?: Partial<EnvironmentLayerRenderState>;
+};
+
 interface ImageLayerState {
   id: string;
   file: string;
@@ -128,6 +150,7 @@ class StageManager {
     // with a background image path that resolves to undefined.
     if (PIXI.Assets && PIXI.Assets.load) {
       const _origLoad = PIXI.Assets.load.bind(PIXI.Assets);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The null-filtering wrapper preserves Pixi Assets.load overloads for single, array, and object requests; a closed signature would narrow the third-party API.
       PIXI.Assets.load = function (urls: any, onProgress?: any): Promise<any> {
         if (urls === undefined || urls === null) {
           console.warn(
@@ -137,7 +160,7 @@ class StageManager {
           return Promise.reject(new Error('Cannot load undefined/null URL'));
         }
         if (Array.isArray(urls)) {
-          const filtered = urls.filter((u: any) => u != null);
+          const filtered = urls.filter((u: unknown) => u != null);
           if (filtered.length !== urls.length) {
             console.warn(
               `[StageManager] PIXI.Assets.load called with array containing null/undefined entries. Original: ${urls.length}, filtered: ${filtered.length}`,
@@ -156,7 +179,7 @@ class StageManager {
     // AeonStagery is a non-interactive video renderer, we don't need pointer events.
     this.app.stage.interactiveChildren = false;
     if ('eventMode' in this.app.stage) {
-      (this.app.stage as any).eventMode = 'none';
+      this.app.stage.eventMode = 'none';
     }
 
     // ─── Two-tier container hierarchy ───
@@ -174,7 +197,7 @@ class StageManager {
     let zIndex = 0;
     for (const name of SCENE_LAYERS) {
       const layer = new PIXI.Container();
-      (layer as any).name = name;
+      layer.name = name;
       layer.sortableChildren = true;
       layer.zIndex = zIndex * 10;
       zIndex++;
@@ -185,7 +208,7 @@ class StageManager {
     // Create UI layers (camera-independent)
     for (const name of UI_LAYERS) {
       const layer = new PIXI.Container();
-      (layer as any).name = name;
+      layer.name = name;
       layer.sortableChildren = true;
       this.layers.set(name, layer);
       this.uiContainer.addChild(layer);
@@ -380,7 +403,7 @@ class StageManager {
     if (!container) {
       container = new PIXI.Container();
       container.sortableChildren = true;
-      (container as any).name = `environment:${layerId}`;
+      container.name = `environment:${layerId}`;
       this.environmentLayerEntries.set(layerId, container);
       bgLayer.addChild(container);
     }
@@ -458,14 +481,14 @@ class StageManager {
       tileOffsetY?: number;
     },
   ): void {
-    (display as any).__imageKey = imagePath;
-    (display as any).__baseAlpha = (display as any).__baseAlpha ?? 1;
-    (display as any).__transitionAlpha = (display as any).__transitionAlpha ?? 1;
-    (display as any).__layoutMode = options?.layoutMode ?? 'cover';
-    (display as any).__tileScaleX = options?.tileScaleX;
-    (display as any).__tileScaleY = options?.tileScaleY;
-    (display as any).__tileOffsetX = options?.tileOffsetX;
-    (display as any).__tileOffsetY = options?.tileOffsetY;
+    (display as StageDisplay).__imageKey = imagePath;
+    (display as StageDisplay).__baseAlpha = (display as StageDisplay).__baseAlpha ?? 1;
+    (display as StageDisplay).__transitionAlpha = (display as StageDisplay).__transitionAlpha ?? 1;
+    (display as StageDisplay).__layoutMode = options?.layoutMode ?? 'cover';
+    (display as StageDisplay).__tileScaleX = options?.tileScaleX;
+    (display as StageDisplay).__tileScaleY = options?.tileScaleY;
+    (display as StageDisplay).__tileOffsetX = options?.tileOffsetX;
+    (display as StageDisplay).__tileOffsetY = options?.tileOffsetY;
   }
 
   async setEnvironmentLayer(layerId: string, imagePath: string, options?: {
@@ -498,15 +521,15 @@ class StageManager {
 
     const sprite = this.createEnvironmentSprite(texture, options?.layoutMode);
     this.applyEnvironmentDisplayMetadata(sprite, imagePath, options);
-    (sprite as any).__baseAlpha = 1;
-    (sprite as any).__transitionAlpha = 1;
+    (sprite as StageDisplay).__baseAlpha = 1;
+    (sprite as StageDisplay).__transitionAlpha = 1;
 
     if (options?.transition === 'fadeIn') {
       container.removeChildren().forEach((child) => child.destroy());
-      (sprite as any).__transitionAlpha = 0;
+      (sprite as StageDisplay).__transitionAlpha = 0;
       container.addChild(sprite);
       this.applyEnvironmentLayerTransform(layerId, options ?? {});
-      gsap.to(sprite as any, {
+      gsap.to(sprite, {
         __transitionAlpha: 1,
         duration: options?.duration ?? 1,
         ease: 'power2.out',
@@ -517,21 +540,21 @@ class StageManager {
     if (options?.transition === 'crossFade') {
       const oldChildren = [...container.children];
       oldChildren.forEach((child) => {
-        (child as any).__outgoingEnvironmentTransform = { ...(child as any).__environmentTransform };
+        (child as StageDisplay).__outgoingEnvironmentTransform = { ...(child as StageDisplay).__environmentTransform };
       });
-      (sprite as any).__transitionAlpha = 0;
+      (sprite as StageDisplay).__transitionAlpha = 0;
       container.addChild(sprite);
       this.applyEnvironmentLayerTransform(layerId, options ?? {});
       const duration = options?.duration ?? 1;
 
-      gsap.to(sprite as any, {
+      gsap.to(sprite, {
         __transitionAlpha: 1,
         duration,
         ease: 'linear',
       });
 
       oldChildren.forEach((child) => {
-        gsap.to(child as any, {
+        gsap.to(child, {
           __transitionAlpha: 0,
           duration,
           ease: 'linear',
@@ -598,11 +621,11 @@ class StageManager {
     const currentImages = new Set(desiredImages.map((entry) => entry.image));
 
     for (const child of [...container.children]) {
-      const imageKey = (child as any).__imageKey;
-      const childLayoutMode = (child as any).__layoutMode ?? 'cover';
+      const imageKey = (child as StageDisplay).__imageKey;
+      const childLayoutMode = (child as StageDisplay).__layoutMode ?? 'cover';
       const desiredImage = desiredImages.find((entry) => entry.image === imageKey);
       const layoutMode = desiredImage?.transform?.layoutMode ?? layer.layoutMode ?? 'cover';
-      if (!currentImages.has(imageKey) || childLayoutMode !== layoutMode) {
+      if (imageKey === undefined || !currentImages.has(imageKey) || childLayoutMode !== layoutMode) {
         container.removeChild(child);
         child.destroy();
       }
@@ -612,7 +635,7 @@ class StageManager {
       const imageTransform = { ...layer, ...imageEntry.transform };
       const layoutMode = imageTransform.layoutMode ?? 'cover';
       let sprite = container.children.find((child) => {
-        return (child as any).__imageKey === imageEntry.image && ((child as any).__layoutMode ?? 'cover') === layoutMode;
+        return (child as StageDisplay).__imageKey === imageEntry.image && ((child as StageDisplay).__layoutMode ?? 'cover') === layoutMode;
       }) as PIXI.Sprite | PIXI.TilingSprite | undefined;
       if (!sprite) {
         const texture = await this.loadEnvironmentTexture(imageEntry.image);
@@ -628,9 +651,9 @@ class StageManager {
         tileOffsetX: imageTransform.tileOffsetX,
         tileOffsetY: imageTransform.tileOffsetY,
       });
-      (sprite as any).__outgoingEnvironmentTransform = imageEntry.transform;
-      (sprite as any).__baseAlpha = imageEntry.weight;
-      (sprite as any).__transitionAlpha = 1;
+      (sprite as StageDisplay).__outgoingEnvironmentTransform = imageEntry.transform;
+      (sprite as StageDisplay).__baseAlpha = imageEntry.weight;
+      (sprite as StageDisplay).__transitionAlpha = 1;
     }
 
     container.visible = desiredImages.length > 0;
@@ -664,12 +687,12 @@ class StageManager {
       const sprite = child as PIXI.Sprite | PIXI.TilingSprite;
       if (!sprite.texture) return;
       // Cross-fades retain the outgoing artwork's authored transform, including under camera updates.
-      const config = { ...layerConfig, ...(sprite as any).__outgoingEnvironmentTransform };
-      (sprite as any).__environmentTransform = createEnvironmentState({
-        ...(sprite as any).__environmentTransform,
+      const config = { ...layerConfig, ...(sprite as StageDisplay).__outgoingEnvironmentTransform };
+      (sprite as StageDisplay).__environmentTransform = createEnvironmentState({
+        ...(sprite as StageDisplay).__environmentTransform,
         ...config,
         layerId,
-        layoutMode: config.layoutMode ?? (sprite as any).__layoutMode,
+        layoutMode: config.layoutMode ?? (sprite as StageDisplay).__layoutMode,
       });
       const x = (config.x ?? 0.5) * STAGE_WIDTH;
       const y = (config.y ?? 0.5) * STAGE_HEIGHT;
@@ -691,19 +714,19 @@ class StageManager {
 
       if (config.scale !== undefined) {
         const effectiveScale = camera ? config.scale * camera.zoom : config.scale;
-        const layoutMode = (config.layoutMode ?? (sprite as any).__layoutMode ?? 'cover') as EnvironmentLayerRenderState['layoutMode'];
+        const layoutMode = (config.layoutMode ?? (sprite as StageDisplay).__layoutMode ?? 'cover') as EnvironmentLayerRenderState['layoutMode'];
         if (layoutMode === 'tile' && sprite instanceof PIXI.TilingSprite) {
           sprite.width = STAGE_WIDTH;
           sprite.height = STAGE_HEIGHT;
           sprite.pivot.set(STAGE_WIDTH / 2, STAGE_HEIGHT / 2);
           sprite.scale.set(effectiveScale);
           sprite.tileScale.set(
-            (config.tileScaleX ?? (sprite as any).__tileScaleX ?? 1),
-            (config.tileScaleY ?? (sprite as any).__tileScaleY ?? 1),
+            (config.tileScaleX ?? (sprite as StageDisplay).__tileScaleX ?? 1),
+            (config.tileScaleY ?? (sprite as StageDisplay).__tileScaleY ?? 1),
           );
           sprite.tilePosition.set(
-            (config.tileOffsetX ?? (sprite as any).__tileOffsetX ?? 0) * STAGE_WIDTH,
-            (config.tileOffsetY ?? (sprite as any).__tileOffsetY ?? 0) * STAGE_HEIGHT,
+            (config.tileOffsetX ?? (sprite as StageDisplay).__tileOffsetX ?? 0) * STAGE_WIDTH,
+            (config.tileOffsetY ?? (sprite as StageDisplay).__tileOffsetY ?? 0) * STAGE_HEIGHT,
           );
         } else {
           const scaleX = STAGE_WIDTH / sprite.texture.width;
@@ -716,12 +739,12 @@ class StageManager {
       const authoredRotation = config.rotation ?? (sprite as any).__environmentTransform?.rotation ?? 0;
       sprite.angle = authoredRotation - (camera?.rotation ?? 0);
       if (config.opacity !== undefined) {
-        const baseAlpha = (sprite as any).__baseAlpha ?? 1;
-        const transitionAlpha = (sprite as any).__transitionAlpha ?? 1;
+        const baseAlpha = (sprite as StageDisplay).__baseAlpha ?? 1;
+        const transitionAlpha = (sprite as StageDisplay).__transitionAlpha ?? 1;
         sprite.alpha = config.opacity * baseAlpha * transitionAlpha * (config.opacityMultiplier ?? 1);
       } else if (config.opacityMultiplier !== undefined) {
-        const baseAlpha = (sprite as any).__baseAlpha ?? 1;
-        const transitionAlpha = (sprite as any).__transitionAlpha ?? 1;
+        const baseAlpha = (sprite as StageDisplay).__baseAlpha ?? 1;
+        const transitionAlpha = (sprite as StageDisplay).__transitionAlpha ?? 1;
         sprite.alpha = baseAlpha * transitionAlpha * config.opacityMultiplier;
       }
     });
@@ -768,7 +791,7 @@ class StageManager {
 
     const children = [...container.children];
     children.forEach((child) => {
-      gsap.to(child as any, {
+      gsap.to(child, {
         __transitionAlpha: 0,
         duration,
         ease: 'linear',
@@ -890,7 +913,7 @@ class StageManager {
       this.destroyImageStateSprite(state);
     }
 
-    const placeholderTexture = (PIXI.Texture as any).EMPTY ?? (PIXI.Texture as any).WHITE;
+    const placeholderTexture = PIXI.Texture.EMPTY ?? PIXI.Texture.WHITE;
     const sprite = placeholderTexture
       ? new PIXI.Sprite(placeholderTexture)
       : new PIXI.Sprite();
@@ -905,10 +928,10 @@ class StageManager {
     }
 
     if (config.id) {
-      (sprite as any).imageTargetId = config.id;
+      (sprite as StageDisplay).imageTargetId = config.id;
       this.imageSprites.set(config.id, sprite);
     }
-    (sprite as any).name = `image:${file}`;
+    sprite.name = `image:${file}`;
 
     effectsLayer.addChild(sprite);
     imageState.sprite = sprite;
@@ -1231,15 +1254,15 @@ class StageManager {
     if (effectsLayer) {
       for (const child of effectsLayer.children) {
         const sprite = child as PIXI.Sprite;
-        const name = (sprite as any).name;
-        if ((sprite as any).imageTargetId || (typeof name === 'string' && name.startsWith('image:'))) {
+        const name = sprite.name;
+        if ((sprite as StageDisplay).imageTargetId || (typeof name === 'string' && name.startsWith('image:'))) {
           sprites.add(sprite);
         }
       }
     }
 
     for (const sprite of sprites) {
-      const id = (sprite as any).imageTargetId;
+      const id = (sprite as StageDisplay).imageTargetId;
       if (typeof id === 'string') {
         this.imageSprites.delete(id);
         const state = this.imageStates.get(id);
@@ -1268,7 +1291,7 @@ class StageManager {
       rotation: sprite?.angle ?? 0,
       opacity: sprite?.alpha ?? 1,
       zIndex: sprite?.zIndex ?? 10,
-      z: sprite ? (sprite as any).z : undefined,
+      z: sprite ? (sprite as StageDisplay).z : undefined,
       active: Boolean(sprite),
       planned: false,
       requestVersion: 0,
@@ -1373,14 +1396,15 @@ class StageManager {
     sprite.alpha = state.opacity;
     sprite.zIndex = state.zIndex;
 
-    (sprite as any).x_orig = state.x;
-    (sprite as any).y_orig = state.y;
-    (sprite as any).scale_orig = state.scale;
-    (sprite as any).rotation_orig = state.rotation;
+    const display = sprite as StageDisplay;
+    display.x_orig = state.x;
+    display.y_orig = state.y;
+    display.scale_orig = state.scale;
+    display.rotation_orig = state.rotation;
     if (state.z !== undefined) {
-      (sprite as any).z = state.z;
+      display.z = state.z;
     } else {
-      delete (sprite as any).z;
+      delete display.z;
     }
   }
 
@@ -1446,13 +1470,13 @@ class StageManager {
     if (!effectsLayer) return;
 
     for (const child of effectsLayer.children) {
-      const sprite = child as any;
+      const sprite = child as StageDisplay;
       if (sprite.x_orig !== undefined && sprite.y_orig !== undefined) {
         const projected = projectToScreen(
           {
             x: sprite.x_orig * STAGE_WIDTH,
             y: sprite.y_orig * STAGE_HEIGHT,
-            scale: sprite.scale_orig,
+            scale: sprite.scale_orig ?? 1,
             rotation: sprite.rotation_orig ?? 0,
             parallaxDepth: sprite.parallaxDepth ?? sprite.z,
             drawOrder: sprite.drawOrder ?? sprite.z,

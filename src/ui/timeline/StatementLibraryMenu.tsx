@@ -24,6 +24,7 @@ interface StatementLibraryMenuProps {
   readonly templates?: SourcedSemanticAuthoringCombo[];
   readonly onPaste?: (time: number) => void;
   readonly hasCopyBuffer?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared selection callback carries statement blocks and legacy/template payloads whose shapes are selected at runtime.
   readonly onSelectAction: (type: 'statement' | 'template', data: any) => void;
   readonly onDismiss?: () => void;
   readonly availableLifecycleEndCommandIds?: ReadonlySet<string>;

@@ -13,6 +13,7 @@ function addStringRef(refs: Set<string>, value: unknown): void {
   refs.add(value);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Bundle discovery reads heterogeneous Cubism/WMDL JSON and preserves extension formats; SDK-specific fields remain local to reference extraction.
 export function collectLive2DModelJsonRawReferences(modelJson: any): string[] {
   const refs = new Set<string>();
   addStringRef(refs, modelJson.model);
@@ -63,6 +64,7 @@ export function collectLive2DModelJsonRawReferences(modelJson: any): string[] {
   return Array.from(refs);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Bundle discovery reads heterogeneous Cubism/WMDL JSON and preserves extension formats; SDK-specific fields remain local to reference extraction.
 export function collectWmdlRawReferences(wmdl: any): string[] {
   const refs = new Set<string>();
   addStringRef(refs, wmdl.modelRelativePath);
@@ -72,6 +74,7 @@ export function collectWmdlRawReferences(wmdl: any): string[] {
   return Array.from(refs);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Bundle discovery reads heterogeneous Cubism/WMDL JSON and preserves extension formats; SDK-specific fields remain local to reference extraction.
 export function collectLive2DAssetBundleRawReferences(parsedEntrypoint: any, entrypointPath: string): string[] {
   const entry = describeLive2DModelEntrypoint(entrypointPath, parsedEntrypoint);
   return entry.format === 'wmdl'
@@ -80,6 +83,7 @@ export function collectLive2DAssetBundleRawReferences(parsedEntrypoint: any, ent
 }
 
 export function collectLive2DAssetBundleDependencyPaths(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Bundle discovery reads heterogeneous Cubism/WMDL JSON and preserves extension formats; SDK-specific fields remain local to reference extraction.
   parsedEntrypoint: any,
   entrypointPath: ProjectRelativeAssetPath,
 ): ProjectRelativeAssetPath[] {
@@ -128,6 +132,7 @@ export async function collectLive2DAssetBundleClosure(
     if (visitedSources.has(sourceKey)) continue;
     visitedSources.add(sourceKey);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Bundle discovery reads heterogeneous Cubism/WMDL JSON and preserves extension formats; SDK-specific fields remain local to reference extraction.
     let parsed: any;
     try {
       parsed = JSON.parse(await adapter.readText(current.sourcePath));

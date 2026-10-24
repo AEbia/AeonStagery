@@ -27,7 +27,9 @@ export interface SemanticSourcePanelProps {
   action: TimelineAction;
   actionType: string;
   actionId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   sourceParams: Record<string, any>;
   sceneData: TimelineScene;
   isIntegrationVisualAction: boolean;

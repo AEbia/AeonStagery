@@ -1,15 +1,16 @@
 interface DesiredDialogue {
-  _id: string;
+  _id?: string;
   text: string;
   startTime: number;
   duration?: number;
   speakerId?: string;
   voice?: string;
-  lipSync?: 'audio' | 'text' | 'none';
+  lipSync?: boolean | 'audio' | 'text' | 'none';
 }
 
 interface SubtitleMuscle {
   setDialogueVisibility(visible: boolean, opacity: number): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Seek supplies reconstructed dialogue fields while the legacy renderer declares an authoring-only config; this bridge preserves both accepted runtime shapes.
   ensureDialogueOnStage(dialogue: any, offset: number): void;
   getCurrentTimeline(): gsap.core.Timeline | null;
   forceUpdate(): void;
@@ -35,7 +36,7 @@ export class DialogueCoordinator {
   private lipSync: LipSyncMuscle;
 
   // Active dialogue tracking state
-  private activeDialogueId: string | null = null;
+  private activeDialogueId: string | null | undefined = null;
   private activeDialogueStartTime: number = 0;
   private activeSpeakerId: string | null = null;
   private activeVoiceKey: string | null = null;
@@ -168,7 +169,7 @@ export class DialogueCoordinator {
     }
   }
 
-  getActiveDialogueId(): string | null {
+  getActiveDialogueId(): string | null | undefined {
     return this.activeDialogueId;
   }
 

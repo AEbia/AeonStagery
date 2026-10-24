@@ -17,7 +17,7 @@ interface PlaybackEngine {
   getDuration(): number;
   setSilentMode(v: boolean): void;
   getBasePath(): string;
-  getMasterTimeline(): any;
+  getMasterTimeline(): gsap.core.Timeline | null | undefined;
   setBasePath?(path: string): void;
 }
 
@@ -108,7 +108,7 @@ export class PlaybackAdapter implements IPlaybackAdapter {
   getDuration(): number { return this.engine.getDuration(); }
   setSilentMode(v: boolean): void { this.engine.setSilentMode(v); }
   getBasePath(): string { return this.engine.getBasePath(); }
-  getMasterTimeline(): any { return this.engine.getMasterTimeline(); }
+  getMasterTimeline(): gsap.core.Timeline | null | undefined { return this.engine.getMasterTimeline(); }
   setBasePath(path: string): void {
     if (this.engine.setBasePath) {
       this.engine.setBasePath(path);

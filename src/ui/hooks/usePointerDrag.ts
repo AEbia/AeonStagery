@@ -46,7 +46,7 @@ export function usePointerDrag(options: UsePointerDragOptions) {
 
     // Set pointer capture if supported
     const target = e.currentTarget as Element;
-    const pointerId = (e as any).pointerId;
+    const pointerId = e.pointerId;
     if (target && typeof target.setPointerCapture === 'function' && pointerId !== undefined) {
       try {
         target.setPointerCapture(pointerId);

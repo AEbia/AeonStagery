@@ -129,7 +129,7 @@ function renderNamebox(
   const speakerText = new PIXI.Text({ text: config.speaker, style: {
     fontFamily: speakerStyle?.fontFamily || presentation.text.fontFamily || DEFAULT_FONT_FAMILY,
     fontSize: speakerStyle?.fontSize ?? Math.round((presentation.text.fontSize ?? config.fontSize ?? 44) * 0.9),
-    fontWeight: (speakerStyle?.fontWeight || '700') as any,
+    fontWeight: (speakerStyle?.fontWeight || '700') as import('pixi.js').TextStyleOptions['fontWeight'],
     fill: color,
     letterSpacing: speakerStyle?.letterSpacing ?? 0,
     align: speakerStyle?.align ?? 'center',

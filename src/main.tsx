@@ -12,6 +12,13 @@ import { motionCurveCache } from './engine/live2d/motionCurveCache';
 import { initLive2DRuntimeAvailability } from './engine/Live2DRuntimeAvailability';
 import './index.css';
 
+declare global {
+  interface Window {
+    __AEON_SEEK_PROFILER?: boolean;
+    __AEON_MOTION_CURVE_CACHE?: typeof motionCurveCache;
+  }
+}
+
 console.log('[AeonStagery] Starting application...');
 
 // Wire runtime-family availability probes (main-process seed report + the
@@ -26,8 +33,8 @@ initLive2DRuntimeAvailability();
 // (packaged builds can opt in the same way). The curve cache is exposed for
 // console inspection (size / keys / invalidate / clear).
 if (import.meta.env.DEV && typeof window !== 'undefined') {
-  if ((window as any).__AEON_SEEK_PROFILER !== false) seekProfiler.setEnabled(true);
-  (window as any).__AEON_MOTION_CURVE_CACHE = motionCurveCache;
+  if (window.__AEON_SEEK_PROFILER !== false) seekProfiler.setEnabled(true);
+  window.__AEON_MOTION_CURVE_CACHE = motionCurveCache;
 }
 
 const surfaceParam = new URLSearchParams(window.location.search).get('surface');
@@ -46,7 +53,7 @@ installManualCrashHotkey();
 
 // Pull real environment metadata from the main process so crash reports are
 // not full of "unknown" fields.
-const crashApi = (window as unknown as { aeonStageryAPI?: any }).aeonStageryAPI?.crash;
+const crashApi = window.aeonStageryAPI?.crash;
 if (crashApi?.getEnvironment) {
   crashApi.getEnvironment()
     .then((env: Partial<import('./api/types/crash').CrashEnvironmentInfo>) => setCrashEnvironmentOverride(env))

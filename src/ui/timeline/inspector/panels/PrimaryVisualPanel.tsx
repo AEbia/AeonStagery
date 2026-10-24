@@ -10,6 +10,7 @@ export interface PrimaryVisualPanelProps {
   actionType: string;
   action: TimelineAction;
   sceneData: TimelineScene;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
   actionId: string;
   updateAction: ActionInspectorProps['updateAction'];

@@ -58,7 +58,7 @@ export function TimelineDragProvider({ children }: { children: React.ReactNode }
     const rawDeltas: Record<string, number> = {};
     
     // We access internal keys from the engine to map pixel delta to delta-time
-    const keys = (engine as any)._keys;
+    const keys = (engine as unknown as { _keys: Record<string, number> | null })._keys;
     if (!keys) return null;
     for (const id of Object.keys(keys)) {
       rawDeltas[id] = deltaPx / pps;
@@ -74,7 +74,7 @@ export function TimelineDragProvider({ children }: { children: React.ReactNode }
 
   const commitBatchDrag = useCallback(() => {
     const engine = engineRef.current;
-    const keys = (engine as any)._keys; // get initial keys before commit resets them
+    const keys = (engine as unknown as { _keys: Record<string, number> | null })._keys; // get initial keys before commit resets them
     const finalDeltas = engine.commit();
     const finalValues: Record<string, number> = {};
     if (keys) {

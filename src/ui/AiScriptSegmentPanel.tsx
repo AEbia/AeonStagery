@@ -34,6 +34,7 @@ function roundTime(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Provider responses may use plain strings or vendor-specific structured content parts; dynamic access is confined to extracting their text.
 function extractStructuredContent(data: any): string {
   const message = data?.choices?.[0]?.message;
   if (!message) {
@@ -47,6 +48,7 @@ function extractStructuredContent(data: any): string {
   }
   if (Array.isArray(message.content)) {
     return message.content
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Provider responses may use plain strings or vendor-specific structured content parts; dynamic access is confined to extracting their text.
       .map((part: any) => typeof part === 'string' ? part : part?.text || '')
       .join('');
   }
@@ -170,9 +172,9 @@ export function AiScriptSegmentPanel({
         compiled: compileAiScriptSegmentPlanToSceneStatements(parsed, semanticDocument),
         anchorTime,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPreview(null);
-      setErrorLog(err?.message || String(err));
+      setErrorLog((err instanceof Error ? err.message : String(err)));
     } finally {
       setIsGenerating(false);
     }
@@ -195,8 +197,8 @@ export function AiScriptSegmentPanel({
       setReceipt(nextReceipt);
       setSelectedIds({});
       showToast(`AI 铺戏已插入 ${nextReceipt.createdStatementIds.length} 个语义语句`, 'success');
-    } catch (err: any) {
-      setErrorLog(err?.message || String(err));
+    } catch (err: unknown) {
+      setErrorLog((err instanceof Error ? err.message : String(err)));
     } finally {
       setIsApplying(false);
     }

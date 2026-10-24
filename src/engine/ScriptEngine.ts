@@ -67,7 +67,7 @@ class ScriptEngine {
   private basePath = '';
   private _seekVersion = 0;
   private _isSeeking = false;
-  private _pendingSeek: { time: number; forceReconstruct: boolean; suppressSeekSideEffects: boolean; resolve: () => void; reject: (err: any) => void } | null = null;
+  private _pendingSeek: { time: number; forceReconstruct: boolean; suppressSeekSideEffects: boolean; resolve: () => void; reject: (err: unknown) => void } | null = null;
   public transformationProxies = new ProxyRegistry();
   private loopStart: number = 0;
   private loopEnd: number = 0;
@@ -481,7 +481,7 @@ class ScriptEngine {
         live2DManager.syncLookAtFollows?.(stateAtTime.characters);
         this.dialogueCoordinator.sync(
           currentTime,
-          dialogueState as any,
+          dialogueState,
           false,
           (src: string) => this.createRuntimeAudio(src),
           (p: string) => this.resolvePathAsync(p),
@@ -517,9 +517,9 @@ class ScriptEngine {
     const charIds = new Set<string>();
     script.meta.characters?.forEach(c => charIds.add(c.id));
     script.timeline.forEach(a => { 
-      if ((a as any).params?.id) charIds.add((a as any).params.id); 
-      if ((a as any).params?.characterId) charIds.add((a as any).params.characterId);
-      if ((a as any).params?.targetCharacter) charIds.add((a as any).params.targetCharacter);
+      if (a.params?.id) charIds.add(a.params.id);
+      if (a.params?.characterId) charIds.add(a.params.characterId);
+      if (a.params?.targetCharacter) charIds.add(a.params.targetCharacter);
     });
     for (const id of charIds) {
       this.transformationProxies.set(id, { x: STAGE_WIDTH / 2, y: STAGE_HEIGHT / 2, scale: 1, rotation: 0, opacity: 1, z: 0 });
@@ -615,6 +615,7 @@ class ScriptEngine {
         },
         clear: () => this.audioCoordinator.clear(),
         values: () => Array.from(this.audioCoordinator.getEntries().values()),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy audio facade supplies Map-like operations backed by AudioCoordinator; it deliberately is not a complete native Map instance.
       } as any,
       takeSnapshot: (t: number) => this.takeSnapshot(t),
       getCurrentTime: () => this.getCurrentTime(),
@@ -624,7 +625,7 @@ class ScriptEngine {
     };
   }
 
-  private setupBGM(bgm: any): void {
+  private setupBGM(bgm: NonNullable<NonNullable<RuntimeTimelineScene['audio']>['bgm']>): void {
     if (!this.masterTimeline) return;
     // Legacy scene-level BGM has no semantic action to compile, but it can
     // still use the same resolver, interval metadata, and linear envelope as
@@ -641,8 +642,8 @@ class ScriptEngine {
     gsap.ticker.remove(this.live2DTransformSync);
     gsap.ticker.add(this.live2DTransformSync);
     this.masterTimeline.play();
-    if (typeof (customAnimHost as any).resume === 'function') {
-      (customAnimHost as any).resume();
+    if (typeof customAnimHost.resume === 'function') {
+      customAnimHost.resume();
     }
     for (const data of this.audioCoordinator.getEntries().values()) data.audio.play().catch(() => { });
     live2DManager.resumeAllTweens(); eventBus.emit('scene:play');
@@ -653,8 +654,8 @@ class ScriptEngine {
     this.setPlaying(false); live2DManager.setAutoUpdate(false); live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
     this.masterTimeline?.pause();
-    if (typeof (customAnimHost as any).pause === 'function') {
-      (customAnimHost as any).pause();
+    if (typeof customAnimHost.pause === 'function') {
+      customAnimHost.pause();
     }
     for (const data of this.audioCoordinator.getEntries().values()) data.audio.pause();
     const time = this.getCurrentTime();
@@ -669,8 +670,8 @@ class ScriptEngine {
     live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
     this.masterTimeline?.pause();
-    if (typeof (customAnimHost as any).pause === 'function') {
-      (customAnimHost as any).pause();
+    if (typeof customAnimHost.pause === 'function') {
+      customAnimHost.pause();
     }
     for (const data of this.audioCoordinator.getEntries().values()) data.audio.pause();
 
@@ -1186,7 +1187,7 @@ class ScriptEngine {
 
     // 4. Synchronize characters using CharacterSynchronizer
     // Convert desiredState Map values to DesiredCharState structure
-    const desiredChars = new Map<string, any>();
+    const desiredChars: Parameters<CharacterSynchronizer['syncTo']>[0]['desiredChars'] = new Map();
     // The expression a seeked frame must fade *out of* is the one the scene had
     // in effect just before the target expression started. Resolving it from
     // the scene (instead of leaving it to the model's live state) keeps a
@@ -1238,7 +1239,7 @@ class ScriptEngine {
     // 5. Synchronize dialogue (takes LipSync + schedules voice audio)
     this.dialogueCoordinator.sync(
       time,
-      desiredDialogue as any,
+      desiredDialogue,
       isScrubbing,
       (src) => this.createRuntimeAudio(src),
       (p) => this.resolvePathAsync(p),
@@ -1267,8 +1268,8 @@ class ScriptEngine {
         invalidateImageReconciliation?: () => void;
       };
       stageWithImageState.invalidateImageReconciliation?.();
-      if (typeof (customAnimHost as any).clear === 'function') {
-        (customAnimHost as any).clear();
+      if (typeof customAnimHost.clear === 'function') {
+        customAnimHost.clear();
       }
       throw error;
     }
@@ -1285,7 +1286,7 @@ class ScriptEngine {
         key: string;
         file: string;
         duration: number;
-        layer: any;
+        layer: import('../api/types/common').LayerName;
         elapsed: number;
         startTime: number;
       }>) => Promise<void>;
@@ -1295,7 +1296,7 @@ class ScriptEngine {
         key: string;
         file: string;
         duration: number;
-        layer: any;
+        layer: import('../api/types/common').LayerName;
         elapsed: number;
         startTime: number;
       }> = [];
@@ -1350,7 +1351,7 @@ class ScriptEngine {
         zIndex?: number;
         z?: number;
       }, epoch?: number) => Promise<unknown>;
-      updateImages?: (camera: { position: any; zoom: number }) => void;
+      updateImages?: (camera: { position: CameraState['position']; zoom: number }) => void;
     };
 
     // Keep the existing lightweight mocks/host integrations usable while the
@@ -1359,7 +1360,7 @@ class ScriptEngine {
       return;
     }
 
-    const validImages = new Map<string, any>();
+    const validImages = new Map<string, import('./RuntimeSceneState').RuntimeImageLayerState>();
     for (const [id, state] of images) {
       if (!state.file.trim()) {
         // Empty resource paths are authoring drafts. The validation daemon
@@ -1370,7 +1371,7 @@ class ScriptEngine {
     }
 
     const epoch = stageWithImageState.beginImageReconciliation(new Set(validImages.keys()));
-    await Promise.all(Array.from(validImages.values()).map(async (state: any) => {
+    await Promise.all(Array.from(validImages.values()).map(async (state) => {
       try {
         const runtimeFile = await this.resolvePathAsync(state.file);
         const materialized = await stageWithImageState.materializeImage!({
@@ -1434,7 +1435,7 @@ class ScriptEngine {
   private async resolvePathAsync(relativePath: string): Promise<string> {
     const normalized = this.normalizeRuntimeAssetPath(relativePath);
     if (!normalized || normalized.startsWith('asset://') || normalized.startsWith('http')) return normalized;
-    const projectResources = (window as any).AeonStagery?.services?.projectResources;
+    const projectResources = window.AeonStagery?.services?.projectResources;
     const isFileSystemAbsolute = /^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('//');
 
     if (projectResources?.getCurrentProject?.() && !normalized.startsWith('file://') && !isFileSystemAbsolute) {
@@ -1634,8 +1635,8 @@ const EXPRESSION_PREDECESSOR_EPSILON_SECONDS = 0.001;
  * source.
  */
 export function resolveExpressionPredecessors(
-  desiredState: ReadonlyMap<string, { expression?: { key: string; time?: number } | null }>,
-  charactersAtTime: (time: number) => ReadonlyMap<string, { expression?: { key: string } | null }>,
+  desiredState: ReadonlyMap<string, { expression?: { key: string | null | undefined; time?: number } | null }>,
+  charactersAtTime: (time: number) => ReadonlyMap<string, { expression?: { key: string | null | undefined } | null }>,
 ): Map<string, string | null> {
   const result = new Map<string, string | null>();
   const byStartTime = new Map<number, Map<string, string | null>>();

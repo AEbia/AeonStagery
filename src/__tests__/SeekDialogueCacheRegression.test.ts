@@ -121,9 +121,12 @@ describe('Seek dialogue cache regression', () => {
     // What computeSceneStateAtTime/DialogueCoordinator passes during seek.
     // It must carry the same resolved speaker fields so the cache key matches.
     const state = computeSceneStateAtTime(scene, 2);
-    expect(state.dialogue.speaker).toBe('Alice');
-    expect(state.dialogue.speakerColor).toBe('#FFD700');
-    renderer.ensureDialogueOnStage(state.dialogue, 1);
+    const dialogue = state.dialogue;
+    expect(dialogue).not.toBeNull();
+    if (!dialogue) throw new Error('Expected an active dialogue at scene time 2');
+    expect(dialogue.speaker).toBe('Alice');
+    expect(dialogue.speakerColor).toBe('#FFD700');
+    renderer.ensureDialogueOnStage(dialogue, 1);
 
     expect(stageState.subtitleLayer.children).toHaveLength(1);
     expect(renderer.getCurrentTimeline()).not.toBeNull();

@@ -12,12 +12,17 @@ import { AUTHORING_SCHEMA_VERSION } from '../api/types/authoring';
 import { usePointerDrag } from './hooks/usePointerDrag';
 import { useEditorSettings } from './store/storeHooks';
 import { buildSemanticTimelineReadModel } from './timeline/semanticTimelineReadModel';
+import type { CameraKeyframe } from '../api/types/camera';
 
 const headPoint = { x: 0, y: 0 };
 const chestPoint = { x: 0, y: 0 };
 
 function createStageOverlayCorrelationId(): string {
   return `stage_overlay_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isCameraPositionTuple(position: CameraKeyframe['position']): position is [number, number] {
+  return Array.isArray(position) && position.length >= 2;
 }
 
 export default function StageOverlay() {
@@ -351,7 +356,7 @@ export default function StageOverlay() {
 
         {/* Camera Path Visual Editor */}
         {selectedAction?.action === 'cameraPath' && (() => {
-          const keyframes: any[] = selectedAction?.params?.keyframes || [];
+          const keyframes: CameraKeyframe[] = selectedAction?.params?.keyframes || [];
           if (keyframes.length < 2) return null;
 
           const stageW = stageWidth;
@@ -359,11 +364,11 @@ export default function StageOverlay() {
 
           // Build positioned keyframe points, preserving original array index
           const points = keyframes
-            .map((kf: any, idx: number) => {
+            .map((kf, idx) => {
               let pos: [number, number] | null = null;
               if (dragOverrides[idx]) {
                 pos = dragOverrides[idx];
-              } else if (Array.isArray(kf.position) && kf.position.length >= 2) {
+              } else if (kf.position && isCameraPositionTuple(kf.position)) {
                 pos = [kf.position[0] ?? 0.5, kf.position[1] ?? 0.5];
               } else if (kf.position && typeof kf.position.x === 'number') {
                 pos = [kf.position.x, kf.position.y ?? 0.5];

@@ -26,7 +26,7 @@ export const CrashScreen: React.FC<CrashScreenProps> = ({
       onRestart();
       return;
     }
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     if (api?.app?.restart) {
       api.app.restart();
     } else {
@@ -55,7 +55,7 @@ export const CrashScreen: React.FC<CrashScreenProps> = ({
   };
 
   const handleOpenFolder = () => {
-    const api = (window as any).aeonStageryAPI;
+    const api = window.aeonStageryAPI;
     if (api?.crash?.openReportDir) {
       api.crash.openReportDir();
     }
@@ -231,7 +231,7 @@ export const CrashScreen: React.FC<CrashScreenProps> = ({
           </button>
 
           {/* Tertiary: Open Directory if available */}
-          {(window as any).aeonStageryAPI?.crash?.openReportDir && (
+          {window.aeonStageryAPI?.crash?.openReportDir && (
             <button
               type="button"
               onClick={handleOpenFolder}

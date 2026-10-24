@@ -6,9 +6,19 @@ let initialized = false;
 let initPromise: Promise<void> | null = null;
 let initError: string | null = null;
 
+function hasCoreVersion(core: unknown): boolean {
+  if (!isPropertyContainer(core)) return false;
+  const version = Reflect.get(core, 'Version');
+  return isPropertyContainer(version)
+    && typeof Reflect.get(version, 'csmGetVersion') === 'function';
+}
+
+function isPropertyContainer(value: unknown): value is object {
+  return value !== null && (typeof value === 'object' || typeof value === 'function');
+}
+
 export function getCubismPixiSdkStatus(): { available: boolean; initialized: boolean; message: string | null } {
-  const available = typeof window !== 'undefined'
-    && typeof (window.Live2DCubismCore as any)?.Version?.csmGetVersion === 'function';
+  const available = typeof window !== 'undefined' && hasCoreVersion(window.Live2DCubismCore);
   return { available, initialized, message: available ? initError : CUBISM_CORE_MISSING_MESSAGE };
 }
 

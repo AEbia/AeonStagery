@@ -209,8 +209,8 @@ export class ProjectWorkspaceService {
         scenePath: sceneAbsolutePath,
         webgalReport,
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -270,8 +270,8 @@ export class ProjectWorkspaceService {
       this.session.setCurrentProject(updatedProject);
 
       return { success: true, scenePath: sceneAbsolutePath, webgalReport: converted.report };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -352,8 +352,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: sceneAbsolutePath,
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -376,8 +376,8 @@ export class ProjectWorkspaceService {
       }
 
       return this.createProjectAt(rootPath, name);
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -406,8 +406,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -442,8 +442,8 @@ export class ProjectWorkspaceService {
       return sceneEntry
         ? { success: true, project, scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path) }
         : { success: false, error: 'Project contains no registered scenes' };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -471,8 +471,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

@@ -1,7 +1,7 @@
 import { memo } from 'react';
 
 interface MarqueeOverlayProps {
-  marqueeRef: React.RefObject<any>;
+  marqueeRef: React.RefObject<HTMLDivElement>;
 }
 
 export const MarqueeOverlay = memo(({ marqueeRef }: MarqueeOverlayProps) => {
