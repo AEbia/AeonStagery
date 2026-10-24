@@ -33,6 +33,7 @@ import { CAMERA_EASING_MAP } from './utils/cameraEasing';
 import { MOVE_HANDLERS, type CameraFocusPositionResolver } from './MoveHandlers';
 import { sampleCameraShake, type CameraShakeOffset } from './CameraShake';
 import { normalizeCharacterEase } from './CharacterAnimationContract';
+import { cameraFollowWeight, FOLLOW_DEFAULT_SMOOTHING } from './CameraFollowSmoothing';
 
 class CameraController {
   /** Virtual camera state (normalized coordinates). Public so move handlers can read current values. */
@@ -558,7 +559,7 @@ class CameraController {
     // and a later spread would otherwise clobber the built-in defaults.
     const merged: CameraFollowConfig = { ...config };
     merged.offset = merged.offset ?? [0, -0.1];
-    merged.smoothing = merged.smoothing ?? 0.85;
+    merged.smoothing = merged.smoothing ?? FOLLOW_DEFAULT_SMOOTHING;
     this.followConfig = merged;
 
     this.registerFollowTicker();
@@ -595,7 +596,7 @@ class CameraController {
    * Tick the follow logic (can be called manually during seek/scrub when ticker is paused).
    *
    * `deltaSeconds` makes the smoothing frame-rate independent; when omitted it
-   * falls back to the legacy per-frame behavior calibrated at a 60fps baseline.
+   * defaults to one frame at 60fps.
    */
   tickFollow(forceInstant: boolean = false, deltaSeconds: number = 1 / 60): void {
     if (!this.followTarget) return;
@@ -605,19 +606,16 @@ class CameraController {
 
     const currentPos = this.state.position as { x: number; y: number };
     const offset = resolveVec2(this.followConfig.offset ?? [0, 0]);
-    // Same viewport clamp as hitchcockZoom(): keep the view inside the
-    // stage extent for the current zoom so tracking never reveals black edges.
-    const zoom = this.state.zoom > 0 ? this.state.zoom : 1;
-    const halfView = 0.5 / zoom;
-    const targetX = Math.max(halfView, Math.min(pos.x + offset.x, 1 - halfView));
-    const targetY = Math.max(halfView, Math.min(pos.y + offset.y, 1 - halfView));
+    // Pursue the world-space anchor directly, including beyond stage edges.
+    const targetX = pos.x + offset.x;
+    const targetY = pos.y + offset.y;
 
     let alpha: number;
     if (forceInstant) {
       alpha = 1;
     } else {
-      const smoothing = this.followConfig.smoothing ?? 0.85;
-      alpha = 1 - Math.pow(smoothing, Math.max(0, deltaSeconds) * 60);
+      const smoothing = this.followConfig.smoothing ?? FOLLOW_DEFAULT_SMOOTHING;
+      alpha = 1 - cameraFollowWeight(smoothing, deltaSeconds);
     }
 
     currentPos.x += (targetX - currentPos.x) * alpha;

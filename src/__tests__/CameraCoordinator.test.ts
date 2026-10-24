@@ -65,7 +65,7 @@ describe('CameraCoordinator', () => {
     expect(controller.applyShakeOffset).toHaveBeenCalledWith({ x: 0, y: 0 });
   });
 
-  it.each([false, true])('clamps a reconstructed follow with the zoom curve after newer zoom writes (stopped: %s)', stopped => {
+  it.each([false, true])('reconstructs follow independently of newer zoom writes (stopped: %s)', stopped => {
     const timeline: RuntimeTimelineAction[] = [
       { _id: 'seed-zoom', action: 'cameraMotion', time: 0,
         params: { move: 'zoom', zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
@@ -82,7 +82,7 @@ describe('CameraCoordinator', () => {
       resolveCharacterPositionAtTime: () => ({ x: 0.95, y: 0.95 }),
     });
     expect(controller.applyResolvedState).toHaveBeenLastCalledWith({
-      position: { x: expect.closeTo(5 / 6, 8), y: expect.closeTo(5 / 6, 8) },
+      position: { x: 0.95, y: 0.95 },
       zoom: stopped ? 4 : 3, rotation: 0,
     });
   });
@@ -330,12 +330,10 @@ describe('CameraCoordinator', () => {
     coordinator.sync(6.0, timeline as any, deps);
     expect(controller.follow).toHaveBeenCalled();
     expect(controller.tickFollow).toHaveBeenCalledWith(true);
-    // Anchor (0.7,0.6) + default offset none → clamped into the zoom-2
-    // viewport. One second past the entry transient only a ~1e-5 glide
-    // residue remains.
+    // One second of pursuit from entry (0.5,0.4) toward anchor (0.7,0.6).
     const lastPatch = (controller.applyResolvedState as any).mock.calls.at(-1)?.[0];
-    expect(lastPatch.position.x).toBeCloseTo(0.7, 4);
-    expect(lastPatch.position.y).toBeCloseTo(0.6, 4);
+    expect(lastPatch.position.x).toBeCloseTo(0.7 - 0.2 * 10 ** (-1 / 1.7), 8);
+    expect(lastPatch.position.y).toBeCloseTo(0.6 - 0.2 * 10 ** (-1 / 1.7), 8);
     expect(lastPatch.zoom).toBe(2);
   });
 });

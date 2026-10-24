@@ -85,6 +85,8 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     vi.spyOn(live2DManager, 'getPoint').mockImplementation(anchorFor);
     vi.spyOn(live2DManager, 'getPosition').mockImplementation(anchorFor);
     const { master } = await load([
+      { id: 'enter', type: 'characterPresence', time: 0,
+        params: { mode: 'enter', id: 'hero', position: [0.5, 0.5], durationSeconds: 0 } },
       { id: 'zoom', type: 'camera', time: 0,
         params: { mode: 'move', zoom: { kind: 'absolute', value: 2 }, durationSeconds: 0 } },
       { id: 'follow', type: 'camera', time: 1,
@@ -106,6 +108,28 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     master.seek(2.1, false);
     cameraController.tickFollow(true);
     expect(engine.getCurrentCamera()).toEqual(authored);
+  });
+
+  it('tracks the character below unit zoom across playback and seek', async () => {
+    const anchor = { x: 0.2, y: 0.3 };
+    vi.spyOn(live2DManager, 'getPoint').mockReturnValue(anchor);
+    vi.spyOn(live2DManager, 'getPosition').mockReturnValue(anchor);
+    const { master } = await load([
+      { id: 'enter', type: 'characterPresence', time: 0,
+        params: { mode: 'enter', id: 'hero', position: [0.5, 0.5], durationSeconds: 0 } },
+      { id: 'zoom', type: 'camera', time: 0,
+        params: { mode: 'move', zoom: { kind: 'absolute', value: 0.8 }, durationSeconds: 0 } },
+      { id: 'follow', type: 'camera', time: 1,
+        params: { mode: 'follow', operation: 'start', target: 'hero', offset: [0, 0], smoothing: 0 } },
+    ]);
+
+    master.seek(0.99, false);
+    master.seek(1.1, false);
+    cameraController.tickFollow(true);
+    expect(engine.getCurrentCamera().position).toEqual(anchor);
+    await engine.seek(2, true);
+    expect(engine.getCurrentCamera().position).toEqual(anchor);
+    expect(engine.getCurrentCamera().zoom).toBe(0.8);
   });
 
   it('starts follow from an earlier same-time position write and retains that entry frame', async () => {
@@ -139,7 +163,7 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     master.seek(0.75, false);
     master.seek(1.05, false);
     expect(engine.getCurrentCamera().position).toEqual({ x: 0.7, y: 0.3 });
-    cameraController.tickFollow(false, 1 / 60);
+    cameraController.tickFollow(false, Math.log10(2));
     const pursued = engine.getCurrentCamera();
     expect(pursued.position).toEqual({ x: 0.6, y: 0.4 });
     master.seek(1.1, false);
@@ -274,10 +298,12 @@ describe('formal camera channels (real engine, scheduler, controller and coordin
     const point = { x: 0.7, y: 0.3 };
     vi.spyOn(live2DManager, 'getPoint').mockImplementation(() => point);
     vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.5, y: 0.5 });
-    const statements: CurrentSceneDocument['statements'] = [{
-      id: 'focus', type: 'camera', time: 1,
-      params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 2, ease: 'linear' },
-    }];
+    const statements: CurrentSceneDocument['statements'] = [
+      { id: 'enter', type: 'characterPresence', time: 0,
+        params: { mode: 'enter', id: 'hero', position: [0.5, 0.5], durationSeconds: 0 } },
+      { id: 'focus', type: 'camera', time: 1,
+        params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 2, ease: 'linear' } },
+    ];
     const { master } = await load(statements);
     master.seek(1.5, false);
     expect(cameraController.getState().position).toEqual({ x: expect.closeTo(0.55, 8), y: expect.closeTo(0.45, 8) });

@@ -58,17 +58,17 @@ describe('StageOverlay character anchors', () => {
     vi.unstubAllGlobals();
   });
 
-  function setup(camera: CameraState) {
+  function setup(camera: CameraState, rotation = 0, flipX = false) {
     const manager = new Live2DManager();
     const container = new Container();
     const model = new Container();
     model.boundsArea = new Rectangle(-50, -100, 100, 200);
     container.addChild(model);
     live2DStageState(manager).characters = new Map([['hero', {
-      id: 'hero', model, baseHeight: 200, config: {},
+      id: 'hero', model, baseHeight: 200, config: { flipX },
     }]]);
     live2DStageState(manager).containers.set('hero', container);
-    const proxy = { x: 960, y: 700, scale: 1, rotation: 0, opacity: 1, z: 250 };
+    const proxy = { x: 960, y: 700, scale: 1, rotation, opacity: 1, z: 250 };
     manager.setScriptEngine({ transformationProxies: new Map([['hero', proxy]]) });
     manager.currentCamera = camera;
     manager.applyProxyTransform('hero', proxy);
@@ -111,5 +111,31 @@ describe('StageOverlay character anchors', () => {
     expect(mocks.author).toHaveBeenCalledWith(expect.objectContaining({
       statementId: 'gaze', patch: { params: { lookAt: { point: [0, 0] } } },
     }));
+  });
+
+  it.each([
+    { cameraRotation: 0, characterRotation: 0, flipX: false },
+    { cameraRotation: 90, characterRotation: 0, flipX: false },
+    { cameraRotation: 37, characterRotation: -20, flipX: false },
+    { cameraRotation: 90, characterRotation: 25, flipX: true },
+  ])('writes local gaze directions for camera $cameraRotation, character $characterRotation and flip $flipX', config => {
+    const { container, model, lookAt } = setup({
+      position: [0.55, 0.6], zoom: 1.5, rotation: config.cameraRotation, shakeOffset: { x: 10, y: -6 },
+    }, config.characterRotation, config.flipX);
+    for (const [localX, localY] of [[10, 0], [0, -10], [-10, 10]]) {
+      const target = model.toGlobal({ x: localX, y: -64 + localY });
+      fireEvent.click(container.querySelector('.stage-overlay')!, {
+        clientX: 100 + target.x / 2,
+        clientY: 50 + target.y / 2,
+      });
+      const focusX = localX * Math.abs(model.scale.x) / 1920 * 4;
+      const focusY = -localY * Math.abs(model.scale.y) / 1080 * 4;
+      expect(lookAt).toHaveBeenLastCalledWith('hero', expect.closeTo(focusX), expect.closeTo(focusY), 0.1);
+      expect(mocks.author).toHaveBeenLastCalledWith(expect.objectContaining({
+        statementId: 'gaze', patch: { params: { lookAt: {
+          point: [expect.closeTo(Number(focusX.toFixed(2)), 8), expect.closeTo(Number(focusY.toFixed(2)), 8)],
+        } } },
+      }));
+    }
   });
 });

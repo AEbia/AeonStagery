@@ -41,7 +41,7 @@ describe('historical camera follow through the public evaluator', () => {
       { time: 2, position: { x: 0.9, y: 0.8 } },
     ]);
     const smoothing = 0.8;
-    const lambda = -60 * Math.log(smoothing);
+    const lambda = Math.LN10 / (2 * smoothing);
     const queryTime = 1.25;
     const slopeX = 0.4;
     const startTargetX = 0.1;
@@ -63,6 +63,16 @@ describe('historical camera follow through the public evaluator', () => {
     expect(evaluateCameraChannels(makeInput(anchors, 0, 0)).position).toEqual({ x: 0.8, y: 0.7 });
     expect(evaluateCameraChannels(makeInput(anchors, 0, 1)).position).toEqual({ x: 0.2, y: 0.25 });
     expect(evaluateCameraChannels(makeInput(missingStartAnchor, 0, 0)).position).toEqual({ x: 0.2, y: 0.25 });
+  });
+
+  it.each([0.25, 0.5, 0.85, 1])('closes 90 percent of a fixed-target gap in the response time at smoothing %s', smoothing => {
+    const anchors = history([{ start: 0, end: 4 }], [
+      { time: 0, position: { x: 0.8, y: 0.7 } },
+      { time: 4, position: { x: 0.8, y: 0.7 } },
+    ]);
+    const result = evaluateCameraChannels(makeInput(anchors, 2 * smoothing, smoothing));
+    expect(result.position.x).toBeCloseTo(0.74, 10);
+    expect(result.position.y).toBeCloseTo(0.655, 10);
   });
 
   it('holds through invalid gaps, samples the exclusive end from the left, and resumes on reappearance', () => {
@@ -87,7 +97,11 @@ describe('historical camera follow through the public evaluator', () => {
       { time: 2, position: { x: 0.8, y: 0.7 } },
     ], [{ time: 1, left: { x: 0.4, y: 0.4 }, right: { x: 0.7, y: 0.6 } }]);
 
-    expect(evaluateCameraChannels(makeInput(anchors, 1, 1, undefined, [0.05, 0])).position).toEqual({ x: 0.2, y: 0.25 });
+    const slow = evaluateCameraChannels(makeInput(anchors, 1, 1, undefined, [0.05, 0]));
+    expect(slow.position.x).toBeGreaterThan(0.2);
+    expect(slow.position.x).toBeLessThan(0.45);
+    expect(slow.position.y).toBeGreaterThan(0.25);
+    expect(slow.position.y).toBeLessThan(0.4);
     expect(evaluateCameraChannels(makeInput(anchors, 1, 0, undefined, [0.05, 0])).position).toEqual({ x: 0.75, y: 0.6 });
     expect(evaluateCameraChannels(makeInput(anchors, 1, 0, 'left', [0.05, 0])).position).toEqual({ x: 0.45, y: 0.4 });
     expect(evaluateCameraChannels(makeInput(anchors, 1, 0.8, undefined, [0.05, 0])).position.x).toBeLessThan(0.45);
@@ -146,7 +160,7 @@ describe('chronological checkpoint reuse', () => {
     const result = evaluateCameraChannels({ ...input, sceneTime: 10.00123 });
     const work = getCameraFollowHistoryDiagnostics(trajectory).anchorQueries - before;
     expect(work).toBeLessThan(2500);
-    expect(result.position.x).toBeCloseTo(0.7, 12);
+    expect(result.position.x).toBeCloseTo(0.7 - 0.5 * 10 ** (-10.00123 / 1.6), 12);
     expect(evaluateCameraChannels({ ...input, sceneTime: 9.99 })).toEqual(evaluateCameraChannels(input));
   });
 });

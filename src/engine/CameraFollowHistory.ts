@@ -1,4 +1,5 @@
 import type { CameraPosition } from './CameraStateResolver';
+import { cameraFollowRate } from './CameraFollowSmoothing';
 
 export interface CameraAnchorValidityInterval {
   readonly start: number;
@@ -37,7 +38,6 @@ export interface CameraFollowHistoryOptions {
   readonly smoothing: number;
   readonly gridHz?: number;
   readonly checkpointSeconds?: number;
-  readonly zoomAt: (time: number) => number;
   readonly cacheKey?: string;
   readonly eventSide?: CameraAnchorEventSide;
 }
@@ -134,15 +134,6 @@ export function sampleCameraAnchorTrajectory(
     y: before.right.y + (after.left.y - before.right.y) * progress };
 }
 
-function clampTarget(point: CameraPosition, zoom: number): CameraPosition {
-  const safeZoom = zoom > 0 ? zoom : 1;
-  const halfView = 0.5 / safeZoom;
-  return {
-    x: Math.max(halfView, Math.min(point.x, 1 - halfView)),
-    y: Math.max(halfView, Math.min(point.y, 1 - halfView)),
-  };
-}
-
 function integrateLinearTarget(
   position: CameraPosition,
   from: CameraPosition,
@@ -174,29 +165,29 @@ export function evaluateCameraFollowHistory(
 ): CameraPosition {
   const { startTime, queryTime, initialPosition, offset } = options;
   if (queryTime < startTime) return { ...initialPosition };
-  const smoothing = Math.max(0, Math.min(1, options.smoothing));
-  if (smoothing === 1 || (queryTime === startTime && smoothing !== 0)) return { ...initialPosition };
+  const lambda = cameraFollowRate(options.smoothing);
+  const instant = lambda === Infinity;
+  if (queryTime === startTime && !instant) return { ...initialPosition };
   if (queryTime === startTime) {
     const target = sampleCameraAnchorTrajectory(trajectory, startTime, options.eventSide ?? 'right');
     return target
-      ? clampTarget({ x: target.x + offset.x, y: target.y + offset.y }, options.zoomAt(startTime))
+      ? { x: target.x + offset.x, y: target.y + offset.y }
       : { ...initialPosition };
   }
   // An immediately following camera has no pursuit history while its target
   // is available. Missing targets still use reconstruction to retain the last
-  // valid position, including the zoom at the time it was acquired.
-  if (smoothing === 0) {
+  // valid position.
+  if (instant) {
     const right = sampleCameraAnchorTrajectory(trajectory, queryTime, 'right');
     if (right) {
       const leftEvent = options.eventSide === 'left' && trajectory.events.some(event => event.time === queryTime);
       const target = leftEvent ? sampleCameraAnchorTrajectory(trajectory, queryTime, 'left') ?? right : right;
-      return clampTarget({ x: target.x + offset.x, y: target.y + offset.y }, options.zoomAt(queryTime));
+      return { x: target.x + offset.x, y: target.y + offset.y };
     }
   }
   const gridHz = options.gridHz ?? CAMERA_FOLLOW_HISTORY_GRID_HZ;
   const requestedCheckpointSeconds = options.checkpointSeconds ?? CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;
   const checkpointSeconds = requestedCheckpointSeconds > 0 ? requestedCheckpointSeconds : CAMERA_FOLLOW_HISTORY_CHECKPOINT_SECONDS;
-  const lambda = smoothing === 0 ? Infinity : -60 * Math.log(smoothing);
   const baseCacheKey = options.cacheKey === undefined ? undefined : [
     options.cacheKey,
     startTime,
@@ -204,7 +195,7 @@ export function evaluateCameraFollowHistory(
     initialPosition.y,
     offset.x,
     offset.y,
-    smoothing,
+    lambda,
     gridHz,
     checkpointSeconds,
     options.eventSide ?? 'right',
@@ -229,10 +220,7 @@ export function evaluateCameraFollowHistory(
   let priorTime = integrationStart;
   let priorTarget = sampleCameraAnchorTrajectory(trajectory, integrationStart, options.eventSide ?? 'right');
   if (priorTarget) {
-    priorTarget = clampTarget(
-      { x: priorTarget.x + offset.x, y: priorTarget.y + offset.y },
-      options.zoomAt(integrationStart),
-    );
+    priorTarget = { x: priorTarget.x + offset.x, y: priorTarget.y + offset.y };
   }
 
   const boundaries = new Set<number>([integrationStart, queryTime]);
@@ -262,19 +250,18 @@ export function evaluateCameraFollowHistory(
       || trajectory.validity.some((interval) => interval.end === time);
     const rawLeft = sampleCameraAnchorTrajectory(trajectory, time, leftBoundary ? 'left' : 'right');
     const rawRight = sampleCameraAnchorTrajectory(trajectory, time, 'right');
-    const zoom = options.zoomAt(time);
     const leftTarget = rawLeft
-      ? clampTarget({ x: rawLeft.x + offset.x, y: rawLeft.y + offset.y }, zoom)
+      ? { x: rawLeft.x + offset.x, y: rawLeft.y + offset.y }
       : null;
     const rightTarget = rawRight
-      ? clampTarget({ x: rawRight.x + offset.x, y: rawRight.y + offset.y }, zoom)
+      ? { x: rawRight.x + offset.x, y: rawRight.y + offset.y }
       : null;
     if (lambda === Infinity && rightTarget) {
       const isTerminalEvent = time === queryTime && trajectory.events.some((event) => event.time === time);
       position = isTerminalEvent && options.eventSide === 'left' ? (leftTarget ?? rightTarget) : rightTarget;
     } else if (leftTarget && priorTarget) {
       position = integrateLinearTarget(position, priorTarget, leftTarget, time - priorTime, lambda);
-    } else if (rightTarget && smoothing === 0) {
+    } else if (rightTarget && instant) {
       position = { ...rightTarget };
     }
     priorTime = time;

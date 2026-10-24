@@ -164,7 +164,9 @@ export class CameraCoordinator {
       }
       this.activeFollowAction = action;
       if (!deps.retainFollowPosition) this.controller.tickFollow(true);
-      if (deps.retainFollowPosition && !this.liveFollow) {
+      // A reconstructed follow can resume playback directly into its release
+      // frame. Register it now so that first frame hands off the live pursuit.
+      if (!this.liveFollow) {
         if (action) {
           this.liveFollow = { action, releaseTime: findFollowReleaseInstant(timeline, action) };
         }

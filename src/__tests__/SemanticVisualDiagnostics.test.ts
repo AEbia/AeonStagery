@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValidationDaemon } from '../engine/daemons/ValidationDaemon';
+import { projectToScreen } from '../engine/Projection';
 import { DocumentStore } from '../ui/store/DocumentStore';
 import { ValidationStore } from '../ui/store/ValidationStore';
 import {
@@ -461,6 +462,78 @@ describe('semantic visual diagnostics', () => {
       .toBeUndefined();
     expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'move-after-reset-unsafe'))
       .toBeDefined();
+  });
+
+  it('keeps a scaled backdrop covered when negative depth reduces camera parallax', () => {
+    const document = makeDocument([
+      {
+        id: 'park',
+        time: 0,
+        type: 'environmentLayer',
+        params: { mode: 'set', layerId: 'background', file: 'background/park.png', scale: 1.4, z: -200 },
+      },
+      {
+        id: 'lounge',
+        time: 1.9,
+        type: 'environmentLayer',
+        params: { mode: 'set', layerId: 'background4', file: 'background/lounge.png', scale: 1.15, z: -200 },
+      },
+      {
+        id: 'move-covered',
+        time: 16.6,
+        type: 'camera',
+        params: {
+          mode: 'move', to: [0.75, 0.5], zoom: { kind: 'absolute', value: 1 },
+          rotation: 0, durationSeconds: 1, ease: 'smooth',
+        },
+      },
+    ]);
+
+    expect(issueFor(validateSemanticSceneStructure(document), SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'move-covered'))
+      .toBeUndefined();
+  });
+
+  describe.each(['move', 'focus', 'path'] as const)('%s camera coverage with parallax', mode => {
+    it.each([
+      { depth: -200, position: [0.75, 0.5], background: [0.5, 0.5], exposed: false },
+      { depth: -200, position: [0.5, 0.75], background: [0.5, 0.5], exposed: false },
+      { depth: -200, position: [0.84, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: 0, position: [0.75, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: 200, position: [0.65, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: -500, position: [0.95, 0.5], background: [0.5, 0.5], exposed: false },
+      { depth: -1000, position: [0.75, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: -200, position: [0.9, 0.5], background: [0.6, 0.5], exposed: false },
+      { depth: -200, position: [0.5, 0.5], background: [0.75, 0.5], exposed: true },
+    ])('matches rendered edges for depth $depth at $position with backdrop at $background', ({ depth, position, background, exposed }) => {
+      const scale = 1.4;
+      const projected = projectToScreen(
+        { x: background[0], y: background[1], scale, parallaxDepth: depth },
+        { position: { x: position[0], y: position[1] }, zoom: 1 },
+        { w: 1, h: 1 },
+      );
+      const halfSize = projected.screenScale / 2;
+      const renderedExposure = projected.screenX - halfSize > 1e-6
+        || projected.screenX + halfSize < 1 - 1e-6
+        || projected.screenY - halfSize > 1e-6
+        || projected.screenY + halfSize < 1 - 1e-6;
+      expect(renderedExposure).toBe(exposed);
+
+      const document = makeDocument([
+        {
+          id: 'backdrop', time: 0, type: 'environmentLayer',
+          params: { mode: 'set', layerId: 'background', file: 'background/room.png', position: background, scale, z: depth },
+        },
+        {
+          id: 'camera', time: 1, type: 'camera',
+          params: mode === 'path'
+            ? { mode, keyframes: [{ time: 0, position: [0.5, 0.5] }, { time: 1, position }] }
+            : mode === 'focus' ? { mode, position } : { mode, to: position },
+        },
+      ]);
+
+      expect(issueFor(validateSemanticSceneStructure(document), SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'camera') !== undefined)
+        .toBe(exposed);
+    });
   });
 
   it('uses the bottom-most environment layer as the backdrop', () => {

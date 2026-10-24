@@ -13,16 +13,11 @@ const trajectory: CameraAnchorTrajectory = {
   samples: knots.map(([time, x, y]) => ({ time, position: { x, y } })),
   events: [{ time: 0.35, left: { x: 0.9, y: 0.2 }, right: { x: 0.1, y: 0.8 } }],
 };
-function zoom(time: number) {
-  if (time < 0.25) return 2;
-  if (time < 0.5) return 2 - (time - 0.25) * 4;
-  return 1 + 2 * Math.min(1, (time - 0.5) / 0.2);
-}
 // Independent authored continuous target: event sides are explicit and gaps are
 // never interpolated. No production trajectory sampler/integrator is used here.
 function target(time: number): readonly [number, number] | null {
   if (time >= 0.6 && time < 0.8) return null;
-  if (time === 0.35) { const half = 0.5 / zoom(time); return [half, 1 - half]; }
+  if (time === 0.35) return [0.1, 0.8];
   let point: readonly [number, number] = [0.6, 0.5];
   for (let index = 0; index < knots.length - 1; index++) {
     const [start, x, y] = knots[index];
@@ -35,13 +30,11 @@ function target(time: number): readonly [number, number] | null {
       break;
     }
   }
-  const halfView = 0.5 / zoom(time);
-  return point.map(value => Math.max(halfView, Math.min(value, 1 - halfView))) as unknown as readonly [number, number];
+  return point;
 }
 function reference(time: number, smoothing: number, hz: number): readonly [number, number] {
   let position: readonly [number, number] = [0.2, 0.25];
-  if (smoothing === 1) return position;
-  const rate = smoothing === 0 ? 0 : -60 * Math.log(smoothing);
+  const rate = smoothing === 0 ? 0 : Math.LN10 / (2 * smoothing);
   const boundaries = [...new Set([0, ...knots.map(([t]) => t), 0.25, 0.5, 0.7, time])].filter(t => t <= time).sort((a, b) => a - b);
   for (let interval = 1; interval < boundaries.length; interval++) {
     const start = boundaries[interval - 1]; const end = boundaries[interval];
@@ -75,7 +68,7 @@ function input(time: number, smoothing: number) {
 }
 
 describe('production history precision independently of deterministic parity', () => {
-  it.each([0, 0.8, 1])('compares fast targets, event sides, gaps/reentry and changing zoom clamp to independent RK4 at smoothing %s', smoothing => {
+  it.each([0, 0.8, 1])('compares fast targets, event sides, gaps/reentry and independent zoom changes to independent RK4 at smoothing %s', smoothing => {
     let maxPixels = 0;
     for (const time of [0, 0.20123, 0.21345, 0.349999, 0.35, 0.350001, 0.599999, 0.6, 0.7, 0.8, 0.800001, 0.912345, 1]) {
       const expected = reference(time, smoothing, 15_360);
@@ -87,7 +80,7 @@ describe('production history precision independently of deterministic parity', (
       expect(pixels, `time=${time}, smoothing=${smoothing}`).toBeLessThan(0.5);
     }
     const left = evaluateCameraChannels({ ...input(0.35, smoothing), anchorEventSide: 'left' });
-    if (smoothing === 0) expect(left.position).toEqual({ x: 0.6875, y: 0.3125 });
+    if (smoothing === 0) expect(left.position).toEqual({ x: 0.9, y: 0.2 });
     fs.writeSync(1, `CAMERA_PRECISION smoothing=${smoothing} maxCompositionPixels=${maxPixels}\n`);
   });
 });

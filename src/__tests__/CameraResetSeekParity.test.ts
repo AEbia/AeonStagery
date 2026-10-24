@@ -243,22 +243,25 @@ describe('camera reset seek parity (playback vs direct seek)', () => {
 
     const coordinator = new CameraCoordinator(cameraController as any);
 
-    // At 6.0s (start of reset): follow is released, position is at hero framing (0.7, 0.6), zoom is 2.0
+    // Reset starts from the actual three-second pursuit frame, before full convergence.
+    const weight = 10 ** (-3 / 1.7);
+    const releaseX = 0.7 - 0.2 * weight;
+    const releaseY = 0.6 - 0.1 * weight;
     coordinator.sync(6.0, actions as any, deps);
     expect((cameraController as any).followTarget).toBeNull();
     let state = cameraController.getState();
     let pos = state.position as { x: number; y: number };
-    expect(pos.x).toBeCloseTo(0.7, 3);
-    expect(pos.y).toBeCloseTo(0.6, 3);
+    expect(pos.x).toBeCloseTo(releaseX, 8);
+    expect(pos.y).toBeCloseTo(releaseY, 8);
     expect(state.zoom).toBeCloseTo(2.0, 3);
 
-    // At 7.0s (midpoint of 2s reset): linearly halfway between (0.7, 0.6, zoom 2) and (0.5, 0.5, zoom 1)
+    // Halfway through reset, interpolate from that release frame to the baseline.
     coordinator.sync(7.0, actions as any, deps);
     expect((cameraController as any).followTarget).toBeNull();
     state = cameraController.getState();
     pos = state.position as { x: number; y: number };
-    expect(pos.x).toBeCloseTo(0.6, 3);
-    expect(pos.y).toBeCloseTo(0.55, 3);
+    expect(pos.x).toBeCloseTo((releaseX + 0.5) / 2, 8);
+    expect(pos.y).toBeCloseTo((releaseY + 0.5) / 2, 8);
     expect(state.zoom).toBeCloseTo(1.5, 3);
 
     // At 8.0s (end of reset): at baseline

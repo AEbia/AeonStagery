@@ -8,6 +8,7 @@ import type {
   Vec2,
 } from '../../api/types/semantic-scene';
 import type { ValidationIssue } from '../../api/types/validation';
+import { ARTISTIC_PARALLAX_DEPTH_SCALE } from '../../engine/Projection';
 import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
 import { validateLensFilterStatements } from './LensFilterStatementValidator';
 import { lowerCameraPropertyTracks } from './CameraPropertyTracks';
@@ -81,8 +82,8 @@ interface ActiveFollow {
  * State of one active environment layer at a scene time. The stage renderer
  * cover-fits every layer image to the stage at scale 1, so scale 1 covers
  * exactly one viewport; rotation expands the axis-aligned half-extent.
- * `z` is the layer's render order (Pixi container zIndex), `order` breaks
- * equal-z ties by insertion sequence.
+ * `z` maps to both render order (Pixi container zIndex) and artistic
+ * parallax depth; `order` breaks equal-z ties by insertion sequence.
  */
 interface EnvironmentLayerCoverage {
   readonly x: number;
@@ -353,7 +354,10 @@ function validateCameraCoverage(
   if (backdrop === undefined) return;
   if (!Number.isFinite(cameraZoom) || cameraZoom <= 0) return;
   const params = context.statement.params as CameraParams;
-  const { x: backgroundX, y: backgroundY, scale: backgroundScale, rotation: backgroundRotation } = backdrop.coverage;
+  const {
+    x: backgroundX, y: backgroundY, scale: backgroundScale,
+    rotation: backgroundRotation, z: backgroundDepth,
+  } = backdrop.coverage;
   const backgroundHalfExtent = rotatedHalfExtent(backgroundScale, backgroundRotation);
 
   if (params.mode === 'focus') {
@@ -366,6 +370,7 @@ function validateCameraCoverage(
       backdrop.layerId,
       backgroundX,
       backgroundY,
+      backgroundDepth,
       backgroundHalfExtent,
       applyZoomIntent(cameraZoom, params.zoom),
       params.rotation ?? cameraRotation,
@@ -382,6 +387,7 @@ function validateCameraCoverage(
       backdrop.layerId,
       backgroundX,
       backgroundY,
+      backgroundDepth,
       backgroundHalfExtent,
       applyZoomIntent(cameraZoom, params.zoom),
       params.rotation ?? cameraRotation,
@@ -402,6 +408,7 @@ function validateCameraCoverage(
         backdrop.layerId,
         backgroundX,
         backgroundY,
+        backgroundDepth,
         backgroundHalfExtent,
         zoom,
         rotation,
@@ -422,6 +429,7 @@ function assertCameraPositionCoverage(
   layerId: string,
   backgroundX: number,
   backgroundY: number,
+  backgroundDepth: number,
   backgroundHalfExtent: number,
   zoom: number,
   rotationDegrees: number,
@@ -431,8 +439,13 @@ function assertCameraPositionCoverage(
   const halfView = rotatedHalfExtent(1 / zoom, rotationDegrees);
   const epsilon = 1e-6;
   const [px, py] = position;
-  const insideX = Math.abs(px - backgroundX) <= backgroundHalfExtent - halfView + epsilon;
-  const insideY = Math.abs(py - backgroundY) <= backgroundHalfExtent - halfView + epsilon;
+  // Match projectToScreen: depth scales the camera offset from the frame
+  // center, while the layer's authored position keeps its own offset.
+  const parallax = 1 + backgroundDepth / ARTISTIC_PARALLAX_DEPTH_SCALE;
+  const offsetX = backgroundX - 0.5 + (0.5 - px) * parallax;
+  const offsetY = backgroundY - 0.5 + (0.5 - py) * parallax;
+  const insideX = Math.abs(offsetX) <= backgroundHalfExtent - halfView + epsilon;
+  const insideY = Math.abs(offsetY) <= backgroundHalfExtent - halfView + epsilon;
   if (insideX && insideY) return;
   issues.push({
     severity: 'warning',

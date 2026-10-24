@@ -152,27 +152,23 @@ describe('computeCameraStateAtTime', () => {
   it('lets follow own the position channel until it is released', () => {
     const deps = { resolveCharacterPosition: () => ({ x: 0.7, y: 0.6 }) };
     const timeline = [
-      // Push in first: zoom 2 opens the viewport clamp (halfView = 0.25) so
-      // the follow framing has room off-center.
       { action: 'cameraMotion', time: 4, params: { move: 'push', duration: 1, easing: 'linear', target: [0.5, 0.4], zoom: 2 } },
       { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1] } },
       { action: 'cameraUnfollow', time: 7, params: {} },
     ];
 
-    // While active the resolved position tracks the deterministic anchor +
-    // offset, clamped into the zoom-2 viewport: (0.8 → 0.75, 0.5). One second
-    // past the entry transient only a ~1e-5 residue of the glide remains.
+    // Follow pursues anchor + offset (0.8, 0.5) from entry (0.5, 0.4).
     const active = computeCameraStateAtTime(timeline as any, 6, deps);
     expect(active.follow).toEqual({ characterId: 'hero', offset: { x: 0.1, y: -0.1 } });
-    expect(active.position.x).toBeCloseTo(0.75, 4);
-    expect(active.position.y).toBeCloseTo(0.5, 4);
+    expect(active.position.x).toBeCloseTo(0.8 - 0.3 * 10 ** (-1 / 1.7), 8);
+    expect(active.position.y).toBeCloseTo(0.5 - 0.1 * 10 ** (-1 / 1.7), 8);
     expect(active.zoom).toBe(2);
 
     // After release the composed framing latches and follow is gone.
     const released = computeCameraStateAtTime(timeline as any, 8, deps);
     expect(released.follow).toBeNull();
-    expect(released.position.x).toBeCloseTo(0.75, 4);
-    expect(released.position.y).toBeCloseTo(0.5, 4);
+    expect(released.position.x).toBeCloseTo(0.8 - 0.3 * 10 ** (-2 / 1.7), 8);
+    expect(released.position.y).toBeCloseTo(0.5 - 0.1 * 10 ** (-2 / 1.7), 8);
     expect(released.zoom).toBe(2);
   });
 
@@ -220,15 +216,16 @@ describe('computeCameraStateAtTime', () => {
     // At the start of the reset (7.0s): follow is released, channels remain at pre-reset state
     const atStart = computeCameraStateAtTime(timeline as any, 7, deps);
     expect(atStart.follow).toBeNull();
-    expect(atStart.position.x).toBeCloseTo(0.7, 4);
-    expect(atStart.position.y).toBeCloseTo(0.6, 4);
+    const weight = 10 ** (-2 / 1.7);
+    expect(atStart.position.x).toBeCloseTo(0.7 - 0.2 * weight, 8);
+    expect(atStart.position.y).toBeCloseTo(0.6 - 0.2 * weight, 8);
     expect(atStart.zoom).toBe(2);
 
-    // Midway through reset (7.5s, linear ease): halfway between (0.7, 0.6, 2) and baseline (0.5, 0.5, 1)
+    // Midway through reset: halfway from the release frame to the baseline.
     const mid = computeCameraStateAtTime(timeline as any, 7.5, deps);
     expect(mid.follow).toBeNull();
-    expect(mid.position.x).toBeCloseTo(0.6, 4);
-    expect(mid.position.y).toBeCloseTo(0.55, 4);
+    expect(mid.position.x).toBeCloseTo(0.6 - 0.1 * weight, 8);
+    expect(mid.position.y).toBeCloseTo(0.55 - 0.1 * weight, 8);
     expect(mid.zoom).toBeCloseTo(1.5, 4);
 
     // After the reset finishes every channel is back at the baseline.
@@ -476,20 +473,20 @@ describe('computeCameraStateAtTime', () => {
  * Reported regression: seeking into the middle of a camera follow presented
  * the follow's TERMINAL framing (the tracked anchor) instead of the
  * intermediate transition state. Playback enters a follow through tickFollow()'s
- * exponential smoothing — alpha = 1 − smoothing^(60·dt) per frame — so the
+ * exponential smoothing with response time 2·smoothing seconds to close 90% of a gap — so the
  * camera glides from its pre-follow position toward the anchor. The resolver
- * must mirror that transient deterministically: with λ = −60·ln(smoothing),
+ * must mirror that transient deterministically: with λ = ln(10)/(2·smoothing),
  *
  *   position(t) = target + (preFollow − startTarget) · e^(−λ·(t−followStart))
  *
- * where both targets are viewport-clamped like tickFollow() does.
+ * where both targets are world-space anchors plus their authored offsets.
  */
 describe('camera follow entry transient (seek presents the intermediate state)', () => {
   // Shared pre-follow framing: push@4 lands at (0.5, 0.4) @ zoom 2 (linear).
   const pushFirst = { action: 'cameraMotion', time: 4, params: { move: 'push', duration: 1, easing: 'linear', target: [0.5, 0.4], zoom: 2 } };
   const deps = { resolveCharacterPosition: () => ({ x: 0.7, y: 0.6 }) };
-  // Default smoothing 0.85 → λ ≈ 9.7511; weight at Δ=0.2s ≈ 0.1422417.
-  const W = 0.1422417;
+  // Default smoothing 0.85 closes 90% of a fixed-target gap in 1.7 seconds.
+  const W = 10 ** (-0.2 / 1.7);
 
   it('decays exponentially from the pre-follow framing toward the tracked anchor', () => {
     const timeline = [
@@ -499,8 +496,8 @@ describe('camera follow entry transient (seek presents the intermediate state)',
 
     const resolved = computeCameraStateAtTime(timeline as any, 5.2, deps);
     expect(resolved.follow).not.toBeNull();
-    // Target (0.8→0.75 clamp, 0.5); composed = target + (P₀ − target)·W.
-    expect(resolved.position.x).toBeCloseTo(0.75 - 0.25 * W, 5);
+    // Target (0.8, 0.5); composed = target + (P₀ − target)·W.
+    expect(resolved.position.x).toBeCloseTo(0.8 - 0.3 * W, 5);
     expect(resolved.position.y).toBeCloseTo(0.5 - 0.1 * W, 5);
   });
 
@@ -521,8 +518,8 @@ describe('camera follow entry transient (seek presents the intermediate state)',
       { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1] } },
     ];
 
-    const resolved = computeCameraStateAtTime(timeline as any, 6, deps);
-    expect(resolved.position.x).toBeCloseTo(0.75, 4);
+    const resolved = computeCameraStateAtTime(timeline as any, 15, deps);
+    expect(resolved.position.x).toBeCloseTo(0.8, 4);
     expect(resolved.position.y).toBeCloseTo(0.5, 4);
   });
 
@@ -547,11 +544,10 @@ describe('camera follow entry transient (seek presents the intermediate state)',
       pushFirst,
       { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1], smoothing: 0.999 } },
     ];
-    // λ = −60·ln(0.999) ≈ 0.06; weight(0.2) ≈ 0.988066.
-    const wSlow = 0.988066;
+    const wSlow = 10 ** (-0.2 / (2 * 0.999));
 
     const resolved = computeCameraStateAtTime(timeline as any, 5.2, deps);
-    expect(resolved.position.x).toBeCloseTo(0.75 - 0.25 * wSlow, 5);
+    expect(resolved.position.x).toBeCloseTo(0.8 - 0.3 * wSlow, 5);
     expect(resolved.position.y).toBeCloseTo(0.5 - 0.1 * wSlow, 5);
   });
 
@@ -561,12 +557,12 @@ describe('camera follow entry transient (seek presents the intermediate state)',
       { action: 'cameraFollow', time: 5, params: { characterId: 'hero', offset: [0.1, -0.1] } },
       { action: 'cameraUnfollow', time: 5.3, params: {} },
     ];
-    // Elapsed capped at 0.3s → weight ≈ 0.0536464; latch holds that frame.
-    const wCap = 0.0536464;
+    // Elapsed is capped at 0.3s; the release latches that intermediate frame.
+    const wCap = 10 ** (-0.3 / 1.7);
 
     const released = computeCameraStateAtTime(timeline as any, 9, deps);
     expect(released.follow).toBeNull();
-    expect(released.position.x).toBeCloseTo(0.75 - 0.25 * wCap, 5);
+    expect(released.position.x).toBeCloseTo(0.8 - 0.3 * wCap, 5);
     expect(released.position.y).toBeCloseTo(0.5 - 0.1 * wCap, 5);
   });
 });

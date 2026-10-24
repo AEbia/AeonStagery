@@ -60,7 +60,7 @@ export interface CameraPathConfig {
 export interface CameraFollowConfig {
   /** Offset from character center */
   offset?: Vec2;
-  /** Follow smoothness (0 = instant, 1 = very smooth) */
+  /** 0 = instant; 0–1 maps to 0–2 seconds to close 90% of a fixed-target gap. */
   smoothing?: number;
   /** Min/max zoom limits */
   zoomRange?: [number, number];

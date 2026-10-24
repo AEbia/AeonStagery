@@ -198,7 +198,7 @@ describe('evaluateCameraChannels', () => {
     expect(result.follow?.characterId).toBe('hero');
   });
 
-  it('uses the historical zoom curve when clamping pursuit and retains follow through zoom-only writes', () => {
+  it('preserves the followed world-space target through zoom-only writes', () => {
     const trajectory: CameraAnchorTrajectory = {
       version: 1,
       characterId: 'hero',
@@ -220,8 +220,8 @@ describe('evaluateCameraChannels', () => {
     });
 
     expect(result.zoom).toBe(2.5);
-    expect(result.position.x).toBeCloseTo(0.2, 8);
-    expect(result.position.y).toBeCloseTo(0.2, 8);
+    expect(result.position.x).toBeCloseTo(0.05, 8);
+    expect(result.position.y).toBeCloseTo(0.05, 8);
     expect(result.follow?.characterId).toBe('hero');
   });
 
@@ -254,7 +254,7 @@ describe('evaluateCameraChannels', () => {
       anchorTrajectories: [trajectory],
     });
 
-    expect(takenOver.position).toEqual({ x: 0.9, y: 0.8 });
+    expect(takenOver.position).toEqual({ x: expect.closeTo(0.9, 12), y: 0.8 });
     expect(takenOver.follow).toBeNull();
     expect(stopped.position).toEqual({ x: 0.3, y: 0.4 });
     expect(stopped.follow).toBeNull();

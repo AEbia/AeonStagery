@@ -145,6 +145,29 @@ describe('formal camera Bake/export parity', () => {
     expect(simulationFrame).not.toHaveBeenCalled();
   });
 
+  it.each(['seek', 'playback'] as const)('keeps a focus before character entry missing after %s and later seeks', async entry => {
+    installModelBoundary(() => {}, () => {}, true);
+    const { prepared } = await new SemanticScenePipeline({ resolveAsset: source => source }).processDocument({
+      schemaVersion: 5, sceneId: 'focus-before-entry',
+      meta: { title: 'Focus before entry', resolution: [1920, 1080], fps: 60, durationSeconds: 5,
+        characters: [{ id: 'hero', name: 'Hero', model: 'hero.model3.json' }] },
+      statements: [
+        { id: 'focus', type: 'camera', time: 1,
+          params: { mode: 'focus', target: 'hero', targetPart: 'head', durationSeconds: 0,
+            zoom: { kind: 'absolute', value: 2 }, rotation: 15 } },
+        { id: 'enter', type: 'characterPresence', time: 2,
+          params: { mode: 'enter', id: 'hero', position: [0.8, 0.9], durationSeconds: 0 } },
+      ],
+    });
+    await engine.loadPreparedScene(prepared);
+    if (entry === 'playback') engine.getMasterTimeline()!.seek(1, false);
+    for (const time of [3, 1, 3]) {
+      await engine.seek(time, true);
+      expect(engine.getCurrentCamera()).toMatchObject({ position: { x: 0.5, y: 0.5 }, zoom: 2, rotation: 15 });
+      expect(engine.getCameraEvaluation()?.diagnostics).toContainEqual(expect.objectContaining({ code: 'missing-focus-anchor' }));
+    }
+  });
+
   it('resolves a character focus from the visible head without historical preparation', async () => {
     installModelBoundary(() => {}, () => {}, true);
     const base = await cameraCrossEntryScene(true);
@@ -276,8 +299,10 @@ describe('formal camera Bake/export parity', () => {
     const master = engine.getMasterTimeline()!;
     master.pause();
     vi.spyOn(live2DManager, 'getPosition').mockReturnValue({ x: 0.8, y: 0.8 });
+    const entry = cameraController.getState();
     cameraController.tickFollow(false, 1 / 60);
     const pursued = cameraController.getState();
+    expect(pursued.position).not.toEqual(entry.position);
     master.seek(3.25, false);
     expect(engine.getCurrentCamera()).toEqual(pursued);
     master.seek(3.5, false);

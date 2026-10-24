@@ -1017,7 +1017,7 @@ class ScriptEngine {
     if (usesUnifiedCameraChannels(this.currentScene?.timeline ?? [])) return base;
     const resolveAtTime = (atTime: number) => {
       const desiredCharacters = this.computeStateAtTime(atTime).characters;
-      return createStageAnchorResolver({
+      const resolveAnchor = createStageAnchorResolver({
         desiredPosition: (characterId) => {
           const desired = desiredCharacters.get(characterId);
           return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
@@ -1035,6 +1035,10 @@ class ScriptEngine {
           return proxy ? { x: proxy.x / STAGE_WIDTH, y: proxy.y / STAGE_HEIGHT } : null;
         },
       });
+      // A visible model at the query time cannot supply an anchor for a
+      // historical instant before its entrance or after its exit.
+      return (characterId: string, part?: string) => desiredCharacters.has(characterId)
+        ? resolveAnchor(characterId, part) : null;
     };
     return {
       ...base,

@@ -21,6 +21,8 @@ import { evaluateCharacterEase } from './CharacterAnimationContract';
 import { resolveVec2 } from './utils/math';
 import { DEFAULT_CAMERA_FOCUS_PART } from '../api/types/camera';
 import { evaluateCameraFollowHistory, type CameraAnchorEventSide, type CameraAnchorTrajectory } from './CameraFollowHistory';
+import { cameraFollowWeight, FOLLOW_DEFAULT_SMOOTHING } from './CameraFollowSmoothing';
+export { FOLLOW_DEFAULT_SMOOTHING } from './CameraFollowSmoothing';
 
 export interface CameraPosition {
   x: number;
@@ -82,21 +84,6 @@ export interface CameraStateResolverDeps {
 export const STAGE_DEFAULT_CAMERA_POSITION: CameraPosition = { x: 0.5, y: 0.5 };
 export const STAGE_DEFAULT_CAMERA_ZOOM = 1;
 export const STAGE_DEFAULT_CAMERA_ROTATION = 0;
-/**
- * Must match CameraController.follow()'s built-in default — playback glides
- * into a follow with alpha = 1 − smoothing^(60·dt) per frame, and seek
- * reconstruction mirrors that exponential pursuit deterministically.
- */
-export const FOLLOW_DEFAULT_SMOOTHING = 0.85;
-
-/** Continuous rate of tickFollow()'s discrete pursuit: λ = −60·ln(smoothing). */
-function followTransientWeight(smoothing: number, elapsedSeconds: number): number {
-  if (elapsedSeconds <= 0) return 1;
-  const k = Math.min(Math.max(smoothing, 0.0001), 0.9999);
-  const lambda = -60 * Math.log(k);
-  return Math.exp(-lambda * elapsedSeconds);
-}
-
 /**
  * A release action stops the ticker and latches the current glide frame.
  */
@@ -391,7 +378,6 @@ function* evaluateCameraStatePrefix(
           initialPosition: channels,
           offset: activeFollow.offset,
           smoothing: activeFollow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING,
-          zoomAt: deps.resolveZoomAtTime ?? (() => channels.zoom),
           cacheKey: deps.followCacheKey,
           eventSide: deps.followEventSide,
         });
@@ -405,13 +391,10 @@ function* evaluateCameraStatePrefix(
           ? deps.resolveCharacterPositionAtTime(activeFollow.characterId, followTime, activeFollow.part ?? 'center')
           : deps.resolveCharacterPosition?.(activeFollow.characterId, activeFollow.part ?? 'center') ?? null;
         if (anchor) {
-          // Newer zoom writers can hide all earlier zoom events during
-          // channel pruning. Clamp with the authored curve at this frame.
-          const zoom = deps.resolveZoomAtTime?.(followTime) ?? channels.zoom;
-          const target = clampPointIntoViewport({ x: anchor.x + activeFollow.offset.x, y: anchor.y + activeFollow.offset.y }, zoom);
+          const target = { x: anchor.x + activeFollow.offset.x, y: anchor.y + activeFollow.offset.y };
           const startAnchor = deps.resolveCharacterPositionAtTime?.(activeFollow.characterId, start, activeFollow.part ?? 'center') ?? anchor;
-          const startTarget = clampPointIntoViewport({ x: startAnchor.x + activeFollow.offset.x, y: startAnchor.y + activeFollow.offset.y }, zoom);
-          const weight = followTransientWeight(activeFollow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING, Math.max(0, followTime - start));
+          const startTarget = { x: startAnchor.x + activeFollow.offset.x, y: startAnchor.y + activeFollow.offset.y };
+          const weight = cameraFollowWeight(activeFollow.smoothing ?? FOLLOW_DEFAULT_SMOOTHING, Math.max(0, followTime - start));
           channels.x = target.x + (channels.x - startTarget.x) * weight;
           channels.y = target.y + (channels.y - startTarget.y) * weight;
           composedFollowFrame = { x: channels.x, y: channels.y };
@@ -505,7 +488,6 @@ function* evaluateCameraStatePrefix(
       if (anchor) {
         channels.x = anchor.x + follow.offset.x;
         channels.y = anchor.y + follow.offset.y;
-        clampPositionIntoViewport(channels);
       }
     }
   }
@@ -647,8 +629,7 @@ function applyCameraMotion(
     channels[key] = from[key] + (to - from[key]) * evaluateCharacterEase(ease, progress, 'power2.inOut');
   };
 
-  // Character focus is independent of zoom: only follow/dolly constrain
-  // framing to the viewport. Preserve the same authored offsets as moveTo().
+  // Character focus is independent of zoom. Preserve the same authored offsets as moveTo().
   const resolveFocusAnchor = (characterId: string): CameraPosition | null =>
     deps.resolveFocusPosition
       ? deps.resolveFocusPosition(characterId, start, focusPart)
@@ -1013,22 +994,6 @@ function resolvePanTarget(
   }
   // Handler default: a pan with no target recenters the position channel.
   return { x: STAGE_DEFAULT_CAMERA_POSITION.x, y: STAGE_DEFAULT_CAMERA_POSITION.y };
-}
-
-/** Same viewport clamp as tickFollow(): tracking never reveals black edges. */
-function clampPositionIntoViewport(channels: MotionChannels): void {
-  const clamped = clampPointIntoViewport({ x: channels.x, y: channels.y }, channels.zoom);
-  channels.x = clamped.x;
-  channels.y = clamped.y;
-}
-
-function clampPointIntoViewport(point: CameraPosition, zoom: number): CameraPosition {
-  const safeZoom = zoom > 0 ? zoom : 1;
-  const halfView = 0.5 / safeZoom;
-  return {
-    x: Math.max(halfView, Math.min(point.x, 1 - halfView)),
-    y: Math.max(halfView, Math.min(point.y, 1 - halfView)),
-  };
 }
 
 function normalizeOffset(offset: unknown): CameraPosition {
