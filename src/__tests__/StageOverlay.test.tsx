@@ -90,26 +90,26 @@ describe('StageOverlay character anchors', () => {
 
   it.each(cameras)('aligns head and chest markers with the rendered model for camera %j', camera => {
     const { container, model, adapter } = setup(camera);
-    for (const [part, localY] of [['head', -64], ['chest', -16]] as const) {
+    for (const [part, localY] of [['head', -76], ['chest', -44]] as const) {
       const rendered = model.toGlobal({ x: 0, y: localY });
       const marker = container.querySelector(`.${part}-marker`)!;
       expect(Number(marker.getAttribute('cx'))).toBeCloseTo(rendered.x);
       expect(Number(marker.getAttribute('cy'))).toBeCloseTo(rendered.y);
     }
     // Scene cameras keep consuming the original world-space anchor.
-    expect(adapter.getPoint('hero', 'head')!.y).toBeCloseTo(354.4 / 1080);
+    expect(adapter.getPoint('hero', 'head')!.y).toBeCloseTo(289.6 / 1080);
   });
 
   it.each(cameras)('sets neutral gaze when clicking the rendered head for camera %j', camera => {
     const { container, model, lookAt } = setup(camera);
-    const head = model.toGlobal({ x: 0, y: -64 });
+    const head = model.toGlobal({ x: 0, y: -76 });
     fireEvent.click(container.querySelector('.stage-overlay')!, {
       clientX: 100 + head.x / 2,
       clientY: 50 + head.y / 2,
     });
     expect(lookAt).toHaveBeenCalledWith('hero', expect.closeTo(0), expect.closeTo(0), 0.1);
     expect(mocks.author).toHaveBeenCalledWith(expect.objectContaining({
-      statementId: 'gaze', patch: { params: { lookAt: { point: [0, 0] } } },
+      statementId: 'gaze', patch: { params: { lookAt: { point: [expect.closeTo(0, 8), expect.closeTo(0, 8)] } } },
     }));
   });
 
@@ -123,7 +123,7 @@ describe('StageOverlay character anchors', () => {
       position: [0.55, 0.6], zoom: 1.5, rotation: config.cameraRotation, shakeOffset: { x: 10, y: -6 },
     }, config.characterRotation, config.flipX);
     for (const [localX, localY] of [[10, 0], [0, -10], [-10, 10]]) {
-      const target = model.toGlobal({ x: localX, y: -64 + localY });
+      const target = model.toGlobal({ x: localX, y: -76 + localY });
       fireEvent.click(container.querySelector('.stage-overlay')!, {
         clientX: 100 + target.x / 2,
         clientY: 50 + target.y / 2,

@@ -463,6 +463,27 @@ describe('Task 2 ActionInspector contracts', () => {
     expect(updateParam).toHaveBeenLastCalledWith(actionId, 'to', [0.71, 0.8], false);
   });
 
+  it('shows the runtime default part and offers the same supported framing anchors', () => {
+    const statement = {
+      id: 'camera_focus', time: 0, type: 'camera',
+      params: { mode: 'focus', target: 'hero', durationSeconds: 1 },
+    };
+    const actionId = 'camera_focus::primary';
+    const { updateParam } = renderInspector(baseDocument(statement, [{ id: 'hero', name: 'Hero' }]), {
+      id: actionId, time: 0, action: 'cameraMotion',
+      params: { move: 'pan', focus: { character: 'hero', part: 'head' }, duration: 1 },
+      source: { statementId: statement.id, outputKey: 'primary' },
+    });
+    const select = screen.getByRole('combobox', { name: '对焦部位' });
+    expect(select.textContent).toContain('头部');
+    fireEvent.click(select);
+    expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual([
+      '头部', '胸口', '模型底部', '模型中心',
+    ]);
+    fireEvent.click(screen.getByRole('option', { name: '模型底部' }));
+    expect(updateParam).toHaveBeenCalledWith(actionId, 'targetPart', 'feet', undefined);
+  });
+
   it('switches semantic camera focus to fixed coordinates without persisting an empty target', () => {
     const statement = {
       id: 'camera_focus',

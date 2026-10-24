@@ -5,6 +5,8 @@ import {
   InlineNumericInput,
 } from '../../FormComponents';
 import { FormSelect } from '../../../FormSelect';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../../../api/types/camera';
+import { CAMERA_FOCUS_PART_OPTIONS, CAMERA_FOCUS_PART_HELP } from '../cameraFocusParts';
 import type { ActionInspectorProps } from '../../ActionInspector';
 import type { TimelineAction, TimelineScene } from '../../semanticTimelineTypes';
 import {
@@ -130,12 +132,9 @@ export function LegacyCameraMotionSection(props: LegacyCameraMotionProps) {
                     <FormSelect
                       aria-label="对焦部位"
                       id={`action-${actionId}-camera-focus-part`}
-                      value={(actionParams.focus && typeof actionParams.focus === 'object' ? actionParams.focus.part : '') || 'chest'}
-                      options={[
-                        { value: 'head', label: '头部' },
-                        { value: 'chest', label: '胸部' },
-                        { value: 'center', label: '中心' },
-                      ]}
+                      value={(actionParams.focus && typeof actionParams.focus === 'object' ? actionParams.focus.part : '') || actionParams.targetPart || DEFAULT_CAMERA_FOCUS_PART}
+                      options={CAMERA_FOCUS_PART_OPTIONS}
+                      title={CAMERA_FOCUS_PART_HELP}
                       onChange={(value) => {
                         const current = (actionParams.focus && typeof actionParams.focus === 'object') ? actionParams.focus : {};
                         updateParam(actionId, 'focus', { ...current, part: value });
