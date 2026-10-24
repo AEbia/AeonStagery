@@ -452,11 +452,11 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         )}
         {mode === 'shake' && (
           <>
-            {renderCameraNumber('震动强度', 'intensity', actionParams.intensity, 0.2, '0.05', '0')}
-            {renderCameraNumber('震动频率', 'frequency', actionParams.frequency, 18, '1', '0')}
-            {renderCameraDuration('震动时长', actionParams.durationSeconds ?? actionParams.duration, 0.6)}
+            {renderCameraNumber('晃动强度', 'intensity', actionParams.intensity, 0.2, '0.05', '0')}
+            {renderCameraNumber('晃动频率', 'frequency', actionParams.frequency, 18, '1', '0')}
+            {renderCameraDuration('晃动时长', actionParams.durationSeconds ?? actionParams.duration, 0.6)}
             {renderCameraBoolean('衰减', 'decay', actionParams.decay, true)}
-            {renderCameraSelect('震动方向', 'direction', actionParams.direction || 'both', [
+            {renderCameraSelect('晃动方向', 'direction', actionParams.direction || 'both', [
               { value: 'both', label: '双向' },
               { value: 'horizontal', label: '水平' },
               { value: 'vertical', label: '垂直' },

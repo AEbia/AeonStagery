@@ -184,7 +184,7 @@ function cameraTimelinePresentation(params: CameraParams): SceneStatementTimelin
     case 'path':
       return { label: '镜头路径', iconKey: 'cameraPath' };
     case 'shake':
-      return { label: '镜头震动', iconKey: 'cameraShake' };
+      return { label: '镜头晃动', iconKey: 'cameraShake' };
     case 'hitchcock':
       return { label: '希区柯克变焦', iconKey: 'cameraHitchcock' };
     case 'reset':
@@ -400,9 +400,13 @@ const definitions = {
     temporalExtent: (params) => {
       if (params.mode === 'path') {
         const lastKeyframe = params.keyframes.reduce((max, keyframe) => Math.max(max, keyframe.time), 0);
-        return Math.max(duration(params.durationSeconds), lastKeyframe);
+        if (params.loop === true || params.repeat === -1) return Math.max(duration(params.durationSeconds), lastKeyframe);
+        const repeatedExtent = lastKeyframe * (1 + (params.repeat ?? 0));
+        return Math.max(duration(params.durationSeconds), repeatedExtent);
       }
-      if (params.mode === 'follow') return 0;
+      if (params.mode === 'follow') {
+        return 0;
+      }
       return duration(params.durationSeconds);
     },
     collectAssetReferences: () => [],

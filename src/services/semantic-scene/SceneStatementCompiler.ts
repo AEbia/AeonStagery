@@ -37,6 +37,7 @@ import {
 } from './SceneStatementDefinitionRegistry';
 import { assertLensFilterStatements } from './LensFilterStatementValidator';
 import { getLensFilterCategory } from '../../engine/visual-runtime/BuiltInVisualRecipeCatalog';
+import { lowerCameraPropertyTracks } from './CameraPropertyTracks';
 
 type SceneCharacter = NonNullable<CurrentSceneDocument['meta']['characters']>[number];
 
@@ -340,11 +341,7 @@ function validateCameraFollowLifecycle(
       continue;
     }
 
-    if (activeFollow && cameraStatementWritesPosition(params)) {
-      throw new Error(
-        `Camera follow "${activeFollow.id}" is still active when "${event.id}" writes camera position`,
-      );
-    }
+    if (cameraStatementWritesPosition(params)) activeFollow = undefined;
   }
 }
 
@@ -389,20 +386,7 @@ function collectCameraTimelineEvents(
 }
 
 function cameraStatementWritesPosition(params: CameraParams): boolean {
-  switch (params.mode) {
-    case 'focus':
-      return params.target !== undefined || params.position !== undefined;
-    case 'move':
-      return params.position !== undefined || params.to !== undefined;
-    case 'path':
-      return params.keyframes.some((keyframe) => keyframe.position !== undefined);
-    case 'hitchcock':
-      return true;
-    case 'follow':
-    case 'reset':
-    case 'shake':
-      return false;
-  }
+  return lowerCameraPropertyTracks(params).includes('position');
 }
 
 function validateSpeakerReference(
@@ -616,6 +600,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
     case 'focus':
       return [withOutput('primary', 'cameraMotion', cleanParams({
         move: cameraMoveForZoom(params.zoom, params.target ? 'focus' : 'pan'),
+        _cameraProperties: lowerCameraPropertyTracks(params),
         easing: mapEase(params.ease),
         duration: params.durationSeconds,
         focus: params.target ? {
@@ -628,6 +613,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
     case 'move':
       return [withOutput('primary', 'cameraMotion', cleanParams({
         move: cameraMoveForZoom(params.zoom, params.position || params.to ? 'pan' : 'zoom'),
+        _cameraProperties: lowerCameraPropertyTracks(params),
         easing: mapEase(params.ease),
         duration: params.durationSeconds,
         target: params.to ?? params.position,

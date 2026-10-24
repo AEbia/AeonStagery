@@ -7,10 +7,12 @@ import { live2DManager } from '../engine/Live2DManager';
 import { seekProfiler, type SeekPhaseReport } from '../engine/SeekProfiler';
 
 function makeFakeTimeline() {
+  let currentTime = 0;
   return {
     kill: vi.fn(),
     pause: vi.fn(),
-    seek: vi.fn(),
+    seek: vi.fn((time: number) => { currentTime = time; }),
+    time: vi.fn(() => currentTime),
     play: vi.fn(),
   };
 }

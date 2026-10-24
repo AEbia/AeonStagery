@@ -5,9 +5,11 @@ import { resolveVec2 } from './utils/math';
 
 export type MoveHandlerFn = (
   this: CameraController,
-  config: CameraMotionConfig,
+  config: CameraMotionConfig & { resolveFocusPosition?: CameraFocusPositionResolver },
   ease: string
 ) => gsap.core.Tween | gsap.core.Timeline;
+
+export type CameraFocusPositionResolver = (characterId: string, part: string) => { x: number; y: number } | null;
 
 export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
@@ -28,7 +30,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const targetZoom: number | string = config.zoom !== undefined ? config.zoom : '+=0.3';
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.4], zoom: targetZoom, duration, ease, delay });
   },
@@ -49,7 +51,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const targetZoom: number | string = config.zoom !== undefined ? config.zoom : '-=0.3';
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.5], zoom: targetZoom, duration, ease, delay });
   },
@@ -66,7 +68,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const oy = config.focus?.offsetY ?? 0;
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     const tl = gsap.timeline({ delay });
@@ -147,7 +149,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const ox = config.focus?.offsetX ?? 0;
     const oy = config.focus?.offsetY ?? 0;
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.5], zoom, duration, ease, delay });
   },
@@ -164,7 +166,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       : angle;
 
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     if (target) {
@@ -235,13 +237,12 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
    * follow — Continuous character tracking via PixiJS ticker.
    *   Uses smooth lerp towards the character's current position each frame.
-   *   When autoUnfollow is true (default), stops after duration.
+   *   Tracking persists until an explicit release; timing only delays its start.
    */
   follow(config, _ease) {
     const {
-      characterId, duration = 2.0, delay = 0,
+      characterId, delay = 0,
       offset = [0, -0.1], smoothing = 0.85,
-      autoUnfollow = true,
     } = config;
 
     if (!characterId) {
@@ -252,10 +253,6 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     tl.call(() => {
       this.follow(characterId, { offset, smoothing });
     });
-    if (autoUnfollow) {
-      tl.to({}, { duration }, '>');
-      tl.call(() => this.unfollow());
-    }
     return tl;
   },
 };

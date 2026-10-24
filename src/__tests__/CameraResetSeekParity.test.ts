@@ -38,11 +38,33 @@ vi.mock('../api/hooks', () => ({
 import { cameraController } from '../engine/CameraController';
 import { actionSchedulers } from '../engine/actions';
 import { CameraCoordinator } from '../engine/coordinators/CameraCoordinator';
+import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('camera reset seek parity (playback vs direct seek)', () => {
   afterEach(() => {
     gsap.globalTimeline.clear();
     vi.clearAllMocks();
+  });
+
+  it('releases earlier shake envelopes at reset and keeps later envelopes active', () => {
+    cameraController.init();
+    const timeline: RuntimeTimelineAction[] = [
+      { action: 'cameraShake', time: 0, params: { intensity: 0.8, frequency: 12, duration: 2 }, _id: 'shake-before' },
+      { action: 'cameraReset', time: 0.5, params: { duration: 0 }, _id: 'reset' },
+      { action: 'cameraShake', time: 0.75, params: { intensity: 0.8, frequency: 12, duration: 2 }, _id: 'shake-after' },
+    ];
+    const coordinator = new CameraCoordinator(cameraController);
+
+    coordinator.sync(0.25, timeline);
+    const beforeReset = cameraController.getState().shakeOffset ?? { x: 0, y: 0 };
+    expect(Math.abs(beforeReset.x) + Math.abs(beforeReset.y)).toBeGreaterThan(0);
+
+    coordinator.sync(0.6, timeline);
+    expect(cameraController.getState().shakeOffset ?? { x: 0, y: 0 }).toEqual({ x: 0, y: 0 });
+
+    coordinator.sync(1, timeline);
+    const afterReset = cameraController.getState().shakeOffset ?? { x: 0, y: 0 };
+    expect(Math.abs(afterReset.x) + Math.abs(afterReset.y)).toBeGreaterThan(0);
   });
 
   it('presents the transition state when seeking to the camera reset statement or mid-reset duration', () => {
@@ -221,22 +243,25 @@ describe('camera reset seek parity (playback vs direct seek)', () => {
 
     const coordinator = new CameraCoordinator(cameraController as any);
 
-    // At 6.0s (start of reset): follow is released, position is at hero framing (0.7, 0.6), zoom is 2.0
+    // Reset starts from the actual three-second pursuit frame, before full convergence.
+    const weight = 10 ** (-3 / 1.7);
+    const releaseX = 0.7 - 0.2 * weight;
+    const releaseY = 0.6 - 0.1 * weight;
     coordinator.sync(6.0, actions as any, deps);
     expect((cameraController as any).followTarget).toBeNull();
     let state = cameraController.getState();
     let pos = state.position as { x: number; y: number };
-    expect(pos.x).toBeCloseTo(0.7, 3);
-    expect(pos.y).toBeCloseTo(0.6, 3);
+    expect(pos.x).toBeCloseTo(releaseX, 8);
+    expect(pos.y).toBeCloseTo(releaseY, 8);
     expect(state.zoom).toBeCloseTo(2.0, 3);
 
-    // At 7.0s (midpoint of 2s reset): linearly halfway between (0.7, 0.6, zoom 2) and (0.5, 0.5, zoom 1)
+    // Halfway through reset, interpolate from that release frame to the baseline.
     coordinator.sync(7.0, actions as any, deps);
     expect((cameraController as any).followTarget).toBeNull();
     state = cameraController.getState();
     pos = state.position as { x: number; y: number };
-    expect(pos.x).toBeCloseTo(0.6, 3);
-    expect(pos.y).toBeCloseTo(0.55, 3);
+    expect(pos.x).toBeCloseTo((releaseX + 0.5) / 2, 8);
+    expect(pos.y).toBeCloseTo((releaseY + 0.5) / 2, 8);
     expect(state.zoom).toBeCloseTo(1.5, 3);
 
     // At 8.0s (end of reset): at baseline

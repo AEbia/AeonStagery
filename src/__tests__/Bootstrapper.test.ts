@@ -87,6 +87,7 @@ function createScriptEngineMock() {
     }),
     previewTransform: vi.fn(), previewCustomMotion: vi.fn(), clearCustomMotionPreview: vi.fn().mockResolvedValue(undefined),
     setBasePath: vi.fn(), getDuration: vi.fn().mockReturnValue(10),
+    setWmdlConfigRegistry: vi.fn(),
     setSilentMode: vi.fn(), getBasePath: vi.fn().mockReturnValue('.'),
     getMasterTimeline: vi.fn().mockReturnValue(null),
     loadScene: vi.fn().mockResolvedValue(undefined),

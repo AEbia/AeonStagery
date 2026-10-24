@@ -183,8 +183,8 @@ export default function StageOverlay() {
         const charId = group.getAttribute('data-char-id');
         if (!charId) continue;
 
-        const head = characterAdapter.getPoint(charId, 'head', headPoint);
-        const chest = characterAdapter.getPoint(charId, 'chest', chestPoint);
+        const head = characterAdapter.getScreenPoint(charId, 'head', headPoint);
+        const chest = characterAdapter.getScreenPoint(charId, 'chest', chestPoint);
 
         if (head && chest) {
           const headCircle = group.querySelector('.head-marker') as SVGCircleElement;
@@ -248,11 +248,24 @@ export default function StageOverlay() {
     const stageY = (e.clientY - canvasRect.top) / canvasRect.height;
 
     const charId = selectedAction.params.id;
-    const headPoint = characterAdapter.getPoint(charId, 'head');
+    const headPoint = characterAdapter.getScreenPoint(charId, 'head');
     if (!headPoint) return;
 
-    const focusX = Math.max(-1, Math.min(1, (stageX - headPoint.x) * 4));
-    const focusY = Math.max(-1, Math.min(1, (headPoint.y - stageY) * 4));
+    const transform = characterAdapter.getDisplayObject(charId)?.getGlobalTransform();
+    if (!transform) return;
+    const scaleX = Math.hypot(transform.a, transform.b);
+    const scaleY = Math.hypot(transform.c, transform.d);
+    if (!(scaleX > 0 && scaleY > 0) || !Number.isFinite(scaleX + scaleY)) return;
+
+    // Rotate in stage pixels before normalizing: picture axes have different
+    // lengths. The display axes include character/camera rotation and mirroring;
+    // removing their scale preserves the existing click sensitivity.
+    const dx = (stageX - headPoint.x) * stageWidth;
+    const dy = (stageY - headPoint.y) * stageHeight;
+    const localX = (dx * transform.a + dy * transform.b) / scaleX;
+    const localY = (dx * transform.c + dy * transform.d) / scaleY;
+    const focusX = Math.max(-1, Math.min(1, localX / stageWidth * 4));
+    const focusY = Math.max(-1, Math.min(1, -localY / stageHeight * 4));
 
     const compiledAction = documentStore.getCompiledSceneSnapshot()?.actions.find((action) => action.id === selectedActionId);
     const sourceDocument = documentStore.getCurrentSceneDocumentSnapshot();

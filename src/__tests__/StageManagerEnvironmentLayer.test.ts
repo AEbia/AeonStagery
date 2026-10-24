@@ -229,6 +229,20 @@ describe('StageManager environment layer clear lifecycle', () => {
     expect(outgoing.scale.set.mock.lastCall).toEqual([2]);
   });
 
+  it('rotates environment position and authored orientation with the shared camera projection', async () => {
+    const { stageManager } = await import('../engine/StageManager');
+    const backgroundLayer = new (await import('pixi.js')).Container();
+    vi.spyOn(stageManager, 'getLayer').mockReturnValue(backgroundLayer as any);
+    await stageManager.renderEnvironmentLayer({
+      layerId: 'background', x: 1200 / 1920, y: 0.5, rotation: 30,
+      images: [{ image: 'landscape.png', weight: 1 }],
+    }, { position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 90 });
+    const sprite = (backgroundLayer.children[0] as any).children[0];
+    expect(sprite.x).toBeCloseTo(960);
+    expect(sprite.y).toBeCloseTo(300);
+    expect(sprite.angle).toBeCloseTo(-60);
+  });
+
   it('cancels a pending fade-out clear when the same layer is set again', async () => {
     const { stageManager } = await import('../engine/StageManager');
 

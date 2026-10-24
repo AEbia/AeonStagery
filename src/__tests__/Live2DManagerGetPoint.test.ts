@@ -3,6 +3,8 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import { Live2DCompositeModel } from '../engine/Live2DCompositeModel';
+import { ProxyRegistry } from '../engine/coordinators/ProxyRegistry';
+import type { CharacterEntry } from '../engine/Live2DConfig';
 import { mockAdapter, mockControls } from './helpers/mockLive2DRuntimeAdapter';
 import {
   acquireSharedRuntimeClockLock,
@@ -143,7 +145,65 @@ describe('Live2DManager.getPoint', () => {
     });
   });
 
-  it('falls back to transformation proxies when model bounds are invalid and returns null for an unknown character', async () => {
+  it('captures refreshed local anchors with head metadata, fallback fractions, flip and authored rotation', async () => {
+    const { default: Live2DManager } = await import('../engine/Live2DManager');
+    const manager = new Live2DManager();
+    const refresh = vi.fn();
+    const model = {
+      height: 400,
+      scale: { x: -1, y: 1, set() {} },
+      getLocalBounds: () => ({ x: -50, y: -100, width: 100, height: 400 }),
+      updateDrawableBounds: refresh,
+    };
+    const entry = {
+      id: 'soyo', model, baseHeight: 400, config: { flipX: true },
+      runtimeHandle: { character: { getHeadAnchor: () => ({ x: 0.25, y: 0.4 }) } } as unknown as CharacterEntry['runtimeHandle'],
+    } as unknown as CharacterEntry;
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
+    const proxy = { x: 960, y: 700, scale: 1, rotation: 90 };
+    const proxies = new ProxyRegistry();
+    proxies.set('soyo', proxy);
+    manager.setScriptEngine({ transformationProxies: proxies });
+
+    expect(manager.getPoint('soyo', 'head')).toEqual({
+      x: (960 - 162) / 1920,
+      y: (700 + 67.5) / 1080,
+    });
+    expect(manager.getPoint('soyo', 'chest')).toEqual({
+      x: (960 - 183.6) / 1920,
+      y: 700 / 1080,
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('maps composite head geometry through its local transform into the authored origin', async () => {
+    const { default: Live2DManager } = await import('../engine/Live2DManager');
+    const manager = new Live2DManager();
+    const mainModel = new PIXI.Container();
+    mainModel.boundsArea = new PIXI.Rectangle(-50, -100, 100, 200);
+    Object.assign(mainModel, { updateDrawableBounds() {} });
+    const headModel = new PIXI.Container();
+    headModel.position.set(20, 30);
+    headModel.boundsArea = new PIXI.Rectangle(0, 0, 100, 100);
+    Object.assign(headModel, { updateDrawableBounds() {} });
+    const composite = new Live2DCompositeModel(mainModel, [headModel]);
+    composite.pivot.set(10, 20);
+    const entry = {
+      id: 'soyo', model: composite, baseHeight: 200, config: {},
+      runtimeHandle: { character: { getHeadAnchor: () => null } } as unknown as CharacterEntry['runtimeHandle'],
+    } as unknown as CharacterEntry;
+    live2DStageState(manager).characters = new Map([['soyo', entry]]);
+    const proxies = new ProxyRegistry();
+    proxies.set('soyo', { x: 960, y: 900, scale: 1, rotation: 0 });
+    manager.setScriptEngine({ transformationProxies: proxies });
+
+    expect(manager.getPoint('soyo', 'head')).toEqual({
+      x: (960 + 0.3 * 1080) / 1920,
+      y: (900 + 0.14 * 1080) / 1080,
+    });
+  });
+
+  it('returns missing anchors for invalid model bounds and unmaterialized characters even with proxies', async () => {
     const { default: Live2DManager } = await import('../engine/Live2DManager');
     const manager = new Live2DManager();
     live2DStageState(manager).characters = new Map([[
@@ -153,15 +213,50 @@ describe('Live2DManager.getPoint', () => {
         model: { getBounds: () => ({ x: 0, y: 0, width: 0, height: 100 }) },
       },
     ]]);
-    (manager as any)._scriptEngine = {
-      transformationProxies: new Map([['soyo', { x: 960, y: 900, scale: 1.5 }]]),
-    };
+    const proxies = new ProxyRegistry();
+    proxies.set('soyo', { x: 960, y: 900, scale: 1.5 });
+    proxies.set('unloaded', { x: 1200, y: 700, scale: 1 });
+    manager.setScriptEngine({ transformationProxies: proxies });
 
-    expect(manager.getPoint('soyo', 'head')).toEqual({
-      x: 0.5,
-      y: 900 / 1080 - 0.6 * 1.5,
-    });
-    expect(manager.getPoint('missing', 'center')).toBeNull();
+    for (const id of ['soyo', 'unloaded', 'missing']) {
+      for (const part of ['head', 'chest', 'center', 'feet'] as const) {
+        expect(manager.getPoint(id, part)).toBeNull();
+      }
+    }
+  });
+
+  it('keeps focus anchors in stage space after camera and editor viewport transforms', async () => {
+    const { default: Live2DManager } = await import('../engine/Live2DManager');
+    const manager = new Live2DManager();
+    const viewport = new PIXI.Container();
+    const container = new PIXI.Container();
+    const model = new PIXI.Container();
+    model.boundsArea = new PIXI.Rectangle(-150, -600, 300, 600);
+    viewport.addChild(container);
+    container.addChild(model);
+    live2DStageState(manager).characters = new Map([['hero', {
+      id: 'hero', model, config: {}, baseHeight: 600,
+    }]]);
+    live2DStageState(manager).containers.set('hero', container);
+    const proxy = { x: 1200, y: 950, scale: 0.8, rotation: 0, opacity: 1, z: 100 };
+    manager.setScriptEngine({ transformationProxies: new Map([['hero', proxy]]) });
+    const rotatedCamera = { position: [0.5, 0.5] as [number, number], zoom: 1, rotation: 90 };
+    manager.currentCamera = rotatedCamera;
+    manager.applyProxyTransform('hero', proxy);
+    expect(container.angle).toBeCloseTo(-90);
+    const initialHead = manager.getPoint('hero', 'head')!;
+    expect(initialHead.x).toBeCloseTo(1200 / 1920);
+    expect(initialHead.y).toBeCloseTo(950 / 1080 - 0.8 * 0.82);
+
+    viewport.position.set(180, 90);
+    viewport.scale.set(0.6);
+    manager.currentCamera = { position: [0.7, 0.4], zoom: 2 };
+    // The camera can advance before the next character projection pass.
+    expect(manager.getPoint('hero', 'head')!.y).toBeCloseTo(initialHead.y);
+    manager.applyProxyTransform('hero', proxy);
+    const focusedHead = manager.getPoint('hero', 'head')!;
+    expect(focusedHead.x).toBeCloseTo(initialHead.x);
+    expect(focusedHead.y).toBeCloseTo(initialHead.y);
   });
 
   it('propagates lookAt to composite sub-models', async () => {

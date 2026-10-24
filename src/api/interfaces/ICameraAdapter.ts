@@ -2,6 +2,8 @@ import type { CameraMotionConfig, CameraKeyframe, CameraPathConfig, CameraShakeC
 
 export interface ICameraAdapter {
   init(): void;
+  /** Stop independent camera previews before formal frame capture. */
+  clearTemporaryState(): void;
   focusOn(characterId: string, part?: string): void;
   executeMotion(config: CameraMotionConfig): void;
   createPath(keyframes: CameraKeyframe[], config?: CameraPathConfig): string;
