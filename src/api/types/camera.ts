@@ -133,7 +133,7 @@ export interface CameraMotionConfig {
   /** Who/what the camera looks at */
   focus?: {
     character?: string;
-    part?: 'head' | 'chest' | 'center';
+    part?: 'head' | 'chest' | 'feet' | 'center';
     point?: Vec2;
     offsetX?: number;
     offsetY?: number;

@@ -24,6 +24,8 @@ status: accepted
 - 基础属性通道、路径、震动和无角色目标的聚焦由 `evaluateCameraChannels` 按场景时间纯求值。正式时间线通过 `CameraCoordinator` 在播放、seek 与导出时同步解析结果；GSAP 保留场景时钟、事件和缓动职责，不竞争写入这些通道。
 - 角色聚焦和跟随读取活动舞台上的模型部位几何，并叠加该场景时刻的角色编排位置。播放期间跟随控制器通过 ticker 保留实际追赶位置；暂停和渲染读取不重新吸附。seek 与导出按目标时刻重建相机，使用当时的编排位置和可见模型部位偏移，不模拟完整的历史角色姿态。因此，含角色运镜的 seek 落点不承诺复现此前播放路径的精确跟随历史。
 - 角色部位锚点在目标时刻不可用时返回缺失值，不回退到角色原点、画面原点或其他时刻的模型。跟随在锚点暂时缺失时保持最后有效位置；目标重新可用后继续追赶。
+- 模型进入活动舞台前，加载流程先执行适配器注册的受保护几何准备，再测量大小和设置 pivot。C2 的实际顶点需要绑定 WebGL 上下文后才能取得，不能把首次绘制前的备用画布边界捕获成角色部位；复合模型逐个准备其具体子模型。该步骤复用渲染准备边界，不绘制额外舞台帧或重放历史姿态。
+- 部位选项与运行时保持一致：`head`（头部，缺省目标）、`chest`（胸口）、`feet`（模型底部）与 `center`（模型中心）。头部优先使用模型提供的标记；无标记时头部、胸口分别按外观边界高度的 12%、28% 估算。底部取 95%，中心取 50%；半身模型的底部不承诺对应脚部。默认角色高度 1.3、镜头缩放 1 下，胸口居中约留 14% 头顶空间；这些估算不保证适配所有模型比例，部位选择不自动改变缩放。
 - 单独调用 `focusOn()`、`shake()`、`executeMotion()` 等 API 属于临时预览，不写入场景时间线。场景重载、seek 和正式导出会清除临时镜头动画、震动与跟随状态。
 - Bake 只生成 Live2D 姿态快照，不生成摄像机轨迹或镜头状态。导出等待场景加载完成，再按逐帧目标时间 seek 和捕获。
 
@@ -46,4 +48,5 @@ status: accepted
 - 时间线同步、聚焦锚点与跟随交接：[`CameraCoordinator.ts`](../../src/engine/coordinators/CameraCoordinator.ts)、[`ScriptEngine.ts`](../../src/engine/ScriptEngine.ts)
 - 跟随平滑与画面震动：[`CameraFollowSmoothing.ts`](../../src/engine/CameraFollowSmoothing.ts)、[`CameraShake.ts`](../../src/engine/CameraShake.ts)
 - 角色舞台锚点：[`cameraAnchorResolver.ts`](../../src/engine/cameraAnchorResolver.ts)
+- 舞台加载与首次几何准备：[`Live2DStageRuntime.ts`](../../src/engine/Live2DStageRuntime.ts)、[`Live2DRenderPreparation.ts`](../../src/engine/live2d/runtime/Live2DRenderPreparation.ts)
 - 投影与舞台逻辑尺寸：[`Projection.ts`](../../src/engine/Projection.ts)、[`StageDimensions.ts`](../../src/engine/StageDimensions.ts)

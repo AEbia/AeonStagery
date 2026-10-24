@@ -21,6 +21,8 @@ import type { CameraPoint } from '../cameraMotionZoom';
 import { clampCameraCoordinate, readCameraPoint } from '../cameraMotionZoom';
 import type { InspectorParamContext } from '../paramControls/context';
 import { switchCameraFocusTarget } from '../../semanticTimelineEditing';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../../../api/types/camera';
+import { CAMERA_FOCUS_PART_OPTIONS, CAMERA_FOCUS_PART_HELP } from '../cameraFocusParts';
 
 export interface SemanticSourcePanelProps {
   rowFieldKeys: ReadonlySet<string>;
@@ -183,6 +185,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
           aria-label={label}
           value={typeof value === 'string' ? value : ''}
           options={options}
+          title={key === 'targetPart' ? CAMERA_FOCUS_PART_HELP : undefined}
           onChange={(nextValue) => updateCameraParam(key, nextValue)}
         />
       </div>
@@ -212,13 +215,8 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
     const renderCameraTargetPart = () => renderCameraSelect(
       '对焦部位',
       'targetPart',
-      actionParams.targetPart || 'chest',
-      [
-        { value: 'head', label: '头部' },
-        { value: 'chest', label: '胸部' },
-        { value: 'feet', label: '脚部' },
-        { value: 'center', label: '中心' },
-      ],
+      actionParams.targetPart || DEFAULT_CAMERA_FOCUS_PART,
+      CAMERA_FOCUS_PART_OPTIONS,
     );
     const zoom = actionParams.zoom && typeof actionParams.zoom === 'object'
       ? actionParams.zoom as { kind?: string; value?: number }

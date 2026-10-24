@@ -95,7 +95,7 @@ describe('Live2DManager.getPoint', () => {
 
     expect(point).toBeTruthy();
     expect(point!.x).toBeCloseTo((200 + 800 * 0.5) / 1920, 6);
-    expect(point!.y).toBeCloseTo((120 + 400 * 0.18) / 1080, 6);
+    expect(point!.y).toBeCloseTo((120 + 400 * 0.12) / 1080, 6);
   });
 
   it('returns each semantic bounds anchor and supports a caller-owned output object', async () => {
@@ -114,9 +114,9 @@ describe('Live2DManager.getPoint', () => {
     expect(manager.getPoint('soyo', 'head', out)).toBe(out);
     expect(out).toEqual({
       x: (100 + 1000 * 0.5) / 1920,
-      y: (200 + 800 * 0.18) / 1080,
+      y: (200 + 800 * 0.12) / 1080,
     });
-    expect(manager.getPoint('soyo', 'chest')!.y).toBeCloseTo((200 + 800 * 0.42) / 1080, 6);
+    expect(manager.getPoint('soyo', 'chest')!.y).toBeCloseTo((200 + 800 * 0.28) / 1080, 6);
     expect(manager.getPoint('soyo', 'center')!.y).toBeCloseTo((200 + 800 * 0.5) / 1080, 6);
     expect(manager.getPoint('soyo', 'feet')!.y).toBeCloseTo((200 + 800 * 0.95) / 1080, 6);
   });
@@ -137,11 +137,11 @@ describe('Live2DManager.getPoint', () => {
 
     expect(manager.getPoint('soyo', 'head')).toEqual({
       x: (300 + 200 * 0.5) / 1920,
-      y: (100 + 300 * 0.18) / 1080,
+      y: (100 + 300 * 0.12) / 1080,
     });
     expect(manager.getPoint('soyo', 'chest')).toEqual({
       x: (500 + 600 * 0.5) / 1920,
-      y: (200 + 700 * 0.42) / 1080,
+      y: (200 + 700 * 0.28) / 1080,
     });
   });
 
@@ -169,10 +169,9 @@ describe('Live2DManager.getPoint', () => {
       x: (960 - 162) / 1920,
       y: (700 + 67.5) / 1080,
     });
-    expect(manager.getPoint('soyo', 'chest')).toEqual({
-      x: (960 - 183.6) / 1920,
-      y: 700 / 1080,
-    });
+    const chest = manager.getPoint('soyo', 'chest')!;
+    expect(chest.x).toBeCloseTo((960 - 32.4) / 1920, 10);
+    expect(chest.y).toBeCloseTo(700 / 1080, 10);
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
@@ -199,7 +198,7 @@ describe('Live2DManager.getPoint', () => {
 
     expect(manager.getPoint('soyo', 'head')).toEqual({
       x: (960 + 0.3 * 1080) / 1920,
-      y: (900 + 0.14 * 1080) / 1080,
+      y: (900 + 0.11 * 1080) / 1080,
     });
   });
 
@@ -246,7 +245,7 @@ describe('Live2DManager.getPoint', () => {
     expect(container.angle).toBeCloseTo(-90);
     const initialHead = manager.getPoint('hero', 'head')!;
     expect(initialHead.x).toBeCloseTo(1200 / 1920);
-    expect(initialHead.y).toBeCloseTo(950 / 1080 - 0.8 * 0.82);
+    expect(initialHead.y).toBeCloseTo(950 / 1080 - 0.8 * 0.88);
 
     viewport.position.set(180, 90);
     viewport.scale.set(0.6);

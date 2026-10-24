@@ -6,7 +6,7 @@ import type { Vec2 } from '../api/types/common';
 import type { CharacterEntry } from './Live2DConfig';
 import { STAGE_WIDTH, STAGE_HEIGHT } from './Live2DConfig';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
-import { captureLive2DAnchorOffset } from './Live2DAnchorGeometry';
+import { captureLive2DAnchorOffset, LIVE2D_ANCHOR_FRACTIONS } from './Live2DAnchorGeometry';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { projectToScreen } from './Projection';
 import { resolveVec2 } from './utils/math';
@@ -211,7 +211,6 @@ export class Live2DCharacterGeometry {
 
         if (bounds && isFinite(bounds.x) && isFinite(bounds.y) && isFinite(bounds.width) && isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
           const centerX = bounds.x + bounds.width * 0.5;
-          const centerY = bounds.y + bounds.height * 0.5;
           const headAnchor = pointName === 'head'
             ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
                 entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
@@ -219,25 +218,10 @@ export class Live2DCharacterGeometry {
             : null;
 
           let x = centerX;
-          let y = centerY;
+          let y = bounds.y + bounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
           if (headAnchor && pointName === 'head') {
             x = bounds.x + bounds.width * headAnchor.x;
             y = bounds.y + bounds.height * headAnchor.y;
-          } else {
-            switch (pointName) {
-              case 'head':
-                y = bounds.y + bounds.height * 0.18;
-                break;
-              case 'chest':
-                y = bounds.y + bounds.height * 0.42;
-                break;
-              case 'center':
-                y = centerY;
-                break;
-              case 'feet':
-                y = bounds.y + bounds.height * 0.95;
-                break;
-            }
           }
 
           const proxy = this.getSceneContext()?.transformationProxies?.get(id);
@@ -258,7 +242,7 @@ export class Live2DCharacterGeometry {
                 : localCenterX;
               const localAnchorY = pointName === 'head' && headAnchor
                 ? localBounds.y + localBounds.height * headAnchor.y
-                : localBounds.y + localBounds.height * (pointName === 'head' ? 0.18 : pointName === 'chest' ? 0.42 : pointName === 'feet' ? 0.95 : 0.5);
+                : localBounds.y + localBounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
               local = container.toLocal(model.toGlobal({ x: localAnchorX, y: localAnchorY }));
             } else {
               local = container.toLocal({ x, y });

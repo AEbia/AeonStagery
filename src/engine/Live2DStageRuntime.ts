@@ -19,6 +19,7 @@ import type { CharacterMotionOutput } from '../api/types/semantic-scene';
 import type { RimLightStyleState } from '../api/types/visual';
 import type { ResolvedRimLightState } from './RimLightResolver';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
+import { prepareLive2DGeometry } from './live2d/runtime/Live2DRenderPreparation';
 import { applyCustomMotionValues, evaluateCustomMotionRuntime } from './live2d/customMotionRuntime';
 import { Live2DMotionController, type MotionRequest } from './Live2DMotionController';
 import { Live2DModelResources, type Live2DResourceModel } from './Live2DModelResources';
@@ -177,6 +178,11 @@ export class Live2DStageRuntime {
           const initialized = await runtimeHandle.initialize({ mode: 'live', isCurrent });
           if (initialized.status !== 'ready' || !isCurrent()) { release(); return; }
           const idleSnapshot = initialized.idleSnapshot;
+
+          // C2 needs its guarded context-bound preparation before drawable
+          // bounds can replace the SDK's temporary canvas bounds. Do this
+          // before sizing/pivot setup or a cold focus captures a false anchor.
+          prepareLive2DGeometry(model, stageManager.getApp().renderer);
 
           // Start our manual ticker if this is the first character
           if (!this.tickerAdded) {
