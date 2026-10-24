@@ -30,6 +30,7 @@ import {
 } from '../project-agent-service/ProjectAgentOverviewPort';
 import { runProjectAgentSceneValidation } from '../project-agent-service/ProjectAgentSceneValidation';
 import { createProjectAgentAuthoringGate } from '../project-agent-service/ProjectAgentAuthoringGate';
+import { describeProjectAgentDialogueStyles } from '../project-agent-service/ProjectAgentDialogueStyles';
 import { createEditorProjectAgentService } from '../project-agent-service/createEditorProjectAgentService';
 import type { ProjectAgentCapabilityService } from '../ai-conversation/ProjectAgentCapabilities';
 import type { AiConversationTransport } from '../ai-authoring/AiConversationTransport';
@@ -220,6 +221,13 @@ export class StandaloneProjectAgentEngine {
           activeScene: { name: entry.name, path: entry.path },
           scenes: metadata.scenes,
           assetRoots,
+          ...(metadata.templates ? {
+            templates: {
+              enabledTemplateIds: metadata.templates.enabledTemplateIds,
+              defaults: { ...metadata.templates.defaults },
+            },
+          } : {}),
+          dialogueStyles: describeProjectAgentDialogueStyles(metadata.templates),
         }),
       }),
       files: readPorts.files,
@@ -240,6 +248,7 @@ export class StandaloneProjectAgentEngine {
     };
 
     const projectAgentWritePorts: ProjectAgentWritePorts = {
+      dialogueDefaults: { getDialogueDefaults: () => metadata.templates },
       scene: {
         getSnapshot: () => projectAgentReadPorts.scene.getSnapshot(),
       },

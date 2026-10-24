@@ -4,6 +4,7 @@ import type { ProjectAgentWritePorts } from '../services/project-agent/ProjectAg
 import { ProjectAgentTaskState } from '../services/project-agent/ProjectAgentTaskState';
 import { ProjectAgentWriteTools } from '../services/project-agent/ProjectAgentWriteTools';
 import { SemanticAuthoringGateError } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
+import type { DialogueImagePresentation } from '../api/types/semantic-scene';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -46,6 +47,7 @@ function makeDocument(): CurrentSceneDocument {
 
 function createWriteHarness(options?: {
   validate?: ProjectAgentWritePorts['validation']['validate'];
+  dialogueDefaults?: ProjectAgentWritePorts['dialogueDefaults'];
   commitFail?: Error;
 }) {
   let document = makeDocument();
@@ -53,6 +55,7 @@ function createWriteHarness(options?: {
   const commits: CurrentSceneDocument[] = [];
 
   const ports: ProjectAgentWritePorts = {
+    dialogueDefaults: options?.dialogueDefaults,
     scene: {
       getSnapshot: () => ({ document, version }),
     },
@@ -91,6 +94,73 @@ function createWriteHarness(options?: {
 }
 
 describe('ProjectAgentWriteTools', () => {
+  it('applies the current default before validation and preserves explicit styles in a transaction', async () => {
+    const validated: CurrentSceneDocument[] = [];
+    let template: 'minimal' | 'classic' = 'minimal';
+    const harness = createWriteHarness({
+      dialogueDefaults: { getDialogueDefaults: () => ({ defaults: { dialogueStyleId: template } }) },
+      validate: (document) => { validated.push(document); return []; },
+    });
+    harness.bind();
+    const first = await harness.tools.insertStatement({
+      time: 3, statement: { type: 'dialogue', params: { text: 'Default', durationSeconds: 1 } },
+    });
+    expect(first.ok).toBe(true);
+    expect(harness.document.statements.find((statement) => statement.time === 3)?.params).toMatchObject({ template: 'minimal' });
+    expect(validated[0]?.statements.find((statement) => statement.time === 3)?.params).toMatchObject({ template: 'minimal' });
+    template = 'classic';
+    const batch = await harness.tools.applyAuthoringTransaction({
+      version: 1,
+      operations: [
+        { kind: 'insertStatement', time: 4, statement: { type: 'dialogue', params: { text: 'Default', durationSeconds: 1 } } },
+        { kind: 'insertStatement', time: 5, statement: { type: 'dialogue', params: { text: 'Explicit', durationSeconds: 1, template: 'glass' } } },
+        { kind: 'updateStatement', statementId: 'dlg_1', patch: { params: { text: 'Existing' } } },
+      ],
+    });
+    expect(batch.ok).toBe(true);
+    expect(harness.document.statements.find((statement) => statement.time === 4)?.params).toMatchObject({ template: 'classic' });
+    expect(harness.document.statements.find((statement) => statement.time === 5)?.params).toMatchObject({ template: 'glass' });
+    expect(harness.document.statements.find((statement) => statement.id === 'dlg_1')?.params).not.toHaveProperty('template');
+  });
+
+  it('copies the project image style without replacing an explicitly supplied presentation', async () => {
+    const presentation: DialogueImagePresentation = {
+      renderer: 'image-dialogue-v1', styleId: 'project.subtitle',
+      textbox: { image: 'images/textbox.png', x: 0, y: 760, width: 1920 },
+      text: { x: 100, y: 800, maxWidth: 1720 },
+    };
+    const harness = createWriteHarness({
+      dialogueDefaults: { getDialogueDefaults: () => ({ dialoguePresentation: presentation }) },
+    });
+    harness.bind();
+    const result = await harness.tools.insertStatement({
+      time: 3, statement: { type: 'dialogue', params: { text: 'Default', durationSeconds: 1 } },
+    });
+    expect(result.ok).toBe(true);
+    const inserted = harness.document.statements.find((statement) => statement.time === 3);
+    if (inserted?.type !== 'dialogue') throw new Error('Dialogue was not inserted');
+    expect(inserted.params.presentation).toEqual(presentation);
+    expect(inserted.params.presentation).not.toBe(presentation);
+    const explicit = { ...presentation, styleId: 'other.subtitle' };
+    const second = await harness.tools.insertStatement({
+      time: 4, statement: { type: 'dialogue', params: { text: 'Explicit', durationSeconds: 1, presentation: explicit } },
+    });
+    expect(second.ok).toBe(true);
+    expect(harness.document.statements.find((statement) => statement.time === 4)?.params).toMatchObject({ presentation: explicit });
+  });
+
+  it('applies default style when replacing another statement family with dialogue', async () => {
+    const harness = createWriteHarness({
+      dialogueDefaults: { getDialogueDefaults: () => ({ dialogueTemplate: 'classic' }) },
+    });
+    harness.bind();
+    const result = await harness.tools.updateStatement({
+      statementId: 'cam_1', patch: { type: 'dialogue', params: { text: 'Replaced', durationSeconds: 1 } },
+    });
+    expect(result.ok).toBe(true);
+    expect(harness.document.statements.find((statement) => statement.id === 'cam_1')?.params).toMatchObject({ template: 'classic' });
+  });
+
   it('rejects writes before a successful scene read', async () => {
     const { tools } = createWriteHarness();
     const result = await tools.updateStatement({

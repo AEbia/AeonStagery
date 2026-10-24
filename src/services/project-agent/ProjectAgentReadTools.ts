@@ -145,6 +145,7 @@ export class ProjectAgentReadTools {
         relativePath: scene.relativePath,
       })),
       assetRoots: { ...overview.assetRoots },
+      ...(overview.dialogueStyles ? { dialogueStyles: structuredClone(overview.dialogueStyles) } : {}),
       ...(overview.templates
         ? {
             templates: {
