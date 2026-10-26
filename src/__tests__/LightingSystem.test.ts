@@ -251,6 +251,7 @@ describe('LightingSystem transient effect rebuilds', () => {
         overlayIntensity: 0.6,
       },
       postProcessingTargets: {},
+      blurTargets: {},
       colorOverlays: [],
       pointLights: [],
       visualOverlay: null,

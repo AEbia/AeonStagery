@@ -61,11 +61,11 @@ describe('visual and lighting source contracts', () => {
     const compiled = sceneStatementCompiler.compile(sceneDocumentCodec.parseAndValidate(JSON.parse(JSON.stringify(saved))));
     const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
     expect(compiled.actions[2].params.bloomBlur).toBe(20);
-    expect(deriveLightingSnapshotAtTime(2, timeline).postProcessingTargets.hero.bloomBlur).toBe(10);
-    expect(deriveLightingSnapshotAtTime(3, timeline).postProcessingTargets.hero.bloomBlur).toBe(20);
-    expect(deriveLightingSnapshotAtTime(5, timeline).postProcessingTargets.hero.bloomBlur).toBe(14);
-    expect(deriveLightingSnapshotAtTime(6, timeline).postProcessingTargets.hero.bloomBlur).toBe(8);
-    expect(deriveLightingSnapshotAtTime(0, timeline).postProcessingTargets.hero.bloomBlur).toBe(0);
+    expect(deriveLightingSnapshotAtTime(2, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(10);
+    expect(deriveLightingSnapshotAtTime(3, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(20);
+    expect(deriveLightingSnapshotAtTime(5, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(14);
+    expect(deriveLightingSnapshotAtTime(6, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(8);
+    expect(deriveLightingSnapshotAtTime(0, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(0);
     expect(deriveLightingSnapshotAtTime(2, timeline).postProcessing.bloomBlur).toBe(0);
   });
 
@@ -233,8 +233,8 @@ describe('visual and lighting source contracts', () => {
     ]);
     expect(sceneStatementCompiler.compile(document).actions.map((action) => action.params)).toEqual([
       { target: 'panorama', adjGamma: 1.1 },
-      { target: 'hero', adjContrast: 1.2 },
-      { target: 'hero' },
+      { target: 'character:hero', adjContrast: 1.2 },
+      { target: 'character:hero' },
     ]);
   });
 

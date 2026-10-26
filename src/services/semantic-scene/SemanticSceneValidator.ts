@@ -10,6 +10,7 @@ import type {
 import type { ValidationIssue } from '../../api/types/validation';
 import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
 import { validateLensFilterStatements } from './LensFilterStatementValidator';
+import { isLightingTarget, lightingTargetKey, resolveLightingTarget } from '../../api/types/lighting-target';
 
 export interface SemanticValidationIssue extends ValidationIssue {
   readonly code?: string;
@@ -32,6 +33,7 @@ export const SEMANTIC_VISUAL_DIAGNOSTIC_CODES = Object.freeze({
   cameraBackgroundBlackEdge: 'semantic.camera.black-edge',
   lightingPresetMissing: 'semantic.lighting.preset.missing',
   lightingBlurTargetEmpty: 'semantic.lighting.blur.target-empty',
+  lightingBlurTargetUnknown: 'semantic.lighting.blur.target-unknown',
   lightingPostTargetEmpty: 'semantic.lighting.post.target-empty',
   lightingPostTargetUnknown: 'semantic.lighting.post.target-unknown',
   lightingGodraysMissingValues: 'semantic.lighting.godrays.missing-values',
@@ -105,7 +107,7 @@ interface CharacterPresenceSegment {
 
 interface LightingValidationState {
   readonly singletonEffects: Set<string>;
-  readonly blurTargets: Set<'global' | 'background' | 'characters'>;
+  readonly blurTargets: Set<string>;
   readonly overlayIds: Set<string>;
   readonly pointLightIds: Set<string>;
 }
@@ -858,22 +860,13 @@ function validateLightingStatement(
       }
       return;
     case 'blur': {
-      const rawTarget = params.target as unknown;
-      if (rawTarget !== undefined && !hasNonEmptyString(rawTarget)) {
-        appendVisualIssue(
-          issues,
-          context,
-          SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingBlurTargetEmpty,
-          'target',
-          '模糊目标为空，请提供 global、background 或 characters。',
-        );
-        return;
-      }
-      const target = (rawTarget ?? 'global') as 'global' | 'background' | 'characters';
+      if (!validateLightingTarget(context, params.target, 'blur', characterIds, environmentLayerIds, issues)) return;
+      const target = params.target ?? 'global';
+      const stateTarget = lightingTargetKey(target, 'blur', characterIds);
       if (params.mode === 'reset') {
-        validateLightingReset(context, 'blur', `模糊「${target}」`, state.blurTargets, issues, target);
+        validateLightingReset(context, 'blur', `模糊「${typeof target === 'string' ? target : 'id' in target ? target.id : '整组'}」`, state.blurTargets, issues, stateTarget);
       } else {
-        state.blurTargets.add(target);
+        state.blurTargets.add(stateTarget);
       }
       return;
     }
@@ -894,12 +887,12 @@ function validateLightingStatement(
       }
       return;
     case 'post':
-      validateLightingPostTarget(context, params.target, characterIds, environmentLayerIds, issues);
+      if (!validateLightingTarget(context, params.target, 'post', characterIds, environmentLayerIds, issues)) return;
       {
-        const target = hasNonEmptyString(params.target) ? params.target : 'panorama';
-        const stateKey = `post:${target}`;
+        const target = params.target ?? 'panorama';
+        const stateKey = `post:${lightingTargetKey(target, 'post', characterIds)}`;
         if (params.mode === 'reset') {
-          validateLightingReset(context, stateKey, `后期处理「${target}」`, state.singletonEffects, issues);
+          validateLightingReset(context, stateKey, `后期处理「${typeof target === 'string' ? target : 'id' in target ? target.id : '整组'}」`, state.singletonEffects, issues);
         } else {
           state.singletonEffects.add(stateKey);
         }
@@ -940,34 +933,31 @@ function validateLightingStatement(
   }
 }
 
-function validateLightingPostTarget(
+function validateLightingTarget(
   context: StatementValidationContext,
   rawTarget: unknown,
+  effect: 'blur' | 'post',
   characterIds: ReadonlySet<string>,
   environmentLayerIds: ReadonlySet<string>,
   issues: SemanticValidationIssue[],
-): void {
-  if (rawTarget === undefined) return;
-  if (!hasNonEmptyString(rawTarget)) {
-    appendVisualIssue(
-      issues,
-      context,
-      SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingPostTargetEmpty,
-      'target',
-      '后期处理目标为空，请提供 panorama、角色 ID 或环境图层 ID。',
-    );
-    return;
+): boolean {
+  if (rawTarget === undefined) return true;
+  const label = effect === 'blur' ? '模糊' : '后期处理';
+  if (!isLightingTarget(rawTarget) || (typeof rawTarget === 'string' && !rawTarget.trim())) {
+    appendVisualIssue(issues, context, effect === 'blur'
+      ? SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingBlurTargetEmpty
+      : SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingPostTargetEmpty,
+    'target', `${label}目标为空，请选择全景、角色或环境图层。`);
+    return false;
   }
-
-  const target = rawTarget as string;
-  if (target === 'panorama' || characterIds.has(target) || environmentLayerIds.has(target)) return;
-  appendVisualIssue(
-    issues,
-    context,
-    SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingPostTargetUnknown,
-    'target',
-    `后期处理目标「${target}」不是 panorama、已声明角色或已声明环境图层。`,
-  );
+  const target = resolveLightingTarget(rawTarget, effect, characterIds);
+  if (target.kind === 'scene' || target.kind === 'group') return true;
+  if ((target.kind === 'character' ? characterIds : environmentLayerIds).has(target.id)) return true;
+  appendVisualIssue(issues, context, effect === 'blur'
+    ? SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingBlurTargetUnknown
+    : SEMANTIC_VISUAL_DIAGNOSTIC_CODES.lightingPostTargetUnknown,
+  'target', `${label}目标「${target.id}」不是已声明角色或环境图层。`);
+  return false;
 }
 
 function validateLightingReset<T extends string>(

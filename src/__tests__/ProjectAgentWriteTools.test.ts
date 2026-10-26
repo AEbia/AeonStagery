@@ -5,6 +5,9 @@ import { ProjectAgentTaskState } from '../services/project-agent/ProjectAgentTas
 import { ProjectAgentWriteTools } from '../services/project-agent/ProjectAgentWriteTools';
 import { SemanticAuthoringGateError } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
 import type { DialogueImagePresentation } from '../api/types/semantic-scene';
+import type { AgentUpdateStatementArgs } from '../api/types/project-agent';
+import type { LightingTargetReference } from '../api/types/lighting-target';
+import { buildProjectAgentSystemPrompt } from '../services/project-agent-service/ProjectAgentSystemPrompt';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -94,6 +97,42 @@ function createWriteHarness(options?: {
 }
 
 describe('ProjectAgentWriteTools', () => {
+  it.each(['blur', 'post'] as const)('executes the prompted %s target switches in one update from every structured target kind', async (effect) => {
+    const prompt = buildProjectAgentSystemPrompt({ baseSystemPrompt: 'base' });
+    const examples = prompt.split('\n')
+      .filter((line) => line.startsWith('  {"statementId":"lighting_id","patch":'))
+      .map((line) => JSON.parse(line) as AgentUpdateStatementArgs);
+    expect(examples).toHaveLength(3);
+    const targets: LightingTargetReference[] = [
+      { kind: 'character', id: 'tomori' },
+      { kind: 'environmentLayer', id: 'bg' },
+      { kind: 'group', group: 'environmentLayers' },
+      { kind: 'scene' },
+    ];
+    const expectedTargets: LightingTargetReference[] = [
+      { kind: 'group', group: 'characters' },
+      { kind: 'scene' },
+      { kind: 'character', id: 'tomori' },
+    ];
+    for (const target of targets) {
+      for (const [index, example] of examples.entries()) {
+        const harness = createWriteHarness();
+        harness.document.statements.push({
+          id: 'lighting_id', time: 0, type: 'lighting',
+          params: { effect, mode: 'set', target, durationSeconds: 0.5 },
+        });
+        harness.bind();
+        const result = await harness.tools.updateStatement(example);
+        expect(result.ok, JSON.stringify(result)).toBe(true);
+        const changed = JSON.stringify(target) !== JSON.stringify(expectedTargets[index]);
+        expect(harness.commits).toHaveLength(changed ? 1 : 0);
+        expect(harness.document.statements.find((statement) => statement.id === 'lighting_id')?.params).toEqual({
+          effect, mode: 'set', target: expectedTargets[index], durationSeconds: 0.5,
+        });
+      }
+    }
+  });
+
   it('applies the current default before validation and preserves explicit styles in a transaction', async () => {
     const validated: CurrentSceneDocument[] = [];
     let template: 'minimal' | 'classic' = 'minimal';

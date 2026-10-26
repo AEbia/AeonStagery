@@ -1,3 +1,4 @@
+import type { LightingTarget } from '../../api/types/lighting-target';
 import type {
   AudioParams,
   CameraParams,
@@ -165,22 +166,6 @@ function optionalOneOf<const Values extends readonly string[]>(
 ): Values[number] | undefined {
   if (input === undefined) return undefined;
   return expectOneOf(input, path, values);
-}
-
-function optionalDiagnosticOneOf<const Values extends readonly string[]>(
-  input: unknown,
-  path: string,
-  values: Values,
-): Values[number] | undefined {
-  if (input === undefined) return undefined;
-  if (typeof input !== 'string') {
-    throw new Error(`Expected string at ${path}`);
-  }
-  if (input.trim() === '') return input as Values[number];
-  if (!values.includes(input)) {
-    throw new UnknownSceneDiscriminatorError(path, input, values);
-  }
-  return input as Values[number];
 }
 
 function optionalVec2(input: unknown, path: string): Vec2 | undefined {
@@ -935,6 +920,22 @@ export function parseFilterResetParams(input: unknown, path: string): FilterRese
   });
 }
 
+function parseLightingTarget(input: unknown, path: string): LightingTarget | undefined {
+  if (input === undefined || typeof input === 'string') return optionalDiagnosticString(input, path);
+  const record = expectRecord(input, path);
+  const kind = expectOneOf(record.kind, `${path}.kind`, ['scene', 'group', 'character', 'environmentLayer']);
+  if (kind === 'scene') {
+    expectKeys(record, path, ['kind']);
+    return { kind };
+  }
+  if (kind === 'group') {
+    expectKeys(record, path, ['kind', 'group']);
+    return { kind, group: expectOneOf(record.group, `${path}.group`, ['characters', 'environmentLayers']) };
+  }
+  expectKeys(record, path, ['kind', 'id']);
+  return { kind, id: expectString(record.id, `${path}.id`) };
+}
+
 export function parseLightingParams(input: unknown, path: string): LightingParams {
   const record = expectRecord(input, path);
   const effect = expectOneOf(record.effect, `${path}.effect`, ['preset', 'blur', 'godrays', 'post', 'overlay', 'pointLight']);
@@ -963,7 +964,7 @@ export function parseLightingParams(input: unknown, path: string): LightingParam
       return compact({
         effect,
         mode,
-        target: optionalDiagnosticOneOf(record.target, `${path}.target`, ['global', 'background', 'characters']),
+        target: parseLightingTarget(record.target, `${path}.target`),
         durationSeconds,
       });
     }
@@ -972,7 +973,7 @@ export function parseLightingParams(input: unknown, path: string): LightingParam
     return compact({
       effect,
       mode,
-      target: optionalDiagnosticOneOf(record.target, `${path}.target`, ['global', 'background', 'characters']),
+      target: parseLightingTarget(record.target, `${path}.target`),
       intensity: optionalFiniteNumber(record.intensity, `${path}.intensity`),
       durationSeconds,
     });
@@ -1023,14 +1024,14 @@ export function parseLightingParams(input: unknown, path: string): LightingParam
       return compact({
         effect,
         mode,
-        target: optionalDiagnosticString(record.target, `${path}.target`),
+        target: parseLightingTarget(record.target, `${path}.target`),
         durationSeconds,
       }) as LightingParams;
     }
     if (mode !== 'set' && mode !== 'modulate') throw new Error('Invalid mode for post at ' + path + '.mode');
     expectKeys(record, path, ['effect', 'mode', ...postKeys, 'durationSeconds']);
     const values = {
-      target: optionalDiagnosticString(record.target, `${path}.target`),
+      target: parseLightingTarget(record.target, `${path}.target`),
       bloomThreshold: optionalFiniteNumber(record.bloomThreshold, `${path}.bloomThreshold`),
       bloomBloomScale: optionalFiniteNumber(record.bloomBloomScale, `${path}.bloomBloomScale`),
       bloomBrightness: optionalFiniteNumber(record.bloomBrightness, `${path}.bloomBrightness`),
