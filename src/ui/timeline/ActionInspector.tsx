@@ -73,9 +73,6 @@ import { useModelData } from './inspector/useModelData';
 import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import { getStatementQuickFields } from './statementQuickFields';
 
-// These fields retain supplemental browsing/preview tools, without displaying their value again.
-const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression']);
-
 export interface ActionInspectorProps {
   semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
@@ -224,7 +221,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     action, actionType, actionParams, usesSourceParamForm,
     isLensFilterSourceAction, isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     semanticItem, semanticInspectorFields, semanticInspectorFieldByKey, isCharacterEntranceAction,
-  }).filter((key) => !rowFieldKeys.has(key) || ROW_TOOL_KEYS.has(key));
+  }).filter((key) => !rowFieldKeys.has(key));
   const semanticActionLabel = action.semanticType === 'visualStyle'
     ? getVisualStyleSemanticLabel(actionParams)
     : action.semanticType === 'lighting'
@@ -298,7 +295,9 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
   };
 
   const renderParam = (key: string) => {
-    if (rowFieldKeys.has(key) && !ROW_TOOL_KEYS.has(key)) return null;
+    // Row resource controls already include browsing and preview. Dedicated
+    // detail panels still provide additional settings such as motion conversion.
+    if (rowFieldKeys.has(key)) return null;
     const guarded = resolveGuardedParam(paramContext, key);
     if (guarded !== undefined) return guarded;
     return resolveParamControl(paramContext, key, computeParamBase(paramContext, key));

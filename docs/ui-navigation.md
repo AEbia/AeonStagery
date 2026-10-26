@@ -149,6 +149,8 @@ flowchart TD
 
 两种布局的语句列表均由 [`useVirtualTimelineRows`](../src/ui/timeline/useVirtualTimelineRows.tsx) 测量行高并按视口挂载，保留正在编辑的焦点行；内联检查器复用列表的 semantic read model。快捷文本控件复用 `FormComponents` 的远端感知草稿，失焦提交、Escape 取消，避免逐字符重建场景。左栏拖拽由 `useResizableLayout` 管理，宽度在拖拽结束时持久化。
 
+行内展开区通过 `getStatementQuickFields` 排除语句行已承载的参数，包括文件选择、模型变体及动作／表情资源选择与预览；动作转换、自定义动作编辑、语音工作台等额外功能仍由详情区提供。轨道优先的独立属性检查器保留完整参数表单。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |

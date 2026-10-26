@@ -4,8 +4,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActionInspector } from '../ui/timeline/ActionInspector';
+import { TimelineStatementRow, type TimelineStatementRowCommands } from '../ui/timeline/TimelineStatementRow';
+import { readSemanticTimelineSnapshot } from '../ui/timeline/useSemanticTimelineSnapshot';
 import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
-import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument } from '../api/types/semantic-scene';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument, type SceneStatement } from '../api/types/semantic-scene';
 
 const testState = vi.hoisted(() => {
   const semanticDocument = {
@@ -1113,6 +1115,57 @@ describe('ActionInspector', () => {
     );
 
     expect(screen.getByText('power4.inOut (自定义)')).toBeTruthy();
+  });
+
+  it.each<{ statement: SceneStatement; pickerName: string; role: 'combobox' | 'textbox' }>([
+    { statement: { id: 'enter', time: 0, type: 'characterPresence', params: { mode: 'enter', id: 'sakiko' } }, pickerName: '模型变体', role: 'combobox' },
+    { statement: { id: 'environment', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'background', file: 'background/room.png' } }, pickerName: '资源路径', role: 'textbox' },
+    { statement: { id: 'image', time: 0, type: 'graphicLayer', params: { kind: 'image', mode: 'set', id: 'poster', file: 'images/poster.png' } }, pickerName: '图片文件', role: 'textbox' },
+    { statement: { id: 'audio', time: 0, type: 'audio', params: { role: 'bgm', mode: 'play', file: 'bgm/theme.ogg' } }, pickerName: '音频文件', role: 'textbox' },
+    { statement: { id: 'animation', time: 0, type: 'customAnimation', params: { target: 'sakiko', file: 'animation/effect.html', durationSeconds: 1 } }, pickerName: '动画文件', role: 'textbox' },
+    { statement: { id: 'performance', time: 0, type: 'characterPerformance', params: { target: 'sakiko', motion: { kind: 'resource', key: 'idle' }, expression: 'smile' } }, pickerName: '动作名称', role: 'combobox' },
+  ])('keeps one resource editor when expanding a $statement.type row', async ({ statement, pickerName, role }) => {
+    const document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'inline-resources',
+      meta: testState.defaultSemanticDocument.meta,
+      statements: [statement],
+    };
+    testState.semanticDocument = document;
+    testState.compiledScene = sceneStatementCompiler.compile(document);
+    const semanticSnapshot = readSemanticTimelineSnapshot({
+      getCurrentSceneDocumentSnapshot: () => document,
+      getCompiledSceneSnapshot: () => testState.compiledScene,
+    });
+    const commands: TimelineStatementRowCommands = {
+      setDropTarget: vi.fn(), setDragOverGapIndex: vi.fn(), setDraggingActionId: vi.fn(),
+      dropRootStatementAt: vi.fn(), handleTimeEdit: vi.fn(), handleDeleteItem: vi.fn(),
+      commitInlineParams: vi.fn(), playAction: vi.fn(), deleteActions: vi.fn(), copyActions: vi.fn(),
+      blockOfflineAuthoring: vi.fn(), setActiveGapMenu: vi.fn(), gapInsertPendingRef: { current: false },
+      handleSelect: vi.fn(), setSelectedIds: vi.fn(), toggleExpand: vi.fn(),
+    };
+    const props = {
+      action: semanticSnapshot.actions[0], realIdx: 0,
+      sceneData: { sceneId: document.sceneId, meta: document.meta, timeline: [] },
+      semanticSnapshot, commands, allowInlineExpand: true, searchActive: false,
+      isSelected: false, isRevealed: false, animateExpansion: false,
+      isOfflineEditingBlocked: false, draggingActionId: null, gapActive: false, gapDragOver: false,
+    };
+    const row = render(<TimelineStatementRow {...props} isExpanded={false} />);
+    expect(screen.getAllByRole(role, { name: pickerName })).toHaveLength(1);
+    const filePickers = row.container.querySelectorAll('.inline-file-picker').length;
+
+    await act(async () => { row.rerender(<TimelineStatementRow {...props} isExpanded />); });
+    expect(screen.getAllByRole(role, { name: pickerName })).toHaveLength(1);
+    expect(row.container.querySelectorAll('.inline-file-picker')).toHaveLength(filePickers);
+    if (statement.type === 'characterPerformance') {
+      expect(screen.getAllByRole('combobox', { name: '表情名' })).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '转为自定义动作…' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('combobox', { name: pickerName }));
+      fireEvent.click(await screen.findByRole('button', { name: '预览 idle' }));
+      expect(testState.characterAdapter.playMotion).toHaveBeenCalledWith('sakiko', 'idle');
+    }
+    await act(async () => { row.unmount(); });
   });
 
   it('renders the action header only in the docked panel, not in script-action priority', async () => {
