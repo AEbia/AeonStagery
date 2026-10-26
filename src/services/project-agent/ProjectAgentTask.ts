@@ -1679,14 +1679,6 @@ export class ProjectAgentTask {
     this.counters.versionConflictRetryCount = 0;
   }
 
-  canZeroWriteComplete(): boolean {
-    return !this.counters.hasCommittedWrite
-      && (this.counters.successfulRelatedReadCount > 0
-        || (this.counters.successfulTerminalCommandCount ?? 0) > 0)
-      && this.peekPendingSupplements().length === 0
-      && !this.counters.pendingWriteReceiptForModel;
-  }
-
   /**
    * Round settlement after a write is only trusted after the last write receipt
    * was returned in a prior turn; zero-write settlement needs at least one
@@ -1836,12 +1828,6 @@ export class ProjectAgentTask {
       kind: 'suspended',
     };
     return report;
-  }
-
-  markReportViewed(): void {
-    if (this.settlementReport) {
-      this.settlementReport = { ...this.settlementReport, viewed: true };
-    }
   }
 
   getCommittedReceipts(): readonly AgentWriteReceiptSummary[] {

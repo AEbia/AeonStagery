@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ContentHash } from '../api/types/collaboration';
-import type { HistoricalSceneDocumentV4 } from '../api/types/semantic-scene';
+import type { SceneDocumentV5 } from '../api/types/semantic-scene';
 import type { LooseTimelineScene as SceneScript } from './fixtures/TimelineTestTypes';
 import {
-  collectCollaborativeSceneDocumentV4AssetRefs,
   collectCollaborativeSceneAssetRefs,
+  collectCollaborativeSceneDocumentV5AssetRefs,
   fingerprintCollaborativeAssetFile,
   hashCollaborativeAssetBundle,
   type CollaborativeAssetHashAdapter,
@@ -48,9 +48,9 @@ function makeScopeScene(): SceneScript {
   };
 }
 
-function makeScopeDocumentV3(): HistoricalSceneDocumentV4 {
+function makeScopeDocumentV3(): SceneDocumentV5 {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sceneId: 'scope_scene_v3',
     meta: {
       title: 'Scope Scene V3',
@@ -207,8 +207,8 @@ describe('Collaborative asset pure rules', () => {
     expect(collectCollaborativeSceneAssetRefs(scene)).toEqual([]);
   });
 
-  it('collects collaborative asset references from HistoricalSceneDocumentV4 source statements and companions', () => {
-    const refs = collectCollaborativeSceneDocumentV4AssetRefs(makeScopeDocumentV3());
+  it('collects collaborative asset references from SceneDocumentV5 source statements and companions', () => {
+    const refs = collectCollaborativeSceneDocumentV5AssetRefs(makeScopeDocumentV3());
 
     expect(refs.map((ref) => [ref.kind, ref.importKind, ref.projectRelativePath]).sort()).toEqual([
       ['animation-file', 'animation', 'animation/card.html'],

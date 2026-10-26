@@ -397,11 +397,6 @@ export function parseBlocks(css: string): ScssBlocks {
   return out;
 }
 
-/** Declaration body → `{ propertySansDashes: value }` (lowercased, vendor prefixes dropped). */
-export function parseDecls(body: string): ScssDeclarations {
-  return cascadeDeclarations(parseDeclarationList(body));
-}
-
 /** Expand supported shorthands before comparing priority and source order. */
 export function expandDeclaration(declaration: ScssDeclaration): ScssDeclaration[] {
   const { property, value } = declaration;
@@ -476,16 +471,6 @@ export function lookup(blocks: ScssBlocks, selector: string): ScssDeclarations {
   return cascadeDeclarations(matching.flatMap((rule) => rule.declarations));
 }
 
-/** First non-empty value among `names`, or `null`. */
-export function declOf(obj: ScssDeclarations | null | undefined, ...names: string[]): string | null {
-  if (!obj) return null;
-  for (const name of names) {
-    const v = obj[name];
-    if (v != null && v !== '') return v;
-  }
-  return null;
-}
-
 /**
  * Round half away from zero.
  *
@@ -557,14 +542,6 @@ export function resolveLength(
   return rnd(val * (relative && baseIsScaled ? 1 : STAGE_SCALE));
 }
 
-/** Resolve only the first token, so `border-radius: 0 0 0 0` reads as `0`. */
-export function firstLength(raw: unknown, base?: number, baseIsScaled = false, percentBasis?: number): number | null {
-  if (raw == null) return null;
-  const t = String(raw).trim().replace(/!\s*\w+\s*$/, '').trim().split(/\s+/)[0];
-  if (!t) return null;
-  return resolveLength(t, base, baseIsScaled, percentBasis);
-}
-
 /**
  * Resolve width-like properties (`width` / `min-width` / `max-width`).
  *
@@ -588,16 +565,6 @@ export function resolveWidthLike(raw: unknown, fontBase: number, containerPx: nu
   if (u === 'em') return rnd(v * fontBase);
   if (u === 'pt') return rnd((v * 96) / 72 * STAGE_SCALE);
   return rnd(v * STAGE_SCALE);
-}
-
-/** First declared property among `props`, or `null`. */
-export function pickDecl(obj: ScssDeclarations | null | undefined, props: readonly string[]): string | null {
-  if (!obj || !props) return null;
-  for (const prop of props) {
-    const v = obj[prop];
-    if (v != null && v !== '') return v;
-  }
-  return null;
 }
 
 function pad2(v: number): string {
@@ -644,11 +611,6 @@ export function tryParseColor(raw: unknown): string | null {
     }
   }
   return null;
-}
-
-/** {@link tryParseColor} with a fallback for unparsable input. */
-export function parseColor(raw: unknown, fallback?: string): string {
-  return tryParseColor(raw) || fallback || '#FFFFFF';
 }
 
 /** Strip alpha — the engine only accepts 6-digit `#RRGGBB`. */
@@ -999,16 +961,6 @@ export function parseScale(raw: unknown): ScaleInfo | null {
   return { sx, sy };
 }
 
-/** Merge the `padding` shorthand with its `padding-*` longhands. */
-export function sidesWithLonghand(obj: ScssDeclarations, base?: number, baseIsScaled = false, percentBasis?: number): BoxSides {
-  const sides = parseBoxSides(obj.padding, base, baseIsScaled, percentBasis);
-  for (const key of ['top', 'right', 'bottom', 'left'] as const) {
-    const v = resolveLength(obj['padding' + key], base, baseIsScaled, percentBasis);
-    if (v != null) sides[key.charAt(0) as 't' | 'r' | 'b' | 'l'] = v;
-  }
-  return sides;
-}
-
 /** Extract the file name from a `url("...")` value. */
 export function urlBasename(raw: unknown): string | null {
   if (!raw) return null;
@@ -1017,9 +969,4 @@ export function urlBasename(raw: unknown): string | null {
   const p = m[1].split(/[?#]/)[0];
   const seg = p.split(/[\\/]/);
   return seg[seg.length - 1] || null;
-}
-
-/** True when the block hides its box, so its other declarations must be ignored. */
-export function hasVisibilityHidden(obj: ScssDeclarations | null | undefined): boolean {
-  return /hidden|collapse/i.test(String((obj && obj.visibility) || ''));
 }

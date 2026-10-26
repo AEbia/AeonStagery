@@ -1,23 +1,23 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import * as Y from 'yjs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  COLLABORATION_SCHEMA_VERSION_V2,
-  type CollaborativeSceneStateV2,
-} from '../api/types/collaboration';
-import type { CharacterPerformanceParams } from '../api/types/semantic-scene';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
-import {
-  writeCollaborativeStateV2ToYDoc,
-} from '../services/collaboration/CollaborativeYDocStore';
 import { CollaborationAssetStore } from '../../server/collaboration/assets';
 import { CollaborationPersistence } from '../../server/collaboration/persistence';
-import { createPresenceRegistryV2 } from '../../server/collaboration/presence';
-import { SingleRoomCollaborationRoomV2 } from '../../server/collaboration/room';
-import { CollaborationSyncSocketAdapterV2 } from '../../server/collaboration/syncSocketAdapter';
+import { createPresenceRegistryV3 } from '../../server/collaboration/presence';
+import { SingleRoomCollaborationRoomV3 } from '../../server/collaboration/room';
+import { CollaborationSyncSocketAdapterV3 } from '../../server/collaboration/syncSocketAdapter';
+import {
+  COLLABORATION_SCHEMA_VERSION_V3,
+  type CollaborativeSceneStateV3,
+} from '../api/types/collaboration';
+import type { CharacterPerformanceParams } from '../api/types/semantic-scene';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
+import {
+  writeCollaborativeStateV3ToYDoc,
+} from '../services/collaboration/CollaborativeYDocStore';
 
 type MessageHandler = (data: Buffer, isBinary: boolean) => void;
 type CloseHandler = () => void;
@@ -64,14 +64,14 @@ function asWebSocket(socket: FakeSocket): WebSocket {
   return socket as unknown as WebSocket;
 }
 
-function makeStateV2(time = 1): CollaborativeSceneStateV2 {
+function makeStateV3(time = 1): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
-    meta: { title: 'Seeded Scene V2', fps: 60 },
+    sceneId: 'scene_v3',
+    meta: { title: 'Seeded Scene V3', fps: 60 },
     statementsById: {
       line_1: {
         id: 'line_1',
@@ -87,9 +87,9 @@ function makeStateV2(time = 1): CollaborativeSceneStateV2 {
   };
 }
 
-function makeInvalidCustomMotionState(): CollaborativeSceneStateV2 {
+function makeInvalidCustomMotionState(): CollaborativeSceneStateV3 {
   return {
-    ...makeStateV2(),
+    ...makeStateV3(),
     statementsById: {
       motion_1: {
         id: 'motion_1',
@@ -124,31 +124,31 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   }
 }
 
-describe('CollaborationSyncSocketAdapterV2', () => {
+describe('CollaborationSyncSocketAdapterV3', () => {
   let tempDir: string;
-  let room: SingleRoomCollaborationRoomV2;
+  let room: SingleRoomCollaborationRoomV3;
   let assets: CollaborationAssetStore;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aeonstagery-collab-sync-v2-'));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aeonstagery-collab-sync-v3-'));
     const persistence = new CollaborationPersistence(tempDir);
-    room = new SingleRoomCollaborationRoomV2(persistence);
+    room = new SingleRoomCollaborationRoomV3(persistence);
     assets = new CollaborationAssetStore(tempDir);
     await assets.ensure();
-    await room.seed(makeStateV2());
+    await room.seed(makeStateV3());
   });
 
   afterEach(async () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it('applies valid v2 binary updates and broadcasts them to other sockets', async () => {
+  it('applies valid v3 binary updates and broadcasts them to other sockets', async () => {
     const clients = new Set<WebSocket>();
-    const adapter = new CollaborationSyncSocketAdapterV2({
+    const adapter = new CollaborationSyncSocketAdapterV3({
       clients,
       room,
       assets,
-      presence: createPresenceRegistryV2<WebSocket>(),
+      presence: createPresenceRegistryV3<WebSocket>(),
     });
     const sender = new FakeSocket();
     const receiver = new FakeSocket();
@@ -160,7 +160,7 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     const clientDoc = new Y.Doc();
     Y.applyUpdate(clientDoc, room.encodeStateAsUpdate());
     const stateVector = Y.encodeStateVector(clientDoc);
-    writeCollaborativeStateV2ToYDoc(clientDoc, makeStateV2(3), 'local');
+    writeCollaborativeStateV3ToYDoc(clientDoc, makeStateV3(3), 'local');
     sender.emitMessage(Y.encodeStateAsUpdate(clientDoc, stateVector), true);
     await waitFor(() => receiver.sent.slice(receiverSentBefore).some((message) => Buffer.isBuffer(message)));
 
@@ -174,8 +174,8 @@ describe('CollaborationSyncSocketAdapterV2', () => {
 
   it('measures websocket ping and broadcasts the latency as peer presence', () => {
     const clients = new Set<WebSocket>();
-    const presence = createPresenceRegistryV2<WebSocket>();
-    const adapter = new CollaborationSyncSocketAdapterV2({ clients, room, assets, presence });
+    const presence = createPresenceRegistryV3<WebSocket>();
+    const adapter = new CollaborationSyncSocketAdapterV3({ clients, room, assets, presence });
     const socket = new FakeSocket();
 
     adapter.connect(asWebSocket(socket), '/sync?clientId=sender&displayName=Sender', 'localhost');
@@ -192,11 +192,11 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     vi.useFakeTimers();
     try {
       const clients = new Set<WebSocket>();
-      const adapter = new CollaborationSyncSocketAdapterV2({
+      const adapter = new CollaborationSyncSocketAdapterV3({
         clients,
         room,
         assets,
-        presence: createPresenceRegistryV2<WebSocket>(),
+        presence: createPresenceRegistryV3<WebSocket>(),
       });
       const socket = new FakeSocket();
       socket.respondToPings = false;
@@ -211,13 +211,13 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     }
   });
 
-  it('rejects updates with a legacy schema marker without broadcasting or mutating the v2 room', async () => {
+  it('rejects updates with a legacy schema marker without broadcasting or mutating the v3 room', async () => {
     const clients = new Set<WebSocket>();
-    const adapter = new CollaborationSyncSocketAdapterV2({
+    const adapter = new CollaborationSyncSocketAdapterV3({
       clients,
       room,
       assets,
-      presence: createPresenceRegistryV2<WebSocket>(),
+      presence: createPresenceRegistryV3<WebSocket>(),
     });
     const sender = new FakeSocket();
     const receiver = new FakeSocket();
@@ -234,26 +234,26 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     await waitFor(() => sender.sent.some((message) => (
       typeof message === 'string' &&
       message.includes('collaboration:error') &&
-      message.includes('schema version 2')
+      message.includes('schema version 3')
     )));
 
-    expect(room.getState()?.sceneId).toBe('scene_v2');
+    expect(room.getState()?.sceneId).toBe('scene_v3');
     expect(room.getState()?.statementsById.line_1.time).toBe(1);
     expect(receiver.sent.slice(receiverSentBefore).some((message) => Buffer.isBuffer(message))).toBe(false);
     expect(sender.sent.some((message) => (
       typeof message === 'string' &&
       message.includes('collaboration:error') &&
-      message.includes('schema version 2')
+      message.includes('schema version 3')
     ))).toBe(true);
   });
 
   it('rejects invalid custom motion keyframe updates before persistence and broadcast', async () => {
     const clients = new Set<WebSocket>();
-    const adapter = new CollaborationSyncSocketAdapterV2({
+    const adapter = new CollaborationSyncSocketAdapterV3({
       clients,
       room,
       assets,
-      presence: createPresenceRegistryV2<WebSocket>(),
+      presence: createPresenceRegistryV3<WebSocket>(),
     });
     const sender = new FakeSocket();
     const receiver = new FakeSocket();
@@ -264,7 +264,7 @@ describe('CollaborationSyncSocketAdapterV2', () => {
     const clientDoc = new Y.Doc();
     Y.applyUpdate(clientDoc, room.encodeStateAsUpdate());
     const stateVector = Y.encodeStateVector(clientDoc);
-    writeCollaborativeStateV2ToYDoc(clientDoc, makeInvalidCustomMotionState(), 'local');
+    writeCollaborativeStateV3ToYDoc(clientDoc, makeInvalidCustomMotionState(), 'local');
     sender.emitMessage(Y.encodeStateAsUpdate(clientDoc, stateVector), true);
     await waitFor(() => sender.sent.some((message) => (
       typeof message === 'string' && message.includes('collaboration:error')

@@ -5,8 +5,8 @@ import {
   COLLABORATION_SCHEMA_VERSION_V3,
   type CollaborationIdentity,
   type CollaborationLeaseServerMessageV3,
-  type CollaborationLeaseTargetV2,
-  type CollaborationPresencePatchV2,
+  type CollaborationLeaseTargetV3,
+  type CollaborationPresencePatchV3,
   type CollaborationPresenceServerMessageV3,
   type CollaborativeSceneStateV3,
 } from '../../api/types/collaboration';
@@ -32,11 +32,11 @@ import {
   type CollaborativeVisualTargetChanges,
   readCollaborativeSchemaVersions,
   readCollaborativeStateV3FromYDoc,
-  writeCollaborativeCompanionChangesV2ToYDoc,
+  writeCollaborativeCompanionChangesV3ToYDoc,
   writeCollaborativeMarkerChangesToYDoc,
   writeCollaborativeRecipeOverlayChangesToYDoc,
   writeCollaborativeSegmentChangesToYDoc,
-  writeCollaborativeStatementChangesV2ToYDoc,
+  writeCollaborativeStatementChangesV3ToYDoc,
   writeCollaborativeStateV3ToYDoc,
   writeCollaborativeVisualTargetChangesToYDoc,
 } from './CollaborativeYDocStore';
@@ -191,7 +191,7 @@ export class CollaborationClientV3 {
     return this.realtimeChannel.isConnected();
   }
 
-  updatePresence(patch: CollaborationPresencePatchV2): void {
+  updatePresence(patch: CollaborationPresencePatchV3): void {
     this.realtimeChannel.updatePresence(patch);
   }
 
@@ -202,15 +202,15 @@ export class CollaborationClientV3 {
     };
   }
 
-  acquireLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  acquireLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.realtimeChannel.acquireLease(requestId, target);
   }
 
-  renewLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  renewLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.realtimeChannel.renewLease(requestId, target);
   }
 
-  releaseLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  releaseLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.realtimeChannel.releaseLease(requestId, target);
   }
 
@@ -257,13 +257,13 @@ export class CollaborationClientV3 {
 
   async publishStatementChanges(changes: CollaborativeStatementChanges): Promise<void> {
     this.realtimeChannel.assertWritable();
-    writeCollaborativeStatementChangesV2ToYDoc(this.ydoc, changes, 'local');
+    writeCollaborativeStatementChangesV3ToYDoc(this.ydoc, changes, 'local');
     this.emitState();
   }
 
   async publishCompanionChanges(changes: CollaborativeCompanionChanges): Promise<void> {
     this.realtimeChannel.assertWritable();
-    writeCollaborativeCompanionChangesV2ToYDoc(this.ydoc, changes, 'local');
+    writeCollaborativeCompanionChangesV3ToYDoc(this.ydoc, changes, 'local');
     this.emitState();
   }
 

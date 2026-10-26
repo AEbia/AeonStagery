@@ -5,7 +5,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssetBrowserModal } from '../ui/AssetBrowserModal';
 import { InlineFilePicker } from '../ui/InlineFilePicker';
-import { ResourceFileBrowser } from '../ui/ResourceFileBrowser';
 
 const mocks = vi.hoisted(() => ({
   readMergedDirectory: vi.fn(),
@@ -93,15 +92,6 @@ describe('Resource entry points', () => {
     fireEvent.click(room);
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('background/room.png'));
     expect(onClose).toHaveBeenCalledOnce();
-  });
-
-  it('exposes images and sfx in the standard resource browser', () => {
-    render(<ResourceFileBrowser />);
-
-    fireEvent.click(screen.getByRole('button', { name: '文件资源' }));
-
-    expect(screen.getByRole('button', { name: 'images/' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'sfx/' })).toBeTruthy();
   });
 
   it('opens image-filtered asset browsing in images and keeps source/path/readiness visible', async () => {

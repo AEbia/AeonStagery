@@ -1,7 +1,5 @@
 import type { TimelineAction } from './semanticTimelineTypes';
 
-export const COMPACT_PPS_THRESHOLD = 12;
-export const COMPACT_VISIBLE_ACTION_THRESHOLD = 180;
 export const ABSOLUTE_VISIBLE_ACTION_LIMIT = 520;
 export const DENSITY_BUCKET_WIDTH_PX = 24;
 export const SUMMARY_ENTER_PPS = 14;
@@ -272,44 +270,10 @@ export function queryVisibleBucketActions(
   return result;
 }
 
-export function buildDensitySegmentsFromBuckets(
-  buckets: TimeBucket[],
-  selectedIds: Record<string, boolean>,
-): DensitySegment[] {
-  const segments: DensitySegment[] = [];
-
-  for (const bucket of buckets) {
-    let count = 0;
-    let end = bucket.end;
-    for (const item of bucket.items) {
-      if (selectedIds[item.id]) continue;
-      count += 1;
-      end = Math.max(end, item.end);
-    }
-    if (count === 0) continue;
-    segments.push({
-      id: `density-${bucket.index}`,
-      start: bucket.start,
-      end,
-      count,
-    });
-  }
-
-  return segments;
-}
-
 export function isActionInView(action: TimelineAction, viewWindow?: TimelineViewWindow, paddingSeconds = 1): boolean {
   if (!viewWindow) return true;
   const { start, end } = getActionRange(action);
   return end >= viewWindow.start - paddingSeconds && start <= viewWindow.end + paddingSeconds;
-}
-
-export function shouldUseCompactTimelineView(
-  pps: number,
-  visibleActionCount: number,
-): boolean {
-  if (visibleActionCount >= ABSOLUTE_VISIBLE_ACTION_LIMIT) return true;
-  return pps <= COMPACT_PPS_THRESHOLD && visibleActionCount >= COMPACT_VISIBLE_ACTION_THRESHOLD;
 }
 
 export function calculateNextLOD(
@@ -441,38 +405,4 @@ export function buildSummarySegmentsFromBuckets(
   }
 
   return segments;
-}
-
-export function buildDensitySegments(
-  actions: TrackActionItem[],
-  viewWindow: TimelineViewWindow | undefined,
-  pps: number,
-  selectedIds: Record<string, boolean>,
-): DensitySegment[] {
-  const bucketSeconds = Math.max(0.25, DENSITY_BUCKET_WIDTH_PX / Math.max(pps, 0.1));
-  const buckets = new Map<number, DensitySegment>();
-
-  for (const item of actions) {
-    if (selectedIds[item.id]) continue;
-    if (!isActionInView(item.action, viewWindow, 1)) continue;
-
-    const { start, end } = getActionRange(item.action);
-    const bucketIndex = Math.floor(start / bucketSeconds);
-    const bucketStart = bucketIndex * bucketSeconds;
-    const existing = buckets.get(bucketIndex);
-
-    if (existing) {
-      existing.end = Math.max(existing.end, end, bucketStart + bucketSeconds);
-      existing.count += 1;
-    } else {
-      buckets.set(bucketIndex, {
-        id: `density-${bucketIndex}`,
-        start: bucketStart,
-        end: Math.max(end, bucketStart + bucketSeconds),
-        count: 1,
-      });
-    }
-  }
-
-  return [...buckets.values()].sort((a, b) => a.start - b.start);
 }

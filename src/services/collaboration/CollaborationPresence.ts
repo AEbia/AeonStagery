@@ -1,7 +1,6 @@
 import type {
-  CollaborationPresencePatchV2,
-  CollaborationPresencePeerV2,
-  CollaborationPresenceServerMessageV2,
+  CollaborationPresencePatchV3,
+  CollaborationPresencePeerV3,
   CollaborationPresenceServerMessageV3,
 } from '../../api/types/collaboration';
 
@@ -17,10 +16,10 @@ export interface CollaborationPresenceLocator {
 }
 
 export function reducePresenceMessage(
-  peers: CollaborationPresencePeerV2[],
-  message: CollaborationPresenceServerMessageV2 | CollaborationPresenceServerMessageV3,
+  peers: CollaborationPresencePeerV3[],
+  message: CollaborationPresenceServerMessageV3,
   selfClientId: string,
-): CollaborationPresencePeerV2[] {
+): CollaborationPresencePeerV3[] {
   if (message.type === 'presence:snapshot') {
     return message.peers.filter((peer) => peer.clientId !== selfClientId);
   }
@@ -35,7 +34,7 @@ export function reducePresenceMessage(
 
 export function derivePresencePatchFromSelection(
   selectedStatementIds: Record<string, boolean>,
-): Pick<CollaborationPresencePatchV2, 'selectedStatementIds' | 'editingTarget'> {
+): Pick<CollaborationPresencePatchV3, 'selectedStatementIds' | 'editingTarget'> {
   const selected = Object.keys(selectedStatementIds).filter((id) => selectedStatementIds[id]);
   return {
     selectedStatementIds: selected,
@@ -50,7 +49,7 @@ export function formatPresencePlayheadTime(time: number): string {
   return `${time.toFixed(time >= 10 ? 1 : 2)}s`;
 }
 
-export function summarizePeerPresence(peer: CollaborationPresencePeerV2): string {
+export function summarizePeerPresence(peer: CollaborationPresencePeerV3): string {
   if (peer.editingTarget?.kind === 'statement') return `正在编辑语句 ${peer.editingTarget.statementId}`;
   if (peer.editingTarget?.kind === 'companion') return `正在编辑 companion ${peer.editingTarget.companionId}`;
   if (peer.editingTarget?.kind === 'scene') return '正在编辑场景';
@@ -60,7 +59,7 @@ export function summarizePeerPresence(peer: CollaborationPresencePeerV2): string
   return '在线';
 }
 
-export function getPeerPresenceFacts(peer: CollaborationPresencePeerV2): CollaborationPeerPresenceFact[] {
+export function getPeerPresenceFacts(peer: CollaborationPresencePeerV3): CollaborationPeerPresenceFact[] {
   const facts: CollaborationPeerPresenceFact[] = [];
   if (typeof peer.playheadTime === 'number' && Number.isFinite(peer.playheadTime) && peer.playheadTime >= 0) {
     facts.push({
@@ -101,9 +100,9 @@ export function getPeerPresenceFacts(peer: CollaborationPresencePeerV2): Collabo
 }
 
 export function getPeersEditingLocator(
-  peers: CollaborationPresencePeerV2[],
+  peers: CollaborationPresencePeerV3[],
   locator: CollaborationPresenceLocator,
-): CollaborationPresencePeerV2[] {
+): CollaborationPresencePeerV3[] {
   return peers.filter((peer) => {
     const target = peer.editingTarget;
     if (!target || (target.kind !== 'statement' && target.kind !== 'companion')) return false;
@@ -114,14 +113,14 @@ export function getPeersEditingLocator(
   });
 }
 
-function formatPeerNames(peers: CollaborationPresencePeerV2[]): string {
+function formatPeerNames(peers: CollaborationPresencePeerV3[]): string {
   const names = peers.map((peer) => peer.displayName.trim() || peer.clientId);
   if (names.length <= 2) return names.join('、');
   return `${names.slice(0, 2).join('、')} 等 ${names.length} 人`;
 }
 
 export function summarizeLocatorEditingPeers(
-  peers: CollaborationPresencePeerV2[],
+  peers: CollaborationPresencePeerV3[],
   locator: CollaborationPresenceLocator,
 ): string | null {
   const editingPeers = getPeersEditingLocator(peers, locator);

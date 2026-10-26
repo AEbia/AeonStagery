@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import {
   authorizeCollaborationFetch,
@@ -44,7 +43,7 @@ function stubChallengeFetch(nonce: string) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('collaboration credential transport', () => {
-  it.each([CollaborationClientV2, CollaborationClientV3])('authorizes XHR uploads through the same credential as fetch', async (Client) => {
+  it.each([CollaborationClientV3])('authorizes XHR uploads through the same credential as fetch', async (Client) => {
     const headers: Record<string, string> = {};
     let requestUrl = '';
     class FakeXhr {
@@ -64,7 +63,7 @@ describe('collaboration credential transport', () => {
     expect(requestUrl).not.toContain(token);
   });
 
-  it.each([CollaborationClientV2, CollaborationClientV3])('disallows fetch redirects while transmitting the credential', async (Client) => {
+  it.each([CollaborationClientV3])('disallows fetch redirects while transmitting the credential', async (Client) => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 201 }));
     const client = new Client({ endpoint: `http://localhost:12345#token=${token}`, fetchImpl });
     try { await client.uploadAssetFile('background/file.bin', new Uint8Array([1])); }

@@ -1,8 +1,8 @@
 import type {
   CollaborationConnectionStatus,
   CollaborationLeaseServerMessageV3,
-  CollaborationLeaseTargetV2,
-  CollaborationPresencePatchV2,
+  CollaborationLeaseTargetV3,
+  CollaborationPresencePatchV3,
   CollaborationPresenceServerMessageV3,
   CollaborativeSceneStateV3,
 } from '../../api/types/collaboration';
@@ -32,10 +32,10 @@ export interface CollaborativeClientPortV3 {
   subscribeErrors?(listener: (error: Error) => void): () => void;
   subscribePresence?(listener: (message: CollaborationPresenceServerMessageV3) => void): () => void;
   subscribeLease?(listener: (message: CollaborationLeaseServerMessageV3) => void): () => void;
-  updatePresence?(patch: CollaborationPresencePatchV2): void;
-  acquireLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
-  renewLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
-  releaseLease?(requestId: string, target: CollaborationLeaseTargetV2): void;
+  updatePresence?(patch: CollaborationPresencePatchV3): void;
+  acquireLease?(requestId: string, target: CollaborationLeaseTargetV3): void;
+  renewLease?(requestId: string, target: CollaborationLeaseTargetV3): void;
+  releaseLease?(requestId: string, target: CollaborationLeaseTargetV3): void;
   /**
    * Opens the realtime channel. Resolves once the connection attempt has been
    * dispatched or has failed — never by rejecting, so callers can await it

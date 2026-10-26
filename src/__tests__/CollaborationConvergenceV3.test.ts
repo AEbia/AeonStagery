@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
 } from '../api/types/collaboration';
 import {
@@ -18,11 +17,11 @@ import {
   type RunningCollaborationServer,
 } from '../../server/collaboration/server';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
-import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
 import {
-  materializeCollaborativeSceneDocumentV5,
   createCollaborativeSceneStateV3FromDocument,
+  materializeCollaborativeSceneDocumentV5,
 } from '../services/collaboration/CollaborativeSceneStateV3';
+import { authenticatedFetch } from './helpers/collaborationAuth';
 
 function makeCanonicalV5Document(): SceneDocumentV5 {
   return {
@@ -247,16 +246,12 @@ describe('Collaboration Convergence V3', () => {
 
   it('rejects a v2 client attempting to connect to or seed a v3 server', async () => {
     const status = server!.getStatus();
-    const endpoint = `${status.localUrl}#token=${status.accessToken}`;
-    const v2Client = new CollaborationClientV2({
-      endpoint,
-      fetchImpl: fetch,
-      webSocketFactory: (url, protocols) => new WebSocket(url, protocols) as any,
-    });
-
     // Attempting to seed v2 state to v3 server fails
-    await expect(v2Client.seed({
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+    const response = await authenticatedFetch(status, `${status.localUrl}/seed`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+      schemaVersion: 2,
       sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
       collaborationProjectId: 'p2',
       roomId: 'p2:main',
@@ -264,8 +259,10 @@ describe('Collaboration Convergence V3', () => {
       meta: { title: 'v2', fps: 60 },
       statementsById: {},
       statementOrder: [],
-    })).rejects.toThrow(/schema version 3/i);
-
-    v2Client.dispose();
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: expect.stringMatching(/schema version 3/i) });
+    expect(server!.getStatus().hasState).toBe(false);
   });
 });

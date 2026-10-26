@@ -1,15 +1,15 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import {
+  COLLABORATION_LIMITS,
+  collaborationAssetUploadMemoryReservationBytes,
   CollaborationAuthChallengeStore,
   CollaborationAuthRateLimiter,
-  COLLABORATION_LIMITS,
   CollaborationRequestError,
   createCollaborationAccessToken,
   createCollaborationPassword,
   createCollaborationPasswordSalt,
   deriveCollaborationPasswordToken,
-  collaborationAssetUploadMemoryReservationBytes,
   hasCollaborationAuthenticationAttempt,
   isCollaborationOriginAllowed,
   isCollaborationRequestAuthorized,
@@ -20,41 +20,36 @@ import {
 import { withCollaborationAccessToken } from '../../src/services/collaboration/CollaborationTransport';
 import { WebSocket, WebSocketServer } from 'ws';
 import {
-  assertCollaborativeSceneStateV2,
   assertCollaborativeSceneStateV3,
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
   type CollaborativeSceneStateV3,
 } from '../../src/api/types/collaboration';
 import {
   CollaborativeAssetAvailabilityError,
-  validateCollaborativeAssetAvailabilityV2,
   validateCollaborativeAssetAvailabilityV3,
 } from './assetAvailability';
 import { CollaborationAssetStore } from './assets';
 import { CollaborationPersistence } from './persistence';
 import {
-  createPresenceRegistryV2,
+  createPresenceRegistryV3,
 } from './presence';
 import {
-  createCollaborationLeaseRegistryV2,
+  createCollaborationLeaseRegistryV3,
 } from './lease';
 import {
   assertCollaborationProjectId,
   CollaborationProjectMismatchError,
-  SingleRoomCollaborationRoomV2,
   SingleRoomCollaborationRoomV3,
 } from './room';
 import {
-  CollaborationSyncSocketAdapterV2,
+  CollaborationSyncSocketAdapterV3,
 } from './syncSocketAdapter';
 
 export interface CollaborationServerOptions {
   host: string;
   port: number;
   dataDir: string;
-  schemaVersion?: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3;
+  schemaVersion?: typeof COLLABORATION_SCHEMA_VERSION_V3;
   expectedProjectId?: string;
   accessToken?: string;
   password?: string;
@@ -73,7 +68,7 @@ export interface CollaborationServerStatus {
   lanUrls: string[];
   assetRoot: string;
   hasState: boolean;
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3;
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3;
 }
 
 export interface RunningCollaborationServer {
@@ -168,17 +163,13 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     ? deriveCollaborationPasswordToken(connectionPassword, passwordSalt)
     : createCollaborationAccessToken(options.accessToken);
   const allowedOrigins = options.allowedOrigins === undefined ? undefined : new Set(options.allowedOrigins);
-  if (options.schemaVersion !== undefined && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2
-    && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
+  if (options.schemaVersion !== undefined && options.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
     throw new Error('Unsupported collaboration schema version');
   }
   const persistence = new CollaborationPersistence(options.dataDir);
   const assets = new CollaborationAssetStore(options.dataDir);
   const schemaVersion = options.schemaVersion ?? COLLABORATION_SCHEMA_VERSION_V3;
-  const room: SingleRoomCollaborationRoomV2 | SingleRoomCollaborationRoomV3 =
-    schemaVersion === COLLABORATION_SCHEMA_VERSION_V3
-      ? new SingleRoomCollaborationRoomV3(persistence)
-      : new SingleRoomCollaborationRoomV2(persistence);
+  const room = new SingleRoomCollaborationRoomV3(persistence);
 
   await assets.ensure();
   await room.load();
@@ -324,27 +315,15 @@ export async function startCollaborationServer(options: CollaborationServerOptio
       }
 
       if (request.method === 'POST' && url.pathname === '/seed') {
-        if (room instanceof SingleRoomCollaborationRoomV3) {
-          const state = await readJsonBody<CollaborativeSceneStateV3>(request);
-          if (state.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
-            throw new CollaborationRequestError(400, `Collaboration room v3 expected schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
-          }
-          try { assertCollaborativeSceneStateV3(state); }
-          catch { throw new CollaborationRequestError(400, 'Invalid collaboration state'); }
-          assertCollaborationProjectId(state.collaborationProjectId, options.expectedProjectId);
-          await validateCollaborativeAssetAvailabilityV3(state, assets);
-          await room.seed(state);
-        } else {
-          const state = await readJsonBody<CollaborativeSceneStateV2>(request);
-          if (state.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2) {
-            throw new CollaborationRequestError(400, `Collaboration room v2 expected schema version ${COLLABORATION_SCHEMA_VERSION_V2}`);
-          }
-          try { assertCollaborativeSceneStateV2(state); }
-          catch { throw new CollaborationRequestError(400, 'Invalid collaboration state'); }
-          assertCollaborationProjectId(state.collaborationProjectId, options.expectedProjectId);
-          await validateCollaborativeAssetAvailabilityV2(state, assets);
-          await room.seed(state);
+        const state = await readJsonBody<CollaborativeSceneStateV3>(request);
+        if (state.schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3) {
+          throw new CollaborationRequestError(400, `Collaboration room v3 expected schema version ${COLLABORATION_SCHEMA_VERSION_V3}`);
         }
+        try { assertCollaborativeSceneStateV3(state); }
+        catch { throw new CollaborationRequestError(400, 'Invalid collaboration state'); }
+        assertCollaborationProjectId(state.collaborationProjectId, options.expectedProjectId);
+        await validateCollaborativeAssetAvailabilityV3(state, assets);
+        await room.seed(state);
         sendJson(response, 201, { ok: true });
         return;
       }
@@ -370,12 +349,12 @@ export async function startCollaborationServer(options: CollaborationServerOptio
     handleProtocols: (protocols) => protocols.has('aeonstagery-collaboration') ? 'aeonstagery-collaboration' : false,
   });
   const clients = new Set<WebSocket>();
-  const syncSocketAdapter = new CollaborationSyncSocketAdapterV2({
+  const syncSocketAdapter = new CollaborationSyncSocketAdapterV3({
     clients,
     room,
     assets,
-    presence: createPresenceRegistryV2<WebSocket>(),
-    leases: createCollaborationLeaseRegistryV2<WebSocket>(),
+    presence: createPresenceRegistryV3<WebSocket>(),
+    leases: createCollaborationLeaseRegistryV3<WebSocket>(),
     schemaVersion,
     expectedProjectId: options.expectedProjectId,
   });

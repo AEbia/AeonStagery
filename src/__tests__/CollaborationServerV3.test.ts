@@ -4,21 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
   type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import {
   SCENE_SCHEMA_VERSION_V4,
   SCENE_SCHEMA_VERSION_V5,
-  type HistoricalSceneDocumentV4,
   type SceneDocumentV5,
 } from '../api/types/semantic-scene';
 import {
   startCollaborationServer,
   type RunningCollaborationServer,
 } from '../../server/collaboration/server';
+import * as Y from 'yjs';
+import { CollaborationPersistence } from '../../server/collaboration/persistence';
+import { writeLegacyCollaborationStateFixture, type LegacyCollaborationStateFixture } from './helpers/legacyCollaborationFixture';
 
 function makeStateV3(): CollaborativeSceneStateV3 {
   return {
@@ -43,9 +43,9 @@ function makeStateV3(): CollaborativeSceneStateV3 {
   };
 }
 
-function makeStateV2(): CollaborativeSceneStateV2 {
+function makeStateV2(): LegacyCollaborationStateFixture {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+    schemaVersion: 2,
     sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
     collaborationProjectId: 'project_v2',
     roomId: 'project_v2:main',
@@ -70,7 +70,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
 }
 
-describe('CollaborationServer V3 and V2 backward compatibility', () => {
+describe('CollaborationServer V3 protocol boundary', () => {
   let tempDir: string;
   let server: RunningCollaborationServer | null = null;
 
@@ -129,7 +129,7 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
     expect(bytes.byteLength).toBeGreaterThan(0);
   });
 
-  it('rejects v2 seed payloads when running in v3 mode', async () => {
+  it.each([1, 2])('rejects schema %i seed payloads', async (schemaVersion) => {
     server = await startCollaborationServer({
       host: '127.0.0.1',
       port: 0,
@@ -141,7 +141,7 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
     const seedResponse = await authenticatedFetch(status, `${status.localUrl}/seed`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(makeStateV2()),
+      body: JSON.stringify({ ...makeStateV2(), schemaVersion }),
     });
 
     expect(seedResponse.status).toBe(400);
@@ -151,20 +151,12 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
   });
 
   it('refuses to start v3 server on a dataDir containing persisted v2 state, providing export-and-reseed guidance', async () => {
-    // 1. First run a v2 server to persist v2 state
-    const v2Server = await startCollaborationServer({
-      host: '127.0.0.1',
-      port: 0,
-      dataDir: tempDir,
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    });
-    const v2SeedResponse = await authenticatedFetch(v2Server.getStatus(), `${v2Server.getStatus().localUrl}/seed`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(makeStateV2()),
-    });
-    expect(v2SeedResponse.status).toBe(201);
-    await v2Server.stop();
+    const persistence = new CollaborationPersistence(tempDir);
+    const legacyDoc = new Y.Doc();
+    writeLegacyCollaborationStateFixture(legacyDoc, makeStateV2());
+    await persistence.saveDoc(legacyDoc);
+    legacyDoc.destroy();
+    const originalBytes = await fs.readFile(persistence.paths.stateFile);
 
     // 2. Try to start v3 server on the same dataDir
     await expect(startCollaborationServer({
@@ -174,18 +166,6 @@ describe('CollaborationServer V3 and V2 backward compatibility', () => {
       schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
     })).rejects.toThrow(/schema version 2|scene schema version 4/i);
 
-    // 3. Verify the v2 server can still run and serve the room for export
-    const v2AdminServer = await startCollaborationServer({
-      host: '127.0.0.1',
-      port: 0,
-      dataDir: tempDir,
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    });
-    const snapshot = await readJson<HistoricalSceneDocumentV4>(
-      await authenticatedFetch(v2AdminServer.getStatus(), `${v2AdminServer.getStatus().localUrl}/snapshot`),
-    );
-    expect(snapshot.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V4);
-    expect(snapshot.sceneId).toBe('scene_v2');
-    await v2AdminServer.stop();
+    expect(await fs.readFile(persistence.paths.stateFile)).toEqual(originalBytes);
   });
 });

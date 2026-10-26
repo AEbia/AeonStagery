@@ -7,7 +7,7 @@ import { WmdlConfigRegistry } from '../engine/WmdlConfigRegistry';
 import type { ProjectState } from '../api/types/project';
 import {
   SCENE_SCHEMA_VERSION,
-  SCENE_SCHEMA_VERSION_V4,
+  SCENE_SCHEMA_VERSION_V5,
   type PreparedCompiledScene,
 } from '../api/types/semantic-scene';
 import { SemanticScenePipeline } from '../services/semantic-scene';
@@ -307,8 +307,8 @@ describe('SceneAssetService collaborative asset preparation', () => {
       () => '',
     );
 
-    const projectized = await service.prepareCollaborativeV2SceneDocumentAssetReferences({
-      schemaVersion: SCENE_SCHEMA_VERSION_V4,
+    const projectized = await service.prepareCollaborativeV5SceneDocumentAssetReferences({
+      schemaVersion: SCENE_SCHEMA_VERSION_V5,
       sceneId: 'semantic-scene',
       meta: {
         title: 'Mounted assets',
@@ -436,8 +436,8 @@ describe('SceneAssetService collaborative asset preparation', () => {
       () => '',
     );
 
-    const projectized = await service.prepareCollaborativeV2SceneDocumentAssetReferences({
-      schemaVersion: SCENE_SCHEMA_VERSION_V4,
+    const projectized = await service.prepareCollaborativeV5SceneDocumentAssetReferences({
+      schemaVersion: SCENE_SCHEMA_VERSION_V5,
       sceneId: 'semantic-scene',
       meta: { title: 'Mounted collision' },
       statements: [

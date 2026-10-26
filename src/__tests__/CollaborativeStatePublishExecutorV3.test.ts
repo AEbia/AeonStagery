@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
-  type CollaborativeSceneStateV2,
+  COLLABORATION_SCHEMA_VERSION_V3,
+  type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
-import { executeCollaborativeStatePublishPlanV2 } from '../services/collaboration/CollaborativeStatePublishExecutorV2';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
+import { executeCollaborativeStatePublishPlanV3 } from '../services/collaboration/CollaborativeStatePublishExecutorV3';
 
-function makeState(): CollaborativeSceneStateV2 {
+function makeState(): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
-    meta: { title: 'Executor Scene V2', fps: 60 },
+    sceneId: 'scene_v3',
+    meta: { title: 'Executor Scene V3', fps: 60 },
     statementsById: {
       line_1: {
         id: 'line_1',
@@ -29,14 +29,14 @@ function makeState(): CollaborativeSceneStateV2 {
   };
 }
 
-describe('CollaborativeStatePublishExecutorV2', () => {
+describe('CollaborativeStatePublishExecutorV3', () => {
   it('returns noop state without publishing', async () => {
     const state = makeState();
     const ports = {
       publishState: vi.fn(),
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({ kind: 'noop', state }, ports))
+    await expect(executeCollaborativeStatePublishPlanV3({ kind: 'noop', state }, ports))
       .resolves.toBe(state);
     expect(ports.publishState).not.toHaveBeenCalled();
   });
@@ -47,7 +47,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
       publishState: vi.fn(),
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({
+    await expect(executeCollaborativeStatePublishPlanV3({
       kind: 'full',
       reason: 'cross-entity-or-scene-change',
       state,
@@ -57,7 +57,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
 
   it('publishes statement entity plans and returns the client-resolved latest state', async () => {
     const state = makeState();
-    const accepted: CollaborativeSceneStateV2 = {
+    const accepted: CollaborativeSceneStateV3 = {
       ...state,
       statementsById: {
         line_1: {
@@ -72,7 +72,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
       getState: () => accepted,
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({
+    await expect(executeCollaborativeStatePublishPlanV3({
       kind: 'entity',
       entity: 'statements',
       changes: {
@@ -87,7 +87,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
   });
 
   it('publishes companion entity plans through the companion port', async () => {
-    const state: CollaborativeSceneStateV2 = {
+    const state: CollaborativeSceneStateV3 = {
       ...makeState(),
       companionGroupsByStatementId: {
         line_1: {
@@ -101,7 +101,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
       publishCompanionChanges: vi.fn(),
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({
+    await expect(executeCollaborativeStatePublishPlanV3({
       kind: 'entity',
       entity: 'companions',
       changes: {
@@ -123,7 +123,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
       publishState: vi.fn(),
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({
+    await expect(executeCollaborativeStatePublishPlanV3({
       kind: 'entity',
       entity: 'statements',
       changes: { statementOrder: ['line_1'] },
@@ -142,7 +142,7 @@ describe('CollaborativeStatePublishExecutorV2', () => {
       getState: vi.fn(() => state),
     };
 
-    await expect(executeCollaborativeStatePublishPlanV2({
+    await expect(executeCollaborativeStatePublishPlanV3({
       kind: 'entity',
       entity: 'statements',
       changes: { statementOrder: ['line_1'] },

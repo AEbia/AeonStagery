@@ -9,8 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CollaborationConnectionStatus,
   CollaborationIdentity,
-  CollaborationPresencePatchV2,
-  CollaborationPresencePeerV2,
+  CollaborationPresencePatchV3,
+  CollaborationPresencePeerV3,
   CollaborationServerStatus,
   CollaborativeAssetManifest,
 } from '../api/types/collaboration';
@@ -179,8 +179,8 @@ function sourceLocatorsForActionIds(
 export function buildSemanticCollaborationPresencePatch(input: {
   selectedStatementIds: string[];
   currentPlayheadTime: number;
-  patch?: Partial<CollaborationPresencePatchV2>;
-}): CollaborationPresencePatchV2 {
+  patch?: Partial<CollaborationPresencePatchV3>;
+}): CollaborationPresencePatchV3 {
   const patch = input.patch ?? {};
   const hasPointerPatch = Object.prototype.hasOwnProperty.call(patch, 'pointer');
   return {
@@ -259,11 +259,11 @@ export function useSemanticCollaborationSession({
   contextValue: BootstrapContext;
   currentProject: ProjectState | null;
   status: CollaborationConnectionStatus;
-  peers: CollaborationPresencePeerV2[];
+  peers: CollaborationPresencePeerV3[];
   onStatusChange: (status: CollaborationConnectionStatus) => void;
   onSelfChange: (self: CollaborationIdentity | null) => void;
-  onPeersChange: (peers: CollaborationPresencePeerV2[]) => void;
-  onPresencePublisherChange?: (publisher: ((patch?: Partial<CollaborationPresencePatchV2>) => void) | null) => void;
+  onPeersChange: (peers: CollaborationPresencePeerV3[]) => void;
+  onPresencePublisherChange?: (publisher: ((patch?: Partial<CollaborationPresencePatchV3>) => void) | null) => void;
   collaborationServerStatus?: CollaborationServerStatus | null;
 }): SemanticCollaborationSessionController {
   const [endpoint, setEndpoint] = useState(() => readStoredInput('aeonstagery.collaboration.endpoint', '127.0.0.1:12345'));
@@ -285,7 +285,7 @@ export function useSemanticCollaborationSession({
   const resourceAgreementRef = useRef<CollaborativeResourceAgreementAdapter | null>(null);
   const serverSceneAgreementRef = useRef<CollaborativeServerSceneAgreementAdapterV3 | null>(null);
   const unsubscribePresenceRef = useRef<(() => void) | null>(null);
-  const peersV2Ref = useRef<CollaborationPresencePeerV2[]>([]);
+  const peersV2Ref = useRef<CollaborationPresencePeerV3[]>([]);
   const selectedActionIdsRef = useRef<SelectedActionIdCollection>(selectedActionIds);
   const selfRef = useRef<CollaborationIdentity | null>(null);
   const forceResourceRefreshRef = useRef(false);
@@ -392,7 +392,7 @@ export function useSemanticCollaborationSession({
     return cleanup;
   }, [onPeersChange, onPresencePublisherChange, onSelfChange, onStatusChange, stopSession]);
 
-  const publishPresence = useCallback((patch: Partial<CollaborationPresencePatchV2> = {}) => {
+  const publishPresence = useCallback((patch: Partial<CollaborationPresencePatchV3> = {}) => {
     if (status !== 'connected') return;
     const locators = sourceLocatorsForActionIds(contextValue, selectedActionIdsRef.current);
     const selectedStatementIds = [...new Set(locators.map((locator) => locator.statementId))];

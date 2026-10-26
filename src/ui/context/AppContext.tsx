@@ -32,8 +32,8 @@ import type { ResourceAuthoringService } from '../../services/resource-authoring
 import type {
   CollaborationConnectionStatus,
   CollaborationIdentity,
-  CollaborationPresencePatchV2,
-  CollaborationPresencePeerV2,
+  CollaborationPresencePatchV3,
+  CollaborationPresencePeerV3,
 } from '../../api/types/collaboration';
 
 import type { ValidationStore } from '../store/ValidationStore';
@@ -78,8 +78,8 @@ interface AppContextValue {
   collaboration?: {
     status: CollaborationConnectionStatus;
     self?: CollaborationIdentity | null;
-    peers?: CollaborationPresencePeerV2[];
-    publishPresence?: (patch?: Partial<CollaborationPresencePatchV2>) => void;
+    peers?: CollaborationPresencePeerV3[];
+    publishPresence?: (patch?: Partial<CollaborationPresencePatchV3>) => void;
   };
 }
 
@@ -150,7 +150,7 @@ export function useCollaborationStatus(): CollaborationConnectionStatus {
   return useApp().collaboration?.status ?? 'disconnected';
 }
 
-export function useCollaborationPresence(): { self: CollaborationIdentity | null; peers: CollaborationPresencePeerV2[] } {
+export function useCollaborationPresence(): { self: CollaborationIdentity | null; peers: CollaborationPresencePeerV3[] } {
   const collaboration = useApp().collaboration;
   return {
     self: collaboration?.self ?? null,
@@ -158,7 +158,7 @@ export function useCollaborationPresence(): { self: CollaborationIdentity | null
   };
 }
 
-export function useCollaborationPresencePublisher(): (patch?: Partial<CollaborationPresencePatchV2>) => void {
+export function useCollaborationPresencePublisher(): (patch?: Partial<CollaborationPresencePatchV3>) => void {
   return useApp().collaboration?.publishPresence ?? (() => {});
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborationPresencePeerV2,
+  type CollaborationPresencePeerV3,
   type CollaborationPresenceServerMessageV3,
 } from '../api/types/collaboration';
 import {
@@ -31,7 +31,7 @@ describe('Collaboration V3 Presence', () => {
   describe('reducePresenceMessage', () => {
     it('handles presence:snapshot by filtering out self identity', () => {
       const selfId = 'client-self';
-      const initialPeers: CollaborationPresencePeerV2[] = [
+      const initialPeers: CollaborationPresencePeerV3[] = [
         {
           clientId: 'stale-peer',
           displayName: 'Stale',
@@ -75,7 +75,7 @@ describe('Collaboration V3 Presence', () => {
 
     it('handles presence:update by adding a new peer or updating an existing peer', () => {
       const selfId = 'client-self';
-      const currentPeers: CollaborationPresencePeerV2[] = [
+      const currentPeers: CollaborationPresencePeerV3[] = [
         {
           clientId: 'peer-1',
           displayName: 'Alice',
@@ -135,7 +135,7 @@ describe('Collaboration V3 Presence', () => {
 
     it('handles presence:remove by deleting peer', () => {
       const selfId = 'client-self';
-      const currentPeers: CollaborationPresencePeerV2[] = [
+      const currentPeers: CollaborationPresencePeerV3[] = [
         { clientId: 'peer-1', displayName: 'Alice', selectedStatementIds: [], editingTarget: null },
         { clientId: 'peer-2', displayName: 'Bob', selectedStatementIds: [], editingTarget: null },
       ];
@@ -153,7 +153,7 @@ describe('Collaboration V3 Presence', () => {
     it('resyncs peers after reconnection via presence:snapshot', () => {
       const selfId = 'client-self';
       // Peers before disconnect
-      const peersBeforeDisconnect: CollaborationPresencePeerV2[] = [
+      const peersBeforeDisconnect: CollaborationPresencePeerV3[] = [
         { clientId: 'peer-old-1', displayName: 'Alice', selectedStatementIds: [], editingTarget: null },
         { clientId: 'peer-old-2', displayName: 'Bob', selectedStatementIds: [], editingTarget: null },
       ];
@@ -177,7 +177,7 @@ describe('Collaboration V3 Presence', () => {
 
   describe('Presence UX summarizers and facts in v3', () => {
     it('summarizes peer editing targets and pointers', () => {
-      const peerStmt: CollaborationPresencePeerV2 = {
+      const peerStmt: CollaborationPresencePeerV3 = {
         clientId: 'p1',
         displayName: 'Alice',
         selectedStatementIds: ['s1'],
@@ -185,7 +185,7 @@ describe('Collaboration V3 Presence', () => {
       };
       expect(summarizePeerPresence(peerStmt)).toBe('正在编辑语句 s1');
 
-      const peerCompanion: CollaborationPresencePeerV2 = {
+      const peerCompanion: CollaborationPresencePeerV3 = {
         clientId: 'p2',
         displayName: 'Bob',
         selectedStatementIds: ['s1'],
@@ -193,7 +193,7 @@ describe('Collaboration V3 Presence', () => {
       };
       expect(summarizePeerPresence(peerCompanion)).toBe('正在编辑 companion c1');
 
-      const peerTimeline: CollaborationPresencePeerV2 = {
+      const peerTimeline: CollaborationPresencePeerV3 = {
         clientId: 'p3',
         displayName: 'Charlie',
         selectedStatementIds: [],
@@ -204,7 +204,7 @@ describe('Collaboration V3 Presence', () => {
     });
 
     it('identifies peers editing specific locators and summarizes them', () => {
-      const peers: CollaborationPresencePeerV2[] = [
+      const peers: CollaborationPresencePeerV3[] = [
         {
           clientId: 'p1',
           displayName: 'Alice',

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { HistoricalSceneDocumentV4 } from '../api/types/semantic-scene';
+import type { SceneDocumentV5 } from '../api/types/semantic-scene';
 import type { LooseTimelineScene as SceneScript } from './fixtures/TimelineTestTypes';
 import {
   CollaborativeAssetManifestBuilder,
   getCollaborativeAssetReferenceKeys,
-  getCollaborativeSceneDocumentV4AssetReferenceKeys,
+  getCollaborativeSceneDocumentV5AssetReferenceKeys,
   hasUnchangedCollaborativeAssetReferences,
-  hasUnchangedCollaborativeSceneDocumentV4AssetReferences,
+  hasUnchangedCollaborativeSceneDocumentV5AssetReferences,
 } from '../services/collaboration/CollaborativeAssetManifestBuilder';
 import type { IFileAccess } from '../services/io/IFileAccess';
 
@@ -101,9 +101,9 @@ function makeScene(): SceneScript {
   };
 }
 
-function makeSceneDocumentV4(): HistoricalSceneDocumentV4 {
+function makeSceneDocumentV5(): SceneDocumentV5 {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sceneId: 'scene_v2',
     meta: {
       title: 'Asset Scene V2',
@@ -173,8 +173,8 @@ describe('CollaborativeAssetManifestBuilder', () => {
     ]);
   });
 
-  it('extracts collaborative asset reference keys from HistoricalSceneDocumentV4 source', () => {
-    expect(getCollaborativeSceneDocumentV4AssetReferenceKeys(makeSceneDocumentV4())).toEqual([
+  it('extracts collaborative asset reference keys from SceneDocumentV5 source', () => {
+    expect(getCollaborativeSceneDocumentV5AssetReferenceKeys(makeSceneDocumentV5())).toEqual([
       'animation/flash.html',
       'background/bg.png',
       'bgm/song.mp3',
@@ -321,7 +321,7 @@ describe('CollaborativeAssetManifestBuilder', () => {
     expect(live2d.files.every((file) => file.contentHash.startsWith('sha256:'))).toBe(true);
   });
 
-  it('builds manifest entries from HistoricalSceneDocumentV4 source statements', async () => {
+  it('builds manifest entries from SceneDocumentV5 source statements', async () => {
     const fileAccess = new FakeFileAccess({
       'figure/tomori/model.json': JSON.stringify({ model: 'tomori.moc' }),
       'figure/tomori/tomori.moc': 'moc-bytes',
@@ -338,8 +338,8 @@ describe('CollaborativeAssetManifestBuilder', () => {
       now: () => '2026-06-06T00:00:00.000Z',
     });
 
-    const document = makeSceneDocumentV4();
-    const manifest = await builder.buildForSceneDocumentV4(document);
+    const document = makeSceneDocumentV5();
+    const manifest = await builder.buildForSceneDocumentV5(document);
 
     expect(Object.keys(manifest).sort()).toEqual([
       'animation/flash.html',
@@ -360,14 +360,14 @@ describe('CollaborativeAssetManifestBuilder', () => {
     expect(manifest['images/cut-in.png'].kind).toBe('image-file');
     expect(manifest['animation/flash.html'].kind).toBe('animation-file');
 
-    await expect(hasUnchangedCollaborativeSceneDocumentV4AssetReferences(document, manifest, {
+    await expect(hasUnchangedCollaborativeSceneDocumentV5AssetReferences(document, manifest, {
       fileAccess,
       projectResources,
     })).resolves.toBe(true);
 
     await fileAccess.writeFile('vocal/line.ogg', 'changed-voice-bytes');
 
-    await expect(hasUnchangedCollaborativeSceneDocumentV4AssetReferences(document, manifest, {
+    await expect(hasUnchangedCollaborativeSceneDocumentV5AssetReferences(document, manifest, {
       fileAccess,
       projectResources,
     })).resolves.toBe(false);

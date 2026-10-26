@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import type { CollaborationWebSocketLike } from '../services/collaboration/CollaborationTransport';
 
@@ -28,7 +27,6 @@ function createSocketStub(readyState = 1): CollaborationWebSocketLike {
 afterEach(() => vi.unstubAllGlobals());
 
 describe.each([
-  ['CollaborationClientV2', CollaborationClientV2],
   ['CollaborationClientV3', CollaborationClientV3],
 ] as const)('%s realtime connect contract', (_name, Client) => {
   it('resolves once the socket is dispatched and shares one in-flight attempt', async () => {

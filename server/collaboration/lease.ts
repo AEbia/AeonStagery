@@ -1,6 +1,6 @@
 import type {
   CollaborationClientId,
-  CollaborationLeaseTargetV2,
+  CollaborationLeaseTargetV3,
 } from '../../src/api/types/collaboration';
 
 /**
@@ -18,23 +18,23 @@ export type CollaborationLeaseTargetKey = string;
 export interface CollaborationLeaseRecord {
   readonly clientId: CollaborationClientId;
   readonly requestId: string;
-  readonly target: CollaborationLeaseTargetV2;
+  readonly target: CollaborationLeaseTargetV3;
   lastRenewedAt: number;
 }
 
-export interface CollaborationLeaseRegistryV2<SocketKey = unknown> {
+export interface CollaborationLeaseRegistryV3<SocketKey = unknown> {
   leasesBySocket: Map<SocketKey, Set<CollaborationLeaseTargetKey>>;
   leasesByTarget: Map<CollaborationLeaseTargetKey, CollaborationLeaseRecord>;
   socketsByTarget: Map<CollaborationLeaseTargetKey, SocketKey>;
 }
 
-export function encodeCollaborationLeaseTargetV2(target: CollaborationLeaseTargetV2): CollaborationLeaseTargetKey {
+export function encodeCollaborationLeaseTargetV3(target: CollaborationLeaseTargetV3): CollaborationLeaseTargetKey {
   return target.kind === 'companion'
     ? `companion:${target.statementId}:${target.companionId}`
     : `statement:${target.statementId}`;
 }
 
-export function decodeCollaborationLeaseTargetV2(key: CollaborationLeaseTargetKey): CollaborationLeaseTargetV2 | null {
+export function decodeCollaborationLeaseTargetV3(key: CollaborationLeaseTargetKey): CollaborationLeaseTargetV3 | null {
   if (key.startsWith('statement:')) {
     const statementId = key.slice('statement:'.length);
     return statementId ? { kind: 'statement', statementId } : null;
@@ -47,7 +47,7 @@ export function decodeCollaborationLeaseTargetV2(key: CollaborationLeaseTargetKe
   return null;
 }
 
-export function createCollaborationLeaseRegistryV2<SocketKey = unknown>(): CollaborationLeaseRegistryV2<SocketKey> {
+export function createCollaborationLeaseRegistryV3<SocketKey = unknown>(): CollaborationLeaseRegistryV3<SocketKey> {
   return {
     leasesBySocket: new Map<SocketKey, Set<CollaborationLeaseTargetKey>>(),
     leasesByTarget: new Map<CollaborationLeaseTargetKey, CollaborationLeaseRecord>(),
@@ -55,7 +55,7 @@ export function createCollaborationLeaseRegistryV2<SocketKey = unknown>(): Colla
   };
 }
 
-export type CollaborationLeaseGrantResultV2 =
+export type CollaborationLeaseGrantResultV3 =
   | { granted: true; record: CollaborationLeaseRecord }
   | { granted: false; heldByClientId: CollaborationClientId };
 
@@ -63,15 +63,15 @@ export type CollaborationLeaseGrantResultV2 =
  * Atomically request the lease for a target. A different client is denied;
  * the same client may replace its ownership with a new acquisition request.
  */
-export function acquireCollaborationLeaseV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function acquireCollaborationLeaseV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
   socket: SocketKey,
   clientId: CollaborationClientId,
   requestId: string,
-  target: CollaborationLeaseTargetV2,
+  target: CollaborationLeaseTargetV3,
   now = Date.now(),
-): CollaborationLeaseGrantResultV2 {
-  const key = encodeCollaborationLeaseTargetV2(target);
+): CollaborationLeaseGrantResultV3 {
+  const key = encodeCollaborationLeaseTargetV3(target);
   const existing = registry.leasesByTarget.get(key);
   if (existing && (existing.clientId !== clientId
     || (existing.requestId === requestId && registry.socketsByTarget.get(key) !== socket))) {
@@ -99,15 +99,15 @@ export function acquireCollaborationLeaseV2<SocketKey>(
   return { granted: true, record };
 }
 
-export function renewCollaborationLeaseV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function renewCollaborationLeaseV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
   socket: SocketKey,
   clientId: CollaborationClientId,
   requestId: string,
-  target: CollaborationLeaseTargetV2,
+  target: CollaborationLeaseTargetV3,
   now = Date.now(),
 ): boolean {
-  const key = encodeCollaborationLeaseTargetV2(target);
+  const key = encodeCollaborationLeaseTargetV3(target);
   const record = registry.leasesByTarget.get(key);
   if (!record || record.clientId !== clientId || record.requestId !== requestId
     || registry.socketsByTarget.get(key) !== socket) return false;
@@ -121,14 +121,14 @@ export function renewCollaborationLeaseV2<SocketKey>(
   return true;
 }
 
-export function releaseCollaborationLeaseV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function releaseCollaborationLeaseV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
   socket: SocketKey,
   clientId: CollaborationClientId,
-  target: CollaborationLeaseTargetV2,
+  target: CollaborationLeaseTargetV3,
   requestId: string,
 ): boolean {
-  const key = encodeCollaborationLeaseTargetV2(target);
+  const key = encodeCollaborationLeaseTargetV3(target);
   const record = registry.leasesByTarget.get(key);
   if (!record || record.clientId !== clientId || record.requestId !== requestId
     || registry.socketsByTarget.get(key) !== socket) return false;
@@ -142,8 +142,8 @@ export function releaseCollaborationLeaseV2<SocketKey>(
  * Release every lease held by a socket (disconnect, crash, session end).
  * Returns the released lease records so the adapter can broadcast.
  */
-export function releaseAllCollaborationLeasesV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function releaseAllCollaborationLeasesV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
   socket: SocketKey,
 ): CollaborationLeaseRecord[] {
   const keys = registry.leasesBySocket.get(socket);
@@ -165,8 +165,8 @@ export function releaseAllCollaborationLeasesV2<SocketKey>(
  * Auto-release leases whose holder has not renewed within the timeout
  * (disconnect, crash, sleep). Returns expired leases for broadcasting.
  */
-export function expireCollaborationLeasesV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function expireCollaborationLeasesV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
   now = Date.now(),
   timeoutMs = COLLABORATION_LEASE_DEFAULT_TIMEOUT_MS,
 ): CollaborationLeaseRecord[] {
@@ -193,8 +193,8 @@ export function expireCollaborationLeasesV2<SocketKey>(
   return expired;
 }
 
-export function listCollaborationLeaseTargetsV2<SocketKey>(
-  registry: CollaborationLeaseRegistryV2<SocketKey>,
+export function listCollaborationLeaseTargetsV3<SocketKey>(
+  registry: CollaborationLeaseRegistryV3<SocketKey>,
 ): readonly CollaborationLeaseRecord[] {
   return Array.from(registry.leasesByTarget.values());
 }
