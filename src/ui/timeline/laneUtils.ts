@@ -1,9 +1,3 @@
-export interface BlockInfo {
-  id: string;
-  time: number;
-  duration: number;
-}
-
 export interface LaneAssignment {
   id: string;
   laneIndex: number;
@@ -12,39 +6,6 @@ export interface LaneAssignment {
 export interface PresentationFootprintBlock {
   id: string;
   ranges: readonly { start: number; end: number }[];
-}
-
-/**
- * 贪心区间划分算法 — O(N log N)
- * 按 start time 排序，每个 block 放入第一个可用的 lane
- * 硬性性能上限：N < 2000，< 2ms per call
- */
-export function computeLanes(blocks: BlockInfo[]): LaneAssignment[] {
-  if (blocks.length === 0) return [];
-
-  const sorted = [...blocks].sort((a, b) => a.time - b.time);
-  const laneEnds: number[] = []; // 每个 lane 的结束时间
-  const result: LaneAssignment[] = [];
-
-  for (const block of sorted) {
-    let placed = false;
-    for (let lane = 0; lane < laneEnds.length; lane++) {
-      // Allow block to be placed on a lane if it starts after or exactly at the lane's end time
-      // Using a small epsilon to avoid float rounding errors
-      if (laneEnds[lane] <= block.time + 0.01) {
-        laneEnds[lane] = block.time + block.duration;
-        result.push({ id: block.id, laneIndex: lane });
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      result.push({ id: block.id, laneIndex: laneEnds.length });
-      laneEnds.push(block.time + block.duration);
-    }
-  }
-
-  return result;
 }
 
 export function computePresentationFootprintLanes(

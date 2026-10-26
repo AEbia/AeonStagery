@@ -49,11 +49,6 @@ export class ProjectAgentTaskState {
     return this.sceneBinding !== null;
   }
 
-  /** Binding that was last promoted from a completed tool round. */
-  getDurableSceneBinding(): ProjectAgentSceneBinding | null {
-    return this.durableSceneBinding;
-  }
-
   getGroupSceneSnapshot(): ProjectAgentSceneSnapshot | null {
     return this.groupSceneSnapshot;
   }
@@ -142,10 +137,6 @@ export class ProjectAgentTaskState {
     }
   }
 
-  clearSceneBinding(): void {
-    this.sceneBinding = null;
-  }
-
   /**
    * Returns true when the revision matches the stored one (or first page).
    * On mismatch, caller should return pagination_changed.
@@ -164,14 +155,6 @@ export class ProjectAgentTaskState {
       return 'changed';
     }
     return 'ok';
-  }
-
-  setPaginationRevision(queryKey: string, revision: string): void {
-    this.pagination.set(queryKey, { revision, queryKey });
-  }
-
-  clearPagination(): void {
-    this.pagination.clear();
   }
 
   clear(): void {

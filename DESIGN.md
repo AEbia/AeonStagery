@@ -264,7 +264,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 | `--radius-md` | `8px` | 标准控件 | 标准按钮 (`.btn`)、输入框 (`input`)、下拉框、菜单面板 (`menu`)、选项卡 (`tab`) |
 | `--radius-lg` | `12px` | 表面/面板 | 内容卡片 (`card`)、检查器面板、悬浮容器 (`popover`)、媒体缩略图 |
 | `--radius-xl` | `16px` | 模态/对话框 | 设置弹窗 (`settings-dialog`)、模态遮罩面板、主要工具悬浮窗 |
-| `--radius-2xl` | `24px` | 英雄/向导 | 首次运行向导 (`SetupWizard`)、全屏居中引导大卡片 |
+| `--radius-2xl` | `24px` | 英雄/向导 | 项目主页欢迎区、全屏居中引导大卡片 |
 | `--radius-full` | `9999px` | 药丸/胶囊 | 状态胶囊 (`pill`)、Toggle 开关槽体、搜索栏外框 |
 | `--radius-circle`| `50%` | 正圆 | 播放/录制单点按钮、头像、未读指示点、状态指示球 |
 
@@ -283,7 +283,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 5. **Modal & Dialog Windows (`--radius-dialog`, `--radius-modal`, `--radius-window`: `16px`)**:
    高层级桌面浮动窗口与模态对话框，具备独立的关闭行为和深层阴影。
 6. **Hero & Onboarding (`--radius-hero`: `24px`)**:
-   非日常紧凑编辑流的引导页面与新用户向导，提供更柔和、更具沉浸感的欢迎视效。
+   非日常紧凑编辑流的项目欢迎页与引导界面，提供更柔和、更具沉浸感的欢迎视效。
 7. **Pill & Circular Affordances (`--radius-pill`, `--radius-switch`: `9999px`, `--radius-circle`: `50%`)**:
    用于表示状态切换、完全自包围的胶囊指示器，以及纯几何正圆按钮。
 
@@ -295,7 +295,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 - 例：外层卡片 $R = 12\text{px}$ (`--radius-lg`)，内边距 $\text{Padding} = 8\text{px}$ 时，内层项目圆角为 $\max(12 - 8, 0) = 4\text{px}$ (`--radius-sm`)，严禁内层元素半径大于外层产生视觉外凸畸变。
 - 例：外层对话框 $R = 16\text{px}$ (`--radius-xl`)，内边距 $\text{Padding} = 12\text{px}$ 时，内层卡片使用 $4\text{px}$ 或 $8\text{px}$ (`--radius-sm` / `--radius-md`)。
-- TypeScript 提供辅助函数 `getNestedRadius(outerPx, paddingPx)` 进行精确计算。
+- 实现时按上述公式计算内层圆角，并优先对齐下级 Token。
 
 ## Components
 

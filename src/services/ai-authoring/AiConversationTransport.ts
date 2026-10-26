@@ -472,8 +472,6 @@ export function normalizeAiToolCalls(
   };
 }
 
-export const normalizeToolCalls = normalizeAiToolCalls;
-
 export function normalizeAiAssistantMessage(
   candidate: unknown,
   options: AiAssistantMessageNormalizationOptions = {},
@@ -520,8 +518,6 @@ export function normalizeAiAssistantMessage(
     invalidToolResults: toolCalls.invalidToolResults,
   };
 }
-
-export const normalizeAiAssistantEnvelope = normalizeAiAssistantMessage;
 
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue);

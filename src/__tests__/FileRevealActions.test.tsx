@@ -5,12 +5,10 @@ import type { AeonStageryElectronAPI } from '../api/types/window';
 import type { ProjectState, ResourceResolution } from '../api/types/project';
 import { FileRevealButton, FileRevealContext } from '../ui/FileRevealActions';
 import { ProjectFileActions } from '../ui/ProjectFileActions';
-import { ResourceFileBrowser } from '../ui/ResourceFileBrowser';
 import { openFolderInManager, revealFileInManager } from '../ui/fileReveal';
 
-const mocks = vi.hoisted(() => ({ toast: vi.fn(), readMergedDirectory: vi.fn() }));
+const mocks = vi.hoisted(() => ({ toast: vi.fn() }));
 vi.mock('../ui/Toast', () => ({ showToast: mocks.toast }));
-vi.mock('../ui/ResourceLibrary', () => ({ readMergedDirectory: mocks.readMergedDirectory }));
 
 describe('file reveal resolution and interactions', () => {
   const reveal = vi.fn();
@@ -85,17 +83,6 @@ describe('file reveal resolution and interactions', () => {
     render(<FileRevealButton path="/project/a.png" name="a.png" />);
     fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：a.png' }));
     await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith('文件管理器不可用', 'error'));
-  });
-
-  it('reveals resources from the browser without dragging or selecting them', async () => {
-    mocks.readMergedDirectory.mockResolvedValue([{ name: 'a.png', path: '/project/a.png', isDirectory: false }]);
-    render(<ResourceFileBrowser />);
-    fireEvent.click(screen.getByRole('button', { name: '文件资源' }));
-    const row = await screen.findByRole('listitem', { name: /a\.png/ });
-    expect(screen.queryByRole('button', { name: '在文件管理器中显示：a.png' })).toBeNull();
-    fireEvent.contextMenu(row);
-    fireEvent.click(screen.getByRole('menuitem'));
-    await waitFor(() => expect(reveal).toHaveBeenCalledWith('/project/a.png'));
   });
 
   it('opens the project directory through the existing folder icon without listing scene actions', async () => {

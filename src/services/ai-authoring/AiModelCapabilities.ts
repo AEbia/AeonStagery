@@ -103,10 +103,6 @@ function capabilityKey(endpoint: string, model: string): string {
   return `${endpoint}\u0000${model}`;
 }
 
-export function getAiModelCapabilityKey(endpoint: string, model: string): string {
-  return capabilityKey(endpoint, model);
-}
-
 function isPositiveContextWindow(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
@@ -201,8 +197,6 @@ export function resolveAiContextWindow(
   };
 }
 
-export const resolveContextWindow = resolveAiContextWindow;
-
 export function resolveAiModelCapabilities(
   endpoint: string,
   model: string,
@@ -290,10 +284,6 @@ export class AiModelCapabilities {
   get(endpoint: string, model: string): AiModelCapabilityRecord | undefined {
     const value = this.states.get(capabilityKey(endpoint, model));
     return value ? cloneRecord(value) : undefined;
-  }
-
-  getCapabilities(endpoint: string, model: string): AiModelCapabilityRecord | undefined {
-    return this.get(endpoint, model);
   }
 
   set(record: AiModelCapabilityRecord): void {
@@ -384,10 +374,6 @@ export class AiModelCapabilities {
     if (this.configurationFingerprint === configurationFingerprint) return;
     this.configurationFingerprint = configurationFingerprint;
     this.states.clear();
-  }
-
-  setConfigurationFingerprint(configurationFingerprint: string): void {
-    this.invalidateForConfigurationChange(configurationFingerprint);
   }
 
   entries(): Array<[string, AiModelCapabilityRecord]> {

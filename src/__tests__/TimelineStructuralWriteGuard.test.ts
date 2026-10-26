@@ -453,7 +453,6 @@ describe('timeline structural write guard', () => {
 
   it('keeps timeline drop insertion on semantic statement authoring', () => {
     const dropHook = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'useTimelineDrop.ts'), 'utf8');
-    const resourceBrowser = fs.readFileSync(path.join(UI_ROOT, 'ResourceFileBrowser.tsx'), 'utf8');
 
     expect(dropHook).toContain('useSemanticAuthoringService');
     expect(dropHook).toContain('createSemanticStatementDraftForResource');
@@ -463,9 +462,6 @@ describe('timeline structural write guard', () => {
     expect(dropHook).not.toContain('createStructuralIntentBase');
     expect(dropHook).not.toContain("kind: 'insert-action'");
     expect(dropHook).not.toContain("kind: 'insert-template'");
-
-    expect(resourceBrowser).toContain("type: 'resource'");
-    expect(resourceBrowser).not.toContain('actionType');
   });
 
   it('keeps dialogue companion editing and template authoring on semantic intents', () => {
