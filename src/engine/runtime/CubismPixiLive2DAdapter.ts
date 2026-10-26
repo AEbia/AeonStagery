@@ -19,6 +19,7 @@ import type {
 } from './Live2DRuntimeContracts';
 import type { Live2DRuntimeControlPort } from './Live2DRuntimeControlPort';
 import { finiteOrUndefined, resolveCubismParameterId, resolveHeadAnchorFromSettings } from './modelMetadata';
+import { resolveCubismModelAnchor, type CubismAnchorModel } from './CubismModelAnchors';
 import { applyRuntimeFocus, manageRuntimeFocusAnimations } from '../live2d/runtime/RuntimeFocus';
 import {
   isExternalPerformanceMethod,
@@ -538,6 +539,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       .filter(Boolean),
     manageFocusAnimations: (model, action) => manageRuntimeFocusAnimations(this.controls.getFocusControllers(model), action),
     getHeadAnchor: (model) => resolveHeadAnchorFromSettings(model?.internalModel?.settings),
+    getAnchor: (model, anchor) => resolveCubismModelAnchor(model as CubismAnchorModel, anchor),
   };
 
   async init(): Promise<void> {

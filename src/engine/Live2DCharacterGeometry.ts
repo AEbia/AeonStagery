@@ -147,6 +147,15 @@ export class Live2DCharacterGeometry {
     return model;
   }
 
+  private resolveAnchorFraction(entry: CharacterEntry, pointName: CharacterPoint): { x: number; y: number; posed?: true } | null {
+    const character = getBoundRuntimeHandle(entry)?.character;
+    const target = entry.model instanceof Live2DCompositeModel && pointName === 'head' ? 'head' : 'main';
+    const posed = character?.getAnchor?.(pointName, target);
+    return posed ? { ...posed, posed: true }
+      : (pointName === 'head' ? character?.getHeadAnchor(target) : null)
+      ?? null;
+  }
+
   getPoint(id: string, pointName: CharacterPoint, out?: { x: number; y: number }): { x: number, y: number } | null {
     const entry = this.characters.get(id);
 
@@ -157,11 +166,7 @@ export class Live2DCharacterGeometry {
     if (entry?.model && proxy) {
       try {
         const source = this.resolvePointSourceModel(entry.model, pointName);
-        const headAnchor = pointName === 'head'
-          ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
-              entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
-            )
-          : null;
+        const anchorFraction = this.resolveAnchorFraction(entry, pointName);
         const logicalHeight = entry.baseHeight ?? source?._baseHeight ?? source?.height;
         const rootModel = entry.model as SpatialModel;
         if (source !== rootModel) source?.updateLocalTransform?.();
@@ -169,7 +174,7 @@ export class Live2DCharacterGeometry {
           source,
           pointName,
           logicalHeight,
-          headAnchor,
+          anchorFraction,
           rootModel.pivot,
           source !== rootModel ? source?.localTransform : undefined,
         );
@@ -198,8 +203,7 @@ export class Live2DCharacterGeometry {
       }
     }
 
-    // 1. Prefer model-defined head hit areas when available.
-    // This gives us the semantic head anchor instead of guessing from the full container bounds.
+    // Prefer runtime anatomy and authored head hit areas over bounds estimates.
     if (entry?.model) {
       try {
         const model = this.resolvePointSourceModel(entry.model, pointName);
@@ -211,17 +215,22 @@ export class Live2DCharacterGeometry {
 
         if (bounds && isFinite(bounds.x) && isFinite(bounds.y) && isFinite(bounds.width) && isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
           const centerX = bounds.x + bounds.width * 0.5;
-          const headAnchor = pointName === 'head'
-            ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
-                entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
-              )
-            : null;
+          const anchorFraction = this.resolveAnchorFraction(entry, pointName);
 
           let x = centerX;
           let y = bounds.y + bounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
-          if (headAnchor && pointName === 'head') {
-            x = bounds.x + bounds.width * headAnchor.x;
-            y = bounds.y + bounds.height * headAnchor.y;
+          if (anchorFraction) {
+            x = bounds.x + bounds.width * anchorFraction.x;
+            y = bounds.y + bounds.height * anchorFraction.y;
+            const localBounds = anchorFraction.posed ? model?.getLocalBounds?.() : null;
+            if (localBounds && model?.toGlobal) {
+              const global = model.toGlobal({
+                x: localBounds.x + localBounds.width * anchorFraction.x,
+                y: localBounds.y + localBounds.height * anchorFraction.y,
+              });
+              x = global.x;
+              y = global.y;
+            }
           }
 
           const proxy = this.getSceneContext()?.transformationProxies?.get(id);
@@ -237,11 +246,11 @@ export class Live2DCharacterGeometry {
             let local: { x: number; y: number };
             if (model && localBounds && localBounds.width > 0 && localBounds.height > 0 && model.toGlobal) {
               const localCenterX = localBounds.x + localBounds.width * 0.5;
-              const localAnchorX = pointName === 'head' && headAnchor
-                ? localBounds.x + localBounds.width * headAnchor.x
+              const localAnchorX = anchorFraction
+                ? localBounds.x + localBounds.width * anchorFraction.x
                 : localCenterX;
-              const localAnchorY = pointName === 'head' && headAnchor
-                ? localBounds.y + localBounds.height * headAnchor.y
+              const localAnchorY = anchorFraction
+                ? localBounds.y + localBounds.height * anchorFraction.y
                 : localBounds.y + localBounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
               local = container.toLocal(model.toGlobal({ x: localAnchorX, y: localAnchorY }));
             } else {
