@@ -57,11 +57,11 @@ function draftInputForStart(
   }
 
   if (
-    (forceStartTarget || nextInput.stateTarget === undefined)
+    (forceStartTarget || (nextInput.lightingTarget === undefined && nextInput.stateTarget === undefined))
     && startStatement.type === 'lighting'
-    && typeof params.target === 'string'
+    && (startStatement.params.effect === 'blur' || startStatement.params.effect === 'post')
   ) {
-    nextInput.stateTarget = params.target;
+    nextInput.lightingTarget = startStatement.params.target ?? { kind: 'scene' };
   }
 
   return nextInput;
@@ -101,6 +101,7 @@ export function resolveLifecycleTargetBinding(
   }
 
   let sawResolvableStateKey = false;
+  const lightingCharacterIds = new Set((document.meta.characters ?? []).map((character) => character.id));
   const byKey = candidates.filter((record) => {
     const startStatement = document.statements.find((statement) => statement.id === record.statementId);
     if (!startStatement) return false;
@@ -110,7 +111,7 @@ export function resolveLifecycleTargetBinding(
       preferredStartStatementIds.has(record.statementId),
     ));
     const draftDependency = draft
-      ? sceneStatementDefinitionRegistry.timelineStateSpanDependency(draft)
+      ? sceneStatementDefinitionRegistry.timelineStateSpanDependency(draft, lightingCharacterIds)
       : undefined;
     if (!draftDependency?.stateKey || draftDependency.presentationTypeKey !== command.presentationTypeKey) return true;
     sawResolvableStateKey = true;

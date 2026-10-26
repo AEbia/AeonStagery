@@ -2,13 +2,14 @@
  * @vitest-environment jsdom
  */
 import { editNumericControl } from './fixtures/editNumericControl';
-import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimelineListView } from '../ui/timeline/TimelineListView';
 import { settingsManager } from '../ui/SettingsStore';
 import { SCENE_SCHEMA_VERSION } from '../api/types/semantic-scene';
 import { SemanticTimelineAuthoringService } from '../services/timeline-authoring/SemanticTimelineAuthoringService';
 import type { SemanticAuthorIntent } from '../api/types/authoring';
+import type { SceneMeta } from '../api/types/scene-common';
 import { useKeyboardShortcuts } from '../ui/hooks/useKeyboardShortcuts';
 
 const state = vi.hoisted(() => {
@@ -72,11 +73,12 @@ function renderList(
 function renderStatements(
   statements: any[],
   collaborationStatus: 'disconnected' | 'offline' = 'disconnected',
+  meta: SceneMeta = { title: 'Inline list', characters: [] },
 ) {
   state.document = {
     schemaVersion: 4,
     sceneId: 'inline-list',
-    meta: { title: 'Inline list', characters: [] },
+    meta,
     statements,
   };
   state.compiledScene = null;
@@ -108,6 +110,33 @@ describe('timeline list inline authoring', () => {
     window.localStorage.clear();
     settingsManager.set('workbenchDialogueFlowMode', 'manual');
     settingsManager.set('workbenchTimelineLayoutMode', 'tracks');
+  });
+
+  it.each(([
+    ['blur', 'modulate', '变化模糊'], ['blur', 'reset', '重置模糊'],
+    ['post', 'modulate', '变化后期处理'], ['post', 'reset', '重置后期处理'],
+  ] as const).flatMap(([effect, mode, label]) => [false, true]
+    .map((withSpeaker) => [effect, mode, label, withSpeaker] as const)))(
+    'inserts available scene %s %s (%s) from a list gap with speaker=%s', async (effect, mode, label, withSpeaker) => {
+    const target = effect === 'blur' ? 'global' : 'panorama';
+    renderStatements([
+      { id: 'scene-effect', time: 0, type: 'lighting', params: { effect, mode: 'set', target } },
+      { ...makeStatement('previous', 1), params: { text: 'previous', durationSeconds: 1, ...(withSpeaker ? { speakerId: 'friend' } : {}) } },
+      makeStatement('next', 3),
+    ], 'disconnected', {
+      title: 'Scene lighting gap', characters: [{ id: 'hero', name: '主角' }, { id: 'friend', name: '朋友' }],
+    });
+    fireEvent.click(screen.getByLabelText('在 2.0 秒插入语句'));
+    const menu = within(screen.getByRole('dialog', { name: '时间轴插入语句菜单' }));
+    fireEvent.click(menu.getByRole('tab', { name: '画面效果' }));
+    const command = menu.getByRole('button', { name: label });
+    expect(command.hasAttribute('disabled')).toBe(false);
+    await act(async () => { fireEvent.click(command); });
+
+    expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'insert-statement', origin: 'timeline-list-gap', anchorTime: 2,
+      statement: { type: 'lighting', params: expect.objectContaining({ effect, mode, target }) },
+    }));
   });
 
   it('renders n - 1 dialogue insertion gaps and hides them while searching', () => {

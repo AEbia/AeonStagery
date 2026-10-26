@@ -22,11 +22,24 @@ describe('environmentPresentation', () => {
     expect(getEnvironmentActionLayerId(scene.timeline[0])).toBe('background');
   });
 
-  it('prefers authored labels and falls back to friendly environment labels', () => {
+  it('displays layer IDs even when authored labels and resource names are present', () => {
     const layers = collectEnvironmentLayerPresentations(scene);
-    expect(layers.get('background')?.displayLabel).toBe('背景');
-    expect(layers.get('fog')?.displayLabel).toBe('前景雾');
-    expect(layers.get('back-wall')?.displayLabel).toBe('环境层 2');
+    expect(layers.get('background')?.displayLabel).toBe('background');
+    expect(layers.get('fog')?.displayLabel).toBe('fog');
+    expect(layers.get('back-wall')?.displayLabel).toBe('back-wall');
+    expect(layers.get('fog')?.sourceFile).toBe('fog.png');
+  });
+
+  it('keeps IDs stable through transforms and resource names that match', () => {
+    const layers = collectEnvironmentLayerPresentations({ ...scene, timeline: [
+      { _id: 'a', action: 'setEnvironmentLayer', params: { layerId: 'a', file: 'day/fog.png' } },
+      { _id: 'b', action: 'setEnvironmentLayer', params: { layerId: 'b', file: 'night/fog.png' } },
+      { _id: 'move', action: 'transformEnvironmentLayer', params: { layerId: 'a', x: 0.5 } },
+      { _id: 'win', action: 'setEnvironmentLayer', params: { layerId: 'win', image: 'assets\\trees.png' } },
+    ] });
+    expect(layers.get('a')?.displayLabel).toBe('a');
+    expect(layers.get('b')?.displayLabel).toBe('b');
+    expect(layers.get('win')?.displayLabel).toBe('win');
   });
 
   it('maps environment tracks to a shared presentation kind', () => {

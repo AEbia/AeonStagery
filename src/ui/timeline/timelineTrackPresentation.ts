@@ -1,4 +1,5 @@
 import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
+import { LIGHTING_GROUP_TARGETS, isLightingTarget, lightingTargetKey, parseCompiledLightingObjectTarget } from '../../api/types/lighting-target';
 import { BACKGROUND_LAYER_ID } from '../../engine/environmentLayerModel';
 import {
   UNIFIED_ENVIRONMENT_TRACK_ID,
@@ -29,8 +30,32 @@ const LENS_FILTER_ACTIONS = new Set([
   'resetLensFilters',
 ]);
 
+const LIGHTING_ACTION_EFFECTS = new Map<string, 'blur' | 'post'>([
+  ['setBlur', 'blur'],
+  ['resetBlur', 'blur'],
+  ['setPostProcessing', 'post'],
+  ['resetPostProcessing', 'post'],
+]);
+
 function stringParam(params: Record<string, unknown>, key: string): string | undefined {
   return typeof params[key] === 'string' && params[key] ? params[key] : undefined;
+}
+
+function getLightingTarget(sceneData: TimelineScene, action: TimelineAction): string | undefined {
+  const effect = LIGHTING_ACTION_EFFECTS.get(action.action)
+    ?? (action.semanticType === 'lighting' ? action.params.effect : undefined);
+  if (effect !== 'blur' && effect !== 'post') return undefined;
+  const target = action.sourceParams?.target ?? action.params.target;
+  if (!isLightingTarget(target)) return undefined;
+  const characterIds = new Set(sceneData.meta.characters?.map((character) => character.id));
+  if (action.sourceParams || action.action === 'lighting') return lightingTargetKey(target, effect, characterIds);
+  // Legacy compiled blur actions reserve all for the runtime-wide reset.
+  if (effect === 'blur' && target === 'all') return target;
+  // Runtime display actions already carry compiler keys. Uncompiled semantic
+  // statements use the source resolver above, including literal prefixed IDs.
+  if (typeof target === 'string' && (parseCompiledLightingObjectTarget(target)
+    || Object.values(LIGHTING_GROUP_TARGETS).some((group) => group === target))) return target;
+  return lightingTargetKey(target, effect, characterIds);
 }
 
 /**
@@ -71,6 +96,12 @@ export function getCharacterTrackTargetId(
     return rawTarget;
   }
 
+  const lightingTarget = getLightingTarget(sceneData, action);
+  if (lightingTarget) {
+    const objectTarget = parseCompiledLightingObjectTarget(lightingTarget);
+    return objectTarget?.kind === 'character' ? objectTarget.id : undefined;
+  }
+
   if (action.action === 'setCompositeRecipe' || action.action === 'modulateComposite') {
     const targetId = stringParam(params, 'targetId');
     return targetId && sceneData.meta.characters?.some((candidate) => candidate.id === targetId)
@@ -104,6 +135,22 @@ const TRACK_ORDER: Record<string, number> = {
 export function getTimelineTrackId(sceneData: TimelineScene, action: TimelineAction): string {
   const characterTargetId = getCharacterTrackTargetId(sceneData, action);
   if (characterTargetId) return `char:${characterTargetId}`;
+
+  const lightingTarget = getLightingTarget(sceneData, action);
+  const objectTarget = lightingTarget ? parseCompiledLightingObjectTarget(lightingTarget) : undefined;
+  if (
+    lightingTarget === 'background'
+    || lightingTarget === LIGHTING_GROUP_TARGETS.environmentLayers
+    || (objectTarget?.kind === 'environmentLayer' && (
+      (isLightingTarget(action.params.target) && typeof action.params.target !== 'string' && action.params.target.kind === 'environmentLayer')
+      || parseCompiledLightingObjectTarget(stringParam(action.params, 'target')?.trim() ?? '')?.kind === 'environmentLayer'
+      || objectTarget.id === BACKGROUND_LAYER_ID
+      || sceneData.timeline.some((candidate) => (
+        (candidate.semanticType === 'environmentLayer' || isUnifiedEnvironmentTrackAction(candidate))
+        && candidate.params.layerId === objectTarget.id
+      ))
+    ))
+  ) return UNIFIED_ENVIRONMENT_TRACK_ID;
 
   if (['setCompositeRecipe', 'modulateComposite'].includes(action.action)) return 'composite';
 

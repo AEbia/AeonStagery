@@ -1,14 +1,8 @@
 import { memo } from 'react';
 import type { SourcedSemanticAuthoringCombo } from '../../services/template-package';
 import { StatementLibraryMenu } from './StatementLibraryMenu';
-
-interface BlankMenuState {
-  x: number;
-  y: number;
-  time: number;
-  charId: string | null;
-  charLabel: string | null;
-}
+import type { BlankMenuState } from './useBlankContextMenu';
+import { UNIFIED_ENVIRONMENT_TRACK_ID } from './environmentAuthoring';
 
 interface BlankContextMenuProps {
   menu: BlankMenuState | null;
@@ -30,15 +24,16 @@ export const BlankContextMenu = memo(({
   availableLifecycleEndCommandIds,
   availableStateSpanDependencyCommandIds,
 }: BlankContextMenuProps) => {
+  const contextMeta = menu?.trackId === UNIFIED_ENVIRONMENT_TRACK_ID
+    ? '全部环境图层'
+    : menu?.charLabel || menu?.charId || undefined;
   return (
     <StatementLibraryMenu
       menu={menu ? {
         x: menu.x,
         y: menu.y,
         time: menu.time,
-        ...(menu.charLabel || menu.charId
-          ? { contextMeta: menu.charLabel || menu.charId || undefined }
-          : {}),
+        ...(contextMeta ? { contextMeta } : {}),
       } : null}
       hasCopyBuffer={hasCopyBuffer}
       templates={templates}

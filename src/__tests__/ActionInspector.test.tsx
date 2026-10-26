@@ -4,6 +4,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActionInspector } from '../ui/timeline/ActionInspector';
+import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument } from '../api/types/semantic-scene';
 
 const testState = vi.hoisted(() => {
   const semanticDocument = {
@@ -110,6 +112,47 @@ describe('ActionInspector', () => {
     testState.customMotionConversion.convert.mockReset();
     testState.semanticAuthoring.author.mockClear();
     testState.playbackAdapter.getCurrentTime.mockReturnValue(4);
+  });
+
+  it.each(['blur', 'post'] as const)('selects arbitrary characters and environment layers for %s', async (effect) => {
+    const document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'lighting-targets',
+      meta: testState.defaultSemanticDocument.meta,
+      statements: [
+        { id: 'fog', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'fog', label: '前景雾', file: 'fog.png' } },
+        { id: 'mist', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'unnamed-mist', file: 'effects/白雾.png' } },
+        { id: 'lighting', time: 1, type: 'lighting', params: { effect, mode: 'set' } },
+      ],
+    };
+    testState.semanticDocument = document;
+    const compiled = sceneStatementCompiler.compile(document);
+    testState.compiledScene = compiled;
+    const actionId = compiled.actions[compiled.actions.length - 1].id;
+    const replaceSourceParams = vi.fn();
+    render(<ActionInspector
+      sceneData={{ sceneId: document.sceneId, meta: document.meta, timeline: [] }}
+      selectedActionIds={{ [actionId]: true }} setSelectedIds={vi.fn()}
+      updateAction={vi.fn()} updateParam={vi.fn()} replaceSourceParams={replaceSourceParams}
+      deleteAction={vi.fn()} onClose={vi.fn()}
+    />);
+    const target = screen.getByRole('combobox', { name: '作用目标' });
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: '全部环境图层' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({
+      effect, target: { kind: 'group', group: 'environmentLayers' },
+    }));
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'fog' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'environmentLayer', id: 'fog' } }));
+    await act(async () => { fireEvent.click(target); });
+    const resourceOption = screen.getByRole('option', { name: 'unnamed-mist' });
+    expect(resourceOption.getAttribute('title')).toBe('effects/白雾.png');
+    await act(async () => { fireEvent.click(resourceOption); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'environmentLayer', id: 'unnamed-mist' } }));
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'Sakiko' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'character', id: 'sakiko' } }));
   });
 
   it('loads model metadata only once when its own state updates', async () => {

@@ -5,6 +5,7 @@ export interface EnvironmentLayerPresentation {
   layerId: string;
   order: number;
   authoredLabel?: string;
+  sourceFile?: string;
   displayLabel: string;
   shortLabel: string;
   isBackground: boolean;
@@ -20,18 +21,13 @@ export function getEnvironmentActionLayerId(action: TimelineAction): string | nu
   return normalizeLayerId(action.params.layerId);
 }
 
-function buildFallbackLayerLabel(layerId: string, order: number): string {
-  if (layerId === BACKGROUND_LAYER_ID) return '背景';
-  return `环境层 ${Math.max(1, order)}`;
-}
-
 export function collectEnvironmentLayerPresentations(sceneData: TimelineScene): Map<string, EnvironmentLayerPresentation> {
   const map = new Map<string, EnvironmentLayerPresentation>();
   map.set(BACKGROUND_LAYER_ID, {
     layerId: BACKGROUND_LAYER_ID,
     order: 0,
-    displayLabel: '背景',
-    shortLabel: '背景',
+    displayLabel: BACKGROUND_LAYER_ID,
+    shortLabel: BACKGROUND_LAYER_ID,
     isBackground: true,
   });
 
@@ -48,14 +44,17 @@ export function collectEnvironmentLayerPresentations(sceneData: TimelineScene): 
         : current?.authoredLabel;
 
     const order = current?.order ?? (layerId === BACKGROUND_LAYER_ID ? 0 : nextEnvironmentOrder++);
-    const displayLabel = authoredLabel || buildFallbackLayerLabel(layerId, order);
+    const sourceFile = [action.params.image, action.params.file]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      ?.trim() ?? current?.sourceFile;
 
     map.set(layerId, {
       layerId,
       order,
       authoredLabel,
-      displayLabel,
-      shortLabel: displayLabel,
+      sourceFile,
+      displayLabel: layerId,
+      shortLabel: layerId,
       isBackground: layerId === BACKGROUND_LAYER_ID,
     });
   }
@@ -72,8 +71,8 @@ export function getEnvironmentLayerPresentation(
     layerId,
     order: layerId === BACKGROUND_LAYER_ID ? 0 : presentations.size,
     authoredLabel: undefined,
-    displayLabel: buildFallbackLayerLabel(layerId, presentations.size),
-    shortLabel: buildFallbackLayerLabel(layerId, presentations.size),
+    displayLabel: layerId,
+    shortLabel: layerId,
     isBackground: layerId === BACKGROUND_LAYER_ID,
   };
 }

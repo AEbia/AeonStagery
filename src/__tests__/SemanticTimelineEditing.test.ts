@@ -17,6 +17,7 @@ import {
   switchCameraFocusTarget,
 } from '../ui/timeline/semanticTimelineEditing';
 import { DEFAULT_SETTINGS, settingsManager } from '../ui/SettingsStore';
+import { sceneDocumentCodec, sceneStatementCompiler } from '../services/semantic-scene';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -779,6 +780,33 @@ describe('semantic timeline editing helpers', () => {
         },
       }),
     ]);
+  });
+
+  it.each(['blur', 'post'] as const)('retargets character %s blocks when moving them to another character track', (effect) => {
+    const document = sceneDocumentCodec.parseAndValidate({
+      ...makeDocument(),
+      statements: ['set', 'modulate', 'reset'].map((mode, index) => ({
+        id: `lighting-${mode}`,
+        time: index,
+        type: 'lighting',
+        params: { effect, mode, target: { kind: 'character', id: 'tomori' }, durationSeconds: 0.2 },
+      })),
+    });
+    const compiled = sceneStatementCompiler.compile(document);
+    const intents = buildSemanticRetargetTimelineIntents(
+      makeStore(document, compiled), compiled.actions.map(({ id }) => id), 'anon',
+    );
+
+    expect(intents).toHaveLength(3);
+    for (const [index, intent] of intents.entries()) {
+      expect(intent).toMatchObject({
+        kind: 'update-statement',
+        statementId: document.statements[index].id,
+        patch: {
+          params: { ...document.statements[index].params, target: { kind: 'character', id: 'anon' } },
+        },
+      });
+    }
   });
 
   it('deletes selected root statements before unrelated companions', () => {

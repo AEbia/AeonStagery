@@ -8,6 +8,15 @@ interface BlankContextMenuOptions {
   pps: number;
 }
 
+export interface BlankMenuState {
+  x: number;
+  y: number;
+  time: number;
+  charId: string | null;
+  charLabel: string | null;
+  trackId?: string;
+}
+
 export function useBlankContextMenu({
   areaRef,
   trackRefs,
@@ -15,13 +24,7 @@ export function useBlankContextMenu({
 }: BlankContextMenuOptions) {
   const app = useOptionalApp();
   const isOffline = app?.collaboration?.status === 'offline' || app?.collaboration?.status === 'reconnecting';
-  const [blankMenu, setBlankMenu] = useState<{
-    x: number;
-    y: number;
-    time: number;
-    charId: string | null;
-    charLabel: string | null;
-  } | null>(null);
+  const [blankMenu, setBlankMenu] = useState<BlankMenuState | null>(null);
 
   // Close blank context menu on mousedown outside
   useEffect(() => {
@@ -92,6 +95,7 @@ export function useBlankContextMenu({
       time,
       charId,
       charLabel,
+      trackId: row?.dataset.trackId,
     });
   };
 
