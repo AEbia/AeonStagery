@@ -1,83 +1,46 @@
-/**
- * AeonStagery — Stage Anchor Resolver
- *
- * Produces the character-anchor resolution used by the deterministic camera
- * state resolver. Playback camera moves target LIVE part anchors
- * (`getPoint(id, part)`); seek reconstruction must frame identically without
- * depending on model transforms being current for the query time.
- *
- * Strategy: compose the statement-derived model position (valid at any time)
- * with a part offset MEASURED from the live model — `getPoint(part) −
- * getPosition()`. Both measurements come from the same (possibly stale) model
- * state, so their delta stays valid regardless of seek staleness, while the
- * base keeps the anchor deterministic.
- */
+import type { Live2DAnchorName } from './Live2DAnchorGeometry';
+import type { CameraPosition } from './CameraStateResolver';
 
-export interface StagePoint {
-  x: number;
-  y: number;
-}
-
-export type StagePartName = 'head' | 'chest' | 'feet' | 'center';
+export type StagePoint = CameraPosition;
+export type StagePartName = Live2DAnchorName;
 
 export interface StageAnchorSource {
-  /** Statement-derived model position at the query time, if known. */
-  desiredPosition?: (characterId: string) => StagePoint | null | undefined;
-  getPoint?: (characterId: string, part: StagePartName) => StagePoint | null | undefined;
-  getPosition?: (characterId: string) => StagePoint | null | undefined;
+  readonly desiredPosition?: (characterId: string) => StagePoint | null | undefined;
+  readonly getPoint?: (characterId: string, part: StagePartName) => StagePoint | null | undefined;
+  readonly getPosition?: (characterId: string) => StagePoint | null | undefined;
+  readonly getOrigin?: (characterId: string) => StagePoint | null | undefined;
 }
 
 export type StageAnchorResolver = (characterId: string, part?: string) => StagePoint | null;
+export type StageAnchorResolverDependencies = StageAnchorSource;
 
-const VALID_PARTS: ReadonlySet<string> = new Set(['head', 'chest', 'feet', 'center']);
-
-function normalizePart(part: string | undefined): StagePartName | null {
-  if (!part) return null;
-  return VALID_PARTS.has(part) ? (part as StagePartName) : 'center';
+/** Compose authored character positions with the current visible part geometry. */
+export function createStageAnchorResolver(dependencies: StageAnchorResolverDependencies): StageAnchorResolver {
+  return (characterId: string, part?: string): StagePoint | null => {
+    const base = dependencies.desiredPosition?.(characterId) ?? null;
+    const proxyOrigin = dependencies.getOrigin?.(characterId);
+    const bodyPoint = dependencies.getPosition?.(characterId);
+    const origin = proxyOrigin ?? bodyPoint;
+    if (!part) {
+      if (base && proxyOrigin && bodyPoint && isFinitePoint(base) && isFinitePoint(proxyOrigin) && isFinitePoint(bodyPoint)) {
+        return { x: base.x + bodyPoint.x - proxyOrigin.x, y: base.y + bodyPoint.y - proxyOrigin.y };
+      }
+      return base ?? origin ?? null;
+    }
+    const normalizedPart: StagePartName = part === 'head' || part === 'chest' || part === 'feet' || part === 'center'
+      ? part
+      : 'center';
+    const point = dependencies.getPoint?.(characterId, normalizedPart);
+    if (point && base && origin && isFinitePoint(point) && isFinitePoint(base) && isFinitePoint(origin)) {
+      if (base.x === origin.x && base.y === origin.y) return point;
+      return { x: base.x + point.x - origin.x, y: base.y + point.y - origin.y };
+    }
+    // A body/origin position cannot stand in for an unavailable part anchor:
+    // focus captures this result once, including a missing destination.
+    return point && isFinitePoint(point) ? point : null;
+  };
 }
 
 function isFinitePoint(point: StagePoint | null | undefined): point is StagePoint {
   return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
-}
-
-/**
- * Build an anchor resolver that keeps seek framing faithful to playback:
- * part queries return `statementBase + (livePart − liveBody)`, body queries
- * return the statement base, and live values fill in when no statement
- * position exists for the character.
- */
-export function createStageAnchorResolver(source: StageAnchorSource): StageAnchorResolver {
-  return (characterId: string, part?: string): StagePoint | null => {
-    const base = source.desiredPosition?.(characterId) ?? null;
-    const partName = normalizePart(part);
-
-    if (partName) {
-      const partPoint = isFinitePoint(source.getPoint?.(characterId, partName))
-        ? source.getPoint!(characterId, partName)!
-        : null;
-      const bodyPoint = isFinitePoint(source.getPosition?.(characterId))
-        ? source.getPosition!(characterId)!
-        : null;
-
-      // Compose only when both sides of the delta are measurable — they are
-      // captured from the same model state so the offset is time-consistent.
-      if (partPoint && bodyPoint) {
-        const delta = { x: partPoint.x - bodyPoint.x, y: partPoint.y - bodyPoint.y };
-        if (base) {
-          return { x: base.x + delta.x, y: base.y + delta.y };
-        }
-        return partPoint;
-      }
-      if (!base && partPoint) {
-        return partPoint;
-      }
-    }
-
-    if (base) {
-      return { x: base.x, y: base.y };
-    }
-
-    const bodyPoint = source.getPosition?.(characterId);
-    return isFinitePoint(bodyPoint) ? { x: bodyPoint.x, y: bodyPoint.y } : null;
-  };
 }

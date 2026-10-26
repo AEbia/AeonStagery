@@ -84,6 +84,33 @@ describe('scene statement compiler — camera focus lowered move types', () => {
     expect(action.params.focus).toEqual({ character: 'tomori', part: 'head' });
   });
 
+  it('emits authoritative channel metadata and keeps rotation-only focus independent of follow', () => {
+    const compiled = sceneStatementCompiler.compile(makeDocument([
+      { id: 'framing', time: 0, type: 'camera', params: { mode: 'move', position: [0.8, 0.7], durationSeconds: 0 } },
+      { id: 'follow', time: 0.5, type: 'camera', params: { mode: 'follow', operation: 'start', target: 'tomori' } },
+      { id: 'rotation-only', time: 1, type: 'camera', params: { mode: 'move', rotation: 0.2, durationSeconds: 1 } },
+      { id: 'stop-follow', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'tomori' } },
+    ]));
+    const rotationProperties = compiled.actions.find((action) => action.source.statementId === 'rotation-only')?.params._cameraProperties;
+    const state = computeCameraStateAtTime(compiled.actions as any, 2.5);
+
+    expect(rotationProperties).toEqual(['rotation']);
+    expect(state.follow?.characterId).toBe('tomori');
+    expect(state.position).toEqual({ x: 0.8, y: 0.7 });
+    expect(state.zoom).toBe(1);
+    expect(state.rotation).toBeCloseTo(0.2, 6);
+  });
+
+  it('marks only independently authored focus and move camera tracks', () => {
+    const rotationOnly = compileFocusMove({ mode: 'move', rotation: 0.2 });
+    const zoomOnly = compileFocusMove({ mode: 'move', zoom: { kind: 'absolute', value: 1.2 } });
+    const positionAndRotation = compileFocusMove({ mode: 'focus', target: 'tomori', rotation: 0.2 });
+
+    expect(rotationOnly.params._cameraProperties).toEqual(['rotation']);
+    expect(zoomOnly.params._cameraProperties).toEqual(['zoom']);
+    expect(positionAndRotation.params._cameraProperties).toEqual(['position', 'rotation']);
+  });
+
   const absoluteFocusPoint = [0.27, 0.73] as const;
   const absolutePointCases: Array<{ name: string; zoom?: Record<string, unknown> }> = [
     { name: 'pan focus' },

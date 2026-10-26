@@ -1582,7 +1582,7 @@ const DIRECTION_OPTIONS = [
 ];
 
 export const DirectionSelect = React.memo(({ value, onChange }: { value: string; onChange: (val: string) => void }) => (
-  <SelectInput label="震动方向 (Direction)" value={value} onChange={onChange} options={DIRECTION_OPTIONS} />
+  <SelectInput label="晃动方向 (Direction)" value={value} onChange={onChange} options={DIRECTION_OPTIONS} />
 ));
 
 const LAYER_OPTIONS = [

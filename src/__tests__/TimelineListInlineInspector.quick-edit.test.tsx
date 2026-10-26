@@ -76,8 +76,8 @@ describe('List inline inspector quick edit', () => {
     );
 
     // Camera shake intensity & duration inputs
-    const intensityInput = screen.getByRole('spinbutton', { name: '震动强度' });
-    const durationInput = screen.getByRole('spinbutton', { name: '震动时长' });
+    const intensityInput = screen.getByRole('spinbutton', { name: '晃动强度' });
+    const durationInput = screen.getByRole('spinbutton', { name: '晃动时长' });
 
     expect(intensityInput).toBeTruthy();
     expect(durationInput).toBeTruthy();
@@ -142,7 +142,7 @@ describe('List inline inspector quick edit', () => {
     const { container } = renderList();
     expect(container.querySelector('input[type="number"]')).toBeNull();
     expect(screen.getAllByRole('spinbutton').every((control) => control.classList.contains('scrubbable-badge'))).toBe(true);
-    const intensity = screen.getByRole('spinbutton', { name: '震动强度' });
+    const intensity = screen.getByRole('spinbutton', { name: '晃动强度' });
     fireEvent.mouseDown(intensity, { clientX: 10, clientY: 10, button: 0 });
     fireEvent.mouseMove(document, { clientX: 46, clientY: 10, movementX: 36 });
     expect(state.authorMock).not.toHaveBeenCalled();
@@ -155,7 +155,7 @@ describe('List inline inspector quick edit', () => {
 
   it('writes camera durationSeconds rather than the compiled duration key', async () => {
     renderList();
-    editNumericControl(screen.getByRole('spinbutton', { name: '震动时长' }), '2.3');
+    editNumericControl(screen.getByRole('spinbutton', { name: '晃动时长' }), '2.3');
     await waitFor(() => expect(state.document.statements.find((item: any) => item.id === 'camera-1').params.durationSeconds).toBe(2.3));
     expect(state.document.statements.find((item: any) => item.id === 'camera-1').params).not.toHaveProperty('duration');
     });
@@ -180,7 +180,7 @@ describe('List inline inspector quick edit', () => {
   it('disables quick fields while collaboration is offline', () => {
     state.collaborationStatus = 'offline';
     renderList();
-    const intensity = screen.getByRole('spinbutton', { name: '震动强度' });
+    const intensity = screen.getByRole('spinbutton', { name: '晃动强度' });
     expect(intensity.getAttribute('aria-disabled')).toBe('true');
     fireEvent.keyDown(intensity, { key: 'ArrowUp' });
     fireEvent.mouseDown(intensity, { clientX: 10, clientY: 10 });

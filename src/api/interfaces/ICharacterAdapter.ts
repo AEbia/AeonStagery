@@ -13,7 +13,10 @@ export interface ICharacterAdapter {
   stopAllMotions(id: string): void;
   setExpression(id: string, expressionName: string): void;
   lookAt(id: string, x: number, y: number, duration?: number): void;
+  /** Normalized world-space anchor, unaffected by the camera. */
   getPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null;
+  /** Normalized picture-space anchor, including camera projection and shake. */
+  getScreenPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null;
   listCharacters(): string[];
   getModelDataFromPath(modelPath: string): Promise<{ motions: string[]; expressions: string[] }>;
   getCharacterInfo(id: string): CharacterInfo | null;

@@ -34,8 +34,9 @@ AeonStagery 尚未正式发布。本次 schema 切换不在生产加载路径中
 KSM-0003 的 inventory、source、compiler、runtime、state、collaboration、template、UI、deletion 与 documentation gates 已完成：
 
 - rim-light baseline、set、finite modulate、reset、同时间顺序、seek 与 bake/playback 使用同一 resolver，并有 parity tests；
-- 相机 position/zoom/rotation 通道生命周期由确定性 resolver（`src/engine/CameraStateResolver.ts`）重建：任何写入者之前的区间回舞台基线、`cameraFollow` 在 playback/seek/export 持有同一 position 通道所有权直到 stop/reset；GSAP 只在 playhead 穿越 tween 窗口时重渲染，因此 seek 落点在所有相机 tween 结束之后的区域时，`CameraCoordinator` 必须整体硬设解析器状态（GSAP 仅播放期权威）；
-- follow 进入过渡同样属于 parity 契约：resolver 以 `position(t) = target + (preFollow − startTarget)·e^(−λ(t−s))`（λ=−60·ln(smoothing)，默认 0.85，目标按段 zoom 视口钳制、滑行值不钳制）镜像 `tickFollow()` 的指数趋近，seek 落入追随入口窗口呈现中间态而非终态；duration 到期与显式 unfollow 一样锁定最后滑行帧，起始锚点经 `resolveCharacterPositionAtTime` 取追随开始时刻的语句位置；
+- 正式摄像机时间线由 `CameraCoordinator` 按场景时间同步；基础属性通道、路径和震动可纯求值，角色聚焦与跟随读取活动舞台锚点。x/y/zoom/rotation 按实际编译属性独立接管，终值保持且旧动作不恢复；路径按属性插值，关键帧节奏不受时间线占用范围伸缩。详见 [ADR-0038](../adr/0038-unified-camera-evaluation.md)；
+- `CameraShake` 按场景时间计算可重复的有限画面偏移，多个震动可叠加，`reset` 释放此前震动。震动在投影后作用于角色、环境层和图片，字幕等屏幕空间 UI 保持独立；
+- 角色跟随播放使用活动舞台锚点与 ticker；seek/export 根据目标时刻的角色编排位置和当前可用部位几何重建落点，不保证精确复现历史 Live2D 姿态。Bake 只生成 Live2D 快照，FrameCapture/export 逐帧执行 seek；
 - runtime timeline representation 与 prepared adapter 位于 engine 内部，产品只从 `loadPreparedScene()`、`bakePrepared()` 和 `bakePreparedRange()` 进入；legacy background/camera scheduler alias 已删除；
 - legacy scene migrator/types 只位于 `scripts/migrations/legacy-scene`，normal loader 与产品 barrel 不导出该边界；
 - camera、visualStyle、lighting Inspector 与 timeline 专用描述直接消费 semantic metadata/source params；
@@ -243,14 +244,14 @@ PreparedCompiledScene
 
 #### Camera State Contract
 
-camera family 不能只把旧 action 名塞进一个 `mode` 字段，还必须固定状态生命周期：
+camera family 以属性轨道和瞬时状态事件表达生命周期，运行时契约见 [ADR-0038](../adr/0038-unified-camera-evaluation.md)：
 
-- `focus` / `move` / `path` / `hitchcock` 竞争 camera transform channels；相互重叠写同一 state key 是 validation error，除非 definition 明确声明可组合。
-- `shake` 是可叠加的有限 envelope，不取得持久 transform ownership。
-- `follow` 使用 `operation: start \| stop`，不再用 `duration: 999` 或 Infinity 暗示生命周期。follow start 持有 position channel，直到同一 camera family 的 follow stop 或 reset 释放；在此期间任何写 position 的 focus/move/path/hitchcock 都必须先按 statement order stop follow，否则 validation error。只写 disjoint zoom/rotation keys 的操作可在 definition 明确声明后并行。
-- `reset` 复位 position/zoom/rotation，并终止 active follow 与未结束 shake。该语义必须同时用于 playback、seek 和 bake。
-- zoom 必须写成 `{ kind: 'absolute' | 'delta', value: number }`。禁止继续让裸 `zoom: 0.3` 同时承担“目标缩放 0.3”与“推进 0.3”的两种解释。
-- 同时间 camera statements 按 statement order 执行；registry 的 overlap/state-key validator 必须给出确定结果。
+- `focus`、`move` 与 `path` 按实际编译属性独立写入 x、y、zoom、rotation；后写入者从开始时的实际值接管并保持结果，旧动作不恢复。完整位置同时接管 x、y。路径按每个属性自己的关键帧插值，首个非零关键帧从动作起点过渡，关键帧时间决定节奏，`durationSeconds` 只表达时间线占用。
+- `follow` start/stop 都是瞬时状态变化，不接受 `durationSeconds`，不增加 scene extent。follow 持有位置，直到 stop、reset、新 follow 或位置轨道接管；只写 zoom 或 rotation 的动作保留跟随。持续追赶速度由 `smoothing` 表达。
+- `shake` 是按场景时间求值的有限画面偏移，可叠加；`reset` 释放跟随与此前震动，并将位置、缩放和旋转复位。
+- 同时刻语句按 source order 求值。缩放显式区分 absolute 与 delta。退役的 `cameraHitchcock` 被正式求值器忽略并报告诊断。
+- 播放、seek 和逐帧导出共用正式摄像机求值。角色镜头从活动模型部位几何构造锚点；播放跟随保留活动 ticker 的追赶位置，seek 与导出依据场景编排位置及当前可用部位几何重建，不保证复现历史 Live2D 姿态。Bake 只生成 Live2D 快照。
+- 单独镜头 API 只产生临时预览状态，不进入 scene source；scene reload、seek 和正式导出清除临时状态。
 
 #### Environment State Contract
 

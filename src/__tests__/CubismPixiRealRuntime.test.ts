@@ -142,6 +142,42 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     expect(Array.from(model.internalModel.parameterValues).every(Number.isFinite)).toBe(true);
     expect(model.deltaTime).toBe(0);
   });
+  it('returns posed local anchors after a real Core update without rendering', async () => {
+    const model = await createModel();
+    model.update(0);
+    const runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } as const;
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('anchor-probe', model, runtime);
+    const character: CharacterEntry = {
+      id: 'anchor-probe', model, modelPath: entry!, modelUrl: entry!, runtime,
+      adapterId: runtime.adapterId, runtimeHandle: handle, config: {}, injectedParams: {},
+      baseHeight: model.height, lipSyncParameterIds: new Set(), motionEpoch: 0,
+    };
+    const manager = new Live2DManager();
+    live2DStageState(manager).characters.set(character.id, character);
+    const proxy = { x: 960, y: 900, scale: 1, rotation: 0, opacity: 1, z: 0 };
+    const proxies = new ProxyRegistry();
+    proxies.set(character.id, proxy);
+    manager.setScriptEngine({ transformationProxies: proxies });
+
+    try {
+      const before = manager.getPoint(character.id, 'head')!;
+      const core = model.internalModel.coreModel;
+      const ids = core.getParameterIds();
+      for (const [id, value] of Object.entries({ ParamAngleX: 30, ParamAngleY: -20, ParamBodyAngleX: 10, ParamBodyAngleY: 12 })) {
+        const index = ids.indexOf(id);
+        if (index >= 0) core.setParameterValueByIndex(index, value);
+      }
+      core.update();
+      const after = manager.getPoint(character.id, 'head')!;
+      expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(1e-6);
+
+      manager.currentCamera = { position: [0.7, 0.3], zoom: 2 };
+      expect(manager.getPoint(character.id, 'head')).toEqual(after);
+    } finally {
+      live2DStageState(manager).characters.clear();
+      handle.dispose({ mode: 'destroy' });
+    }
+  });
   it('commits a batch of injected parameters with one Core geometry update', async () => {
     const model = await createModel();
     const runtime = new CubismPixiLive2DAdapter();

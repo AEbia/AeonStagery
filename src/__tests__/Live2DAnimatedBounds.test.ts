@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import * as PIXI from 'pixi.js';
 import type { Live2DModel } from 'untitled-pixi-live2d-engine';
-import { installLive2DRenderPreparation } from '../engine/live2d/runtime/Live2DRenderPreparation';
+import { installLive2DRenderPreparation, prepareLive2DGeometry } from '../engine/live2d/runtime/Live2DRenderPreparation';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
 import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
@@ -59,6 +59,23 @@ describe.skipIf(!corePath)('Live2D animated bounds before parent filters', () =>
 });
 
 describe('Live2D render preparation lifecycle', () => {
+  it('prepares every concrete child of a composite without running frame hooks', () => {
+    const composite = new PIXI.Container();
+    const main = composite.addChild(new PIXI.Container());
+    const face = composite.addChild(new PIXI.Container());
+    const frameHook = vi.fn();
+    main.onRender = frameHook;
+    const prepareMain = vi.fn();
+    const prepareFace = vi.fn();
+    installLive2DRenderPreparation(main, prepareMain);
+    installLive2DRenderPreparation(face, prepareFace);
+    const renderer = {} as PIXI.Renderer;
+    prepareLive2DGeometry(composite, renderer);
+    expect(prepareMain).toHaveBeenCalledExactlyOnceWith(renderer);
+    expect(prepareFace).toHaveBeenCalledExactlyOnceWith(renderer);
+    expect(frameHook).not.toHaveBeenCalled();
+  });
+
   it('preserves the existing frame hook and avoids duplicate installation', () => {
     const model = new PIXI.Container();
     const calls: string[] = [];

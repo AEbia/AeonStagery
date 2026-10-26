@@ -9,6 +9,10 @@ export class CameraAdapter implements ICameraAdapter {
     cameraController.init();
   }
 
+  clearTemporaryState(): void {
+    cameraController.clearTemporaryState();
+  }
+
   focusOn(characterId: string, part: string = 'center'): void {
     cameraController.moveTo({
       targetCharacter: characterId,

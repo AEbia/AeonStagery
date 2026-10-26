@@ -15,6 +15,7 @@ vi.mock('../engine/CameraController', () => ({
 }));
 
 import { actionSchedulers } from '../engine/actions';
+import type { SchedulerContext } from '../engine/actions/types';
 
 describe('camera action schedulers', () => {
   it('inserts a camera motion at the authored time', () => {
@@ -40,7 +41,7 @@ describe('camera action schedulers', () => {
   });
 
   it('translates the legacy camera follow action into an indefinite follow motion', () => {
-    const cameraTimeline = gsap.timeline().to({}, { duration: 999 });
+    const cameraTimeline = gsap.timeline();
     cameraMocks.executeMotion.mockReturnValue(cameraTimeline);
     const timeline = gsap.timeline({ paused: true });
 
@@ -60,13 +61,12 @@ describe('camera action schedulers', () => {
     expect(cameraMocks.executeMotion).toHaveBeenCalledWith({
       move: 'follow',
       easing: 'linear',
-      duration: 999,
+      duration: 0,
       characterId: 'tomori',
       offset: [0.1, -0.05],
       smoothing: 0.8,
-      autoUnfollow: false,
     });
-    expect(timeline.duration()).toBeCloseTo(1000.5, 6);
+    expect(timeline.duration()).toBeCloseTo(1.5, 6);
   });
 
   it('releases follow through a dedicated unfollow action without resetting the camera', () => {
@@ -88,8 +88,8 @@ describe('camera action schedulers', () => {
     expect(timeline.duration()).toBeCloseTo(3, 6);
   });
 
-  it('honors an authored follow duration so playback ends where seek reconciliation does', () => {
-    const cameraTimeline = gsap.timeline().to({}, { duration: 4 });
+  it('ignores legacy follow duration without scheduling an automatic stop', () => {
+    const cameraTimeline = gsap.timeline();
     cameraMocks.executeMotion.mockReturnValue(cameraTimeline);
     const timeline = gsap.timeline({ paused: true });
 
@@ -105,10 +105,19 @@ describe('camera action schedulers', () => {
     expect(cameraMocks.executeMotion).toHaveBeenCalledWith(expect.objectContaining({
       move: 'follow',
       characterId: 'tomori',
-      duration: 4,
-      autoUnfollow: true,
+      duration: 0,
     }));
-    expect(timeline.duration()).toBeCloseTo(5, 6);
+    expect(timeline.duration()).toBeCloseTo(1, 6);
+  });
+
+  it.each(['cameraFollow', 'cameraUnfollow'] as const)('keeps formal %s instantaneous despite legacy duration fields', action => {
+    const timeline = gsap.timeline({ paused: true });
+    actionSchedulers[action]({ tl: timeline, cameraStateDriven: true } as SchedulerContext, {
+      _id: 'follow-boundary', action, time: 2,
+      params: { characterId: 'hero', duration: 5, durationSeconds: 5 },
+    });
+    expect(timeline.duration()).toBe(2);
+    timeline.kill();
   });
 
   it('passes camera path playback options to the path controller', () => {
@@ -177,7 +186,7 @@ describe('camera action schedulers', () => {
       params: config,
     });
 
-    expect(cameraMocks.shake).toHaveBeenCalledWith(config);
+    expect(cameraMocks.shake).not.toHaveBeenCalled();
     expect(timeline.duration()).toBeCloseTo(1.4, 6);
   });
 

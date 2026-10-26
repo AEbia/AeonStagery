@@ -287,7 +287,7 @@ export const StatementQuickControls = memo(function StatementQuickControls({ ite
         if (value !== undefined && typeof value !== 'string' && typeof value !== 'number') return null;
         const numeric = field.valueType === 'number';
         const label = item.source.type === 'camera' && source.mode === 'shake'
-          ? field.key === 'intensity' ? '震动强度' : field.key === 'durationSeconds' ? '震动时长' : field.label
+          ? field.key === 'intensity' ? '晃动强度' : field.key === 'durationSeconds' ? '晃动时长' : field.label
           : field.label;
         if (numeric) return (
           <div key={field.key} className="timeline-item__inline-field">

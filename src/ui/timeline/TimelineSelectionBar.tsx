@@ -17,7 +17,7 @@ const CAMERA_MOVE_LABELS: Record<string, string> = {
   zoom: '变焦',
   rotate: '旋转',
   dolly: '滑轨变焦',
-  shake: '震动',
+  shake: '晃动',
 };
 
 const CAMERA_EASING_LABELS: Record<string, string> = {

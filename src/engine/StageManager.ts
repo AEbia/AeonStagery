@@ -55,6 +55,9 @@ type StageDisplay = PIXI.Container & {
   x_orig?: number;
   y_orig?: number;
   scale_orig?: number;
+  rotation_orig?: number;
+  parallaxDepth?: number;
+  drawOrder?: number;
   __imageKey?: string;
   __baseAlpha?: number;
   __transitionAlpha?: number;
@@ -606,7 +609,7 @@ class StageManager {
 
   async renderEnvironmentLayer(
     layer: EnvironmentLayerRenderState,
-    camera?: { position: Vec2; zoom: number },
+    camera?: { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } },
   ): Promise<void> {
     const container = this.getEnvironmentContainer(layer.layerId);
     const request = {};
@@ -673,7 +676,7 @@ class StageManager {
       tileOffsetX?: number;
       tileOffsetY?: number;
     },
-    camera?: { position: Vec2; zoom: number },
+    camera?: { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } },
   ): void {
     const container = this.environmentLayerEntries.get(layerId);
     if (!container) return;
@@ -695,7 +698,7 @@ class StageManager {
       const y = (config.y ?? 0.5) * STAGE_HEIGHT;
       const projected = camera
         ? projectToScreen(
-            { x, y, scale: config.scale ?? 1, z: config.z ?? 0 },
+            { x, y, scale: config.scale ?? 1, rotation: config.rotation, parallaxDepth: config.z ?? 0, drawOrder: config.z },
             camera,
             { w: STAGE_WIDTH, h: STAGE_HEIGHT },
           )
@@ -733,7 +736,8 @@ class StageManager {
         }
       }
 
-      if (config.rotation !== undefined) sprite.angle = config.rotation;
+      const authoredRotation = config.rotation ?? (sprite as any).__environmentTransform?.rotation ?? 0;
+      sprite.angle = authoredRotation - (camera?.rotation ?? 0);
       if (config.opacity !== undefined) {
         const baseAlpha = (sprite as StageDisplay).__baseAlpha ?? 1;
         const transitionAlpha = (sprite as StageDisplay).__transitionAlpha ?? 1;
@@ -755,7 +759,7 @@ class StageManager {
       opacity?: number;
       z?: number;
     },
-    camera?: { position: Vec2; zoom: number },
+    camera?: { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } },
   ): void {
     this.applyEnvironmentLayerTransform(
       BACKGROUND_LAYER_ID,
@@ -1392,16 +1396,15 @@ class StageManager {
     sprite.alpha = state.opacity;
     sprite.zIndex = state.zIndex;
 
+    const display = sprite as StageDisplay;
+    display.x_orig = state.x;
+    display.y_orig = state.y;
+    display.scale_orig = state.scale;
+    display.rotation_orig = state.rotation;
     if (state.z !== undefined) {
-      (sprite as StageDisplay).z = state.z;
-      (sprite as StageDisplay).x_orig = state.x;
-      (sprite as StageDisplay).y_orig = state.y;
-      (sprite as StageDisplay).scale_orig = state.scale;
+      display.z = state.z;
     } else {
-      delete (sprite as StageDisplay).z;
-      delete (sprite as StageDisplay).x_orig;
-      delete (sprite as StageDisplay).y_orig;
-      delete (sprite as StageDisplay).scale_orig;
+      delete display.z;
     }
   }
 
@@ -1460,22 +1463,23 @@ class StageManager {
   }
 
   /**
-   * Update all active custom images in the effects layer that have z-depth values,
-   * projecting their screen coordinates/scales based on the camera position and zoom.
+   * Project all custom images into logical stage space; legacy z controls depth and ordering.
    */
-  updateImages(camera: { position: Vec2; zoom: number }): void {
+  updateImages(camera: { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } }): void {
     const effectsLayer = this.getLayer('effects');
     if (!effectsLayer) return;
 
     for (const child of effectsLayer.children) {
       const sprite = child as StageDisplay;
-      if (sprite.z !== undefined && sprite.x_orig !== undefined && sprite.y_orig !== undefined) {
+      if (sprite.x_orig !== undefined && sprite.y_orig !== undefined) {
         const projected = projectToScreen(
           {
             x: sprite.x_orig * STAGE_WIDTH,
             y: sprite.y_orig * STAGE_HEIGHT,
-            scale: sprite.scale_orig!,
-            z: sprite.z,
+            scale: sprite.scale_orig ?? 1,
+            rotation: sprite.rotation_orig ?? 0,
+            parallaxDepth: sprite.parallaxDepth ?? sprite.z,
+            drawOrder: sprite.drawOrder ?? sprite.z,
           },
           camera,
           { w: STAGE_WIDTH, h: STAGE_HEIGHT },
@@ -1483,9 +1487,10 @@ class StageManager {
         sprite.x = projected.screenX;
         sprite.y = projected.screenY;
         sprite.scale.set(projected.screenScale);
+        sprite.angle = projected.screenRotation;
         
         // Update zIndex based on z depth for proper rendering order within effects layer
-        sprite.zIndex = sprite.z;
+        if (sprite.z !== undefined) sprite.zIndex = sprite.z;
       }
     }
   }

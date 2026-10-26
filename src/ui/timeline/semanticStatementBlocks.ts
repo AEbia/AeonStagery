@@ -410,7 +410,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
   },
   {
     id: 'camera.shake',
-    label: '镜头震动',
+    label: '镜头晃动',
     icon: 'cameraShake',
     category: 'camera',
     createDraft: () => ({

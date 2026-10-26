@@ -67,11 +67,10 @@ export async function loadLive2DEngineModule(): Promise<Live2DEngineModule> {
 }
 
 /** Modern entry remains independent of the optional Cubism 2.1 core. */
-export async function loadCubismEngineModule(): Promise<Live2DEngineModule & { cubismReady: () => Promise<void> }> {
+export async function loadCubismEngineModule(): Promise<typeof import('untitled-pixi-live2d-engine/cubism')> {
   await waitForLive2DRuntimeBootstrap();
   if (!hasCubismCore()) throw new Error('Cubism 3/4/5 requires live2dcubismcore.min.js.');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This compatibility bridge loads and patches version-specific Live2D/Pixi exports; their runtime extension hooks exceed the published SDK declarations.
-  return await import('untitled-pixi-live2d-engine/cubism') as any;
+  return await import('untitled-pixi-live2d-engine/cubism');
 }
 
 function hasCubismCore(): boolean {

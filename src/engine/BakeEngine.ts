@@ -174,7 +174,7 @@ export class BakeEngine {
     const isCurrent = () => this.checkToken(token, taskVersion);
 
     this.snapshotHistory = [];
-    
+
     // Reset all loaded models to their idle state to prevent parameter carryover
     const reset = await this.resetAllModelsToIdle(isCurrent);
     if (!reset || !isCurrent()) return { snapshotHistory: [] };
@@ -315,7 +315,7 @@ export class BakeEngine {
 
     eventBus.emit(silent ? 'pb-daemon:start' : 'bake:start', { sceneId: script.sceneId, title: script.meta.title });
 
-    const effectiveEnd = Math.min(rangeEnd, totalDuration);
+    const effectiveEnd = rangeEnd;
     // Seeded characters are already on stage at rangeStart. Treating them as a
     // first addCharacter appearance would idle-reset the seed pose and restart
     // any in-flight Live2D fade-in from T-pose (ADR-0029 handoff).
@@ -529,7 +529,7 @@ export class BakeEngine {
 
   private scanAssets(script: RuntimeTimelineScene, modelSources: ReadonlyMap<string, string>) {
     const requiredMotions = new Map<string, Set<string>>(); // ModelPath -> Set of motion keys
-    
+
     // Track the active model path for each character ID as we scan the timeline
     const activeModelMap = new Map<string, string>();
 
