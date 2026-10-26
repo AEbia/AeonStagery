@@ -70,11 +70,12 @@ export function captureLive2DAnchorOffset(
   model: RefreshableModel | null | undefined,
   anchor: Live2DAnchorName,
   logicalHeight: number | null | undefined,
-  headFraction?: { readonly x: number; readonly y: number } | null,
+  anchorFraction?: { readonly x: number; readonly y: number } | null,
   origin: Point = { x: 0, y: 0 },
   localTransform?: LocalTransform,
 ): LogicalHeightAnchorOffset | null {
-  return captureLive2DAnchorOffsets(model, [anchor], logicalHeight, headFraction, origin, localTransform)?.[anchor] ?? null;
+  return captureLive2DAnchorOffsets(model, [anchor], logicalHeight, null, origin, localTransform,
+    anchorFraction ? { [anchor]: anchorFraction } : undefined)?.[anchor] ?? null;
 }
 
 /** Refresh one posed model once, then derive every requested semantic anchor. */
@@ -85,6 +86,7 @@ export function captureLive2DAnchorOffsets(
   headFraction?: { readonly x: number; readonly y: number } | null,
   origin: Point = { x: 0, y: 0 },
   localTransform?: LocalTransform,
+  anchorFractions?: Partial<Record<Live2DAnchorName, Readonly<Point>>>,
 ): Partial<Record<Live2DAnchorName, LogicalHeightAnchorOffset>> | null {
   if (!model) return null;
 
@@ -98,9 +100,10 @@ export function captureLive2DAnchorOffsets(
       : bounds.height;
     const offsets: Partial<Record<Live2DAnchorName, LogicalHeightAnchorOffset>> = {};
     for (const anchor of anchors) {
-      const fractionX = anchor === 'head' && isFiniteFraction(headFraction?.x) ? headFraction.x : 0.5;
-      const fractionY = anchor === 'head' && isFiniteFraction(headFraction?.y)
-        ? headFraction.y
+      const fraction = anchorFractions?.[anchor] ?? (anchor === 'head' ? headFraction : null);
+      const fractionX = isFiniteFraction(fraction?.x) ? fraction.x : 0.5;
+      const fractionY = isFiniteFraction(fraction?.y)
+        ? fraction.y
         : LIVE2D_ANCHOR_FRACTIONS[anchor];
       const anchorPoint = { x: bounds.x + bounds.width * fractionX, y: bounds.y + bounds.height * fractionY };
       const transformed = localTransform?.apply(anchorPoint) ?? anchorPoint;

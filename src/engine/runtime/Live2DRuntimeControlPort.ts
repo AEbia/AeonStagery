@@ -1,4 +1,5 @@
 import type { ModelSnapshot } from '../Live2DConfig';
+import type { Live2DAnchorName } from '../Live2DAnchorGeometry';
 import type { Live2DParameterMetadata } from '../../api/types/live2d-parameter-animation';
 import type { CustomMotionStageHandle, InstallCustomMotionStageInput } from '../live2d/customMotionStage';
 import type { PreparedAssetRef } from '../../api/types/semantic-scene';
@@ -217,5 +218,7 @@ export interface Live2DRuntimeControlPort {
   /** Read the authored head hit-area anchor (model.json layout data). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
   getHeadAnchor(model: any, target?: 'head' | 'main'): { x: number; y: number } | null;
+  /** Optional posed anatomy override in fractions of model-local bounds. */
+  getAnchor?(model: unknown, anchor: Live2DAnchorName): { x: number; y: number } | null;
 }
 
