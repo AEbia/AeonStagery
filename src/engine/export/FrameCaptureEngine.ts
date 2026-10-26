@@ -29,6 +29,7 @@ interface PlaybackSubsystem {
   getDuration(): number;
   setSilentMode(v: boolean): void;
   getMasterTimeline(): gsap.core.Timeline | null | undefined;
+  prepareForExport?(signal?: AbortSignal): Promise<{ assertCurrent(): void }>;
 }
 
 interface FrameCaptureTimelineAction {
@@ -55,6 +56,7 @@ interface Live2DSubsystem {
 
 interface CameraSubsystem {
   init(): void;
+  clearTemporaryState?(): void;
 }
 
 export interface FrameCaptureVisualRuntime {
@@ -279,6 +281,7 @@ export class FrameCaptureEngine {
 
     try {
       signal?.throwIfAborted();
+      const cameraSession = await this.playback.prepareForExport?.(signal);
       // ── Init ──
       // Video dimensions are physical output pixels. Preview DPR must not
       // multiply the encoder input size.
@@ -329,10 +332,13 @@ export class FrameCaptureEngine {
       // that was playing can make ScriptEngine resume its custom iframes in
       // the small window between seek completion and export pause.
       this.playback.pause();
+      // Clear standalone GSAP/ticker writers before reconstruction. Resetting
+      // afterwards would erase the evaluated rangeStart pose before first render.
+      if (this.camera.clearTemporaryState) this.camera.clearTemporaryState();
+      else this.camera.init();
       await this.playback.seek(rangeStart);
+      cameraSession?.assertCurrent();
       this.playback.pause();
-
-      this.camera.init();
       if (typeof lighting.resetRuntimeState === 'function') {
         lighting.resetRuntimeState();
       } else {
@@ -358,6 +364,7 @@ export class FrameCaptureEngine {
       }
 
       const renderCaptureTarget = () => {
+        cameraSession?.assertCurrent();
         prepareResolution(renderTarget);
         const restoreTextLayers = renderSubtitlesOnly
           ? textLayerManager.hideForSubtitleExport()
@@ -426,6 +433,7 @@ export class FrameCaptureEngine {
         // when export starts in the middle of an action interval.
         config.voiceLipSync?.beforeSeek(time);
         await this.playback.seek(time);
+        cameraSession?.assertCurrent();
         signal?.throwIfAborted();
         gsap.globalTimeline.totalTime(time, false);
         config.visualRuntime?.applyCompositeAtTime(time);

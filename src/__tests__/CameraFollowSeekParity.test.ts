@@ -199,14 +199,14 @@ describe('camera focus defaults during seek', () => {
  * not the settled anchor.
  */
 describe('camera follow entry parity (playback glide vs direct seek)', () => {
-  it('presents the mid-transition frame when seeking into the follow entry window', () => {
+  it.each([0.25, 0.5, 0.85, 1])('matches the playback glide when seeking at smoothing %s', smoothing => {
     cameraMocks.getPoint.mockReturnValue({ x: 0.75, y: 0.55 });
     cameraMocks.getPosition.mockReturnValue({ x: 0.75, y: 0.55 });
     cameraController.init();
 
     const actions: any[] = [
       { action: 'cameraMotion', time: 5.9, params: { move: 'zoom', duration: 1, easing: 'smooth', target: [0.6, 0.5], zoom: 1.1 } },
-      { action: 'cameraFollow', time: 9.8, params: { characterId: '1', offset: [0, -0.1], smoothing: 0.85 } },
+      { action: 'cameraFollow', time: 9.8, params: { characterId: '1', offset: [0, -0.1], smoothing } },
     ];
     const master = gsap.timeline({ paused: true });
     for (const action of actions) {
@@ -241,8 +241,8 @@ describe('camera follow entry parity (playback glide vs direct seek)', () => {
 
     // The playback truth must genuinely be MID-glide, not the settled anchor —
     // otherwise this test could pass trivially with both paths at the endpoint.
-    const endpointX = 0.5454545; // clamp(0.75 + 0, viewport @ zoom 1.1)
-    const endpointY = 0.4545455; // clamp(0.55 − 0.1, viewport @ zoom 1.1)
+    const endpointX = 0.75; // anchor + offset
+    const endpointY = 0.45; // anchor + offset
     const playbackPosition = playbackState.position as { x: number; y: number };
     expect(Math.abs(playbackPosition.x - endpointX)).toBeGreaterThan(0.004);
     expect(Math.abs(playbackPosition.y - endpointY)).toBeGreaterThan(0.002);

@@ -33,9 +33,10 @@ import type { TransformationProxy } from './actions/types';
 import type { RimLightStyleState } from '../api/types/visual';
 import { SnapshotStore } from './SnapshotStore';
 import { preBakeDaemon } from './daemons/PreBakeDaemon';
-import { CameraCoordinator } from './coordinators/CameraCoordinator';
-import type { CameraStateResolverDeps } from './CameraStateResolver';
+import { CameraCoordinator, usesUnifiedCameraChannels } from './coordinators/CameraCoordinator';
 import { createStageAnchorResolver } from './cameraAnchorResolver';
+import type { CameraStateResolverDeps } from './CameraStateResolver';
+import type { CameraEvaluationOutput } from './CameraChannelEvaluator';
 import { CharacterSynchronizer } from './coordinators/CharacterSynchronizer';
 import { DialogueCoordinator } from './coordinators/DialogueCoordinator';
 import { AudioCoordinator } from './coordinators/AudioCoordinator';
@@ -81,6 +82,15 @@ class ScriptEngine {
   private customMotionPreviewUpdates: Promise<void> = Promise.resolve();
 
   private cameraCoordinator = new CameraCoordinator(cameraController);
+  private sceneLoadVersion = 0;
+  /** Installed content revision; identical load requests retain captured focus. */
+  private cameraSceneRevision = 0;
+  private scenePreparation: Promise<void> = Promise.resolve();
+  private scenePreparing = false;
+  private seekRequestVersion = 0;
+  private requestedSeekTime = 0;
+  private playbackIntentVersion = 0;
+  private cameraEvaluation: CameraEvaluationOutput | undefined;
   private characterSynchronizer = new CharacterSynchronizer(live2DManager);
   private dialogueCoordinator = new DialogueCoordinator(subtitleRenderer, lipSyncEngine);
   private audioCoordinator = new AudioCoordinator(() => lipSyncEngine.resumeAudioDrivenSyncs());
@@ -136,9 +146,27 @@ class ScriptEngine {
     this.customMotionPreviewUpdates = Promise.allSettled([this.customMotionPreviewUpdates, updating]).then(() => {});
     await updating;
   }
+  /** Rendering reads preserve standalone previews and the live pursuit frame. */
   getCurrentCamera(): CameraState {
     return cameraController.getState();
   }
+
+  /** Formal scene writes run on timeline updates; seeks synchronize explicitly. */
+  private syncCameraFromTimeline(): void {
+    const time = this.getCurrentTime();
+    const timeline = this.currentScene?.timeline;
+    if (timeline) {
+      this.cameraEvaluation = this.cameraCoordinator.sync(time, timeline, {
+        ...this.buildCameraResolverDeps(time),
+        captureFocus: !this.isReconstructing,
+        retainFollowPosition: !this.isReconstructing,
+      });
+    }
+  }
+
+  /** Diagnostics are data for the caller to present and deduplicate. */
+  getCameraEvaluation(): CameraEvaluationOutput | undefined { return this.cameraEvaluation; }
+
   setBasePath(path: string): void { this.basePath = path; }
   getBasePath(): string { return this.basePath; }
 
@@ -158,6 +186,7 @@ class ScriptEngine {
   }
 
   private setPlaying(playing: boolean): void {
+    cameraController.setFollowTickerEnabled(playing);
     if (this.playing === playing) return;
     this.playing = playing;
     this._playingCallbacks.forEach(callback => callback(playing));
@@ -173,7 +202,7 @@ class ScriptEngine {
     if (!proxy) return;
     Object.assign(proxy, updates);
     if (live2DManager.hasCharacter(id)) {
-      const cam = cameraController.getState();
+      const cam = this.getCurrentCamera();
       live2DManager.currentCamera = cam;
       live2DManager.applyProxyTransform(id, proxy, undefined, cam);
     }
@@ -183,7 +212,7 @@ class ScriptEngine {
     const proxy = this.environmentLayerProxies.get(layerId);
     if (!proxy) return;
     Object.assign(proxy, updates);
-    stageManager.applyEnvironmentLayerTransform(layerId, proxy, cameraController.getState());
+    stageManager.applyEnvironmentLayerTransform(layerId, proxy, this.getCurrentCamera());
   }
 
   setLoopRegion(start: number, end: number): void {
@@ -204,7 +233,50 @@ class ScriptEngine {
 
   private loadedStageSize = '';
 
-  async loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
+  loadPreparedScene(scene: PreparedCompiledScene): Promise<void> {
+    this.scenePreparing = true;
+    const preparation = this.loadPreparedSceneRuntime(scene).finally(() => {
+      if (this.scenePreparation === preparation) this.scenePreparing = false;
+    });
+    this.scenePreparation = preparation;
+    return preparation;
+  }
+
+  /** Await the current scene revision; an export must never switch scenes mid-frame. */
+  async prepareForExport(signal?: AbortSignal): Promise<{ assertCurrent(): void }> {
+    const version = this.sceneLoadVersion;
+    const referenceSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
+    let onAbort: (() => void) | undefined;
+    try {
+      signal?.throwIfAborted();
+      await Promise.race([
+        (async () => {
+          await this.scenePreparation;
+          signal?.throwIfAborted();
+        })(),
+        new Promise<never>((_resolve, reject) => {
+          if (!signal) return;
+          onAbort = () => reject(signal.reason ?? new DOMException('Export aborted', 'AbortError'));
+          signal.addEventListener('abort', onAbort, { once: true });
+        }),
+      ]);
+    } finally {
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+    const assertCurrent = () => {
+      signal?.throwIfAborted();
+      if (version !== this.sceneLoadVersion || !this.masterTimeline
+        || referenceSize !== `${STAGE_WIDTH}x${STAGE_HEIGHT}`) {
+        throw new Error('Prepared camera scene changed during export.');
+      }
+    };
+    assertCurrent();
+    return { assertCurrent };
+  }
+
+  private async loadPreparedSceneRuntime(scene: PreparedCompiledScene): Promise<void> {
+    const loadVersion = ++this.sceneLoadVersion;
+    const seekRequestVersion = this.seekRequestVersion;
     const stageSize = `${STAGE_WIDTH}x${STAGE_HEIGHT}`;
     if (this.loadedStageSize !== '' && this.loadedStageSize !== stageSize) {
       this.currentSceneAuxSignature = null;
@@ -220,12 +292,14 @@ class ScriptEngine {
       this.logger.warn(`Failed to preload dialogue resources for scene "${scene.sceneId}"; continuing projection: ${String(error)}`);
     }
     try {
-      await this.loadRuntimeScene(preparedSceneToRuntimeTimelineScene(scene), scene);
-      this.loadedStageSize = stageSize;
+      if (loadVersion !== this.sceneLoadVersion) return;
+      await this.loadRuntimeScene(preparedSceneToRuntimeTimelineScene(scene), scene, loadVersion, seekRequestVersion);
+      if (loadVersion === this.sceneLoadVersion) this.loadedStageSize = stageSize;
     } catch (error) {
       // A projection can fail after the incoming scene has populated these
       // diff caches. Clear both runtime state and identity caches so a
       // coordinator rollback is never mistaken for an unchanged reload.
+      if (loadVersion !== this.sceneLoadVersion) return;
       this.resetAfterProjectionFailure();
       throw error;
     }
@@ -246,6 +320,8 @@ class ScriptEngine {
   private async loadRuntimeScene(
     compiledScript: RuntimeTimelineScene,
     preparedScene: PreparedCompiledScene,
+    loadVersion: number,
+    seekRequestVersion: number,
   ): Promise<void> {
     const durationOverride = preparedScene.durationSeconds;
     const previousScene = this.currentScene;
@@ -305,28 +381,28 @@ class ScriptEngine {
       return;
     }
 
-    const oldTime = this.getCurrentTime();
+    const oldTime = this.seekRequestVersion === seekRequestVersion ? this.getCurrentTime() : this.requestedSeekTime;
     const wasPlaying = this.playing;
 
     this.currentScene = compiledScript;
+    this.cameraSceneRevision = loadVersion;
     this.currentSceneActionSignatures = signatures;
     this.currentSceneAuxSignature = sceneAuxSignature(compiledScript);
     this.currentSceneDurationOverride = durationOverride;
     // Full cleanup if SceneID changed; soft cleanup otherwise (retain models for speed)
     this.cleanup(!isSameScene, invalidationTime);
     this.initMasterTimeline(compiledScript, durationOverride);
-
-    // Entrance tweens are timeline-driven, but addCharacter model creation is async.
-    // Warm the Live2D instances before the first seek/play so the first visible
-    // entrance frame is controlled by the proxy tween instead of model load time.
-    await this.prewarmModels();
+    await this.prewarmModels(compiledScript);
+    if (loadVersion !== this.sceneLoadVersion) return;
+    this.masterTimeline?.seek(oldTime, true);
 
     // Restore state for the editor. Incomplete image drafts are a script
     // diagnostic, not a runtime failure, so the seek path simply skips them.
     // A light seek suffices here: soft cleanup retained the loaded models and
     // _doSeek auto-upgrades to a full reconstruct when the character set or a
     // model resource actually changed.
-    await this.seek(oldTime, false);
+    await this.seekLoadedScene(oldTime, false);
+    if (loadVersion !== this.sceneLoadVersion) return;
 
     // Background curve-cache pre-warm AFTER the initial seek: it is that seek's
     // addCharacter pass which creates the sampled model entries, so running
@@ -376,6 +452,7 @@ class ScriptEngine {
         // PreBakeDaemon auto-resumes via scene:end event listener
       },
       onUpdate: () => {
+        this.syncCameraFromTimeline();
         const cam = this.syncLive2DTransformsFromTimeline();
         const time = this.masterTimeline?.time() ?? 0;
         const stateAtTime = this.isReconstructing ? null : this.computeStateAtTime(time);
@@ -518,6 +595,7 @@ class ScriptEngine {
       backgroundProxy: this.backgroundProxy,
       isReconstructing: () => this.isReconstructing,
       environmentStateDriven: true,
+      cameraStateDriven: true,
       isPlaying: () => this.playing,
       audioElements: {
         set: (key: string, entry: { audio: HTMLAudioElement; startTime: number; duration: number }) =>
@@ -557,6 +635,7 @@ class ScriptEngine {
 
   play(): void {
     if (!this.masterTimeline) return;
+    this.playbackIntentVersion++;
 
     // PreBakeDaemon listens for 'scene:play' and auto-suspends all baking
     this.setPlaying(true); live2DManager.setAutoUpdate(true);
@@ -571,6 +650,7 @@ class ScriptEngine {
   }
 
   pause(): void {
+    this.playbackIntentVersion++;
     this.setPlaying(false); live2DManager.setAutoUpdate(false); live2DManager.pauseAllTweens();
     gsap.ticker.remove(this.live2DTransformSync);
     this.masterTimeline?.pause();
@@ -604,8 +684,8 @@ class ScriptEngine {
     eventBus.emit('scene:pause');
   }
 
-  private syncLive2DTransformsFromTimeline(): { position: CameraState['position']; zoom: number } {
-    const cam = cameraController.getState();
+  private syncLive2DTransformsFromTimeline(): CameraState {
+    const cam = this.getCurrentCamera();
     live2DManager.currentCamera = cam;
 
     this.transformationProxies.forEach((proxy, id) => {
@@ -616,8 +696,6 @@ class ScriptEngine {
 
     return cam;
   }
-
-
 
   private takeSnapshot(time: number): void {
     if (this.customMotionPreview) return;
@@ -650,6 +728,16 @@ class ScriptEngine {
   }
 
   async seek(time: number, forceReconstruct: boolean = true): Promise<void> {
+    const request = ++this.seekRequestVersion;
+    this.requestedSeekTime = time;
+    // A seek belongs to the incoming scene. Await its installation, and retain
+    // only the newest request if the editor scrubs during preparation.
+    while (this.scenePreparing) await this.scenePreparation;
+    if (request !== this.seekRequestVersion) return;
+    await this.seekLoadedScene(time, forceReconstruct);
+  }
+
+  private async seekLoadedScene(time: number, forceReconstruct: boolean = true): Promise<void> {
     const suppressSeekSideEffects = forceReconstruct === false;
     if (this._isSeeking) {
       return new Promise((resolve, reject) => {
@@ -701,8 +789,8 @@ class ScriptEngine {
 
     const seekVersion = ++this._seekVersion;
     const wasPlaying = this.playing;
+    const playbackIntent = this.playbackIntentVersion;
     eventBus.emit('scene:seek:start', { time });
-
     // 核心优化：即使外部请求了 forceReconstruct = false，
     // 如果我们检测到目标时间点 desired 角色集合与当前已加载角色集合不一致，
     // 我们必须自动提升为 forceReconstruct = true，以确保角色能正确登场/退场！
@@ -746,6 +834,7 @@ class ScriptEngine {
         this.logger.trace(`snapshotStore range: [${storeRange?.min.toFixed(3) ?? 'N/A'} .. ${storeRange?.max.toFixed(3) ?? 'N/A'}] count=${this.snapshotStore.size}`, 'color: #fff');
       }
       this.pauseForSeek({ emitLifecycle: !suppressSeekSideEffects });
+      cameraController.clearTemporaryState();
 
       if (forceReconstruct) {
         this.isReconstructing = true;
@@ -754,8 +843,10 @@ class ScriptEngine {
         // creation. The first visible frame must use the same camera that the
         // post-load synchronization pass will use.
         this.masterTimeline.seek(time, true);
-        this.cameraCoordinator.sync(time, this.currentScene?.timeline ?? [], this.buildCameraResolverDeps(time));
-        live2DManager.currentCamera = cameraController.getState();
+        this.cameraEvaluation = this.cameraCoordinator.sync(time, this.currentScene?.timeline ?? [], {
+          ...this.buildCameraResolverDeps(time), captureFocus: false,
+        });
+        live2DManager.currentCamera = this.getCurrentCamera();
 
         // ─── Maginot Line: All Character asset load must completely finish first ───
         // A missing or unresolvable model resource is a SCRIPT-level defect, not a
@@ -878,7 +969,7 @@ class ScriptEngine {
 
     // Crucial race-condition fix: only set playing to false if we haven't clicked Play during seek
     if (this._seekVersion === seekVersion) {
-      if (wasPlaying || this.playing) {
+      if ((wasPlaying && playbackIntent === this.playbackIntentVersion) || this.playing) {
         this.play();
       } else {
         this.setPlaying(false);
@@ -914,16 +1005,20 @@ class ScriptEngine {
   }
 
   /**
-   * Deterministic anchor source for camera state reconstruction. Playback
-   * camera moves target live part anchors; reconstruction composes the
-   * statement-derived position (valid at any time) with the part offset
-   * measured from the current model state, so scrubbed framing matches
-   * playback without depending on model transforms being current.
+   * Live anchor source for camera reconstruction. The coordinator captures
+   * each focus destination once and shares it with playback. A first seek
+   * into an uncaptured segment composes its authored start position with
+   * the currently available part geometry; no historical pose is simulated.
    */
-  private buildCameraResolverDeps(time: number): CameraStateResolverDeps {
-    const desiredCharacters = this.computeStateAtTime(time).characters;
-    return {
-      resolveCharacterPosition: createStageAnchorResolver({
+  private buildCameraResolverDeps(time: number): CameraStateResolverDeps & {
+    logicalReferenceSize: { width: number; height: number };
+    revision: number;
+  } {
+    const base = { logicalReferenceSize: { width: STAGE_WIDTH, height: STAGE_HEIGHT }, revision: this.cameraSceneRevision };
+    if (usesUnifiedCameraChannels(this.currentScene?.timeline ?? [])) return base;
+    const resolveAtTime = (atTime: number) => {
+      const desiredCharacters = this.computeStateAtTime(atTime).characters;
+      const resolveAnchor = createStageAnchorResolver({
         desiredPosition: (characterId) => {
           const desired = desiredCharacters.get(characterId);
           return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
@@ -936,14 +1031,20 @@ class ScriptEngine {
           typeof live2DManager.getPosition === 'function'
             ? live2DManager.getPosition(characterId)
             : null,
-      }),
-      // Follow entry transient: capture the followed character's statement
-      // position at the follow start so seek reconstruction decays from where
-      // playback began gliding (body anchor — tickFollow() tracks getPosition).
-      resolveCharacterPositionAtTime: (characterId, atTime) => {
-        const desired = this.computeStateAtTime(atTime).characters.get(characterId);
-        return desired?.position ? { x: desired.position[0], y: desired.position[1] } : null;
-      },
+        getOrigin: (characterId) => {
+          const proxy = this.transformationProxies.get(characterId);
+          return proxy ? { x: proxy.x / STAGE_WIDTH, y: proxy.y / STAGE_HEIGHT } : null;
+        },
+      });
+      // A visible model at the query time cannot supply an anchor for a
+      // historical instant before its entrance or after its exit.
+      return (characterId: string, part?: string) => desiredCharacters.has(characterId)
+        ? resolveAnchor(characterId, part) : null;
+    };
+    return {
+      ...base,
+      resolveCharacterPosition: resolveAtTime(time),
+      resolveCharacterPositionAtTime: (characterId, atTime, part) => resolveAtTime(atTime)(characterId, part),
     };
   }
 
@@ -1050,9 +1151,9 @@ class ScriptEngine {
   ): Promise<void> {
     // 1. Reconcile Camera Controller & transform immediately
     if (this.currentScene) {
-      this.cameraCoordinator.sync(time, this.currentScene.timeline, this.buildCameraResolverDeps(time));
+      this.cameraEvaluation = this.cameraCoordinator.sync(time, this.currentScene.timeline, this.buildCameraResolverDeps(time));
     }
-    const cam = cameraController.getState();
+    const cam = this.getCurrentCamera();
     live2DManager.currentCamera = cam;
 
     // 2. Reconcile non-character environment states
@@ -1298,7 +1399,7 @@ class ScriptEngine {
       }
     }));
 
-    stageWithImageState.updateImages?.(cameraController.getState());
+    stageWithImageState.updateImages?.(this.getCurrentCamera());
   }
 
   private resolvePath(relativePath: string): string {
@@ -1356,6 +1457,8 @@ class ScriptEngine {
   }
 
   private cleanup(full: boolean = true, invalidationTime: number = 0): void {
+    this._seekVersion++;
+    this.cameraEvaluation = undefined;
     if (full) this.customMotionPreview = null;
     this.masterTimeline?.kill(); this.masterTimeline = null; this.setPlaying(false);
     gsap.ticker.remove(this.live2DTransformSync);
@@ -1406,11 +1509,11 @@ class ScriptEngine {
     }
   }
 
-  private async prewarmModels(): Promise<void> {
-    if (!this.currentScene) return;
+  private async prewarmModels(scene = this.currentScene): Promise<void> {
+    if (!scene) return;
 
     const modelsToLoad = new Map<string, string>();
-    for (const action of this.currentScene.timeline) {
+    for (const action of scene.timeline) {
       if (action.action === 'addCharacter' && action.params?.id && action.params?.model) {
         try {
           const runtimePath = await this.resolvePathAsync(action.params.model);
@@ -1493,7 +1596,7 @@ class ScriptEngine {
     }
   }
 
-  destroy(): void { this.cleanup(); }
+  destroy(): void { this.sceneLoadVersion++; this.cleanup(); }
 }
 
 function resolveResourceMotionKey(value: unknown): string {

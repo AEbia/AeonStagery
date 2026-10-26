@@ -74,10 +74,10 @@ describe('Inline details quick edit', () => {
     load('camera', { mode: 'shake', intensity: 0.4, durationSeconds: 1 });
     const { container } = list();
     const detail = expand(container);
-    expect(screen.getAllByRole('spinbutton', { name: '震动强度' })).toHaveLength(1);
-    expect(screen.getAllByRole('spinbutton', { name: '震动时长' })).toHaveLength(1);
-    expect(detail.queryByRole('spinbutton', { name: '震动强度' })).toBeNull();
-    expect(detail.getByRole('spinbutton', { name: '震动频率' })).toBeTruthy();
+    expect(screen.getAllByRole('spinbutton', { name: '晃动强度' })).toHaveLength(1);
+    expect(screen.getAllByRole('spinbutton', { name: '晃动时长' })).toHaveLength(1);
+    expect(detail.queryByRole('spinbutton', { name: '晃动强度' })).toBeNull();
+    expect(detail.getByRole('spinbutton', { name: '晃动频率' })).toBeTruthy();
     expect(detail.getByRole('checkbox', { name: '衰减' })).toBeTruthy();
   });
 
@@ -85,7 +85,7 @@ describe('Inline details quick edit', () => {
     load('camera', { mode: 'shake', intensity: 0.4, durationSeconds: 1, frequency: 10 });
     const { container } = list();
     const detail = expand(container);
-    const frequency = detail.getByRole('spinbutton', { name: '震动频率' });
+    const frequency = detail.getByRole('spinbutton', { name: '晃动频率' });
 
     fireEvent.mouseDown(frequency, { clientX: 10, clientY: 10, button: 0 });
     fireEvent.mouseMove(document, { clientX: 46, clientY: 10, movementX: 36 });

@@ -256,7 +256,7 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
   - `move`：平移并调整缩放比例（Zoom）。
   - `follow`：镜头持续跟随目标移动，具备明确的启动与停止时间。
   - `path`：沿指定轨迹点平滑运动。
-  - `shake`：产生屏幕震动或冲击波晃动效果。
+  - `shake`：产生屏幕晃动或冲击波晃动效果。
   - `reset`：将镜头视角与缩放平滑重置为默认画面。
 
 ### 2. 环境图层管理 (`environmentLayer`)
@@ -507,7 +507,7 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 | **角色位移/缩放/旋转** | `characterTransform` | **当前支持** | 平滑插值空间属性；未声明的参数自动继承；不处理登场销毁。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **角色肢体与面部表演** | `characterPerformance` | **当前支持** | 调度 Motion、Expression、注视与眨眼；需指定明确演出时长。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
 | **Live2D 关键帧曲线** | `kind: 'custom'` Motion | **当前支持** | 非破坏性生成内联副本；支持多轨道曲线微调；协作独占租约。 | [ADR-0029](adr/0029-live2d-custom-motion-keyframe-authoring.md) |
-| **镜头景深与运镜** | `camera` | **当前支持** | 支持聚焦、移动、跟随、路径、震动与重置；具备启停时间。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
+| **镜头景深与运镜** | `camera` | **当前支持** | 支持聚焦、移动、跟随、路径、晃动与重置；具备启停时间。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **环境背景图层** | `environmentLayer` | **当前支持** | 图层添加、变换与移除；必须引用已存在的 Layer ID；旧别名已废弃。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **对象视觉融入与边缘光**| `visualStyle` | **当前支持** | 作用于单体对象的样式修饰，与全局滤镜严格区分。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **镜头滤镜添加** | `filterAdd` | **废弃兼容** | 历史遗留语句，仅用于播放兼容，不再提供新创作入口。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |

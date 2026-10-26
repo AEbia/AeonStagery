@@ -100,6 +100,7 @@ describe('runtime source seam guard', () => {
 
   it('keeps runtime bake on the prepared runtime timeline adapter', () => {
     const content = fs.readFileSync(BAKE_ENGINE_PATH, 'utf8');
+    expect(content).not.toContain('CameraAnchor');
 
     expect(content).toContain('preparedSceneToRuntimeTimelineScene(scene)');
     expect(content).toContain("from './RuntimeSceneState'");

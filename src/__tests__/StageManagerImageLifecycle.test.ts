@@ -90,6 +90,20 @@ describe('StageManager image lifecycle', () => {
     expect(stageManager.getImageSprite('poster')).toBe(second);
   });
 
+  it('applies camera rotation to custom image position and visible orientation', async () => {
+    const { stageManager, effectsLayer } = await createImageStage();
+    const image = stageManager.addImage({
+      id: 'poster', file: 'images/poster.png', position: { x: 1200 / 1920, y: 0.5 },
+      rotation: 30,
+    })!;
+    stageManager.updateImages({ position: { x: 0.5, y: 0.5 }, zoom: 1, rotation: 90 });
+
+    expect(effectsLayer.children).toContain(image);
+    expect(image.x).toBeCloseTo(960);
+    expect(image.y).toBeCloseTo(300);
+    expect(image.angle).toBeCloseTo(-60);
+  });
+
   it('removes an existing same-id image without reporting an empty replacement file', async () => {
     const pending: Array<{ file: string; resolve: (texture: any) => void }> = [];
     imageAssetMocks.load.mockImplementation((file: string) => new Promise((resolve) => {

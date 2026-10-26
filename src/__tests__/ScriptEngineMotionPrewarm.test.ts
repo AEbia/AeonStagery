@@ -133,7 +133,7 @@ describe('ScriptEngine.prewarmMotionCurves', () => {
     vi.spyOn(engine as any, 'cleanup').mockImplementation(() => {});
     vi.spyOn(engine as any, 'initMasterTimeline').mockImplementation(() => {});
     vi.spyOn(engine as any, 'prewarmModels').mockImplementation(async () => { order.push('prewarmModels'); });
-    const seekSpy = vi.spyOn(engine as any, 'seek').mockImplementation(async () => { order.push('seek'); });
+    const seekSpy = vi.spyOn(engine as unknown as { seekLoadedScene(time: number, forceReconstruct: boolean): Promise<void> }, 'seekLoadedScene').mockImplementation(async () => { order.push('seek'); });
     const prewarmSpy = vi.spyOn(engine as any, 'prewarmMotionCurves').mockImplementation(async () => { order.push('prewarm'); });
     const attachSpy = vi.spyOn(preBakeDaemon, 'attach').mockImplementation(() => {});
     const coldScanSpy = vi.spyOn(preBakeDaemon, 'triggerColdScan').mockImplementation(() => {});

@@ -19,6 +19,8 @@ export interface SchedulerContext {
   isReconstructing: () => boolean;
   /** The engine reconciles environment artwork from absolute scene time. */
   environmentStateDriven?: boolean;
+  /** Formal camera values come from scene-time evaluation, not GSAP writes. */
+  cameraStateDriven?: boolean;
   audioElements: Map<string, { audio: HTMLAudioElement; startTime: number; duration: number }>;
   takeSnapshot: (time: number) => void;
   getCurrentTime: () => number;

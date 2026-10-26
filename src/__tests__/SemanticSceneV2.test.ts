@@ -382,7 +382,7 @@ describe('semantic scene v3', () => {
     }))).toThrow(/Duplicate statement id/);
   });
 
-  it('rejects camera position writes while follow is active', () => {
+  it('allows position writes during follow and releases ownership for the next follow', () => {
     const document = sceneDocumentCodec.parseAndValidate(makeDocument({
       statements: [
         {
@@ -405,12 +405,30 @@ describe('semantic scene v3', () => {
             durationSeconds: 0.5,
           },
         },
+        {
+          id: 'follow_after_takeover',
+          time: 3,
+          type: 'camera',
+          params: {
+            mode: 'follow',
+            operation: 'start',
+            target: 'tomori',
+          },
+        },
       ],
     }));
 
-    expect(() => sceneStatementCompiler.compile(document)).toThrow(
-      /Camera follow "follow_start" is still active when "focus_during_follow" writes camera position/,
-    );
+    const compiled = sceneStatementCompiler.compile(document);
+
+    expect(compiled.actions.map((action) => [action.source.statementId, action.action])).toEqual([
+      ['follow_start', 'cameraFollow'],
+      ['focus_during_follow', 'cameraMotion'],
+      ['follow_after_takeover', 'cameraFollow'],
+    ]);
+    expect(compiled.actions[1].params).toMatchObject({
+      _cameraProperties: ['position'],
+      focus: { character: 'tomori', part: 'head' },
+    });
   });
 
   it('allows zoom-only camera statements while follow is active', () => {
@@ -468,6 +486,7 @@ describe('semantic scene v3', () => {
       ['focus_after_stop', 'cameraMotion'],
     ]);
     expect(compiled.actions[1].params).toEqual({
+      _cameraProperties: ['zoom', 'rotation'],
       move: 'zoom',
       easing: 'smooth',
       duration: 0.4,
@@ -517,6 +536,7 @@ describe('semantic scene v3', () => {
 
     expect(compiled.actions.map((action) => action.params)).toEqual([
       {
+        _cameraProperties: ['position', 'zoom'],
         move: 'push',
         easing: 'smooth',
         duration: 0.5,
@@ -524,12 +544,14 @@ describe('semantic scene v3', () => {
         zoom: '+=0.25',
       },
       {
+        _cameraProperties: ['zoom'],
         move: 'pull',
         easing: 'smooth',
         duration: 0.5,
         zoom: '-=0.2',
       },
       {
+        _cameraProperties: ['zoom'],
         move: 'zoom',
         easing: 'smooth',
         duration: 0.5,
@@ -557,6 +579,7 @@ describe('semantic scene v3', () => {
     expect(document.statements[0].params).toMatchObject({ to: [0.8, 0.7] });
     expect(sceneStatementCompiler.compile(document).actions[0].params)
       .toEqual({
+        _cameraProperties: ['position'],
         move: 'pan',
         easing: 'smooth',
         duration: 1,

@@ -26,14 +26,14 @@ describe('createStageAnchorResolver', () => {
     expect(resolve('tomori', 'head')).toEqual({ x: 0.5, y: 0.3 });
   });
 
-  it('falls back to the statement base when model anchors are unavailable', () => {
+  it('keeps a missing part anchor unavailable even with a statement base', () => {
     const resolve = createStageAnchorResolver({
       desiredPosition: () => ({ x: 0.6, y: 0.78 }),
       getPoint: () => null,
       getPosition: () => null,
     });
 
-    expect(resolve('tomori', 'chest')).toEqual({ x: 0.6, y: 0.78 });
+    expect(resolve('tomori', 'chest')).toBeNull();
     expect(resolve('tomori')).toEqual({ x: 0.6, y: 0.78 });
   });
 
@@ -59,8 +59,20 @@ describe('createStageAnchorResolver', () => {
       getPosition: () => ({ x: 0.6, y: 0.78 }),
     });
 
-    expect(resolve('tomori', 'torso' as any)).toEqual({ x: 0.6, y: 0.78 });
+    expect(resolve('tomori', 'torso')).toBeNull();
     expect(requestedPart).toBe('center');
+  });
+
+  it('uses the proxy origin rather than the visual center to reconstruct focus and follow', () => {
+    const resolve = createStageAnchorResolver({
+      desiredPosition: () => ({ x: 0.6, y: 0.8 }),
+      getOrigin: () => ({ x: 0.4, y: 0.7 }),
+      getPoint: () => ({ x: 0.4, y: 0.2 }),
+      getPosition: () => ({ x: 0.4, y: 0.4 }),
+    });
+    expect(resolve('hero', 'head')!.x).toBeCloseTo(0.6);
+    expect(resolve('hero', 'head')!.y).toBeCloseTo(0.3);
+    expect(resolve('hero')!.y).toBeCloseTo(0.5);
   });
 
   it('returns null when nothing can resolve the character', () => {

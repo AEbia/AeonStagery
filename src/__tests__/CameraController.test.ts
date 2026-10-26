@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import gsap from 'gsap';
+import { projectToScreen } from '../engine/Projection';
+import { computeCameraStateAtTime } from '../engine/CameraStateResolver';
+import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
+import { sceneDocumentCodec } from '../services/semantic-scene';
+import type { CameraMotionConfig } from '../api/types/camera';
 
 const cameraMocks = vi.hoisted(() => ({
   tickerAdd: vi.fn(),
@@ -60,6 +65,30 @@ describe('CameraController public state', () => {
     });
   });
 
+  it('projects camera shake onto the scene without changing the persistent position', () => {
+    const camera = new CameraController();
+    const timeline = camera.shake({ intensity: 1, frequency: 4, duration: 1, direction: 'horizontal' });
+    timeline.seek(0.2, false);
+    const projected = projectToScreen({ x: 960, y: 540, scale: 1 }, camera.getState(), { w: 1920, h: 1080 });
+    expect(projected.screenX).not.toBe(960);
+    expect(projected.screenY).toBe(540);
+    expect(camera.state.position).toEqual({ x: 0.5, y: 0.5 });
+    timeline.progress(1);
+    expect(projectToScreen({ x: 960, y: 540, scale: 1 }, camera.getState(), { w: 1920, h: 1080 }).screenX).toBe(960);
+  });
+
+  it('keeps the authored shake duration and previously scheduled shakes intact', () => {
+    const camera = new CameraController();
+    const master = gsap.timeline({ paused: true });
+    const first = camera.shake({ duration: 1, frequency: 4 });
+    master.add(first, 1);
+    const second = camera.shake({ duration: 1, frequency: 4 });
+    master.add(second, 3);
+    expect(first.parent).toBe(master);
+    expect(first.duration()).toBe(1);
+    expect(second.duration()).toBe(1);
+  });
+
   it('stops active camera shake when the camera is reset', () => {
     const camera = new CameraController();
 
@@ -98,8 +127,6 @@ describe('CameraController public state', () => {
 
   it('follows a character with smoothing and can snap instantly during seek reconciliation', () => {
     const camera = new CameraController();
-    // Zoom in first: like focus/pan, positional tracking has freedom only
-    // when the visible window is smaller than the stage extent.
     cameraMocks.getPoint.mockReturnValue({ x: 0.5, y: 0.5 });
     camera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 5, duration: 0 }).progress(1);
 
@@ -108,7 +135,8 @@ describe('CameraController public state', () => {
     camera.follow('hero', { offset: [0.1, -0.2], smoothing: 0.5 });
 
     expect(cameraMocks.tickerAdd).toHaveBeenCalledTimes(1);
-    camera.tickFollow();
+    // At smoothing 0.5, a fixed-target gap halves in log10(2) seconds.
+    camera.tickFollow(false, Math.log10(2));
     expect(camera.getState().position).toEqual({
       x: expect.closeTo(0.7),
       y: expect.closeTo(0.45),
@@ -124,7 +152,57 @@ describe('CameraController public state', () => {
     expect(cameraMocks.tickerRemove).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves semantic focus onto the authored character part and clamps target position by zoom', () => {
+  it.each([0.8, 1, 1.2, 2])('smoothly centers the followed world-space anchor at zoom %s', zoom => {
+    const camera = new CameraController();
+    camera.state.zoom = zoom;
+    const anchor = { x: 0.2, y: 0.3 };
+    cameraMocks.getPosition.mockReturnValue(anchor);
+    camera.follow('hero', { offset: [0, 0], smoothing: 0.5 });
+
+    camera.tickFollow(false, Math.log10(2));
+    expect(camera.getState().position).toEqual({ x: 0.35, y: 0.4 });
+    camera.tickFollow(true);
+    expect(camera.getState().position).toEqual(anchor);
+    const projected = projectToScreen({ x: anchor.x * 1920, y: anchor.y * 1080, scale: 1 }, camera.getState(), { w: 1920, h: 1080 });
+    expect(projected.screenX).toBeCloseTo(960);
+    expect(projected.screenY).toBeCloseTo(540);
+
+    cameraMocks.getPosition.mockReturnValue({ x: -0.2, y: 1.3 });
+    camera.tickFollow(true);
+    expect(camera.getState().position).toEqual({ x: -0.2, y: 1.3 });
+    camera.unfollow();
+  });
+
+  it.each([0.8, 1, 1.2, 2])('centers character focus at zoom %s in playback and seek', (zoom) => {
+    const camera = new CameraController();
+    const head = { x: 0.72, y: 0.28 };
+    cameraMocks.getPoint.mockReturnValue(head);
+    const document = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: 4, sceneId: 'focus-at-unit-zoom',
+      meta: { title: 'Focus at unit zoom', characters: [{ id: 'hero', name: 'Hero', model: 'hero/model.json' }] },
+      statements: [{ id: 'focus', type: 'camera', time: 0, params: {
+        mode: 'focus', target: 'hero', targetPart: 'head',
+        zoom: { kind: 'absolute', value: zoom }, durationSeconds: 1, ease: 'linear',
+      } }],
+    });
+    const action = sceneStatementCompiler.compile(document).actions[0];
+    // Execute the compiler output through the public controller entry point.
+    const timeline = camera.executeMotion(action.params as unknown as CameraMotionConfig);
+    timeline.progress(1);
+    const state = camera.getState();
+    expect(state.position).toEqual(head);
+    expect(state.zoom).toBe(zoom);
+    const projectedHead = projectToScreen({ x: head.x * 1920, y: head.y * 1080, scale: 1 }, state, { w: 1920, h: 1080 });
+    expect(projectedHead.screenX).toBeCloseTo(960);
+    expect(projectedHead.screenY).toBeCloseTo(540);
+    const resolved = computeCameraStateAtTime([{
+      _id: action.id, action: action.action, time: action.time, params: action.params,
+    }], 1, { resolveCharacterPosition: () => head });
+    expect(resolved.position).toEqual(head);
+    expect(resolved.zoom).toBe(zoom);
+  });
+
+  it('resolves semantic focus onto the authored character part with offsets independently of zoom', () => {
     const camera = new CameraController();
     cameraMocks.getPoint.mockReturnValue({ x: 0.95, y: 0.1 });
 
@@ -145,7 +223,7 @@ describe('CameraController public state', () => {
 
     expect(cameraMocks.getPoint).toHaveBeenCalledWith('hero', 'head');
     expect(camera.getState()).toEqual({
-      position: { x: 0.75, y: 0.25 },
+      position: { x: 1.15, y: 0 },
       zoom: 2,
       rotation: 0,
     });
@@ -185,9 +263,26 @@ describe('CameraController public state', () => {
     });
   });
 
+  it('releases prior tracking when a fixed character focus starts', () => {
+    const camera = new CameraController();
+    cameraMocks.getPosition.mockReturnValue({ x: 0.5, y: 0.5 });
+    camera.follow('hero');
+    cameraMocks.getPoint.mockReturnValue({ x: 0.7, y: 0.3 });
+    const motion = camera.executeMotion({
+      move: 'pan', easing: 'linear', duration: 2, focus: { character: 'hero', part: 'head' },
+    });
+    motion.seek(1, false);
+    expect(cameraMocks.tickerRemove).toHaveBeenCalledTimes(1);
+
+    cameraMocks.getPoint.mockReturnValue({ x: 0.9, y: 0.8 });
+    cameraMocks.getPosition.mockReturnValue({ x: 0.9, y: 0.8 });
+    camera.tickFollow(true);
+    motion.seek(2, false);
+    expect(camera.getState().position).toEqual({ x: 0.7, y: 0.3 });
+  });
+
   it('applies the built-in follow offset when callers pass undefined config fields', () => {
     const camera = new CameraController();
-    // Mild push-in so the composed follow target sits inside the viewport.
     camera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 1.5, duration: 0 }).progress(1);
     cameraMocks.getPosition.mockReturnValue({ x: 0.5, y: 0.5 });
 
@@ -206,8 +301,7 @@ describe('CameraController public state', () => {
     const playbackCamera = new CameraController();
     const seekCamera = new CameraController();
     cameraMocks.getPoint.mockReturnValue({ x: 0.5, y: 0.5 });
-    // Push in so follow targets are inside the viewport instead of clamped
-    // to the pinned zoom-1 center.
+    // Compare the same framing at a non-default zoom.
     playbackCamera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 2, duration: 0 }).progress(1);
     seekCamera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 2, duration: 0 }).progress(1);
     cameraMocks.getPosition.mockReturnValue({ x: 0.8, y: 0.6 });
@@ -230,11 +324,10 @@ describe('CameraController public state', () => {
     expect(seekCamera.getState()).toEqual(playbackCamera.getState());
   });
 
-  it('clamps follow targets inside the visible viewport so tracking never reveals black edges', () => {
+  it('tracks world-space anchors near stage edges', () => {
     const camera = new CameraController();
     cameraMocks.getPoint.mockReturnValue({ x: 0.5, y: 0.5 });
 
-    // Zoom to 2x through the public motion API → visible half-extent is 0.25.
     camera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 2, duration: 0 }).progress(1);
     expect(camera.getState().zoom).toBe(2);
 
@@ -243,8 +336,8 @@ describe('CameraController public state', () => {
     camera.tickFollow(true);
 
     expect(camera.getState().position).toEqual({
-      x: expect.closeTo(0.75),
-      y: expect.closeTo(0.25),
+      x: expect.closeTo(0.95),
+      y: expect.closeTo(0.05),
     });
   });
 
@@ -275,14 +368,40 @@ describe('CameraController public state', () => {
     expect(camera.getState()).toEqual({ position: { x: 0.3, y: 0.7 }, zoom: 1.5, rotation: 12 });
   });
 
-  it('traces the same follow path regardless of how a time span splits into ticks', () => {
+  it.each([0.25, 0.5, 0.85, 1])('glides toward the character over time at smoothing %s', smoothing => {
+    const camera = new CameraController();
+    cameraMocks.getPosition.mockReturnValue({ x: 0.8, y: 0.5 });
+    camera.follow('hero', { offset: [0, 0], smoothing });
+    camera.tickFollow(false, 0.2);
+
+    const position = camera.getState().position as { x: number; y: number };
+    const progress = (position.x - 0.5) / 0.3;
+    expect(progress).toBeGreaterThan(0);
+    expect(progress).toBeLessThan(0.8);
+    camera.unfollow();
+  });
+
+  it.each([0, 0.25, 0.5, 0.85, 1])('uses smoothing %s as the response time while continuing to pursue', smoothing => {
+    const camera = new CameraController();
+    cameraMocks.getPosition.mockReturnValue({ x: 0.8, y: 0.5 });
+    camera.follow('hero', { offset: [0, 0], smoothing });
+    camera.tickFollow(false, 2 * smoothing);
+    expect(camera.getState().position).toEqual({ x: expect.closeTo(smoothing === 0 ? 0.8 : 0.77, 12), y: 0.5 });
+    camera.tickFollow(false, 1);
+    const position = camera.getState().position as { x: number; y: number };
+    expect(position.x).toBeGreaterThanOrEqual(0.77);
+    expect(position.x).toBeLessThanOrEqual(0.8);
+    camera.unfollow();
+  });
+
+  it.each([0.25, 0.5, 0.85, 1])('traces the same follow path across frame rates at smoothing %s', smoothing => {
     const thirtyFpsCamera = new CameraController();
     const sixtyFpsCamera = new CameraController();
     for (const camera of [thirtyFpsCamera, sixtyFpsCamera]) {
       cameraMocks.getPoint.mockReturnValue({ x: 0.5, y: 0.5 });
       camera.executeMotion({ move: 'zoom', easing: 'linear', zoom: 2, duration: 0 }).progress(1);
       cameraMocks.getPosition.mockReturnValue({ x: 0.8, y: 0.6 });
-      camera.follow('hero', { offset: [0, 0], smoothing: 0.5 });
+      camera.follow('hero', { offset: [0, 0], smoothing });
     }
 
     thirtyFpsCamera.tickFollow(false, 1 / 30);
