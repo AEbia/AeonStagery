@@ -4,9 +4,7 @@ import path from 'node:path';
 import * as Y from 'yjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
   type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import {
@@ -15,9 +13,9 @@ import {
 } from '../api/types/semantic-scene';
 import { CollaborationPersistence } from '../../server/collaboration/persistence';
 import {
-  SingleRoomCollaborationRoomV2,
   SingleRoomCollaborationRoomV3,
 } from '../../server/collaboration/room';
+import { writeLegacyCollaborationStateFixture, type LegacyCollaborationStateFixture } from './helpers/legacyCollaborationFixture';
 
 function makeStateV3(): CollaborativeSceneStateV3 {
   return {
@@ -42,9 +40,9 @@ function makeStateV3(): CollaborativeSceneStateV3 {
   };
 }
 
-function makeStateV2(): CollaborativeSceneStateV2 {
+function makeStateV2(): LegacyCollaborationStateFixture {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+    schemaVersion: 2,
     sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
     collaborationProjectId: 'project_v2',
     roomId: 'project_v2:main',
@@ -98,10 +96,13 @@ describe('SingleRoomCollaborationRoomV3', () => {
   });
 
   it('refuses to load persisted v2 room data, provides clear export-and-reseed guidance, and leaves room untouched', async () => {
-    // 1. First create a persisted v2 room using v2 room
     const v2Persistence = new CollaborationPersistence(tempDir);
-    const v2Room = new SingleRoomCollaborationRoomV2(v2Persistence);
-    await v2Room.seed(makeStateV2());
+    const legacyDoc = new Y.Doc();
+    writeLegacyCollaborationStateFixture(legacyDoc, makeStateV2());
+    await v2Persistence.saveDoc(legacyDoc);
+    legacyDoc.destroy();
+    await fs.writeFile(v2Persistence.paths.snapshotFile, JSON.stringify({ schemaVersion: 4, sceneId: 'scene_v2' }));
+    await v2Persistence.saveManifest({});
 
     // Record persisted files on disk
     const stateFileBytesBefore = await fs.readFile(v2Persistence.paths.stateFile);
@@ -112,19 +113,8 @@ describe('SingleRoomCollaborationRoomV3', () => {
     const v3Persistence = new CollaborationPersistence(tempDir);
     const v3Room = new SingleRoomCollaborationRoomV3(v3Persistence);
 
-    let errorThrown: any = null;
-    try {
-      await v3Room.load();
-    } catch (err) {
-      errorThrown = err;
-    }
-
-    expect(errorThrown).not.toBeNull();
-    const errorMessage = errorThrown?.message ?? '';
-    // Must mention v2 / schema 2, explain no in-place migration, and guide to export via v2 and re-seed v3
-    expect(errorMessage).toMatch(/schema version 2|scene schema version 4/i);
-    expect(errorMessage).toMatch(/export/i);
-    expect(errorMessage).toMatch(/re-?seed|v3/i);
+    await expect(v3Room.load()).rejects.toThrow(/schema version 2.*scene schema version 4/i);
+    await expect(v3Room.load()).rejects.toThrow(/older AeonStagery release/);
 
     // 3. Verify the files on disk were left completely untouched
     const stateFileBytesAfter = await fs.readFile(v2Persistence.paths.stateFile);
@@ -135,12 +125,6 @@ describe('SingleRoomCollaborationRoomV3', () => {
     expect(snapshotFileBytesAfter.equals(snapshotFileBytesBefore)).toBe(true);
     expect(manifestFileBytesAfter.equals(manifestFileBytesBefore)).toBe(true);
 
-    // 4. Verify the v2 room can still open and export the scene v4 snapshot without any corruption
-    const v2Reloaded = new SingleRoomCollaborationRoomV2(new CollaborationPersistence(tempDir));
-    await v2Reloaded.load();
-    expect(v2Reloaded.getState()?.schemaVersion).toBe(COLLABORATION_SCHEMA_VERSION_V2);
-    expect(v2Reloaded.getMaterializedSceneDocument()?.schemaVersion).toBe(SCENE_SCHEMA_VERSION_V4);
-    expect(v2Reloaded.getMaterializedSceneDocument()?.sceneId).toBe('scene_v2');
   });
 
   it('rejects an update with a non-v3 schema marker in a v3 room', async () => {

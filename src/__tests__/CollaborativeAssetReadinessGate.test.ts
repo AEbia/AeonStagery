@@ -3,7 +3,7 @@ import type { CollaborativeAssetManifest } from '../api/types/collaboration';
 import { CollaborativeAssetReadinessGate } from '../services/collaboration/CollaborativeAssetReadinessGate';
 import type { IFileAccess } from '../services/io/IFileAccess';
 import type { LooseTimelineScene as SceneScript } from './fixtures/TimelineTestTypes';
-import type { HistoricalSceneDocumentV4, SceneDocumentV5 } from '../api/types/semantic-scene';
+import type { SceneDocumentV5 } from '../api/types/semantic-scene';
 
 const encoder = new TextEncoder();
 
@@ -81,8 +81,8 @@ describe('CollaborativeAssetReadinessGate', () => {
     timeline: [],
   };
 
-  const document: HistoricalSceneDocumentV4 = {
-    schemaVersion: 4,
+  const document: SceneDocumentV5 = {
+    schemaVersion: 5,
     sceneId: 'scene_v2',
     meta: { title: 'Readiness Scene V2' },
     statements: [],
@@ -272,23 +272,23 @@ describe('CollaborativeAssetReadinessGate', () => {
     expect(uploader.uploadManifest).not.toHaveBeenCalled();
   });
 
-  it('reuses an unchanged HistoricalSceneDocumentV4 manifest without rebuilding or uploading', async () => {
+  it('reuses an unchanged SceneDocumentV5 manifest without rebuilding or uploading', async () => {
     const manifest = makeManifest(await hashText('bg'));
     const manifestBuilder = {
       buildForScene: vi.fn(),
-      buildForSceneDocumentV4: vi.fn(),
+      buildForSceneDocumentV5: vi.fn(),
     };
     const gate = new CollaborativeAssetReadinessGate({
       manifestBuilder,
       manifestReuseChecker: {
         hasUnchangedReferences: vi.fn(),
-        hasUnchangedSceneDocumentV4References: vi.fn(async () => true),
+        hasUnchangedSceneDocumentV5References: vi.fn(async () => true),
       },
       uploader: { uploadManifest: vi.fn() },
       downloader: { downloadManifest: vi.fn() },
     });
 
-    await expect(gate.prepareLocalPublishV3({
+    await expect(gate.prepareLocalPublishV5({
       document,
       previousManifest: manifest,
       reason: 'local-asset-changed',
@@ -300,15 +300,15 @@ describe('CollaborativeAssetReadinessGate', () => {
       reusedPreviousManifest: true,
     }));
 
-    expect(manifestBuilder.buildForSceneDocumentV4).not.toHaveBeenCalled();
+    expect(manifestBuilder.buildForSceneDocumentV5).not.toHaveBeenCalled();
   });
 
-  it('builds and verifies a HistoricalSceneDocumentV4 manifest when references changed', async () => {
+  it('builds and verifies a SceneDocumentV5 manifest when references changed', async () => {
     const contentHash = await hashText('bg');
     const manifest = makeManifest(contentHash);
     const manifestBuilder = {
       buildForScene: vi.fn(),
-      buildForSceneDocumentV4: vi.fn(async () => manifest),
+      buildForSceneDocumentV5: vi.fn(async () => manifest),
     };
     const uploader = { uploadManifest: vi.fn(async () => undefined) };
     const gate = new CollaborativeAssetReadinessGate({
@@ -323,7 +323,7 @@ describe('CollaborativeAssetReadinessGate', () => {
       confirmAgreement: vi.fn(async () => undefined),
     });
 
-    await expect(gate.prepareLocalPublishV3({
+    await expect(gate.prepareLocalPublishV5({
       document,
       previousManifest: {},
       reason: 'initial-host',
@@ -337,53 +337,10 @@ describe('CollaborativeAssetReadinessGate', () => {
       reusedVerifiedSignature: false,
     }));
 
-    expect(manifestBuilder.buildForSceneDocumentV4).toHaveBeenCalledWith(document);
+    expect(manifestBuilder.buildForSceneDocumentV5).toHaveBeenCalledWith(document);
     expect(uploader.uploadManifest).toHaveBeenCalledTimes(1);
   });
 
-  it('projectizes a HistoricalSceneDocumentV4 before manifest reuse checks and building', async () => {
-    const projectizedDocument = {
-      ...document,
-      meta: { ...document.meta, title: 'Projectized' },
-    };
-    const manifest = makeManifest(await hashText('bg'));
-    const manifestBuilder = {
-      buildForScene: vi.fn(),
-      buildForSceneDocumentV4: vi.fn(async () => manifest),
-    };
-    const reuseChecker = {
-      hasUnchangedReferences: vi.fn(),
-      hasUnchangedSceneDocumentV4References: vi.fn(async () => false),
-    };
-    const gate = new CollaborativeAssetReadinessGate({
-      fileAccess: new FakeFileAccess({ 'D:/project/background/bg.png': 'bg' }) as unknown as IFileAccess,
-      projectResources: {
-        resolveForRead: async (relativePath: string) => `D:/project/${relativePath}`,
-        resolveForProjectWrite: async (relativePath: string) => `D:/project/${relativePath}`,
-      },
-      sceneProjectizer: {
-        prepareCollaborativeAssetReferences: vi.fn(async (scene) => scene),
-        prepareCollaborativeV2SceneDocumentAssetReferences: vi.fn(async () => projectizedDocument),
-      },
-      manifestBuilder,
-      manifestReuseChecker: reuseChecker,
-      uploader: { uploadManifest: vi.fn(async () => undefined) },
-      downloader: { downloadManifest: vi.fn() },
-      confirmAgreement: vi.fn(async () => undefined),
-    });
-
-    const result = await gate.prepareLocalPublishV3({
-      document,
-      previousManifest: {},
-      reason: 'initial-host',
-      forceAgreement: true,
-      title: 'Confirm',
-      message: 'Confirm assets',
-    });
-
-    expect(result.document).toBe(projectizedDocument);
-    expect(manifestBuilder.buildForSceneDocumentV4).toHaveBeenCalledWith(projectizedDocument);
-  });
 
   it('projectizes a SceneDocumentV5 before manifest reuse checks and building', async () => {
     const documentV5: SceneDocumentV5 = {

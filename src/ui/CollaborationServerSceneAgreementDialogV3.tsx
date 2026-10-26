@@ -1,11 +1,9 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
-  CollaborativeSceneStateV2,
   CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import type {
-  HistoricalSceneDocumentV4,
   SceneDocumentV5,
 } from '../api/types/semantic-scene';
 import {
@@ -15,19 +13,19 @@ import {
   summarizeAssetHandshake,
   type CollaborationAssetAgreementProposal,
 } from '../services/collaboration/CollaborationAssetHandshake';
-import { IconCheckCircle, IconUsers, IconX } from './icons';
-import { useModalDialog } from './hooks/useModalDialog';
 import { CollaborationResourcePlanList, hasAgreementItemProblem } from './CollaborationResourcePlanList';
+import { useModalDialog } from './hooks/useModalDialog';
+import { IconCheckCircle, IconUsers, IconX } from './icons';
 
-function documentTitle(document: HistoricalSceneDocumentV4 | SceneDocumentV5 | null): string {
+function documentTitle(document: SceneDocumentV5 | null): string {
   return document?.meta?.title || document?.sceneId || '未命名场景';
 }
 
-function serverSceneTitle(state: CollaborativeSceneStateV2 | CollaborativeSceneStateV3): string {
+function serverSceneTitle(state: CollaborativeSceneStateV3): string {
   return state.meta?.title || state.sceneId || '服务器场景';
 }
 
-export function CollaborationServerSceneAgreementDialogV2({
+export function CollaborationServerSceneAgreementDialogV3({
   serverDocument,
   serverState,
   assetAgreementProposal,
@@ -38,9 +36,9 @@ export function CollaborationServerSceneAgreementDialogV2({
   onConfirm,
   onCancel,
 }: {
-  localDocument: HistoricalSceneDocumentV4 | SceneDocumentV5 | null;
-  serverDocument: HistoricalSceneDocumentV4 | SceneDocumentV5;
-  serverState: CollaborativeSceneStateV2 | CollaborativeSceneStateV3;
+  localDocument: SceneDocumentV5 | null;
+  serverDocument: SceneDocumentV5;
+  serverState: CollaborativeSceneStateV3;
   assetAgreementProposal?: CollaborationAssetAgreementProposal;
   blockingIssues?: string[];
   jsonBackupPath?: string;
@@ -85,7 +83,7 @@ export function CollaborationServerSceneAgreementDialogV2({
       className="collaboration-server-dialog"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="collaboration-server-dialog-v2-title"
+      aria-labelledby="collaboration-server-dialog-v3-title"
     >
       <div className="collaboration-server-dialog__surface">
         <div className="collaboration-server-dialog__header">
@@ -94,7 +92,7 @@ export function CollaborationServerSceneAgreementDialogV2({
               <IconUsers width={18} height={18} />
             </span>
             <div>
-              <div id="collaboration-server-dialog-v2-title" className="collaboration-server-dialog__title">
+              <div id="collaboration-server-dialog-v3-title" className="collaboration-server-dialog__title">
                 加入协作房间
               </div>
               <div className="collaboration-server-dialog__subtitle">
@@ -229,5 +227,3 @@ export function CollaborationServerSceneAgreementDialogV2({
     document.body,
   );
 }
-
-export const CollaborationServerSceneAgreementDialogV3 = CollaborationServerSceneAgreementDialogV2;

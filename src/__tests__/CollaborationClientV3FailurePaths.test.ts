@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
-  type CollaborativeSceneStateV2,
+  COLLABORATION_SCHEMA_VERSION_V3,
+  type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
-import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
+import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import type { CollaborationWebSocketLike } from '../services/collaboration/CollaborationTransport';
-import { writeCollaborativeStateV2ToYDoc } from '../services/collaboration/CollaborativeYDocStore';
+import { writeCollaborativeStateV3ToYDoc } from '../services/collaboration/CollaborativeYDocStore';
 
 function createSocketStub(readyState = 1): CollaborationWebSocketLike {
   return {
@@ -22,14 +22,14 @@ function createSocketStub(readyState = 1): CollaborationWebSocketLike {
   };
 }
 
-function makeState(time = 1): CollaborativeSceneStateV2 {
+function makeState(time = 1): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
-    meta: { title: 'Client V2 Scene', fps: 60 },
+    sceneId: 'scene_v3',
+    meta: { title: 'Client V3 Scene', fps: 60 },
     statementsById: {
       line_1: {
         id: 'line_1',
@@ -70,14 +70,14 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 function makeServerUpdate(state = makeState()): Uint8Array {
   const doc = new Y.Doc();
-  writeCollaborativeStateV2ToYDoc(doc, state, 'server');
+  writeCollaborativeStateV3ToYDoc(doc, state, 'server');
   return Y.encodeStateAsUpdate(doc);
 }
 
-describe('CollaborationClientV2 failure paths', () => {
+describe('CollaborationClientV3 failure paths', () => {
   it('reports the HTTP status when joining fails', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 503 })) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -91,7 +91,7 @@ describe('CollaborationClientV2 failure paths', () => {
       JSON.stringify({ error: 'Room is already seeded' }),
       { status: 409, headers: { 'content-type': 'application/json' } },
     )) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -104,7 +104,7 @@ describe('CollaborationClientV2 failure paths', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('connection refused');
     }) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -124,7 +124,7 @@ describe('CollaborationClientV2 failure paths', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('connection refused');
     }) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -141,7 +141,7 @@ describe('CollaborationClientV2 failure paths', () => {
       if (String(url).endsWith('/seed')) return new Response(null, { status: 201 });
       throw new Error('connection refused');
     }) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -155,7 +155,7 @@ describe('CollaborationClientV2 failure paths', () => {
 
   it('reports upload HTTP failure without emitting a completion progress event', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 502 })) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -172,7 +172,7 @@ describe('CollaborationClientV2 failure paths', () => {
 
   it('reports download HTTP failure', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 404 })) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -185,7 +185,7 @@ describe('CollaborationClientV2 failure paths', () => {
 
   it('returns an empty byte array and progress for a successful response without a body', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -212,7 +212,7 @@ describe('CollaborationClientV2 failure paths', () => {
         streamController.enqueue(encoder.encode('a'));
       },
     }), { status: 200 })) as typeof fetch;
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => createSocketStub(),
@@ -232,7 +232,7 @@ describe('CollaborationClientV2 failure paths', () => {
 
   it('rejects state transactions before a room has been joined', async () => {
     const socket = createSocketStub();
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl: vi.fn() as typeof fetch,
       webSocketFactory: () => socket,
@@ -254,7 +254,7 @@ describe('CollaborationClientV2 failure paths', () => {
       { status: 200 },
     )) as typeof fetch;
     const socket = createSocketStub();
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => socket,
@@ -278,7 +278,7 @@ describe('CollaborationClientV2 failure paths', () => {
       { status: 200 },
     )) as typeof fetch;
     const socket = createSocketStub();
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => socket,
@@ -288,7 +288,7 @@ describe('CollaborationClientV2 failure paths', () => {
     const connections: boolean[] = [];
     const errors: string[] = [];
 
-    const disposeStateSubscription = client.subscribe((state) => states.push(state));
+    const disposeStateSubscription = client.subscribe((state) => { states.push(state); });
     disposeStateSubscription();
     await client.join();
     expect(states).toEqual([]);
@@ -301,12 +301,12 @@ describe('CollaborationClientV2 failure paths', () => {
     await vi.waitFor(() => expect(client.isRealtimeConnected()).toBe(true));
     expect(connections).toEqual([]);
 
-    const disposePresenceSubscription = client.subscribePresence((message) => presenceMessages.push(message));
+    const disposePresenceSubscription = client.subscribePresence((message) => { presenceMessages.push(message); });
     disposePresenceSubscription();
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'presence:update',
-        schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+        schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
         peer: {
           clientId: 'peer-1',
           displayName: 'Peer',
@@ -333,7 +333,7 @@ describe('CollaborationClientV2 failure paths', () => {
       { status: 200 },
     )) as typeof fetch;
     const socket = createSocketStub();
-    const client = new CollaborationClientV2({
+    const client = new CollaborationClientV3({
       endpoint: '127.0.0.1:12345',
       fetchImpl,
       webSocketFactory: () => socket,
@@ -342,8 +342,8 @@ describe('CollaborationClientV2 failure paths', () => {
     const presenceMessages: unknown[] = [];
     const connections: boolean[] = [];
     const errors: string[] = [];
-    client.subscribe((state) => states.push(state));
-    client.subscribePresence((message) => presenceMessages.push(message));
+    client.subscribe((state) => { states.push(state); });
+    client.subscribePresence((message) => { presenceMessages.push(message); });
     client.subscribeRealtimeConnection((isConnected) => connections.push(isConnected));
     client.subscribeErrors((error) => errors.push(error.message));
 
@@ -353,7 +353,7 @@ describe('CollaborationClientV2 failure paths', () => {
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'presence:update',
-        schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+        schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
         peer: {
           clientId: 'peer-1',
           displayName: 'Peer',
@@ -380,7 +380,7 @@ describe('CollaborationClientV2 failure paths', () => {
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'presence:update',
-        schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+        schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
         peer: {
           clientId: 'peer-2',
           displayName: 'Peer 2',

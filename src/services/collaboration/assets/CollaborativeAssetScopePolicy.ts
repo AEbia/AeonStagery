@@ -5,7 +5,6 @@ import type {
 import type { ResourceImportKind } from '../../../api/types/project';
 import type {
   DialogueCompanion,
-  HistoricalSceneDocumentV4,
   SceneDocumentV5,
   SceneStatement,
 } from '../../../api/types/semantic-scene';
@@ -146,7 +145,7 @@ export function getCollaborativeAssetReferenceKeys(scene: LegacyCollaborativeSce
 
 type SceneStatementAssetSource = Pick<SceneStatement, 'type' | 'params'> | Pick<DialogueCompanion, 'type' | 'params'>;
 
-function classifySceneDocumentV4AssetRef(
+function classifySceneDocumentAssetRef(
   statement: SceneStatementAssetSource,
   path: string,
   value: string,
@@ -190,30 +189,9 @@ function collectStatementAssetRefs(
   statement: SceneStatementAssetSource,
 ): void {
   for (const field of sceneStatementDefinitionRegistry.collectAssetReferences(statement as SceneStatement)) {
-    const ref = classifySceneDocumentV4AssetRef(statement, field.path, field.value);
+    const ref = classifySceneDocumentAssetRef(statement, field.path, field.value);
     if (ref) addProjectRelativeRef(refs, ref);
   }
-}
-
-export function collectCollaborativeSceneDocumentV4AssetRefs(document: HistoricalSceneDocumentV4): CollaborativeAssetRef[] {
-  const refs = new Map<string, CollaborativeAssetRef>();
-
-  collectSceneMetaAssetRefs(refs, document);
-
-  for (const statement of document.statements) {
-    collectStatementAssetRefs(refs, statement);
-    for (const companion of statement.companions || []) {
-      collectStatementAssetRefs(refs, companion);
-    }
-  }
-
-  return Array.from(refs.values());
-}
-
-export function getCollaborativeSceneDocumentV4AssetReferenceKeys(document: HistoricalSceneDocumentV4): ProjectRelativeAssetPath[] {
-  return collectCollaborativeSceneDocumentV4AssetRefs(document)
-    .map((ref) => ref.projectRelativePath)
-    .sort();
 }
 
 export function collectCollaborativeSceneDocumentV5AssetRefs(document: SceneDocumentV5): CollaborativeAssetRef[] {

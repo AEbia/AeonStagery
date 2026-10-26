@@ -3,7 +3,7 @@
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { CollaborationPresencePeerV2 } from '../api/types/collaboration';
+import type { CollaborationPresencePeerV3 } from '../api/types/collaboration';
 import {
   createAssetAgreementProposal,
   createAssetHandshakeState,
@@ -45,7 +45,7 @@ function makeController(overrides: Partial<SemanticCollaborationSessionControlle
   };
 }
 
-function makePeers(count: number): CollaborationPresencePeerV2[] {
+function makePeers(count: number): CollaborationPresencePeerV3[] {
   return Array.from({ length: count }, (_, index) => ({
     clientId: `peer-${index + 1}`,
     displayName: `成员${index + 1}`,

@@ -1,11 +1,9 @@
 import type {
   CompiledScene,
   CurrentSceneDocument,
-  HistoricalSceneDocumentV4,
   PreparedCompiledScene,
   SemanticSceneBundle,
 } from '../../api/types/semantic-scene';
-import { isHistoricalSceneDocumentV4 } from '../../api/types/semantic-scene';
 import {
   deriveSceneDocumentCanonicalOrder,
   getSceneDocumentCanonicalOrder,
@@ -18,7 +16,6 @@ export interface ReadonlyDocumentStore {
   readonly version: number;
   getCurrentSceneDocumentSnapshot(): CurrentSceneDocument | null;
   getCurrentSceneDocumentView(): CurrentSceneDocument | null;
-  getHistoricalSceneDocumentV4Snapshot(): HistoricalSceneDocumentV4 | null;
   getCompiledSceneSnapshot(): CompiledScene | null;
   getPreparedSceneSnapshot(): PreparedCompiledScene | null;
 }
@@ -59,11 +56,6 @@ export class DocumentStore implements ReadonlyDocumentStore {
     return this._sceneDocumentCanonicalOrder
       ? withSceneDocumentCanonicalOrder(snapshot, this._sceneDocumentCanonicalOrder)
       : snapshot;
-  }
-
-  getHistoricalSceneDocumentV4Snapshot(): HistoricalSceneDocumentV4 | null {
-    const document = this.getCurrentSceneDocumentSnapshot();
-    return isHistoricalSceneDocumentV4(document) ? document : null;
   }
 
   getCompiledSceneSnapshot(): CompiledScene | null {

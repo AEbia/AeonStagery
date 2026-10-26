@@ -1,40 +1,37 @@
 import type {
   CollaborationIdentity,
-  CollaborationPresencePatchV2,
-  CollaborationPresencePeerV2,
-  CollaborationPresenceServerMessageV2,
+  CollaborationPresencePatchV3,
+  CollaborationPresencePeerV3,
   CollaborationPresenceServerMessageV3,
 } from '../../src/api/types/collaboration';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
 } from '../../src/api/types/collaboration';
 import { isCollaborationPresenceClientMessage } from '../../src/services/collaboration/CollaborationPresenceProtocol';
 
 export type CollaborationPresenceServerMessage =
-  | CollaborationPresenceServerMessageV2
-  | CollaborationPresenceServerMessageV3;
+  CollaborationPresenceServerMessageV3;
 
-export interface PresenceRegistryV2<SocketKey = unknown> {
-  peersBySocket: Map<SocketKey, CollaborationPresencePeerV2>;
+export interface PresenceRegistryV3<SocketKey = unknown> {
+  peersBySocket: Map<SocketKey, CollaborationPresencePeerV3>;
 }
 
-export interface PresenceJoinResultV2 {
+export interface PresenceJoinResultV3 {
   snapshot: Extract<CollaborationPresenceServerMessage, { type: 'presence:snapshot' }>;
   update: Extract<CollaborationPresenceServerMessage, { type: 'presence:update' }>;
 }
 
-export interface PresenceSocketProtocolEventsV2 {
+export interface PresenceSocketProtocolEventsV3 {
   socketMessages: CollaborationPresenceServerMessage[];
   broadcastMessages: CollaborationPresenceServerMessage[];
 }
 
-export interface PresenceSocketMessageResultV2 extends PresenceSocketProtocolEventsV2 {
+export interface PresenceSocketMessageResultV3 extends PresenceSocketProtocolEventsV3 {
   handled: boolean;
 }
 
-export function createPresenceRegistryV2<SocketKey = unknown>(): PresenceRegistryV2<SocketKey> {
-  return { peersBySocket: new Map<SocketKey, CollaborationPresencePeerV2>() };
+export function createPresenceRegistryV3<SocketKey = unknown>(): PresenceRegistryV3<SocketKey> {
+  return { peersBySocket: new Map<SocketKey, CollaborationPresencePeerV3>() };
 }
 
 export function createPresenceIdentity(url: URL): CollaborationIdentity | null {
@@ -47,12 +44,12 @@ export function createPresenceIdentity(url: URL): CollaborationIdentity | null {
   return { clientId, displayName };
 }
 
-export function connectPresenceSocketV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function connectPresenceSocketV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
   identity: CollaborationIdentity | null,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
-): PresenceSocketProtocolEventsV2 {
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
+): PresenceSocketProtocolEventsV3 {
   const snapshot = {
     type: 'presence:snapshot' as const,
     schemaVersion,
@@ -62,7 +59,7 @@ export function connectPresenceSocketV2<SocketKey>(
     return { socketMessages: [snapshot], broadcastMessages: [] };
   }
 
-  const peer: CollaborationPresencePeerV2 = {
+  const peer: CollaborationPresencePeerV3 = {
     ...identity,
     selectedStatementIds: [],
     editingTarget: null,
@@ -75,18 +72,18 @@ export function connectPresenceSocketV2<SocketKey>(
   };
 }
 
-export function applyPresenceJoinV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function applyPresenceJoinV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
   identity: CollaborationIdentity,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
-): PresenceJoinResultV2 {
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
+): PresenceJoinResultV3 {
   const snapshot = {
     type: 'presence:snapshot' as const,
     schemaVersion,
     peers: Array.from(registry.peersBySocket.values()),
   };
-  const peer: CollaborationPresencePeerV2 = {
+  const peer: CollaborationPresencePeerV3 = {
     ...identity,
     selectedStatementIds: [],
     editingTarget: null,
@@ -99,16 +96,16 @@ export function applyPresenceJoinV2<SocketKey>(
   };
 }
 
-export function applyPresenceUpdateV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function applyPresenceUpdateV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
-  patch: CollaborationPresencePatchV2,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
+  patch: CollaborationPresencePatchV3,
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
 ): Extract<CollaborationPresenceServerMessage, { type: 'presence:update' }> | null {
   const current = registry.peersBySocket.get(socket);
   if (!current) return null;
   const hasPointerPatch = Object.prototype.hasOwnProperty.call(patch, 'pointer');
-  const peer: CollaborationPresencePeerV2 = {
+  const peer: CollaborationPresencePeerV3 = {
     ...current,
     selectedStatementIds: patch.selectedStatementIds,
     editingTarget: patch.editingTarget ?? null,
@@ -119,26 +116,26 @@ export function applyPresenceUpdateV2<SocketKey>(
   return { type: 'presence:update' as const, schemaVersion, peer };
 }
 
-export function applyPresencePingV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function applyPresencePingV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
   pingMs: number,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
 ): Extract<CollaborationPresenceServerMessage, { type: 'presence:update' }> | null {
   const current = registry.peersBySocket.get(socket);
   if (!current || !Number.isFinite(pingMs) || pingMs < 0) return null;
-  const peer: CollaborationPresencePeerV2 = { ...current, pingMs: Math.round(pingMs) };
+  const peer: CollaborationPresencePeerV3 = { ...current, pingMs: Math.round(pingMs) };
   registry.peersBySocket.set(socket, peer);
   return { type: 'presence:update' as const, schemaVersion, peer };
 }
 
-export function handlePresenceSocketMessageV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function handlePresenceSocketMessageV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
   isBinary: boolean,
   message?: unknown,
-  defaultSchemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
-): PresenceSocketMessageResultV2 {
+  defaultSchemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
+): PresenceSocketMessageResultV3 {
   if (isBinary) {
     return { handled: false, socketMessages: [], broadcastMessages: [] };
   }
@@ -154,7 +151,7 @@ export function handlePresenceSocketMessageV2<SocketKey>(
     return { handled: true, socketMessages: [], broadcastMessages: [] };
   }
 
-  const update = applyPresenceUpdateV2(registry, socket, message, schemaVersion);
+  const update = applyPresenceUpdateV3(registry, socket, message, schemaVersion);
   return {
     handled: true,
     socketMessages: [],
@@ -162,10 +159,10 @@ export function handlePresenceSocketMessageV2<SocketKey>(
   };
 }
 
-export function applyPresenceRemoveV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function applyPresenceRemoveV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
 ): Extract<CollaborationPresenceServerMessage, { type: 'presence:remove' }> | null {
   const current = registry.peersBySocket.get(socket);
   if (!current) return null;
@@ -173,12 +170,12 @@ export function applyPresenceRemoveV2<SocketKey>(
   return { type: 'presence:remove' as const, schemaVersion, clientId: current.clientId };
 }
 
-export function disconnectPresenceSocketV2<SocketKey>(
-  registry: PresenceRegistryV2<SocketKey>,
+export function disconnectPresenceSocketV3<SocketKey>(
+  registry: PresenceRegistryV3<SocketKey>,
   socket: SocketKey,
-  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V2,
-): PresenceSocketProtocolEventsV2 {
-  const remove = applyPresenceRemoveV2(registry, socket, schemaVersion);
+  schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3 = COLLABORATION_SCHEMA_VERSION_V3,
+): PresenceSocketProtocolEventsV3 {
+  const remove = applyPresenceRemoveV3(registry, socket, schemaVersion);
   return {
     socketMessages: [],
     broadcastMessages: remove ? [remove] : [],

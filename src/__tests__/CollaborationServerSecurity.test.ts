@@ -8,7 +8,6 @@ import { startCollaborationServer, type RunningCollaborationServer } from '../..
 import { collaborationEndpointWithPassword } from '../services/collaboration/CollaborationTransport';
 import { COLLABORATION_LIMITS, createCollaborationAuthProof } from '../../server/collaboration/security';
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
-import { CollaborationClientV2 } from '../services/collaboration/CollaborationClientV2';
 import { authenticatedFetch } from './helpers/collaborationAuth';
 
 describe('collaboration server security boundary', () => {
@@ -167,9 +166,9 @@ describe('collaboration server security boundary', () => {
     expect(socket.url).not.toContain(server.getStatus().accessToken);
   });
 
-  it('supports authenticated HTTP and realtime clients in both protocol versions', async () => {
+  it('supports authenticated HTTP and realtime clients in protocol v3', async () => {
     const status = server.getStatus();
-    for (const Client of [CollaborationClientV2, CollaborationClientV3]) {
+    for (const Client of [CollaborationClientV3]) {
       const client = new Client({
         endpoint: `${status.localUrl}#token=${status.accessToken}`,
         webSocketFactory: (url, offered) => {

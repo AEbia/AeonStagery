@@ -2,7 +2,7 @@
 
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CollaborationPresencePatchV2, CollaborationPresencePeerV2 } from '../api/types/collaboration';
+import type { CollaborationPresencePatchV3, CollaborationPresencePeerV3 } from '../api/types/collaboration';
 import type { BootstrapContext } from '../engine/Bootstrapper';
 import type { ProjectState } from '../api/types/project';
 import {
@@ -66,10 +66,6 @@ const mocks = vi.hoisted(() => {
   class FakeGate {
     cancelActiveTransfer = vi.fn();
     reset = vi.fn();
-    prepareLocalPublishV3 = vi.fn(async (input: { document: unknown }) => ({
-      document: input.document,
-      assets: {},
-    }));
     prepareLocalPublishV5 = vi.fn(async (input: { document: unknown }) => ({
       document: input.document,
       assets: {},
@@ -268,7 +264,7 @@ function renderController(input: {
     contextValue: context,
     currentProject: input.currentProject ?? null,
     status,
-    peers: [] as CollaborationPresencePeerV2[],
+    peers: [] as CollaborationPresencePeerV3[],
     collaborationServerStatus: input.collaborationServerStatus,
     ...callbacks,
   }));
@@ -618,7 +614,7 @@ describe('semantic collaboration session controller', () => {
     const client = mocks.state.clients[0];
     client.updatePresence.mockClear();
     const publisher = controller.onPresencePublisherChange.mock.calls
-      .at(-1)?.[0] as (patch?: Partial<CollaborationPresencePatchV2>) => void;
+      .at(-1)?.[0] as (patch?: Partial<CollaborationPresencePatchV3>) => void;
 
     act(() => publisher());
 

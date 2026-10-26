@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
+  COLLABORATION_SCHEMA_VERSION_V3,
   type CollaborativeAssetManifest,
-  type CollaborativeSceneStateV2,
+  type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import {
-  SCENE_SCHEMA_VERSION_V4,
+  SCENE_SCHEMA_VERSION_V5,
   type DialogueCompanion,
-  type HistoricalSceneDocumentV4,
+  type SceneDocumentV5,
   type SceneStatement,
 } from '../api/types/semantic-scene';
-import { CollaborativeLocalCommitPipelineV2 } from '../services/collaboration/CollaborativeLocalCommitPipelineV2';
-import { createCollaborativeSceneStateV2FromDocument } from '../services/collaboration/CollaborativeSceneStateV2';
+import { CollaborativeLocalCommitPipelineV3 } from '../services/collaboration/CollaborativeLocalCommitPipelineV3';
+import { createCollaborativeSceneStateV3FromDocument } from '../services/collaboration/CollaborativeSceneStateV3';
 
 const baseLine: SceneStatement = {
   id: 'line_1',
@@ -23,21 +23,21 @@ const baseLine: SceneStatement = {
   },
 };
 
-function makeDocument(statements: SceneStatement[] = [baseLine]): HistoricalSceneDocumentV4 {
+function makeDocument(statements: SceneStatement[] = [baseLine]): SceneDocumentV5 {
   return {
-    schemaVersion: SCENE_SCHEMA_VERSION_V4,
-    sceneId: 'scene_v2',
-    meta: { title: 'Pipeline Scene V2' },
+    schemaVersion: SCENE_SCHEMA_VERSION_V5,
+    sceneId: 'scene_v3',
+    meta: { title: 'Pipeline Scene V3' },
     statements,
   };
 }
 
 function makeState(
-  document: HistoricalSceneDocumentV4 = makeDocument(),
-  overrides: Partial<CollaborativeSceneStateV2> = {},
-): CollaborativeSceneStateV2 {
+  document: SceneDocumentV5 = makeDocument(),
+  overrides: Partial<CollaborativeSceneStateV3> = {},
+): CollaborativeSceneStateV3 {
   return {
-    ...createCollaborativeSceneStateV2FromDocument(document, {
+    ...createCollaborativeSceneStateV3FromDocument(document, {
       collaborationProjectId: 'project_1',
       roomId: 'project_1:main',
     }),
@@ -73,14 +73,14 @@ function makeManifest(path = 'background/bg.png'): CollaborativeAssetManifest {
   };
 }
 
-describe('CollaborativeLocalCommitPipelineV2', () => {
+describe('CollaborativeLocalCommitPipelineV3', () => {
   it('skips local asset preparation when SceneDocumentV4 references match the latest manifest', async () => {
     const document = makeDocument([makeBackgroundStatement()]);
     const latestState = makeState(document, {
       assets: makeManifest('background/bg.png'),
     });
     const prepareLocalState = vi.fn();
-    const pipeline = new CollaborativeLocalCommitPipelineV2({ prepareLocalState });
+    const pipeline = new CollaborativeLocalCommitPipelineV3({ prepareLocalState });
     const publisher = {
       publishState: vi.fn(),
       publishStatementChanges: vi.fn(),
@@ -108,7 +108,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
       document,
       assets: preparedAssets,
     }));
-    const pipeline = new CollaborativeLocalCommitPipelineV2({ prepareLocalState });
+    const pipeline = new CollaborativeLocalCommitPipelineV3({ prepareLocalState });
     const publisher = {
       publishState: vi.fn(),
     };
@@ -133,7 +133,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
     const assets = makeManifest('background/bg.png');
     const latestState = makeState(document, { assets });
     const prepareLocalState = vi.fn(async () => assets);
-    const pipeline = new CollaborativeLocalCommitPipelineV2({ prepareLocalState });
+    const pipeline = new CollaborativeLocalCommitPipelineV3({ prepareLocalState });
 
     await pipeline.commit({
       document,
@@ -163,7 +163,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
     const assets = makeManifest('background/bg.png');
     const latestState = makeState(previousDocument, { assets });
     const prepareLocalState = vi.fn();
-    const pipeline = new CollaborativeLocalCommitPipelineV2({ prepareLocalState });
+    const pipeline = new CollaborativeLocalCommitPipelineV3({ prepareLocalState });
     const accepted = makeState(nextDocument, { assets });
     const publisher = {
       publishState: vi.fn(),
@@ -193,7 +193,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
   });
 
   it('publishes statement-only changes through the statement entity port', async () => {
-    const pipeline = new CollaborativeLocalCommitPipelineV2();
+    const pipeline = new CollaborativeLocalCommitPipelineV3();
     const latestState = makeState();
     const document = makeDocument([{
       ...baseLine,
@@ -240,7 +240,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
       ...baseLine,
       companions: [companion],
     }]);
-    const pipeline = new CollaborativeLocalCommitPipelineV2();
+    const pipeline = new CollaborativeLocalCommitPipelineV3();
     const latestState = makeState(previousDocument);
     const publisher = {
       publishState: vi.fn(),
@@ -264,7 +264,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
   });
 
   it('falls back to full publish when statement entity port is unavailable', async () => {
-    const pipeline = new CollaborativeLocalCommitPipelineV2();
+    const pipeline = new CollaborativeLocalCommitPipelineV3();
     const latestState = makeState();
     const document = makeDocument([{
       ...baseLine,
@@ -281,8 +281,8 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
     });
 
     expect(publisher.publishState).toHaveBeenCalledWith(expect.objectContaining({
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-      sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+      sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
       statementsById: {
         line_1: {
           ...baseLine,
@@ -305,7 +305,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
       { ...second, time: 1 },
     ]);
     const publisher = { publishState: vi.fn() };
-    const pipeline = new CollaborativeLocalCommitPipelineV2();
+    const pipeline = new CollaborativeLocalCommitPipelineV3();
 
     const committed = await pipeline.commit({
       document: nextDocument,
@@ -341,7 +341,7 @@ describe('CollaborativeLocalCommitPipelineV2', () => {
       publishState: vi.fn(),
       publishStatementChanges: vi.fn(),
     };
-    const pipeline = new CollaborativeLocalCommitPipelineV2();
+    const pipeline = new CollaborativeLocalCommitPipelineV3();
 
     const committed = await pipeline.commit({
       document,

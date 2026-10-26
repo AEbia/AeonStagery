@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
   type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import {
@@ -13,9 +11,9 @@ import {
 import { CollaborationClientV3 } from '../services/collaboration/CollaborationClientV3';
 import type { CollaborationWebSocketLike } from '../services/collaboration/CollaborationTransport';
 import {
-  writeCollaborativeStateV2ToYDoc,
   writeCollaborativeStateV3ToYDoc,
 } from '../services/collaboration/CollaborativeYDocStore';
+import { writeLegacyCollaborationStateFixture, type LegacyCollaborationStateFixture } from './helpers/legacyCollaborationFixture';
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(bytes.byteLength);
@@ -76,9 +74,9 @@ function makeStateV3(time = 1): CollaborativeSceneStateV3 {
   };
 }
 
-function makeStateV2(time = 1): CollaborativeSceneStateV2 {
+function makeStateV2(time = 1): LegacyCollaborationStateFixture {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+    schemaVersion: 2,
     sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
     collaborationProjectId: 'project_v2',
     roomId: 'project_v2:main',
@@ -107,7 +105,7 @@ function makeServerUpdateV3(state = makeStateV3()): Uint8Array {
 
 function makeServerUpdateV2(state = makeStateV2()): Uint8Array {
   const doc = new Y.Doc();
-  writeCollaborativeStateV2ToYDoc(doc, state, 'server');
+  writeLegacyCollaborationStateFixture(doc, state, 'server');
   return Y.encodeStateAsUpdate(doc);
 }
 
@@ -486,7 +484,7 @@ describe('CollaborationClientV3', () => {
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'presence:update',
-        schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+        schemaVersion: 2,
         peer: {
           clientId: 'legacy-peer',
           displayName: 'Legacy',
@@ -544,7 +542,7 @@ describe('CollaborationClientV3', () => {
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'lease:acquired',
-        schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+        schemaVersion: 2,
         requestId: 'req-legacy',
         target: { kind: 'statement', statementId: 'line_1' },
       }),
@@ -578,7 +576,7 @@ describe('CollaborationClientV3', () => {
 
     // Send an update that writes v2 schema
     const v2Doc = new Y.Doc();
-    writeCollaborativeStateV2ToYDoc(v2Doc, makeStateV2(99), 'remote');
+    writeLegacyCollaborationStateFixture(v2Doc, makeStateV2(99), 'remote');
     const v2Update = Y.encodeStateAsUpdate(v2Doc);
 
     socket.onmessage?.({ data: v2Update } as MessageEvent);

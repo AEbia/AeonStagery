@@ -1,10 +1,8 @@
 import type {
   CollaborativeCompanionGroup,
-  CollaborativeSceneStateV2,
   CollaborativeSceneStateV3,
   CollaborativeStatementRecord,
   CollaborativeTombstoneRecord,
-  CollaborativeTombstonesV2,
   CollaborativeTombstonesV3,
 } from '../../api/types/collaboration';
 import type { SceneVisualBlock } from '../../api/types/visual';
@@ -27,7 +25,7 @@ function filterRecordMapByTombstones<T>(
 
 function filterVisualByTombstones(
   visual: SceneVisualBlock | undefined,
-  tombstones: CollaborativeTombstonesV2 | undefined,
+  tombstones: CollaborativeTombstonesV3 | undefined,
 ): SceneVisualBlock | undefined {
   if (!visual) return undefined;
   const next: SceneVisualBlock = {};
@@ -45,7 +43,7 @@ function filterVisualByTombstones(
 function filterCompanionGroupsByTombstones(
   groups: Record<string, CollaborativeCompanionGroup> | undefined,
   liveStatementsById: Record<string, CollaborativeStatementRecord>,
-  tombstones: CollaborativeTombstonesV2 | undefined,
+  tombstones: CollaborativeTombstonesV3 | undefined,
 ): Record<string, CollaborativeCompanionGroup> | undefined {
   if (!groups) return undefined;
   const next: Record<string, CollaborativeCompanionGroup> = {};
@@ -65,44 +63,6 @@ function filterCompanionGroupsByTombstones(
   return Object.keys(next).length > 0 ? next : undefined;
 }
 
-export function filterTombstonedCollaborativeRecordsV2(
-  state: CollaborativeSceneStateV2,
-): CollaborativeSceneStateV2 {
-  const tombstones = state.tombstones;
-  if (!tombstones) return state;
-
-  const statementsById = filterRecordMapByTombstones(
-    state.statementsById,
-    tombstones.statements,
-  ) ?? {};
-  const statementOrder = state.statementOrder.filter((statementId) => !tombstones.statements?.[statementId]);
-  const companionGroupsByStatementId = filterCompanionGroupsByTombstones(
-    state.companionGroupsByStatementId,
-    statementsById,
-    tombstones,
-  );
-  const markersById = filterRecordMapByTombstones(state.markersById, tombstones.markers);
-  const visual = filterVisualByTombstones(state.visual, tombstones);
-  const assets = filterRecordMapByTombstones(state.assets, tombstones.assets);
-  const {
-    companionGroupsByStatementId: _companionGroupsByStatementId,
-    markersById: _markersById,
-    visual: _visual,
-    assets: _assets,
-    ...base
-  } = state;
-
-  return {
-    ...base,
-    statementsById,
-    statementOrder,
-    ...(companionGroupsByStatementId ? { companionGroupsByStatementId } : {}),
-    ...(markersById ? { markersById } : {}),
-    ...(visual ? { visual } : {}),
-    ...(assets ? { assets } : {}),
-  };
-}
-
 function deletedRecordIds(
   previousRecords: Record<string, unknown> | undefined,
   nextRecords: Record<string, unknown> | undefined,
@@ -112,8 +72,8 @@ function deletedRecordIds(
 }
 
 function addDeletedIdsToTombstoneSection(
-  tombstones: CollaborativeTombstonesV2,
-  sectionKey: Exclude<keyof CollaborativeTombstonesV2, 'companions'>,
+  tombstones: CollaborativeTombstonesV3,
+  sectionKey: Exclude<keyof CollaborativeTombstonesV3, 'companions'>,
   ids: string[],
   deletedAt: string,
 ): boolean {
@@ -133,9 +93,9 @@ function addDeletedIdsToTombstoneSection(
 }
 
 function addDeletedCompanionsToTombstones(
-  tombstones: CollaborativeTombstonesV2,
-  previousState: Pick<CollaborativeSceneStateV2, 'companionGroupsByStatementId'>,
-  nextState: Pick<CollaborativeSceneStateV2, 'companionGroupsByStatementId'>,
+  tombstones: CollaborativeTombstonesV3,
+  previousState: Pick<CollaborativeSceneStateV3, 'companionGroupsByStatementId'>,
+  nextState: Pick<CollaborativeSceneStateV3, 'companionGroupsByStatementId'>,
   deletedAt: string,
 ): boolean {
   const companionTombstones = cloneJson(tombstones.companions ?? {});
@@ -161,60 +121,6 @@ function addDeletedCompanionsToTombstones(
 
   if (changed) tombstones.companions = companionTombstones;
   return changed;
-}
-
-export function addCollaborativeTombstonesForDeletedRecordsV2(
-  previousState: CollaborativeSceneStateV2,
-  nextState: CollaborativeSceneStateV2,
-  deletedAt = new Date().toISOString(),
-): CollaborativeSceneStateV2 {
-  const tombstones: CollaborativeTombstonesV2 = cloneJson(nextState.tombstones ?? {});
-  let changed = false;
-
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'statements',
-    deletedRecordIds(previousState.statementsById, nextState.statementsById),
-    deletedAt,
-  ) || changed;
-  changed = addDeletedCompanionsToTombstones(
-    tombstones,
-    previousState,
-    nextState,
-    deletedAt,
-  ) || changed;
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'markers',
-    deletedRecordIds(previousState.markersById, nextState.markersById),
-    deletedAt,
-  ) || changed;
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'visualTargets',
-    deletedRecordIds(previousState.visual?.visualTargets, nextState.visual?.visualTargets),
-    deletedAt,
-  ) || changed;
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'segments',
-    deletedRecordIds(previousState.visual?.segments, nextState.visual?.segments),
-    deletedAt,
-  ) || changed;
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'recipeOverlay',
-    deletedRecordIds(previousState.visual?.recipeOverlay, nextState.visual?.recipeOverlay),
-    deletedAt,
-  ) || changed;
-  changed = addDeletedIdsToTombstoneSection(
-    tombstones,
-    'assets',
-    deletedRecordIds(previousState.assets, nextState.assets),
-    deletedAt,
-  ) || changed;
-
-  return changed ? { ...nextState, tombstones } : nextState;
 }
 
 export function filterTombstonedCollaborativeRecordsV3(

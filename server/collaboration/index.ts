@@ -1,6 +1,5 @@
 import path from 'node:path';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
 } from '../../src/api/types/collaboration';
 import { startCollaborationServer, type CollaborationServerOptions } from './server';
@@ -30,11 +29,10 @@ function parseArgs(argv: string[]): CollaborationServerOptions {
     } else if ((arg === '--schema-version' || arg === '--collaboration-schema-version') && next) {
       const schemaVersion = Number(next);
       if (
-        schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2 &&
         schemaVersion !== COLLABORATION_SCHEMA_VERSION_V3
       ) {
         throw new Error(
-          `Only collaboration schema versions ${COLLABORATION_SCHEMA_VERSION_V2} and ${COLLABORATION_SCHEMA_VERSION_V3} are supported`,
+          `Only collaboration schema version ${COLLABORATION_SCHEMA_VERSION_V3} is supported`,
         );
       }
       options.schemaVersion = schemaVersion;

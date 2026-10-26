@@ -1,7 +1,6 @@
 import type {
   CompiledScene,
   CurrentSceneDocument,
-  HistoricalSceneDocumentV4,
   PreparedCompiledScene,
 } from '../types/semantic-scene';
 
@@ -12,8 +11,6 @@ export interface IReadonlyDocumentStore {
   getCurrentSceneDocumentSnapshot(): CurrentSceneDocument | null;
   /** Stable deeply frozen source; read-only callers avoid full document copies. */
   getCurrentSceneDocumentView(): CurrentSceneDocument | null;
-  /** Historical collaboration-v2 seam. Returns null for a non-v4 current document. */
-  getHistoricalSceneDocumentV4Snapshot(): HistoricalSceneDocumentV4 | null;
   getCompiledSceneSnapshot(): CompiledScene | null;
   getPreparedSceneSnapshot(): PreparedCompiledScene | null;
 }

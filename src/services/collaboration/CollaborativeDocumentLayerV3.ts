@@ -1,6 +1,6 @@
 import type {
   CollaborationConnectionStatus,
-  CollaborationPresencePatchV2,
+  CollaborationPresencePatchV3,
   CollaborationPresenceServerMessageV3,
   CollaborativeAssetManifest,
 } from '../../api/types/collaboration';
@@ -172,7 +172,7 @@ export class CollaborativeDocumentLayerV3 {
 
   getStatus(): CollaborationConnectionStatus { return this.status; }
 
-  updatePresence(patch: CollaborationPresencePatchV2): void {
+  updatePresence(patch: CollaborationPresencePatchV3): void {
     this.options.client.updatePresence?.(patch);
   }
 

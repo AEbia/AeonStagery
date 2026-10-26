@@ -1,29 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
-  type CollaborativeSceneStateV2,
+  COLLABORATION_SCHEMA_VERSION_V3,
+  type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
 import {
-  addCollaborativeTombstonesForDeletedRecordsV2,
-  filterTombstonedCollaborativeRecordsV2,
-  planCollaborativeStateTransactionV2,
-} from '../services/collaboration/CollaborativeStateTransactionPlannerV2';
+  addCollaborativeTombstonesForDeletedRecordsV3,
+  filterTombstonedCollaborativeRecordsV3,
+  planCollaborativeStateTransactionV3,
+} from '../services/collaboration/CollaborativeStateTransactionPlannerV3';
 
-const FULL_CAPABILITIES_V2 = {
+const FULL_CAPABILITIES_V3 = {
   statements: true,
   companions: true,
 };
 
-function makeState(): CollaborativeSceneStateV2 {
+function makeState(): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
+    sceneId: 'scene_v3',
     meta: {
-      title: 'Planner Scene V2',
+      title: 'Planner Scene V3',
       fps: 60,
     },
     statementsById: {
@@ -79,10 +79,10 @@ function makeState(): CollaborativeSceneStateV2 {
   };
 }
 
-describe('CollaborativeStateTransactionPlannerV2', () => {
+describe('CollaborativeStateTransactionPlannerV3', () => {
   it('plans statement-only changes as an entity transaction when the capability exists', () => {
     const previous = makeState();
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       statementsById: {
         line_1: {
@@ -96,7 +96,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       },
     };
 
-    expect(planCollaborativeStateTransactionV2(previous, next, FULL_CAPABILITIES_V2)).toEqual({
+    expect(planCollaborativeStateTransactionV3(previous, next, FULL_CAPABILITIES_V3)).toEqual({
       kind: 'entity',
       entity: 'statements',
       changes: {
@@ -115,7 +115,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
 
   it('keeps ordinary statement time patches from changing statement order', () => {
     const previous = makeState();
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       statementsById: {
         ...previous.statementsById,
@@ -126,7 +126,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       },
     };
 
-    const plan = planCollaborativeStateTransactionV2(previous, next, FULL_CAPABILITIES_V2);
+    const plan = planCollaborativeStateTransactionV3(previous, next, FULL_CAPABILITIES_V3);
 
     expect(plan).toEqual(expect.objectContaining({
       kind: 'entity',
@@ -144,7 +144,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
 
   it('plans companion-only changes as an entity transaction when the capability exists', () => {
     const previous = makeState();
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       companionGroupsByStatementId: {
         line_1: {
@@ -159,7 +159,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       },
     };
 
-    expect(planCollaborativeStateTransactionV2(previous, next, FULL_CAPABILITIES_V2)).toEqual({
+    expect(planCollaborativeStateTransactionV3(previous, next, FULL_CAPABILITIES_V3)).toEqual({
       kind: 'entity',
       entity: 'companions',
       changes: {
@@ -179,7 +179,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
 
   it('falls back to tombstone-aware full state when statement capability is missing', () => {
     const previous = makeState();
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       statementsById: {
         bg: previous.statementsById.bg,
@@ -188,8 +188,8 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       companionGroupsByStatementId: {},
     };
 
-    const plan = planCollaborativeStateTransactionV2(previous, next, {
-      ...FULL_CAPABILITIES_V2,
+    const plan = planCollaborativeStateTransactionV3(previous, next, {
+      ...FULL_CAPABILITIES_V3,
       statements: false,
     }, { deletedAt: '2026-07-15T00:00:00.000Z' });
 
@@ -219,7 +219,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
 
   it('falls back to full state for cross-entity or scene changes', () => {
     const previous = makeState();
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       meta: { title: 'Renamed', fps: 60 },
       statementsById: {
@@ -231,7 +231,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       },
     };
 
-    expect(planCollaborativeStateTransactionV2(previous, next, FULL_CAPABILITIES_V2)).toEqual(expect.objectContaining({
+    expect(planCollaborativeStateTransactionV3(previous, next, FULL_CAPABILITIES_V3)).toEqual(expect.objectContaining({
       kind: 'full',
       reason: 'cross-entity-or-scene-change',
       state: next,
@@ -239,7 +239,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
   });
 
   it('plans noop when no changes remain after tombstone filtering', () => {
-    const previous: CollaborativeSceneStateV2 = {
+    const previous: CollaborativeSceneStateV3 = {
       ...makeState(),
       tombstones: {
         statements: {
@@ -247,7 +247,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
         },
       },
     };
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       statementsById: {
         ...previous.statementsById,
@@ -267,18 +267,18 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       statementOrder: [...previous.statementOrder, 'stale'],
     };
 
-    const plan = planCollaborativeStateTransactionV2(previous, next, FULL_CAPABILITIES_V2);
+    const plan = planCollaborativeStateTransactionV3(previous, next, FULL_CAPABILITIES_V3);
 
     expect(plan).toEqual({
       kind: 'noop',
-      state: filterTombstonedCollaborativeRecordsV2(next),
+      state: filterTombstonedCollaborativeRecordsV3(next),
     });
     expect(plan.state.statementOrder).toEqual(['line_1', 'bg']);
     expect(plan.state.statementsById).not.toHaveProperty('stale');
   });
 
-  it('adds v2 tombstones for removed statements, companions, visual records, and assets', () => {
-    const previous: CollaborativeSceneStateV2 = {
+  it('adds v3 tombstones for removed statements, companions, visual records, and assets', () => {
+    const previous: CollaborativeSceneStateV3 = {
       ...makeState(),
       visual: {
         visualTargets: {
@@ -298,7 +298,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
         },
       },
     };
-    const next: CollaborativeSceneStateV2 = {
+    const next: CollaborativeSceneStateV3 = {
       ...previous,
       statementsById: {
         bg: previous.statementsById.bg,
@@ -309,7 +309,7 @@ describe('CollaborativeStateTransactionPlannerV2', () => {
       assets: {},
     };
 
-    const withTombstones = addCollaborativeTombstonesForDeletedRecordsV2(
+    const withTombstones = addCollaborativeTombstonesForDeletedRecordsV3(
       previous,
       next,
       '2026-07-15T00:00:00.000Z',

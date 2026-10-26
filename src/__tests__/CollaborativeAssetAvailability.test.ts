@@ -4,17 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
+  COLLABORATION_SCHEMA_VERSION_V3,
   type CollaborativeAssetKind,
   type CollaborativeAssetManifest,
-  type CollaborativeSceneStateV2,
+  type CollaborativeSceneStateV3,
   type ContentHash,
 } from '../api/types/collaboration';
 import type { ResourceImportKind } from '../api/types/project';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
 import { CollaborationAssetStore } from '../../server/collaboration/assets';
 import {
-  validateCollaborativeAssetAvailabilityV2,
+  validateCollaborativeAssetAvailabilityV3,
 } from '../../server/collaboration/assetAvailability';
 
 const textEncoder = new TextEncoder();
@@ -53,14 +53,14 @@ function mergeManifests(...manifests: CollaborativeAssetManifest[]): Collaborati
   return Object.assign({}, ...manifests);
 }
 
-function makeStateV2(assets?: CollaborativeAssetManifest): CollaborativeSceneStateV2 {
+function makeStateV3(assets?: CollaborativeAssetManifest): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
-    meta: { title: 'Asset Gate Scene V2', fps: 60 },
+    sceneId: 'scene_v3',
+    meta: { title: 'Asset Gate Scene V3', fps: 60 },
     statementsById: {
       line_1: {
         id: 'line_1',
@@ -107,7 +107,7 @@ function makeStateV2(assets?: CollaborativeAssetManifest): CollaborativeSceneSta
   };
 }
 
-describe('validateCollaborativeAssetAvailabilityV2', () => {
+describe('validateCollaborativeAssetAvailabilityV3', () => {
   let tempDir: string;
   let assetStore: CollaborationAssetStore;
 
@@ -121,18 +121,18 @@ describe('validateCollaborativeAssetAvailabilityV2', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it('rejects v2 source statement references that are not covered by the manifest', async () => {
-    await expect(validateCollaborativeAssetAvailabilityV2(makeStateV2(), assetStore))
+  it('rejects v3 source statement references that are not covered by the manifest', async () => {
+    await expect(validateCollaborativeAssetAvailabilityV3(makeStateV3(), assetStore))
       .rejects.toThrow('missing manifest entry for referenced asset "background/bg.png"');
   });
 
-  it('accepts v2 source statement and companion assets after manifest files are in the asset store', async () => {
+  it('accepts v3 source statement and companion assets after manifest files are in the asset store', async () => {
     const backgroundBytes = textEncoder.encode('background-bytes');
     const chimeBytes = textEncoder.encode('chime-bytes');
     await assetStore.writeAsset('background/bg.png', backgroundBytes);
     await assetStore.writeAsset('sfx/chime.ogg', chimeBytes);
 
-    await expect(validateCollaborativeAssetAvailabilityV2(makeStateV2(mergeManifests(
+    await expect(validateCollaborativeAssetAvailabilityV3(makeStateV3(mergeManifests(
       makeSingleFileManifest('background/bg.png', 'background-image', 'background', backgroundBytes),
       makeSingleFileManifest('sfx/chime.ogg', 'audio-file', 'bgm', chimeBytes),
     )), assetStore)).resolves.toBeUndefined();
