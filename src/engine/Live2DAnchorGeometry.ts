@@ -51,9 +51,12 @@ type RefreshableModel = {
 type Point = { x: number; y: number };
 type LocalTransform = { apply: (point: Point) => Point };
 
-const FALLBACK_FRACTIONS: Readonly<Record<Live2DAnchorName, number>> = {
-  head: 0.18,
-  chest: 0.42,
+// Full-figure proportions: the chest is above the waist. At the standard
+// character height (1.3), centering 28% leaves roughly 14% headroom.
+// These remain estimates when a model supplies no anatomical metadata.
+export const LIVE2D_ANCHOR_FRACTIONS: Readonly<Record<Live2DAnchorName, number>> = {
+  head: 0.12,
+  chest: 0.28,
   center: 0.5,
   feet: 0.95,
 };
@@ -98,7 +101,7 @@ export function captureLive2DAnchorOffsets(
       const fractionX = anchor === 'head' && isFiniteFraction(headFraction?.x) ? headFraction.x : 0.5;
       const fractionY = anchor === 'head' && isFiniteFraction(headFraction?.y)
         ? headFraction.y
-        : FALLBACK_FRACTIONS[anchor];
+        : LIVE2D_ANCHOR_FRACTIONS[anchor];
       const anchorPoint = { x: bounds.x + bounds.width * fractionX, y: bounds.y + bounds.height * fractionY };
       const transformed = localTransform?.apply(anchorPoint) ?? anchorPoint;
       const x = (transformed.x - origin.x) / unitHeight;
