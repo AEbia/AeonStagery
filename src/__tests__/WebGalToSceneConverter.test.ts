@@ -874,7 +874,7 @@ describe('convertWebGalToSceneDocument', () => {
     const compiled = sceneStatementCompiler.compile(document);
     const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
     const snapshot = deriveLightingSnapshotAtTime(0.5, timeline);
-    expect(snapshot.postProcessingTargets.soyo).toMatchObject({
+    expect(snapshot.postProcessingTargets['character:soyo']).toMatchObject({
       bloomBloomScale: 0.5, bloomBrightness: 1, bloomBlur: 10, bloomThreshold: 0.3,
     });
     expect(snapshot.postProcessing).toMatchObject({ bloomBloomScale: 0, bloomBlur: 8, bloomThreshold: 0.5 });

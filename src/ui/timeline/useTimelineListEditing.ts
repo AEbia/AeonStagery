@@ -4,13 +4,13 @@ import {
   useIsCollaborationUndoDisabled, useCollaborationStatus, useOptionalApp,
 } from '../context/AppContext';
 import { deriveCollaborationStatusUx } from '../../services/collaboration/CollaborationStatusUxModel';
-import { AUTHORING_SCHEMA_VERSION, type AuthoringScope } from '../../api/types/authoring';
+import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import { buildTemplateAuthoringPreview } from '../../services/template-package';
 import { computeTimelineEndSeconds } from '../../services/sequential-flow/SequentialFlowAuthoring';
 import { showToast } from '../Toast';
 import { useSettings } from '../SettingsStore';
 import { createSemanticTimelineCorrelationId } from './semanticTimelineEditing';
-import { buildSemanticStatementLibraryInsert } from './semanticStatementInsertion';
+import { prepareSemanticStatementLibraryMenu } from './semanticStatementInsertion';
 import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
 import type { SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import type { QuickParamPatch } from './StatementQuickControls';
@@ -24,12 +24,12 @@ function createTimelineListCorrelationId(): string {
 
 /** List-specific commands reuse the shared semantic command and selection contract. */
 export function useTimelineListEditing(
-  props: Pick<TimelineListViewProps, 'sceneData' | 'handleSelect' | 'setSelectedIds' | 'setCurrentTime' | 'availableTemplates'>,
+  props: Pick<TimelineListViewProps, 'handleSelect' | 'setSelectedIds' | 'setCurrentTime' | 'availableTemplates'>,
   snapshot: SemanticTimelineSnapshot,
   gapMenu: TimelineListGapMenuState,
 ) {
-  const { sceneData, handleSelect, setSelectedIds, setCurrentTime, availableTemplates } = props;
-  const { activeGapMenu, setActiveGapMenu, gapInsertPendingRef, timelineListGapByIndex } = gapMenu;
+  const { handleSelect, setSelectedIds, setCurrentTime, availableTemplates } = props;
+  const { activeGapMenu, setActiveGapMenu, gapInsertPendingRef, timelineListGapByIndex, gapInsertOptions } = gapMenu;
   const playbackAdapter = usePlaybackAdapter();
   const documentStore = useDocumentStore();
   const { document: sceneDocument, items: semanticTimelineItems, actions: semanticTimelineActions, itemById: semanticTimelineItemByDisplayId } = snapshot;
@@ -78,45 +78,18 @@ export function useTimelineListEditing(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared library callback receives either statement or legacy/template data selected at runtime; decoding stays at the authoring boundary.
   const handleSelectActionFromLibrary = useCallback(async (type: 'statement' | 'template', data: any) => {
     if (blockOfflineAuthoring()) return;
-    if (!semanticAuthoring || !activeGapMenu || gapInsertPendingRef.current) return;
+    if (!semanticAuthoring || !activeGapMenu || !gapInsertOptions || gapInsertPendingRef.current) return;
     const { gap } = activeGapMenu;
-    const nextRootStatement = semanticTimelineItems
-      .slice(gap.index + 1)
-      .find((item) => item.locator.kind === 'statement');
-    const beforeStatementId = nextRootStatement?.statementId;
-    const prevSpeakerId = gap.previous.source.type === 'dialogue' && typeof gap.previous.displayAction.params?.speaker === 'string'
-      ? gap.previous.displayAction.params.speaker
-      : undefined;
-    const targetCharId = prevSpeakerId || sceneData.meta?.characters?.[0]?.id;
-    const scope: AuthoringScope = targetCharId
-      ? prevSpeakerId
-        ? {
-            kind: 'inferred-character' as const,
-            charId: targetCharId,
-            source: 'blank-menu-track' as const,
-          }
-        : {
-            kind: 'character' as const,
-            charId: targetCharId,
-          }
-      : { kind: 'none' as const };
+    const { scope } = gapInsertOptions;
 
     gapInsertPendingRef.current = true;
     try {
       if (type === 'statement' && data.blockId) {
         const document = documentStore.getCurrentSceneDocumentSnapshot();
-        const result = buildSemanticStatementLibraryInsert({
-          blockId: data.blockId,
+        const result = prepareSemanticStatementLibraryMenu({
+          ...gapInsertOptions,
           document,
-          sceneMeta: sceneData.meta,
-          anchorTime: gap.time,
-          origin: 'timeline-list-gap',
-          scope,
-          correlationPrefix: 'timeline_list_gap_insert',
-          lifecycleEndCorrelationPrefix: 'timeline_list_gap_lifecycle_end',
-          lifecycleTargetBindingCorrelationPrefix: 'timeline_list_gap_lifecycle_target_binding',
-          beforeStatementId,
-        });
+        }).resolve(data.blockId);
         if (result.kind === 'warning') {
           showToast(result.message, 'warning');
           setActiveGapMenu(null);
@@ -159,7 +132,7 @@ export function useTimelineListEditing(
     } finally {
       gapInsertPendingRef.current = false;
     }
-  }, [activeGapMenu, blockOfflineAuthoring, commands, documentStore, availableTemplates, sceneData.meta, semanticAuthoring, semanticTimelineItems, gapInsertPendingRef, setActiveGapMenu]);
+  }, [activeGapMenu, blockOfflineAuthoring, commands, documentStore, availableTemplates, semanticAuthoring, gapInsertOptions, gapInsertPendingRef, setActiveGapMenu]);
 
   const handlePasteAtGap = useCallback(async (time: number) => {
     const editorStore = app?.stores?.editor;

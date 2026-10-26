@@ -2,6 +2,7 @@ import {
   SCENE_SCHEMA_VERSION,
   SCENE_SCHEMA_VERSION_V5,
   type SceneDocumentV5,
+  type SceneStatement,
 } from '../../api/types/semantic-scene';
 import { SceneDocumentCodec, sceneDocumentCodec } from './SceneDocumentCodec';
 import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
@@ -69,10 +70,18 @@ export function validateV4Stage(document: unknown, codec: SceneDocumentCodec): v
   const projection = codec.parseKnownProjection(working);
   for (const [index, statement] of projection.statements.entries()) {
     const path = `scene.statements[${index}]`;
-    sceneStatementDefinitionRegistry.assertSupportedInSchema(statement.type, 4, `${path}.type`);
+    validateV4Statement(statement, path);
     for (const [companionIndex, companion] of (statement.companions ?? []).entries()) {
-      sceneStatementDefinitionRegistry.assertSupportedInSchema(companion.type, 4, `${path}.companions[${companionIndex}].type`);
+      validateV4Statement(companion, `${path}.companions[${companionIndex}]`);
     }
+  }
+}
+
+function validateV4Statement(statement: Pick<SceneStatement, 'type' | 'params'>, path: string): void {
+  sceneStatementDefinitionRegistry.assertSupportedInSchema(statement.type, 4, `${path}.type`);
+  if (statement.type === 'lighting' && 'target' in statement.params
+    && statement.params.target !== undefined && typeof statement.params.target !== 'string') {
+    throw new Error(`Structured lighting targets require scene schemaVersion 5 at ${path}.params.target`);
   }
 }
 

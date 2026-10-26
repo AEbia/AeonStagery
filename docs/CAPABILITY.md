@@ -289,7 +289,11 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
 - **对象视觉风格 (`visualStyle`)**：作用于单个角色或物体本身的视觉属性，例如边缘光（Rim-light）、色调调和与融入度。
 - **场景光照 (`lighting`)**：提供全局光照预设（Preset）、色彩覆盖层（Overlay）以及点光源（PointLight），具备独立的启停与调制生命周期。
 
-“设置后期处理”使用 `lighting` 的 `effect: "post"`，目标可选全景（`panorama`）、角色 ID 或环境层 ID。Bloom 的四项控制独立生效，支持过渡、Seek 和导出：
+“设置模糊”“变化模糊”和“重置模糊”使用 `effect: "blur"`，可分别选择任意角色或环境图层。`target` 支持角色 ID、环境层 ID，以及原有的 `global`（全景）、`characters`（全部角色）和 `background`（全部环境层）。仅处理主背景时使用 `{ "kind": "environmentLayer", "id": "background" }`。模糊与后期处理均支持 `{ "kind": "character" | "environmentLayer", "id": "<id>" }` 结构化引用，以区分同名对象和保留的范围名称；对象尚未登场时保留效果，登场后应用。对象强度独立过渡，重置指定对象不会改变其他对象的效果，Seek 和导出使用同一状态。
+
+对象选择器中的角色只显示名称；单个环境层始终显示其 `layerId`，与环境图层 ID 编辑项一致，不使用 `label`、资源文件名或顺序编号替代。资源路径只在悬停提示中提供补充信息。模糊和后期处理均提供“全部环境图层”和“全部角色”选项，整组范围与单层 ID 明确区分。
+
+“设置后期处理”使用 `lighting` 的 `effect: "post"`，目标可选全景（`panorama`）、全部角色（`{ "kind": "group", "group": "characters" }`）、全部环境图层（`{ "kind": "group", "group": "environmentLayers" }`）、单个角色 ID 或环境层 ID。变化和重置沿用同一目标。Bloom 的四项控制独立生效，支持过渡、Seek 和导出：
 
 | 参数 | 含义 | 新建“设置后期处理”的值 | WebGAL 对应参数 |
 | --- | --- | --- | --- |

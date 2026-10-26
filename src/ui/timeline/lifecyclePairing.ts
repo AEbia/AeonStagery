@@ -228,6 +228,7 @@ export function buildLifecyclePairTable(
   }
 
   const registry = options.registry ?? sceneStatementDefinitionRegistry;
+  const lightingCharacterIds = new Set((document.meta.characters ?? []).map((character) => character.id));
   const statementOrderByStatementId = createLifecycleStatementOrderMap(
     document,
     options.canonicalStatementOrder,
@@ -235,7 +236,7 @@ export function buildLifecyclePairTable(
 
   const groups = new Map<string, BoundaryEvent[]>();
   for (const statement of document.statements) {
-    const lifecycle = registry.timelineLifecyclePresentation(statement);
+    const lifecycle = registry.timelineLifecyclePresentation(statement, lightingCharacterIds);
     if (!lifecycle) continue;
     const typeKey = lifecycle.definition.presentationTypeKey;
     const groupKey = `${typeKey}\0${lifecycle.stateKey}`;

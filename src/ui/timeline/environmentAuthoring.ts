@@ -1,5 +1,5 @@
 import type { TimelineAction, TimelineScene } from './semanticTimelineTypes';
-import { BACKGROUND_LAYER_ID, isEnvironmentAction } from '../../engine/environmentLayerModel';
+import { isEnvironmentAction } from '../../engine/environmentLayerModel';
 import {
   collectEnvironmentLayerPresentations,
   getEnvironmentActionLayerId,
@@ -21,6 +21,7 @@ export interface AuthorFacingEnvironmentLayerOption {
   layerId: string;
   displayLabel: string;
   authoredLabel?: string;
+  sourceFile?: string;
   isBackground: boolean;
   order: number;
 }
@@ -38,13 +39,10 @@ function toAuthorFacingEnvironmentOption(
     layerId: presentation.layerId,
     displayLabel: presentation.displayLabel,
     authoredLabel: presentation.authoredLabel,
+    sourceFile: presentation.sourceFile,
     isBackground: presentation.isBackground,
     order: presentation.order,
   };
-}
-
-function normalizeDisplayName(value: string): string {
-  return value.trim().toLocaleLowerCase();
 }
 
 function slugifyLayerName(value: string): string {
@@ -67,11 +65,10 @@ export function listAuthorFacingEnvironmentLayers(sceneData: TimelineScene): Aut
 }
 
 export function getAuthorFacingEnvironmentLayerLabel(
-  sceneData: TimelineScene,
+  _sceneData: TimelineScene,
   layerId: string,
 ): string {
-  const presentations = collectEnvironmentLayerPresentations(sceneData);
-  return presentations.get(layerId)?.displayLabel ?? (layerId === BACKGROUND_LAYER_ID ? '背景' : '环境画面');
+  return layerId;
 }
 
 export function withAuthorFacingEnvironmentLabel(
@@ -83,14 +80,7 @@ export function withAuthorFacingEnvironmentLabel(
   }
 
   const layerId = getEnvironmentActionLayerId(action);
-  if (!layerId || layerId === BACKGROUND_LAYER_ID) {
-    return action;
-  }
-
-  const currentLabel = typeof action.params.label === 'string' ? action.params.label.trim() : '';
-  if (currentLabel) {
-    return action;
-  }
+  if (!layerId || action.params.label === layerId) return action;
 
   const displayLabel = getAuthorFacingEnvironmentLayerLabel(sceneData, layerId);
   return {
@@ -131,9 +121,8 @@ export function resolveEnvironmentLayerSelection(
   name: string,
 ): EnvironmentLayerSelection {
   const trimmedName = name.trim();
-  const normalizedName = normalizeDisplayName(trimmedName);
   const layers = listAuthorFacingEnvironmentLayers(sceneData);
-  const existingLayer = layers.find((layer) => normalizeDisplayName(layer.displayLabel) === normalizedName);
+  const existingLayer = layers.find((layer) => layer.layerId === trimmedName);
 
   if (existingLayer) {
     return {

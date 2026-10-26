@@ -1,5 +1,6 @@
 import * as PIXI from 'pixi.js';
 import type { BlendMode } from '../../api/types/blend-mode';
+import { LIGHTING_GROUP_TARGETS, parseCompiledLightingObjectTarget } from '../../api/types/lighting-target';
 import {
   AdjustmentFilter,
   AdvancedBloomFilter,
@@ -25,7 +26,12 @@ type OwnedTargetFilter = PIXI.Filter & {
   [TARGET_POST_PROCESSING_KIND]?: TargetPostFilterKind;
 };
 
-type TargetPostFilterKind = 'adjustment' | 'bloom' | 'godray' | 'rgbSplit' | 'overlay';
+type TargetPostFilterKind = 'blur' | 'adjustment' | 'bloom' | 'godray' | 'rgbSplit' | 'overlay';
+
+interface TargetEffects {
+  postProcessing: LightingPostProcessingSnapshot;
+  blur: number;
+}
 
 function markOwnedFilter<T extends PIXI.Filter>(filter: T, kind: TargetPostFilterKind): T {
   filter.resolution = 'inherit';
@@ -40,7 +46,7 @@ function isOwnedFilter(filter: PIXI.Filter): boolean {
 
 function getFilterKind(filter: PIXI.Filter): TargetPostFilterKind | null {
   const kind = (filter as OwnedTargetFilter)[TARGET_POST_PROCESSING_KIND];
-  return kind === 'adjustment' || kind === 'bloom' || kind === 'godray' || kind === 'rgbSplit' || kind === 'overlay'
+  return kind === 'blur' || kind === 'adjustment' || kind === 'bloom' || kind === 'godray' || kind === 'rgbSplit' || kind === 'overlay'
     ? kind
     : null;
 }
@@ -148,43 +154,32 @@ function destroyFilter(filter: PIXI.Filter): void {
  * pending until a later reconciliation pass can resolve their runtime object.
  */
 class TargetPostProcessingController {
-  private appliedTargets = new Set<string>();
-  private pendingTargets = new Map<string, LightingPostProcessingSnapshot>();
+  private appliedTargets = new Set<PIXI.Container>();
+  private targetStates = new Map<string, Partial<TargetEffects>>();
+  private hasPendingTargets = false;
 
   applySnapshot(snapshot: LightingSnapshot): void {
-    const targetStates = snapshot.postProcessingTargets || {};
-    const nextTargets = new Set(Object.keys(targetStates));
-
-    for (const targetId of new Set([...this.appliedTargets, ...this.pendingTargets.keys()])) {
-      if (!nextTargets.has(targetId)) {
-        this.clearTarget(targetId);
-        this.appliedTargets.delete(targetId);
-        this.pendingTargets.delete(targetId);
-      }
+    const postStates = snapshot.postProcessingTargets || {};
+    const blurStates = snapshot.blurTargets || {};
+    this.targetStates.clear();
+    for (const target of new Set([...Object.keys(postStates), ...Object.keys(blurStates)])) {
+      this.targetStates.set(target, {
+        ...(postStates[target] ? { postProcessing: postStates[target] } : {}),
+        ...(blurStates[target] !== undefined ? { blur: blurStates[target] } : {}),
+      });
     }
-
-    for (const [targetId, state] of Object.entries(targetStates)) {
-      if (this.applyTarget(targetId, state)) {
-        this.appliedTargets.add(targetId);
-        this.pendingTargets.delete(targetId);
-      } else {
-        this.appliedTargets.delete(targetId);
-        this.pendingTargets.set(targetId, state);
-      }
-    }
+    this.reconcileTargets();
   }
 
-  /** Alias kept small and explicit for runtime callers that reconcile visual state. */
   apply(snapshot: LightingSnapshot): void {
     this.applySnapshot(snapshot);
   }
 
   clear(): void {
-    for (const targetId of this.appliedTargets) {
-      this.clearTarget(targetId);
-    }
+    for (const displayObject of this.appliedTargets) this.clearTarget(displayObject);
     this.appliedTargets.clear();
-    this.pendingTargets.clear();
+    this.targetStates.clear();
+    this.hasPendingTargets = false;
   }
 
   clearAll(): void {
@@ -193,27 +188,55 @@ class TargetPostProcessingController {
 
   /** Retry target states whose runtime display objects were not available yet. */
   reconcilePendingTargets(): void {
-    for (const [targetId, state] of this.pendingTargets) {
-      if (!this.applyTarget(targetId, state)) continue;
-      this.pendingTargets.delete(targetId);
-      this.appliedTargets.add(targetId);
+    if (this.hasPendingTargets) this.reconcileTargets();
+  }
+
+  private reconcileTargets(): void {
+    // Resolve before applying: legacy IDs and explicit references can name the
+    // same object, and its blur and post-processing must share one owned stack.
+    const resolved = new Map<PIXI.Container, TargetEffects>();
+    this.hasPendingTargets = false;
+    for (const [target, effects] of this.targetStates) {
+      const displayObject = this.getTargetDisplayObject(target);
+      if (!displayObject) {
+        this.hasPendingTargets = true;
+        continue;
+      }
+      resolved.set(displayObject, {
+        ...(resolved.get(displayObject) ?? { postProcessing: DEFAULT_POST_PROCESSING_SNAPSHOT, blur: 0 }),
+        ...effects,
+      });
     }
+    for (const displayObject of this.appliedTargets) {
+      if (!resolved.has(displayObject)) this.clearTarget(displayObject);
+    }
+    for (const [displayObject, effects] of resolved) this.applyTarget(displayObject, effects);
+    this.appliedTargets = new Set(resolved.keys());
   }
 
   private getTargetDisplayObject(targetId: string): PIXI.Container | null {
-    if (typeof live2DManager.hasCharacter === 'function' && live2DManager.hasCharacter(targetId)) {
+    if (targetId === LIGHTING_GROUP_TARGETS.environmentLayers) {
+      return stageManager.getLayer?.('background') ?? null;
+    }
+    if (targetId === LIGHTING_GROUP_TARGETS.characters) {
+      if (live2DManager.hasActiveFilterWarmup?.()) return null;
+      return stageManager.getLayer?.('characters') ?? null;
+    }
+    const object = parseCompiledLightingObjectTarget(targetId);
+    const id = object?.id ?? targetId;
+    if (object?.kind !== 'environmentLayer'
+      && typeof live2DManager.hasCharacter === 'function' && live2DManager.hasCharacter(id)) {
       if (typeof live2DManager.canApplyContainerFilters === 'function'
-        && !live2DManager.canApplyContainerFilters(targetId)) {
+        && !live2DManager.canApplyContainerFilters(id)) {
         return null;
       }
-      return live2DManager.getContainer(targetId);
+      return live2DManager.getContainer(id);
     }
-    return stageManager.getEnvironmentLayerContainer?.(targetId) ?? null;
+    return object?.kind === 'character' ? null : stageManager.getEnvironmentLayerContainer?.(id) ?? null;
   }
 
-  private applyTarget(targetId: string, state: LightingPostProcessingSnapshot): boolean {
-    const displayObject = this.getTargetDisplayObject(targetId);
-    if (!displayObject) return false;
+  private applyTarget(displayObject: PIXI.Container, effects: TargetEffects): void {
+    const state = effects.postProcessing;
 
     const existingFilters = ((displayObject.filters as PIXI.Filter[] | null) || []);
     const externalFilters = existingFilters.filter((filter) => !isOwnedFilter(filter));
@@ -225,6 +248,13 @@ class TargetPostProcessingController {
       if (index < 0) return null;
       return ownedFilters.splice(index, 1)[0] as T;
     };
+
+    if (effects.blur > 0) {
+      const blur = take<PIXI.BlurFilter>('blur') ?? markOwnedFilter(new PIXI.BlurFilter(), 'blur');
+      blur.strength = effects.blur;
+      blur.enabled = true;
+      nextOwned.push(blur);
+    }
 
     if (!isDefaultPostProcessing(state)) {
       if (
@@ -311,12 +341,10 @@ class TargetPostProcessingController {
     const filters = [...externalFilters, ...nextOwned];
     displayObject.filters = filters.length > 0 ? filters : null;
     (displayObject as typeof displayObject & { _filtersDirty?: boolean })._filtersDirty = true;
-    return true;
   }
 
-  private clearTarget(targetId: string): void {
-    const displayObject = this.getTargetDisplayObject(targetId);
-    if (!displayObject) return;
+  private clearTarget(displayObject: PIXI.Container): void {
+    if (displayObject.destroyed) return;
     const filters = ((displayObject.filters as PIXI.Filter[] | null) || []);
     const remaining = filters.filter((filter) => !isOwnedFilter(filter));
     filters.filter((filter) => isOwnedFilter(filter)).forEach(destroyFilter);

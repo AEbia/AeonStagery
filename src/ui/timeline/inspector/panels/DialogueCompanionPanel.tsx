@@ -323,7 +323,7 @@ export function DialogueCompanionPanel(props: DialogueCompanionPanelProps) {
                 const replacement = createDialogueCompanionDraft(
                   value as DialogueCompanionFamily,
                   parent.params.speakerId,
-                  currentTarget === '$speaker' ? undefined : currentTarget,
+                  typeof currentTarget === 'string' && currentTarget !== '$speaker' ? currentTarget : undefined,
                 );
                 if (!replacement) return;
                 updateCompanion(companion, { type: replacement.type, params: replacement.params } as Partial<DialogueCompanion>);

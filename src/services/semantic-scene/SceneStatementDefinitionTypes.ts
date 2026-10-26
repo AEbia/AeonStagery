@@ -105,6 +105,13 @@ export interface SceneStatementDefinition<Family extends StatementFamily = State
   readonly discriminators: readonly string[];
   readonly attachableTo?: readonly StatementFamily[];
   parseParams(input: unknown, path: string): StatementParamsByFamily[Family];
+  /** Return unchanged params when this family does not reference the renamed character. */
+  renameCharacterReferences?(
+    params: StatementParamsByFamily[Family],
+    currentId: string,
+    nextId: string,
+    characterIds: ReadonlySet<string>,
+  ): StatementParamsByFamily[Family];
   temporalExtent(params: StatementParamsByFamily[Family]): number;
   collectAssetReferences(params: StatementParamsByFamily[Family]): readonly AssetReferenceField[];
   readonly compiledAssetSlots?: readonly CompiledAssetSlotDefinition[];

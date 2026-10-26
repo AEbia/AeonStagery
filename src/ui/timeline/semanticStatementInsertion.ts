@@ -1,3 +1,4 @@
+import { type LightingTarget, lightingTargetKey, resolveLightingTarget } from '../../api/types/lighting-target';
 import type {
   AuthoringOrigin,
   AuthoringScope,
@@ -17,12 +18,14 @@ import {
   createSemanticStatementDraftForBlock,
   getSemanticStatementBlock,
   NON_INSERTABLE_SEMANTIC_STATEMENT_BLOCK_IDS,
+  SEMANTIC_STATEMENT_BLOCKS,
 } from './semanticStatementBlocks';
 import {
   insertLifecycleEndFromMenu,
   type LifecycleEndAuthoringMetadata,
 } from './insertLifecycleEndCommand';
 import { resolveLifecycleTargetBinding } from './lifecycleTargetBinding';
+import { buildLifecyclePairTable, type LifecyclePairTable } from './lifecyclePairing';
 import { resolveActiveLensFiltersAtTime } from '../../services/semantic-scene/LensFilterStatementValidator';
 
 export interface SemanticStatementLibraryInsertOptions {
@@ -32,6 +35,7 @@ export interface SemanticStatementLibraryInsertOptions {
   readonly anchorTime: number;
   readonly origin: AuthoringOrigin;
   readonly scope: AuthoringScope;
+  readonly lightingTarget?: LightingTarget;
   readonly preferredLifecycleStartStatementIds?: ReadonlySet<string>;
   readonly correlationPrefix?: string;
   readonly lifecycleEndCorrelationPrefix?: string;
@@ -49,6 +53,13 @@ export type SemanticStatementLibraryInsertResult =
 export function buildSemanticStatementLibraryInsert(
   options: SemanticStatementLibraryInsertOptions,
 ): SemanticStatementLibraryInsertResult {
+  return resolveSemanticStatementLibraryInsert(options);
+}
+
+function resolveSemanticStatementLibraryInsert(
+  options: SemanticStatementLibraryInsertOptions,
+  lifecycleTable?: LifecyclePairTable,
+): SemanticStatementLibraryInsertResult {
   const {
     blockId,
     document,
@@ -56,7 +67,7 @@ export function buildSemanticStatementLibraryInsert(
     anchorTime,
     origin,
     scope,
-    preferredLifecycleStartStatementIds = new Set<string>(),
+    preferredLifecycleStartStatementIds: selectedStarts = new Set<string>(),
     correlationPrefix = 'statement_library_insert',
     lifecycleEndCorrelationPrefix,
     lifecycleTargetBindingCorrelationPrefix,
@@ -71,18 +82,32 @@ export function buildSemanticStatementLibraryInsert(
   const currentFilterId = document
     ? resolveActiveLensFiltersAtTime(document, anchorTime)[0]?.recipeId
     : undefined;
+  const charId = scope.kind === 'character' || scope.kind === 'inferred-character' ? scope.charId : null;
+  const lightingTarget = options.lightingTarget ?? (charId ? { kind: 'character' as const, id: charId } : undefined);
+  const characterIds = new Set((document?.meta.characters ?? sceneMeta.characters ?? []).map((character) => character.id));
+  const preferredLifecycleStartStatementIds = new Set([...selectedStarts].filter((id) => {
+    const statement = document?.statements.find((candidate) => candidate.id === id);
+    if (!lightingTarget || statement?.type !== 'lighting') return true;
+    const { effect } = statement.params;
+    if (effect !== 'blur' && effect !== 'post') return true;
+    const rowTarget = resolveLightingTarget(lightingTarget, effect, characterIds);
+    // Individual environment layers share the row whose default target is the whole group.
+    if (rowTarget.kind === 'group' && rowTarget.group === 'environmentLayers'
+      && resolveLightingTarget(statement.params.target, effect, characterIds).kind === 'environmentLayer') return true;
+    return lightingTargetKey(statement.params.target, effect, characterIds) === lightingTargetKey(lightingTarget, effect, characterIds);
+  }));
   const draftInput = {
     sceneMeta,
-    charId: scope.kind === 'character' || scope.kind === 'inferred-character' ? scope.charId : null,
-    ...(scope.kind === 'character' || scope.kind === 'inferred-character'
-      ? { stateTarget: scope.charId }
-      : {}),
+    charId,
+    ...(charId ? { stateTarget: charId } : {}),
+    lightingTarget,
     ...(currentFilterId ? { currentFilterId } : {}),
     ...(options.dialoguePresentation ? { dialoguePresentation: options.dialoguePresentation } : {}),
     ...(options.dialogueTemplate ? { dialogueTemplate: options.dialogueTemplate } : {}),
   };
 
   if (document) {
+    const table = lifecycleTable ?? buildLifecyclePairTable(document);
     const endResult = insertLifecycleEndFromMenu(
       document,
       blockId,
@@ -93,6 +118,7 @@ export function buildSemanticStatementLibraryInsert(
         origin,
       } satisfies LifecycleEndAuthoringMetadata,
       preferredLifecycleStartStatementIds,
+      table,
     );
     if (endResult.ok) return { kind: 'intent', intent: endResult.intent };
     if (endResult.reason === 'stale') {
@@ -105,6 +131,7 @@ export function buildSemanticStatementLibraryInsert(
       anchorTime,
       draftInput,
       preferredLifecycleStartStatementIds,
+      table,
     );
     if (dependencyCommand) {
       return {
@@ -128,6 +155,9 @@ export function buildSemanticStatementLibraryInsert(
   }
 
   const blockMeta = getSemanticStatementBlock(blockId);
+  if (document && blockMeta?.stateSpanDependencyCommand) {
+    return { kind: 'warning', message: '此处没有可变化的匹配生命周期' };
+  }
   if (blockMeta?.lifecycleEndCommand) {
     return { kind: 'warning', message: '此处没有可结束的匹配生命周期' };
   }
@@ -153,6 +183,35 @@ export function buildSemanticStatementLibraryInsert(
       ...(options.beforeStatementId ? { beforeStatementId: options.beforeStatementId } : {}),
       statement,
     },
+  };
+}
+
+/** Availability and insertion cross the same seam and resolve the same authoring context. */
+export function prepareSemanticStatementLibraryMenu(
+  options: Omit<SemanticStatementLibraryInsertOptions, 'blockId'>,
+) {
+  const lifecycleTable = options.document ? buildLifecyclePairTable(options.document) : undefined;
+  const results = new Map<string, SemanticStatementLibraryInsertResult>();
+  const resolve = (blockId: string): SemanticStatementLibraryInsertResult => {
+    const cached = results.get(blockId);
+    if (cached) return cached;
+    const result = resolveSemanticStatementLibraryInsert({ ...options, blockId }, lifecycleTable);
+    results.set(blockId, result);
+    return result;
+  };
+  const available = (command: 'lifecycleEndCommand' | 'stateSpanDependencyCommand'): ReadonlySet<string> => {
+    const ids = new Set<string>();
+    if (options.document) {
+      for (const block of SEMANTIC_STATEMENT_BLOCKS) {
+        if (block[command] && resolve(block.id).kind === 'intent') ids.add(block.id);
+      }
+    }
+    return ids;
+  };
+  return {
+    resolve,
+    get availableLifecycleEndCommandIds() { return available('lifecycleEndCommand'); },
+    get availableLifecycleTargetBindingCommandIds() { return available('stateSpanDependencyCommand'); },
   };
 }
 

@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { TimelineAction, TimelineScene } from '../ui/timeline/semanticTimelineTypes';
 import { createSemanticStatementDraftForBlock } from '../ui/timeline/semanticStatementBlocks';
 import { buildTimelineTracks, getTimelineTrackId, isCharacterTrackAction } from '../ui/timeline/timelineTrackPresentation';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument } from '../api/types/semantic-scene';
+import { sceneDocumentCodec, sceneStatementCompiler } from '../services/semantic-scene';
+import { buildSemanticStatementLibraryInsert } from '../ui/timeline/semanticStatementInsertion';
+import { buildSemanticTimelineReadModel } from '../ui/timeline/semanticTimelineReadModel';
 
 const sceneWithBgm: TimelineScene = {
   sceneId: 'timeline-track-presentation',
@@ -37,7 +41,8 @@ describe('timelineTrackPresentation', () => {
       'setEnvironmentLayer',
       'transformEnvironmentLayer',
     ]);
-    expect(environmentTrack?.actions.find(({ id }) => id === 'transform-layer')?.action.params.label).toBe('前景雾');
+    expect(environmentTrack?.actions.find(({ id }) => id === 'transform-layer')?.action.params.label).toBe('fog-bank');
+    expect(environmentTrack?.actions.find(({ id }) => id === 'set-layer')?.action.params.label).toBe('fog-bank');
     expect(tracks.some((track) => track.id === 'lens')).toBe(false);
     expect(tracks.some((track) => track.id.startsWith('env:'))).toBe(false);
     expect(tracks[tracks.length - 2]?.id).toBe('environment');
@@ -47,6 +52,42 @@ describe('timelineTrackPresentation', () => {
   it('keeps the environment track at the bottom when no BGM track is visible', () => {
     const tracks = buildTimelineTracks(sceneWithoutBgm);
     expect(tracks[tracks.length - 1]?.id).toBe('environment');
+  });
+
+  it.each(['setBlur', 'resetBlur', 'setPostProcessing', 'resetPostProcessing'])(
+    'places %s for individual environment layers on the environment row', (actionType) => {
+      for (const target of ['fog-bank', 'environmentLayer:fog-bank', 'environmentLayer:1']) {
+        const candidate = action({ action: actionType, params: { target } });
+        expect(getTimelineTrackId(sceneWithBgm, candidate)).toBe('environment');
+        expect(isCharacterTrackAction(sceneWithBgm, candidate)).toBe(false);
+      }
+    },
+  );
+
+  it.each(['blur', 'post'] as const)('keeps environment %s lifecycle blocks on the environment row before and after compilation', (effect) => {
+    const document = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'environment-lighting',
+      meta: { title: 'Environment lighting', characters: [{ id: 'background', name: '主角' }] },
+      statements: ['set', 'modulate', 'reset'].map((mode, index) => ({
+        id: mode,
+        time: index + 1,
+        type: 'lighting',
+        params: { effect, mode, target: { kind: 'group', group: 'environmentLayers' } },
+      })),
+    });
+
+    for (const compiled of [sceneStatementCompiler.compile(document), null]) {
+      const scene: TimelineScene = {
+        sceneId: document.sceneId,
+        meta: document.meta,
+        timeline: buildSemanticTimelineReadModel(document, compiled).map((item) => item.displayAction),
+      };
+      const tracks = buildTimelineTracks(scene);
+      expect(tracks.find((track) => track.id === 'environment')?.actions.map(({ action }) => action.time)).toEqual([1, 2, 3]);
+      expect(tracks.find((track) => track.id === 'global')?.actions).toHaveLength(0);
+      expect(tracks.find((track) => track.id === 'char:background')?.actions).toHaveLength(0);
+    }
   });
 });
 
@@ -67,6 +108,59 @@ function action(input: Partial<TimelineAction> & Pick<TimelineAction, 'action'>)
 }
 
 describe('timeline track target classification', () => {
+  it.each([
+    ['blur', 'hero'],
+    ['post', 'hero'],
+    ['blur', 'background'],
+    ['post', 'panorama'],
+    ['blur', 'group:characters'],
+    ['post', 'environmentLayer:fog'],
+  ] as const)('keeps %s inserted from character %s on that character track throughout its lifecycle', (effect, charId) => {
+    let document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'character-lighting-insert',
+      meta: {
+        title: 'Character lighting insertion',
+        characters: [{ id: 'bystander', name: '旁观者' }, { id: charId, name: '主角' }],
+      },
+      statements: [],
+    };
+
+    const blocks = [`lighting.${effect}`, `lighting.modulate-${effect}`, `lighting.reset-${effect}`];
+    for (const [index, blockId] of blocks.entries()) {
+      const time = index + 1;
+      const result = buildSemanticStatementLibraryInsert({
+        blockId,
+        document,
+        sceneMeta: document.meta,
+        anchorTime: time,
+        origin: 'blank-context-menu',
+        scope: { kind: 'inferred-character', charId, source: 'blank-menu-track' },
+      });
+      expect(result.kind).toBe('intent');
+      if (result.kind !== 'intent') throw new Error(`Cannot insert ${blockId}`);
+      expect(result.intent.statement.params).toMatchObject({ target: { kind: 'character', id: charId } });
+      document = sceneDocumentCodec.parseAndValidate({
+        ...document,
+        statements: [...document.statements, { ...result.intent.statement, id: blockId, time }],
+      });
+    }
+
+    // The timeline must retain the row while compilation is pending as well.
+    for (const compiled of [sceneStatementCompiler.compile(document), null]) {
+      const scene: TimelineScene = {
+        sceneId: document.sceneId,
+        meta: document.meta,
+        timeline: buildSemanticTimelineReadModel(document, compiled).map((item) => item.displayAction),
+      };
+      const tracks = buildTimelineTracks(scene);
+      const characterTrack = tracks.find((track) => track.id === `char:${charId}`);
+      expect(characterTrack?.actions.map(({ action }) => action.time)).toEqual([1, 2, 3]);
+      expect(tracks.find((track) => track.id === 'global')?.actions).toHaveLength(0);
+      expect(tracks.find((track) => track.id === 'char:bystander')?.actions).toHaveLength(0);
+    }
+  });
+
   it('does not treat non-character ids as character track targets', () => {
     const cases: Array<[TimelineAction, string]> = [
       [action({ action: 'addImage', params: { id: 'image_ee6e5745' } }), 'global'],
@@ -89,11 +183,63 @@ describe('timeline track target classification', () => {
       action({ action: 'playMotion', params: { id: 'char-1' } }),
       action({ action: 'dialogue', params: { speakerId: 'char-1' } }),
       action({ action: 'setCompositeRecipe', params: { targetId: 'char-1' } }),
+      action({ action: 'setBlur', params: { target: 'char-1' } }),
+      action({ action: 'resetBlur', params: { target: 'character:char-1' } }),
+      action({ action: 'setPostProcessing', params: { target: 'character:char-1' } }),
+      action({ action: 'resetPostProcessing', params: { target: 'char-1' } }),
     ];
 
     for (const candidate of cases) {
       expect(getTimelineTrackId(classificationScene, candidate)).toBe('char:char-1');
       expect(isCharacterTrackAction(classificationScene, candidate)).toBe(true);
+    }
+  });
+
+  it.each(['blur', 'post'] as const)('keeps %s scene, group and environment targets off character tracks', (effect) => {
+    const scene: TimelineScene = {
+      ...classificationScene,
+      meta: {
+        ...classificationScene.meta,
+        characters: [
+          'char-1', 'global', 'background', 'characters', 'all', 'panorama',
+          'group:characters', 'group:environmentLayers',
+        ].map((id) => ({ id, name: id })),
+      },
+    };
+    const targets = [
+      undefined, '', { kind: 'group', group: 'characters' }, { kind: 'group', group: 'environmentLayers' }, { kind: 'environmentLayer', id: 'char-1' }, 'unknown',
+      ...(effect === 'blur' ? ['global', 'background', 'characters'] : ['panorama']),
+    ];
+    const actionTypes = effect === 'blur' ? ['setBlur', 'resetBlur'] : ['setPostProcessing', 'resetPostProcessing'];
+    for (const target of targets) {
+      const candidates = [
+        ...actionTypes.map((actionType) => action({ action: actionType, params: { target } })),
+        action({ action: 'lighting', semanticType: 'lighting', params: { effect, target } }),
+      ];
+      for (const candidate of candidates) {
+        const expectedTrack = (typeof target === 'object' && (target.kind === 'environmentLayer' || (target.kind === 'group' && target.group === 'environmentLayers')))
+          || (effect === 'blur' && target === 'background') ? 'environment' : 'global';
+        expect(getTimelineTrackId(scene, candidate)).toBe(expectedTrack);
+        expect(isCharacterTrackAction(scene, candidate)).toBe(false);
+      }
+    }
+  });
+
+  it('keeps the runtime all sentinel global while the source ID all stays on its character track', () => {
+    const scene: TimelineScene = {
+      ...classificationScene,
+      meta: { ...classificationScene.meta, characters: [{ id: 'all', name: 'All' }] },
+    };
+    const source = action({ action: 'lighting', semanticType: 'lighting', params: { effect: 'blur', target: 'all' } });
+    const compiled = action({ action: 'resetBlur', params: { target: 'character:all' } });
+    for (const candidate of [source, compiled]) {
+      expect(getTimelineTrackId(scene, candidate)).toBe('char:all');
+      expect(isCharacterTrackAction(scene, candidate)).toBe(true);
+    }
+    for (const actionType of ['setBlur', 'resetBlur']) {
+      const candidate = action({ action: actionType, params: { target: 'all' } });
+      expect(getTimelineTrackId(scene, candidate)).toBe('global');
+      expect(isCharacterTrackAction(scene, candidate)).toBe(false);
     }
   });
 

@@ -1,9 +1,9 @@
+import { isLightingTarget } from '../../../../api/types/lighting-target';
 // Per-family single-line selects in the dispatch tail (lighting preset, blur,
 // dialogue style/lipSync/position/template, blink intervals, environment
 // layout/transition, character enter/exit, ease, animation layer, ...).
 import React from 'react';
 import {
-  BlurTargetSelect,
   DialoguePositionSelect,
   DialogueStyleSelect,
   DialogueTemplateSelect,
@@ -29,24 +29,21 @@ export function resolveMiscSelectParam(ctx: InspectorParamContext, key: string, 
   const actionType = ctx.actionType;
 
   if ((actionType === 'setLighting' || ctx.action.semanticType === 'lighting') && key === 'preset') return <LightingPresetSelect key={key} value={val || ''} onChange={(v) => ctx.updateAuthoringParam(key, v)} />;
-  if (ctx.action.semanticType === 'lighting' && ctx.actionParams.effect === 'post' && key === 'target') {
+  if (key === 'target' && ((ctx.action.semanticType === 'lighting' && ['post', 'blur'].includes(String(ctx.actionParams.effect)))
+    || actionType === 'setBlur' || actionType === 'resetBlur')) {
+    const effect = ctx.actionParams.effect === 'post' ? 'post' : 'blur';
     return (
       <LightingTargetPicker
         key={key}
         id={base.fieldId}
         dataTestId={base.paramTestId}
-        value={typeof val === 'string' && val.trim() ? val : 'panorama'}
+        value={isLightingTarget(val) ? val : undefined}
+        effect={effect}
         characters={ctx.sceneData.meta.characters ?? []}
         environmentLayers={ctx.environmentLayers}
         onChange={(value) => ctx.updateAuthoringParam(key, value)}
       />
     );
-  }
-  if ((actionType === 'setBlur' || actionType === 'resetBlur' || ctx.action.semanticType === 'lighting') && key === 'target') {
-    const defaultTarget = ctx.action.semanticType === 'lighting'
-      ? 'global'
-      : actionType === 'resetBlur' ? 'all' : 'global';
-    return <BlurTargetSelect key={key} value={val || defaultTarget} onChange={(v) => ctx.action.semanticType === 'lighting' ? ctx.updateAuthoringParam(key, v) : ctx.updateParam(ctx.actionId, key, v)} />;
   }
   if ((actionType === 'dialogue' || actionType === 'addTextLayer') && key === 'style') return <DialogueStyleSelect key={key} value={val || 'typewriter'} onChange={(v) => ctx.updateAuthoringParam(key, v)} />;
   if (ctx.action.semanticType === 'dialogue' && key === 'lipSync') {

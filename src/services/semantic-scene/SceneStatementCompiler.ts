@@ -23,6 +23,7 @@ import {
   type ZoomIntent,
 } from '../../api/types/semantic-scene';
 import { DEFAULT_CAMERA_FOCUS_PART } from '../../api/types/camera';
+import { lightingTargetKey } from '../../api/types/lighting-target';
 import type { SceneVisualBlock } from '../../api/types/visual';
 import {
   resolveAudioFadeIn,
@@ -199,7 +200,7 @@ export class SceneStatementCompiler {
   ): CompiledUnit[] {
     validateSpeakerReference(statement, companionContext, characterIds);
     const resolvedStatement = resolveStatementReferences(statement, companionContext);
-    const lowered = lowerStatement(resolvedStatement, charactersById, visual);
+    const lowered = lowerStatement(resolvedStatement, charactersById, visual, characterIds);
     assertUniqueOutputKeys(lowered, statement.id, companionContext?.parent.id);
     return lowered.map((entry, outputOrder) => ({
       statementId: companionContext?.parent.id ?? statement.id,
@@ -461,6 +462,7 @@ function lowerStatement(
   statement: SceneStatement,
   charactersById: ReadonlyMap<string, SceneCharacter>,
   visual: SceneVisualBlock | undefined,
+  characterIds: ReadonlySet<string>,
 ): LoweredAction[] {
   switch (statement.type) {
     case 'dialogueVisibility':
@@ -489,7 +491,7 @@ function lowerStatement(
     case 'filterReset':
       return lowerFilterReset(statement.params);
     case 'lighting':
-      return lowerLighting(statement.params);
+      return lowerLighting(statement.params, characterIds);
     case 'audio':
       return lowerAudio(statement.params);
     case 'graphicLayer':
@@ -793,7 +795,12 @@ function lowerFilterReset(params: FilterResetParams): LoweredAction[] {
   }))];
 }
 
-function lowerLighting(params: LightingParams): LoweredAction[] {
+function lowerLighting(params: LightingParams, characterIds: ReadonlySet<string>): LoweredAction[] {
+  // Resolve object roles from declarations so effects retain their identity
+  // before entrance, including when a character and environment layer share an ID.
+  const target = (params.effect === 'blur' || params.effect === 'post') && params.target !== undefined
+    ? lightingTargetKey(params.target, params.effect, characterIds)
+    : undefined;
   switch (params.effect) {
     case 'preset':
       switch (params.mode) {
@@ -812,11 +819,11 @@ function lowerLighting(params: LightingParams): LoweredAction[] {
     case 'blur':
       switch (params.mode) {
         case 'reset':
-          return [withOutput('primary', 'resetBlur', cleanParams({ target: params.target, duration: params.durationSeconds }))];
+          return [withOutput('primary', 'resetBlur', cleanParams({ target, duration: params.durationSeconds }))];
         case 'set':
         case 'modulate':
           return [withOutput('primary', 'setBlur', cleanParams({
-            target: params.target,
+            target,
             intensity: params.intensity,
             duration: params.durationSeconds,
           }))];
@@ -842,13 +849,13 @@ function lowerLighting(params: LightingParams): LoweredAction[] {
       switch (params.mode) {
         case 'reset':
           return [withOutput('primary', 'resetPostProcessing', cleanParams({
-            target: params.target ?? 'panorama',
+            target: target ?? 'panorama',
             duration: params.durationSeconds,
           }))];
         case 'set':
         case 'modulate':
           return [withOutput('primary', 'setPostProcessing', cleanParams({
-            target: params.target ?? 'panorama',
+            target: target ?? 'panorama',
             bloomThreshold: params.bloomThreshold,
             bloomBloomScale: params.bloomBloomScale,
             bloomBrightness: params.bloomBrightness,

@@ -1720,8 +1720,8 @@ export const FontFamilySelect = React.memo(({ value, onChange }: { value: string
 const BLUR_TARGET_OPTIONS = [
   { value: 'all', label: '全部' },
   { value: 'global', label: '全画面' },
-  { value: 'background', label: '仅背景' },
-  { value: 'characters', label: '仅角色' }
+  { value: 'background', label: '全部环境图层' },
+  { value: 'characters', label: '全部角色' }
 ];
 
 export const BlurTargetSelect = React.memo(({ value, onChange }: { value: string; onChange: (val: string) => void }) => (

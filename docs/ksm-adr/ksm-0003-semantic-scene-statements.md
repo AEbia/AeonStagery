@@ -265,6 +265,19 @@ object scope 的 `visualStyle` 保留角色融入与轮廓光语义；其 set/re
 
 `visualStyle(mode: 'reset')` 清除指定 object `(target, slot)` 的 latched cue 与仍在生效的 modulation，使 resolver 回到 `scene.visual` 中对应 object baseline；只有 baseline 缺失时才使用该 scene schema version 固定的 builtin neutral default。reset 不能读取当前模板默认值。
 
+#### Lighting Target References
+
+`lighting(effect: blur | post).target` accepts legacy strings and structured references:
+
+- `{ kind: 'character' | 'environmentLayer', id: string }` addresses one object without colliding with IDs or scope names.
+- `{ kind: 'group', group: 'characters' | 'environmentLayers' }` addresses an entire group; `{ kind: 'scene' }` addresses the panorama.
+- Strings retain their existing meaning: blur uses `global / background / characters` for legacy scopes; post uses `panorama` for the panorama. Other strings are raw IDs with character-first resolution. Prefixes such as `character:` and `group:` are never source syntax, so existing IDs containing them retain their identity.
+- The compiler resolves source references using scene declarations. Runtime keys are a private compiled representation and must not be reinterpreted as source references. Lifecycle identity and validation use the same target resolver.
+- Statement definitions own character-reference rewrites. Character-directory ID changes apply those definitions to root statements and companions; lighting rewrites only character references, preserving group and environment references.
+- The statement-library menu resolves availability and insertion through one authoring context. Its row target takes priority over selected lighting starts on other rows; the shared environment row preserves selected individual-layer targets. Clicking re-resolves against the current document.
+
+This is additive v5 syntax: unchanged legacy JSON retains its meaning, so no Schema Epoch migration is required. Historical v3/v4 inputs must reject structured targets before migration. Ordinary saves retain existing string references; newly authored object/group targets use structured references. The ordinary codec rejects malformed reference shapes, and the compatibility projection preserves unknown nested fields under ADR-0031.
+
 #### Lens Filter Statement Contract
 
 v3 不再接受带 `scope: 'lens'` 的 `visualStyle`。镜头滤镜必须使用三个严格 source family，内部仍保存 recipe catalog 的 `recipeId`，而不是把类别或 UI 名称写入 source：

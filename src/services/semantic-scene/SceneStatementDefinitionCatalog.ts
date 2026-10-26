@@ -1,3 +1,4 @@
+import { resolveLightingTarget } from '../../api/types/lighting-target';
 import type {
   AudioParams,
   CameraParams,
@@ -313,6 +314,7 @@ const definitions = {
   },
   dialogue: {
     family: 'dialogue',
+    renameCharacterReferences: (params, from, to) => params.speakerId === from ? { ...params, speakerId: to } : params,
     category: 'dialogue',
     label: 'Dialogue',
     discriminators: ['type'],
@@ -337,6 +339,7 @@ const definitions = {
   },
   characterPresence: {
     family: 'characterPresence',
+    renameCharacterReferences: (params, from, to) => params.id === from ? { ...params, id: to } : params,
     category: 'character',
     label: 'Character Presence',
     discriminators: ['params.mode'],
@@ -363,6 +366,7 @@ const definitions = {
   },
   characterTransform: {
     family: 'characterTransform',
+    renameCharacterReferences: (params, from, to) => params.id === from ? { ...params, id: to } : params,
     category: 'character',
     label: 'Character Transform',
     discriminators: [],
@@ -378,6 +382,15 @@ const definitions = {
   },
   characterPerformance: {
     family: 'characterPerformance',
+    renameCharacterReferences: (params, from, to) => {
+      const targetChanged = params.target === from;
+      const lookAtChanged = params.lookAt?.target === from;
+      return targetChanged || lookAtChanged ? {
+        ...params,
+        ...(targetChanged ? { target: to } : {}),
+        ...(lookAtChanged ? { lookAt: { ...params.lookAt, target: to } } : {}),
+      } : params;
+    },
     category: 'character',
     label: 'Character Performance',
     discriminators: ['params.motion', 'params.expression', 'params.lookAt', 'params.blink'],
@@ -392,6 +405,7 @@ const definitions = {
   },
   camera: {
     family: 'camera',
+    renameCharacterReferences: (params, from, to) => 'target' in params && params.target === from ? { ...params, target: to } : params,
     category: 'camera',
     label: 'Camera',
     discriminators: ['params.mode'],
@@ -535,6 +549,12 @@ const definitions = {
   },
   lighting: {
     family: 'lighting',
+    renameCharacterReferences: (params, from, to, characterIds) => {
+      if (params.effect !== 'blur' && params.effect !== 'post') return params;
+      const target = resolveLightingTarget(params.target, params.effect, characterIds);
+      return target.kind === 'character' && target.id === from
+        ? { ...params, target: { kind: 'character', id: to } } : params;
+    },
     category: 'visual',
     label: 'Lighting',
     discriminators: ['params.effect', 'params.mode'],
@@ -710,6 +730,7 @@ const definitions = {
   },
   customAnimation: {
     family: 'customAnimation',
+    renameCharacterReferences: (params, from, to) => params.target === from ? { ...params, target: to } : params,
     category: 'layer',
     label: 'Custom Animation',
     discriminators: [],

@@ -71,6 +71,8 @@ import {
   type TrackLodMode,
 } from './timelineDensity';
 import { getEnvironmentTrackKind } from './environmentPresentation';
+import { UNIFIED_ENVIRONMENT_TRACK_ID } from './environmentAuthoring';
+import type { LightingTarget } from '../../api/types/lighting-target';
 import type { AuthoringScope } from '../../api/types/authoring';
 import {
   buildTemplateAuthoringPreview,
@@ -79,12 +81,6 @@ import {
   createSemanticTimelineCorrelationId,
   locatorForCompiledTimelineAction,
 } from './semanticTimelineEditing';
-import {
-  listAvailableLifecycleEndCommandIds,
-} from './insertLifecycleEndCommand';
-import {
-  listAvailableLifecycleTargetBindingCommandIds,
-} from './lifecycleTargetBinding';
 import {
   buildLifecyclePairTable,
   resolveLifecyclePair,
@@ -106,7 +102,7 @@ import {
 } from './lifecycleBoundaryPresentation';
 import type { SceneStatement } from '../../api/types/semantic-scene';
 import {
-  buildSemanticStatementLibraryInsert,
+  prepareSemanticStatementLibraryMenu,
   submitSemanticStatementLibraryInsert,
 } from './semanticStatementInsertion';
 
@@ -697,6 +693,13 @@ export const TrackArea = React.memo(({
     trackRefs,
     pps,
   });
+  const blankMenuLightingTarget = useMemo<LightingTarget | undefined>(() => blankMenu?.charId
+    ? { kind: 'character', id: blankMenu.charId }
+    : blankMenu?.trackId === UNIFIED_ENVIRONMENT_TRACK_ID
+      ? { kind: 'group', group: 'environmentLayers' }
+      : blankMenu?.trackId === 'global'
+        ? { kind: 'scene' }
+        : undefined, [blankMenu]);
   const blockOfflineAuthoring = useCallback(() => {
     const offlineEditMessage = deriveCollaborationStatusUx({ status: collaborationStatus }).offlineEditMessage;
     if (!offlineEditMessage) return false;
@@ -704,11 +707,12 @@ export const TrackArea = React.memo(({
     setBlankMenu(null);
     return true;
   }, [collaborationStatus, setBlankMenu]);
-  const preferredLifecycleStartStatementIds = useMemo(() => new Set(
-    (documentStore.getCompiledSceneSnapshot()?.actions ?? [])
+  const preferredLifecycleStartStatementIds = useMemo(() => {
+    const preferredIds = (documentStore.getCompiledSceneSnapshot()?.actions ?? [])
       .filter((action) => !!selectedIds[action.id] && !action.source.companionId)
-      .map((action) => action.source.statementId),
-  ), [documentStore, selectedIds]);
+      .map((action) => action.source.statementId);
+    return new Set(preferredIds);
+  }, [documentStore, selectedIds]);
   const lifecyclePairTable = useMemo(() => {
     // sceneData invalidates this memo when the timeline projection changes;
     // the document store remains the canonical pairing source.
@@ -752,26 +756,26 @@ export const TrackArea = React.memo(({
     }
     return peers;
   }, [actionIdByStatementId, hoveredLifecycleActionId, lifecyclePairTable, selectedIds, statementIdByActionId]);
-  const availableLifecycleEndCommandIds = useMemo(() => {
-    const document = documentStore.getCurrentSceneDocumentSnapshot();
-    if (!blankMenu || !document) return new Set<string>();
-    return listAvailableLifecycleEndCommandIds(
-      document,
-      blankMenu.time,
-      { sceneMeta: sceneData.meta, charId: blankMenu.charId },
-      preferredLifecycleStartStatementIds,
-    );
-  }, [blankMenu, documentStore, preferredLifecycleStartStatementIds, sceneData.meta]);
-  const availableLifecycleTargetBindingCommandIds = useMemo(() => {
-    const document = documentStore.getCurrentSceneDocumentSnapshot();
-    if (!blankMenu || !document) return new Set<string>();
-    return listAvailableLifecycleTargetBindingCommandIds(
-      document,
-      blankMenu.time,
-      { sceneMeta: sceneData.meta, charId: blankMenu.charId },
-      preferredLifecycleStartStatementIds,
-    );
-  }, [blankMenu, documentStore, preferredLifecycleStartStatementIds, sceneData.meta]);
+  const blankMenuInsertOptions = useMemo(() => blankMenu ? {
+    document: documentStore.getCurrentSceneDocumentSnapshot(),
+    sceneMeta: sceneData.meta,
+    anchorTime: blankMenu.time,
+    origin: 'blank-context-menu' as const,
+    scope: blankMenu.charId ? {
+      kind: 'inferred-character' as const,
+      charId: blankMenu.charId,
+      source: 'blank-menu-track' as const,
+    } : { kind: 'none' as const },
+    lightingTarget: blankMenuLightingTarget,
+    preferredLifecycleStartStatementIds,
+    correlationPrefix: 'blank_menu_insert',
+    lifecycleEndCorrelationPrefix: 'blank_menu_lifecycle_end',
+    lifecycleTargetBindingCorrelationPrefix: 'blank_menu_lifecycle_target_binding',
+  } : null, [blankMenu, blankMenuLightingTarget, documentStore, sceneData, preferredLifecycleStartStatementIds]);
+  const blankMenuStatementCommands = useMemo(() => blankMenuInsertOptions
+    ? prepareSemanticStatementLibraryMenu(blankMenuInsertOptions) : null, [blankMenuInsertOptions]);
+  const availableLifecycleEndCommandIds = blankMenuStatementCommands?.availableLifecycleEndCommandIds ?? new Set<string>();
+  const availableLifecycleTargetBindingCommandIds = blankMenuStatementCommands?.availableLifecycleTargetBindingCommandIds ?? new Set<string>();
 
   const { handlePointerDown: handleBlockDrag } = useBlockDrag({
     blockRefs,
@@ -1097,35 +1101,13 @@ export const TrackArea = React.memo(({
   const handleSelectActionFromLibrary = async (type: 'statement' | 'template', data: any) => {
     if (blockOfflineAuthoring()) return;
     if (!semanticAuthoring || !blankMenu) return;
-    const targetCharId = blankMenu.charId || sceneData.meta?.characters?.[0]?.id;
-    const scope: AuthoringScope = targetCharId
-      ? blankMenu.charId
-        ? {
-            kind: 'inferred-character' as const,
-            charId: targetCharId,
-            source: 'blank-menu-track' as const,
-          }
-        : {
-            kind: 'character' as const,
-            charId: targetCharId,
-          }
-      : { kind: 'none' as const };
 
     if (type === 'statement' && data.blockId) {
       const document = documentStore.getCurrentSceneDocumentSnapshot();
       try {
-        const result = buildSemanticStatementLibraryInsert({
-          blockId: data.blockId,
-          document,
-          sceneMeta: sceneData.meta,
-          anchorTime: blankMenu.time,
-          origin: 'blank-context-menu',
-          scope,
-          preferredLifecycleStartStatementIds,
-          correlationPrefix: 'blank_menu_insert',
-          lifecycleEndCorrelationPrefix: 'blank_menu_lifecycle_end',
-          lifecycleTargetBindingCorrelationPrefix: 'blank_menu_lifecycle_target_binding',
-        });
+        if (!blankMenuInsertOptions) return;
+        // Re-resolve through the same interface against the latest document on click.
+        const result = prepareSemanticStatementLibraryMenu({ ...blankMenuInsertOptions, document }).resolve(data.blockId);
         if (result.kind === 'warning') {
           showToast(result.message, 'warning');
           setBlankMenu(null);
@@ -1151,6 +1133,20 @@ export const TrackArea = React.memo(({
     }
 
     if (type === 'template' && data.templateId) {
+      const targetCharId = blankMenu.charId
+        || (blankMenu.trackId === UNIFIED_ENVIRONMENT_TRACK_ID ? undefined : sceneData.meta?.characters?.[0]?.id);
+      const scope: AuthoringScope = targetCharId
+        ? blankMenu.charId
+          ? {
+              kind: 'inferred-character' as const,
+              charId: targetCharId,
+              source: 'blank-menu-track' as const,
+            }
+          : {
+              kind: 'character' as const,
+              charId: targetCharId,
+            }
+        : { kind: 'none' as const };
       const combo = availableTemplates.find((candidate) => candidate.id === data.templateId);
       const preview = combo
         ? buildTemplateAuthoringPreview(combo, {

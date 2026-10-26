@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SCENE_SCHEMA_VERSION } from '../api/types/semantic-scene';
+import type { LightingTargetReference } from '../api/types/lighting-target';
 import {
   sceneDocumentCodec,
   sceneStatementDefinitionRegistry,
@@ -9,6 +10,7 @@ import {
   listAvailableLifecycleTargetBindingCommandIds,
   resolveLifecycleTargetBinding,
 } from '../ui/timeline/lifecycleTargetBinding';
+import { insertLifecycleEndFromMenu, listAvailableLifecycleEndCommandIds } from '../ui/timeline/insertLifecycleEndCommand';
 
 function documentOf(statements: unknown[], durationSeconds = 12) {
   return sceneDocumentCodec.parseAndValidate({
@@ -20,6 +22,35 @@ function documentOf(statements: unknown[], durationSeconds = 12) {
 }
 
 describe('lifecycleTargetBinding', () => {
+  describe.each(['blur', 'post'] as const)('selected structured %s targets', (effect) => {
+    const targets: readonly LightingTargetReference[] = [
+      { kind: 'character', id: 'hero' },
+      { kind: 'environmentLayer', id: 'fog' },
+      { kind: 'group', group: 'characters' },
+      { kind: 'group', group: 'environmentLayers' },
+    ];
+    it.each(targets)('offers and inserts modulation and reset for $kind without an explicit editor target', (target) => {
+      const document = documentOf([
+        { id: 'effect', time: 1, type: 'lighting', params: { effect, mode: 'set', target } },
+      ]);
+      const input = { sceneMeta: { ...document.meta, characters: [{ id: 'hero', name: 'Hero' }] } };
+      const selected = new Set(['effect']);
+      const modulationId = `lighting.modulate-${effect}`;
+      const resetId = `lighting.reset-${effect}`;
+
+      expect(listAvailableLifecycleTargetBindingCommandIds(document, 4, input, selected).has(modulationId)).toBe(true);
+      expect(resolveLifecycleTargetBinding(document, modulationId, 4, input, selected)?.statement)
+        .toMatchObject({ type: 'lighting', params: { effect, mode: 'modulate', target } });
+      expect(listAvailableLifecycleEndCommandIds(document, 4, input, selected).has(resetId)).toBe(true);
+      expect(insertLifecycleEndFromMenu(document, resetId, 4, input, {
+        correlationId: 'structured-target-reset', origin: 'timeline-editor',
+      }, selected)).toMatchObject({
+        ok: true,
+        intent: { statement: { type: 'lighting', params: { effect, mode: 'reset', target } } },
+      });
+    });
+  });
+
   it('keeps binding commands in parity with registry dependency types', () => {
     const registryTypes = new Set(
       sceneStatementDefinitionRegistry.list()

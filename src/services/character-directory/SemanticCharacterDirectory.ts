@@ -3,11 +3,7 @@ import type {
   CharacterDirectoryOrigin,
 } from '../../api/types/character-directory';
 import type {
-  CameraParams,
-  CharacterPerformanceParams,
   CharacterPresenceParams,
-  CharacterTransformParams,
-  CustomAnimationParams,
   DialogueCompanion,
   DialogueParams,
   CurrentSceneDocument,
@@ -16,6 +12,7 @@ import type {
 } from '../../api/types/semantic-scene';
 import {
   sceneDocumentCodec,
+  sceneStatementDefinitionRegistry,
 } from '../semantic-scene';
 
 type SceneCharacter = NonNullable<CurrentSceneMeta['characters']>[number];
@@ -56,6 +53,7 @@ export function applyCharacterDirectoryCommandToCurrentSceneDocument(
   rewriteSceneDocumentCharacterReferences(
     next,
     command,
+    new Set((document.meta.characters ?? []).map((character) => character.id)),
     affectedStatementIds,
     affectedCompanionLocators,
   );
@@ -223,16 +221,17 @@ function nextCharacterId(characters: SceneCharacter[]): string {
 function rewriteSceneDocumentCharacterReferences(
   document: CurrentSceneDocument,
   command: CharacterDirectoryCommand,
+  characterIds: ReadonlySet<string>,
   affectedStatementIds: Set<string>,
   affectedCompanionLocators: SemanticCompanionLocator[],
 ): void {
   for (const statement of document.statements) {
-    if (rewriteStatementCharacterReferences(statement, command)) {
+    if (rewriteStatementCharacterReferences(statement, command, characterIds)) {
       affectedStatementIds.add(statement.id);
     }
 
     for (const companion of statement.companions ?? []) {
-      if (rewriteCompanionCharacterReferences(companion, command)) {
+      if (rewriteCompanionCharacterReferences(companion, command, characterIds)) {
         affectedStatementIds.add(statement.id);
         affectedCompanionLocators.push({
           statementId: statement.id,
@@ -244,52 +243,27 @@ function rewriteSceneDocumentCharacterReferences(
 }
 
 function rewriteStatementCharacterReferences(
-  statement: SceneStatement,
+  statement: SceneStatement | DialogueCompanion,
   command: CharacterDirectoryCommand,
+  characterIds: ReadonlySet<string>,
 ): boolean {
-  switch (statement.type) {
-    case 'dialogue':
-      return rewriteDialogueParams(statement.params, command);
-    case 'characterPresence':
-      return rewriteCharacterPresenceParams(statement.params, command);
-    case 'characterTransform':
-      return rewriteCharacterTransformParams(statement.params, command);
-    case 'characterPerformance':
-      return rewriteCharacterPerformanceParams(statement.params, command);
-    case 'camera':
-      return rewriteCameraParams(statement.params, command);
-    case 'customAnimation':
-      return rewriteCustomAnimationParams(statement.params, command);
-    case 'environmentLayer':
-    case 'dialogueVisibility':
-    case 'visualStyle':
-    case 'filterAdd':
-    case 'filterChange':
-    case 'filterReset':
-    case 'lighting':
-    case 'audio':
-    case 'graphicLayer':
-      return false;
+  if (command.kind === 'update-character-id') {
+    return sceneStatementDefinitionRegistry.renameCharacterReferences(statement, command.currentCharId, command.nextCharId, characterIds);
   }
+  if (statement.type === 'dialogue') return rewriteDialogueParams(statement.params, command);
+  if (statement.type === 'characterPresence') return rewriteCharacterPresenceParams(statement.params, command);
+  return false;
 }
 
 function rewriteCompanionCharacterReferences(
   companion: DialogueCompanion,
   command: CharacterDirectoryCommand,
+  characterIds: ReadonlySet<string>,
 ): boolean {
-  return rewriteStatementCharacterReferences({
-    id: companion.id,
-    time: 0,
-    type: companion.type,
-    params: companion.params,
-  } as SceneStatement, command);
+  return rewriteStatementCharacterReferences(companion, command, characterIds);
 }
 
 function rewriteDialogueParams(params: DialogueParams, command: CharacterDirectoryCommand): boolean {
-  if (command.kind === 'update-character-id' && params.speakerId === command.currentCharId) {
-    params.speakerId = command.nextCharId;
-    return true;
-  }
   if (command.kind === 'update-character-name' && params.speakerId === command.charId) {
     params.speaker = command.nextName;
     return true;
@@ -301,67 +275,11 @@ function rewriteCharacterPresenceParams(
   params: CharacterPresenceParams,
   command: CharacterDirectoryCommand,
 ): boolean {
-  if (command.kind === 'update-character-id' && params.id === command.currentCharId) {
-    params.id = command.nextCharId;
-    return true;
-  }
   if (command.kind === 'set-character-model' && params.mode === 'enter' && params.id === command.charId) {
     params.model = command.model ?? '';
     return true;
   }
   return false;
-}
-
-function rewriteCharacterTransformParams(
-  params: CharacterTransformParams,
-  command: CharacterDirectoryCommand,
-): boolean {
-  if (command.kind !== 'update-character-id' || params.id !== command.currentCharId) return false;
-  params.id = command.nextCharId;
-  return true;
-}
-
-function rewriteCharacterPerformanceParams(
-  params: CharacterPerformanceParams,
-  command: CharacterDirectoryCommand,
-): boolean {
-  if (command.kind !== 'update-character-id') return false;
-  let changed = false;
-  if (params.target === command.currentCharId) {
-    params.target = command.nextCharId;
-    changed = true;
-  }
-  if (params.lookAt?.target === command.currentCharId) {
-    params.lookAt = { ...params.lookAt, target: command.nextCharId };
-    changed = true;
-  }
-  return changed;
-}
-
-function rewriteCameraParams(params: CameraParams, command: CharacterDirectoryCommand): boolean {
-  if (command.kind !== 'update-character-id') return false;
-  switch (params.mode) {
-    case 'focus':
-    case 'follow':
-    case 'hitchcock':
-      if (params.target !== command.currentCharId) return false;
-      params.target = command.nextCharId;
-      return true;
-    case 'move':
-    case 'path':
-    case 'shake':
-    case 'reset':
-      return false;
-  }
-}
-
-function rewriteCustomAnimationParams(
-  params: CustomAnimationParams,
-  command: CharacterDirectoryCommand,
-): boolean {
-  if (command.kind !== 'update-character-id' || params.target !== command.currentCharId) return false;
-  params.target = command.nextCharId;
-  return true;
 }
 
 function cloneJson<T>(value: T): T {

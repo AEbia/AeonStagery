@@ -1,6 +1,7 @@
 import type { RuntimeTimelineAction } from './RuntimeTimelineScene';
 import type { VisualLightingOverlay } from './visual-runtime/VisualRuntimeResolver';
 import { normalizeBlendMode, type BlendMode } from '../api/types/blend-mode';
+import { isLightingGroupTarget, parseCompiledLightingObjectTarget } from '../api/types/lighting-target';
 
 export type LightingPresetName =
   | 'normal'
@@ -63,6 +64,8 @@ export interface LightingSnapshot {
   preset: { name: LightingPresetName; intensity: number };
   presetWeights: Record<LightingPresetName, number>;
   blur: LightingBlurSnapshot;
+  /** Object-scoped blur, separate from the legacy scene/layer groups. */
+  blurTargets: Record<string, number>;
   postProcessing: LightingPostProcessingSnapshot;
   /** Post-processing state for character/environment targets keyed by ID. */
   postProcessingTargets: Record<string, LightingPostProcessingSnapshot>;
@@ -136,6 +139,7 @@ export function createDefaultLightingSnapshot(
     preset: { name: 'normal', intensity: 0 },
     presetWeights: createEmptyPresetWeights(),
     blur: { ...DEFAULT_BLUR_SNAPSHOT },
+    blurTargets: {},
     postProcessing: { ...DEFAULT_POST_PROCESSING_SNAPSHOT },
     postProcessingTargets: {},
     colorOverlays: [],
@@ -296,6 +300,11 @@ function sanitizeSnapshot(snapshot: LightingSnapshot): LightingSnapshot {
       characters: isFiniteNumber(snapshot.blur.characters) ? Math.max(0, snapshot.blur.characters) : 0,
     },
     postProcessing: sanitizePostProcessingState(snapshot.postProcessing),
+    blurTargets: Object.fromEntries(
+      Object.entries(snapshot.blurTargets || {})
+        .filter(([target]) => target.length > 0)
+        .map(([target, intensity]) => [target, isFiniteNumber(intensity) ? Math.max(0, intensity) : 0]),
+    ),
     postProcessingTargets: Object.fromEntries(
       Object.entries(snapshot.postProcessingTargets || {})
         .filter(([target]) => target !== 'panorama' && typeof target === 'string' && target.length > 0)
@@ -355,6 +364,37 @@ export function normalizeLightingSnapshot(snapshot: LightingSnapshot | null | un
   } as LightingSnapshot);
 }
 
+function createLightingTargetResolver(timeline: readonly RuntimeTimelineAction[]) {
+  const explicitTargets = new Set<string>();
+  const characterIds = new Set<string>();
+  const environmentLayerIds = new Set<string>(['background']);
+  for (const action of timeline) {
+    const params = action.params || {};
+    if (action.action === 'addCharacter' && typeof params.id === 'string') characterIds.add(params.id);
+    if (action.action === 'setEnvironmentLayer' && typeof params.layerId === 'string') environmentLayerIds.add(params.layerId);
+    if (!['setBlur', 'resetBlur', 'setPostProcessing', 'resetPostProcessing'].includes(action.action)) continue;
+    const target: unknown = params.target ?? params.proxyParams?.target;
+    if (typeof target === 'string' && parseCompiledLightingObjectTarget(target.trim())) explicitTargets.add(target.trim());
+  }
+
+  return (target: string, effect: 'blur' | 'post'): string => {
+    target = target.trim();
+    if (parseCompiledLightingObjectTarget(target) || isLightingGroupTarget(target)
+      || (effect === 'blur'
+        ? ['global', 'background', 'characters', 'all'].includes(target)
+        : target === 'panorama')) return target;
+
+    // Preserve roles inferred from the whole timeline even before entrance,
+    // when a raw ID could otherwise resolve to an object of the other kind.
+    const kind = characterIds.has(target) ? 'character'
+      : environmentLayerIds.has(target) ? 'environmentLayer'
+        : explicitTargets.has(`character:${target}`) ? 'character' : 'environmentLayer';
+    const explicit = `${kind}:${target}`;
+    return characterIds.has(target) || environmentLayerIds.has(target) || explicitTargets.has(explicit)
+      ? explicit : target;
+  };
+}
+
 export function deriveLightingSnapshotAtTime(
   time: number,
   timeline: readonly RuntimeTimelineAction[],
@@ -364,6 +404,7 @@ export function deriveLightingSnapshotAtTime(
   const targetPostProcessing = snapshot.postProcessingTargets;
   const activeColorOverlays = new Map<string, LightingColorOverlaySnapshot>();
   const activePointLights = new Map<string, LightingPointLightSnapshot>();
+  const resolveTarget = createLightingTargetResolver(timeline);
   const orderedTimeline = timeline
     .map((action, index) => ({ action, index }))
     .sort((a, b) => ((a.action.time || 0) - (b.action.time || 0)) || (a.index - b.index));
@@ -399,21 +440,26 @@ export function deriveLightingSnapshotAtTime(
       }
 
       case 'setBlur': {
-        const target = params.target === 'background' || params.target === 'characters' ? params.target : 'global';
+        const target = resolveTarget(typeof params.target === 'string' && params.target.trim() ? params.target.trim() : 'global', 'blur');
         const intensity = isFiniteNumber(params.intensity) ? Math.max(0, params.intensity) : 5;
-        applyBlurTransition(snapshot.blur, target, intensity, progress);
+        if (target === 'global' || target === 'background' || target === 'characters') {
+          applyBlurTransition(snapshot.blur, target, intensity, progress);
+        } else {
+          snapshot.blurTargets[target] = interpolateNumber(snapshot.blurTargets[target] ?? 0, intensity, progress);
+        }
         break;
       }
 
       case 'resetBlur': {
-        const target = params.target === 'global' || params.target === 'background' || params.target === 'characters'
-          ? params.target
-          : 'all';
+        const target = resolveTarget(typeof params.target === 'string' && params.target.trim() ? params.target.trim() : 'all', 'blur');
         const targets: Array<keyof LightingBlurSnapshot> = target === 'all'
           ? ['global', 'background', 'characters']
-          : [target];
+          : target === 'global' || target === 'background' || target === 'characters' ? [target] : [];
         for (const key of targets) {
           applyBlurTransition(snapshot.blur, key, 0, progress);
+        }
+        for (const key of target === 'all' ? Object.keys(snapshot.blurTargets) : targets.length === 0 ? [target] : []) {
+          snapshot.blurTargets[key] = interpolateNumber(snapshot.blurTargets[key] ?? 0, 0, progress);
         }
         break;
       }
@@ -423,9 +469,9 @@ export function deriveLightingSnapshotAtTime(
           ? params.proxyParams as Partial<Record<keyof LightingPostProcessingSnapshot, unknown>>
           : params as Partial<Record<keyof LightingPostProcessingSnapshot, unknown>>;
         const targetParam = params.target ?? (rawParams as Record<string, unknown>).target;
-        const target = typeof targetParam === 'string' && targetParam.trim()
+        const target = resolveTarget(typeof targetParam === 'string' && targetParam.trim()
           ? targetParam.trim()
-          : 'panorama';
+          : 'panorama', 'post');
         const targetState = target === 'panorama'
           ? snapshot.postProcessing
           : (targetPostProcessing[target] ??= { ...DEFAULT_POST_PROCESSING_SNAPSHOT });
@@ -434,9 +480,9 @@ export function deriveLightingSnapshotAtTime(
       }
 
       case 'resetPostProcessing': {
-        const target = typeof params.target === 'string' && params.target.trim()
+        const target = resolveTarget(typeof params.target === 'string' && params.target.trim()
           ? params.target.trim()
-          : 'panorama';
+          : 'panorama', 'post');
         const targetState = target === 'panorama'
           ? snapshot.postProcessing
           : (targetPostProcessing[target] ??= { ...DEFAULT_POST_PROCESSING_SNAPSHOT });

@@ -7,6 +7,7 @@ import {
 } from '../icons';
 import { FormSelect } from '../FormSelect';
 import { getActionDisplayLabel, getTrackColorForAction } from './TrackComponents';
+import { getEnvironmentActionLayerId } from './environmentPresentation';
 
 const CAMERA_MOVE_LABELS: Record<string, string> = {
   push: '推镜',
@@ -209,9 +210,7 @@ function getActionSummary(action: TimelineAction): string {
     return '运镜';
   }
   if (['setEnvironmentLayer', 'transformEnvironmentLayer', 'removeEnvironmentLayer'].includes(action.action)) {
-    const layerName = typeof action.params.label === 'string' && action.params.label.trim()
-      ? action.params.label.trim()
-      : '';
+    const layerName = getEnvironmentActionLayerId(action);
     return layerName ? `环境画面: ${layerName}` : '环境画面';
   }
   if (params.id) {

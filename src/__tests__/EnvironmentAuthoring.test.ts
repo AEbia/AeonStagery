@@ -17,18 +17,19 @@ const scene: SceneScript = {
 };
 
 describe('environmentAuthoring', () => {
-  it('resolves existing author-facing layer names back to their stable layer ids', () => {
-    expect(resolveEnvironmentLayerSelection(scene, '前景雾')).toEqual({
+  it('resolves existing layers by ID regardless of labels or resource names', () => {
+    expect(resolveEnvironmentLayerSelection(scene, 'fog-bank')).toEqual({
       layerId: 'fog-bank',
       label: '前景雾',
       isExisting: true,
     });
 
-    expect(resolveEnvironmentLayerSelection(scene, '环境层 2')).toEqual({
+    expect(resolveEnvironmentLayerSelection(scene, 'back-wall')).toEqual({
       layerId: 'back-wall',
       label: undefined,
       isExisting: true,
     });
+    expect(resolveEnvironmentLayerSelection(scene, '前景雾').isExisting).toBe(false);
   });
 
   it('generates unique ids for new author-facing names', () => {
