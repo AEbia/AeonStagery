@@ -6,14 +6,15 @@ import { describe, expect, it } from 'vitest';
 setupInlineDetailsFixture();
 
 describe('Inline details resources', () => {
-  it('keeps resource browsing without repeating the file path in details', () => {
+  it('keeps one audio file picker with browsing in the row after expanding details', () => {
     load('audio', { role: 'bgm', mode: 'play', file: 'music.ogg' });
     const { container } = list();
     const detail = expand(container);
-    expect(detail.getByRole('button', { name: '音频文件' })).toBeTruthy();
-    expect(detail.getByText('选择背景音乐...')).toBeTruthy();
+    expect(detail.queryByRole('button', { name: '音频文件' })).toBeNull();
+    expect(detail.queryByRole('textbox', { name: '音频文件' })).toBeNull();
     expect(detail.queryByText('music.ogg')).toBeNull();
-    expect(screen.getByRole('textbox', { name: '音频文件' })).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: '音频文件' }) as HTMLInputElement).value).toBe('music.ogg');
+    expect(screen.getByRole('button', { name: '打开资源浏览器' })).toBeTruthy();
   });
 
   it.each([
@@ -32,16 +33,17 @@ describe('Inline details resources', () => {
     expect(picker.textContent).not.toContain('.model3.json');
   });
 
-  it.each(['row', 'details'])('writes the actual main model path when selected in %s', async (location) => {
+  it.each([false, true])('writes the actual main model path from the row with expanded=%s', async (expanded) => {
     const mainModel = '@mount/figure/figure/hero/main.model3.json';
     load('characterPresence', { mode: 'enter', id: 'alice', model: 'figure/hero/winter.model3.json', opacity: 0.8 }, [{
       id: 'alice', name: 'Alice', model: mainModel,
       variants: [{ name: '冬装', model: 'figure/hero/winter.model3.json' }],
     }]);
     const { container } = list();
-    const picker = location === 'details'
-      ? expand(container).getByRole('combobox', { name: '模型变体' })
-      : screen.getByRole('combobox', { name: '模型变体' });
+    if (expanded) {
+      expect(expand(container).queryByRole('combobox', { name: '模型变体' })).toBeNull();
+    }
+    const picker = screen.getByRole('combobox', { name: '模型变体' });
     fireEvent.click(picker);
     fireEvent.click(screen.getByRole('option', { name: '主模型' }));
     await waitFor(() => expect(state.author).toHaveBeenCalledWith(expect.objectContaining({
@@ -85,34 +87,51 @@ describe('Inline details resources', () => {
     ]);
     const { container } = list();
     const detail = expand(container);
-    expect(detail.getByRole('combobox', { name: '模型变体' })).toBeTruthy();
-    expect(detail.getByText('自定义模型')).toBeTruthy();
+    const picker = screen.getByRole('combobox', { name: '模型变体' });
+    expect(picker.textContent).toBe('自定义模型');
+    expect(detail.queryByRole('combobox', { name: '模型变体' })).toBeNull();
     expect(detail.queryByText('alice.model3.json')).toBeNull();
     expect(detail.queryByText('空间坐标')).toBeNull();
     // The registered-model catalog stays one column: no group rails, and no meaningless "current file" entry.
-    fireEvent.click(detail.getByRole('combobox', { name: '模型变体' }));
+    fireEvent.click(picker);
     expect(screen.queryByRole('listbox', { name: '一级分组' })).toBeNull();
     expect(screen.queryByRole('listbox', { name: '二级分组' })).toBeNull();
     expect(screen.getByRole('option', { name: '主模型' })).toBeTruthy();
     expect(screen.getByRole('option', { name: '冬装' })).toBeTruthy();
     expect(screen.getByRole('option', { name: '夏装' })).toBeTruthy();
     expect(screen.queryByRole('option', { name: '当前模型文件' })).toBeNull();
-    fireEvent.keyDown(detail.getByRole('combobox', { name: '模型变体' }), { key: 'Escape' });
+    fireEvent.keyDown(picker, { key: 'Escape' });
     await waitFor(() => expect(state.characterAdapter.getModelDataFromPath).toHaveBeenCalledWith('alice.model3.json'));
   });
 
-  it('shows the selected motion and expression in details while retaining browsing and conversion', () => {
-    load('characterPerformance', { target: 'alice', motion: { kind: 'resource', key: 'wave', fadeInSeconds: 0.3 }, expression: 'smile' });
+  it('keeps motion and expression browsing and preview in the row while retaining conversion in details', async () => {
+    load('characterPerformance', { target: 'alice', motion: { kind: 'resource', key: 'wave', fadeInSeconds: 0.3 }, expression: 'smile' }, [
+      { id: 'alice', name: 'Alice', model: 'figure/alice/main.model3.json' },
+    ]);
     const { container } = list();
     const detail = expand(container);
-    expect(detail.getByText('wave')).toBeTruthy();
-    expect(detail.getByText('smile')).toBeTruthy();
-    expect(detail.queryByText('浏览并预览动作…')).toBeNull();
-    expect(detail.queryByText('浏览并预览表情…')).toBeNull();
+    expect(detail.queryByRole('combobox', { name: '动作名称' })).toBeNull();
+    expect(detail.queryByRole('combobox', { name: '表情名' })).toBeNull();
+    expect(detail.queryByText('wave')).toBeNull();
+    expect(detail.queryByText('smile')).toBeNull();
     expect(detail.getByTestId('resource-motion-conversion')).toBeTruthy();
-    expect(within(container.querySelector('.timeline-item__quick-fields') as HTMLElement)
-      .getByRole('combobox', { name: '动作名称' })).toBeTruthy();
+    const row = within(container.querySelector('.timeline-item__quick-fields') as HTMLElement);
+    const motionPicker = screen.getByRole('combobox', { name: '动作名称' });
+    const expressionPicker = screen.getByRole('combobox', { name: '表情名' });
+    expect(row.getByRole('combobox', { name: '动作名称' })).toBe(motionPicker);
+    expect(row.getByRole('combobox', { name: '表情名' })).toBe(expressionPicker);
+    await waitFor(() => {
+      expect(motionPicker.textContent).toContain('wave');
+      expect(expressionPicker.textContent).toContain('smile');
+    });
     expect(screen.queryByRole('textbox', { name: '动作名称' })).toBeNull();
+    fireEvent.click(motionPicker);
+    fireEvent.click(await screen.findByRole('button', { name: '预览 wave' }));
+    expect(state.characterAdapter.playMotion).toHaveBeenCalledWith('alice', 'wave');
+    fireEvent.keyDown(motionPicker, { key: 'Escape' });
+    fireEvent.click(expressionPicker);
+    fireEvent.click(await screen.findByRole('button', { name: '预览 smile' }));
+    expect(state.characterAdapter.setExpression).toHaveBeenCalledWith('alice', 'smile');
   });
 
   it('retains the custom motion keyframe editor', () => {
