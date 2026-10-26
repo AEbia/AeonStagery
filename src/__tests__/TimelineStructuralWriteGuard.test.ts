@@ -60,7 +60,7 @@ describe('timeline structural write guard', () => {
       path.join(ROOT, 'App.tsx'),
       path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
       path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
-      path.join(UI_ROOT, 'AiScriptSegmentPanel.tsx'),
+      path.join(UI_ROOT, 'AiProseWorkbench.tsx'),
       path.join(UI_ROOT, 'timeline', 'RawScriptTab.tsx'),
       path.join(ROOT, 'services', 'io', 'SceneFileService.ts'),
     ];
@@ -71,21 +71,18 @@ describe('timeline structural write guard', () => {
     }
   });
 
-  it('keeps raw editing and AI script generation wired to CurrentSceneDocument source', () => {
+  it('keeps raw editing wired to CurrentSceneDocument source', () => {
     const app = [
       path.join(ROOT, 'App.tsx'),
       path.join(UI_ROOT, 'hooks', 'useWorkspaceToolsBridge.ts'),
       path.join(UI_ROOT, 'hooks', 'useAppProjectWorkspace.ts'),
     ].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
     const rawScriptTab = fs.readFileSync(path.join(UI_ROOT, 'timeline', 'RawScriptTab.tsx'), 'utf8');
-    const aiPanel = fs.readFileSync(path.join(UI_ROOT, 'AiScriptSegmentPanel.tsx'), 'utf8');
     const sceneFileService = fs.readFileSync(path.join(ROOT, 'services', 'io', 'SceneFileService.ts'), 'utf8');
 
     expect(app).toContain('useSemanticDocument');
     expect(app).toContain('JSON.stringify(semanticDocument');
     expect(rawScriptTab).toContain('useSemanticTimelineSnapshot');
-    expect(aiPanel).toContain('useSemanticAuthoringService');
-    expect(aiPanel).toContain('compileAiScriptSegmentPlanToSceneStatements');
     expect(sceneFileService).toContain('Only current Scene Document JSON is supported');
   });
 
