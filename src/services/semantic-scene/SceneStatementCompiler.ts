@@ -597,7 +597,7 @@ function lowerCharacterPerformance(params: CharacterPerformanceParams): LoweredA
   return outputs;
 }
 
-function lowerCamera(params: CameraParams): LoweredAction[] {
+export function lowerCamera(params: CameraParams): LoweredAction[] {
   switch (params.mode) {
     case 'focus':
       return [withOutput('primary', 'cameraMotion', cleanParams({
@@ -671,7 +671,7 @@ function lowerCamera(params: CameraParams): LoweredAction[] {
   }
 }
 
-function lowerEnvironmentLayer(params: EnvironmentLayerParams): LoweredAction[] {
+export function lowerEnvironmentLayer(params: EnvironmentLayerParams): LoweredAction[] {
   const transition = resolveEnvironmentLayerTransition(params);
   const duration = resolveEnvironmentLayerDuration(params);
   const runtimeParams = cleanParams({

@@ -1079,7 +1079,8 @@ export function bootstrap(options?: {
     validationStore,
     projectResources,
     () => getScriptEngine()?.getBasePath() ?? '',
-    (modelPath: string) => characterAdapter.getModelDataFromPath(modelPath)
+    (modelPath: string) => characterAdapter.getModelDataFromPath(modelPath),
+    projectSession,
   );
   validationDaemon.start();
 

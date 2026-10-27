@@ -5,6 +5,7 @@ import {
   applyEnvironmentActionCompileDefaults,
   createEnvironmentLayerCompileState,
   reconstructEnvironmentAtTime,
+  prepareEnvironmentResolver,
   toEnvironmentRenderPlan,
   validateEnvironmentTimeline,
 } from '../engine/EnvironmentLayerRuntime';
@@ -18,6 +19,28 @@ function makeScene(timeline: RuntimeTimelineScene['timeline']): RuntimeTimelineS
 }
 
 describe('EnvironmentLayerRuntime', () => {
+  it('reuses settled history without changing overlapping fades, transforms, or backwards samples', () => {
+    const scene = makeScene([
+      { _id: 'first', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'a.png', duration: 0 } },
+      { _id: 'overlay', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'overlay', image: 'o.png', duration: 0 } },
+      { _id: 'pan', time: 1, action: 'transformEnvironmentLayer', params: { layerId: 'background', x: 0.8, duration: 4 } },
+      { _id: 'replace', time: 2, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'b.png', transition: 'crossFade', duration: 2 } },
+      { _id: 'fade', time: 3, action: 'removeEnvironmentLayer', params: { layerId: 'overlay', duration: 3 } },
+      { _id: 'zoom', time: 4, action: 'transformEnvironmentLayer', params: { layerId: 'background', scale: 2, duration: 2 } },
+      { _id: 'return', time: 7, action: 'setEnvironmentLayer', params: { layerId: 'overlay', image: 'r.png', duration: 0 } },
+    ]);
+    const resolve = prepareEnvironmentResolver(scene);
+    for (const time of [0, 1, 1.5, 2, 2.5, 3.5, 4, 5, 6, 7, 8, 2.5, 0, 6, 3, 8]) {
+      const snapshot = resolve(time);
+      expect(snapshot).toEqual(reconstructEnvironmentAtTime(scene, time));
+      // Consumers must not be able to mutate the cached settled prefix.
+      if (snapshot.background) snapshot.background.x = 99;
+      snapshot.environmentLayers.clear();
+      snapshot.layerOrder?.clear();
+      expect(resolve(time)).toEqual(reconstructEnvironmentAtTime(scene, time));
+    }
+  });
+
   it.each(['none', 'fadeIn', 'crossFade'])('keeps replacement artwork at its authored scale during %s', (transition) => {
     const scene = makeScene([
       { _id: 'first', time: 0, action: 'setEnvironmentLayer', params: { layerId: 'background', image: 'first.png', duration: 0 } },

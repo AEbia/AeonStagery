@@ -5,9 +5,9 @@ import type { ValidationIssue } from '../../api/types/validation';
  * store merges all sources so a slow async scan can never clobber results
  * produced by a different, faster source.
  */
-export type ValidationIssueSource = 'structure' | 'scene-assets' | 'project-dependencies';
+export type ValidationIssueSource = 'structure' | 'camera-coverage' | 'scene-assets' | 'project-dependencies';
 
-const SOURCE_ORDER: ValidationIssueSource[] = ['structure', 'scene-assets', 'project-dependencies'];
+const SOURCE_ORDER: ValidationIssueSource[] = ['structure', 'camera-coverage', 'scene-assets', 'project-dependencies'];
 
 export class ValidationStore {
   private _issues: ValidationIssue[] = [];

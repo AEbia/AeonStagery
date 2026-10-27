@@ -5,10 +5,10 @@ import type {
   CurrentSceneDocument,
   LightingParams,
   SceneStatement,
-  Vec2,
 } from '../../api/types/semantic-scene';
 import type { ValidationIssue } from '../../api/types/validation';
-import { ARTISTIC_PARALLAX_DEPTH_SCALE } from '../../engine/Projection';
+import type { ImageSize } from '../../engine/EnvironmentFrameCoverage';
+import { collectCameraCoverageIssues, collectCameraCoverageIssuesAsync } from './CameraCoverageDiagnostics';
 import { sceneStatementDefinitionRegistry } from './SceneStatementDefinitionRegistry';
 import { validateLensFilterStatements } from './LensFilterStatementValidator';
 import { isLightingTarget, lightingTargetKey, resolveLightingTarget } from '../../api/types/lighting-target';
@@ -66,7 +66,7 @@ interface AssetDiagnosticSlot {
   readonly value: unknown;
 }
 
-interface StatementValidationContext {
+export interface StatementValidationContext {
   readonly statement: SceneStatement;
   readonly actionId: string;
   readonly actionType: SceneStatement['type'];
@@ -78,28 +78,6 @@ interface StatementValidationContext {
 
 interface ActiveFollow {
   readonly target: string;
-}
-
-/**
- * State of one active environment layer at a scene time. The stage renderer
- * cover-fits every layer image to the stage at scale 1, so scale 1 covers
- * exactly one viewport; rotation expands the axis-aligned half-extent.
- * `z` maps to both render order (Pixi container zIndex) and artistic
- * parallax depth; `order` breaks equal-z ties by insertion sequence.
- */
-interface EnvironmentLayerCoverage {
-  readonly x: number;
-  readonly y: number;
-  readonly scale: number;
-  readonly rotation: number;
-  readonly z: number;
-  readonly order: number;
-}
-
-interface CameraFrameValidation {
-  readonly follow: ActiveFollow | undefined;
-  readonly zoom: number;
-  readonly rotation: number;
 }
 
 interface CharacterPresenceSegment {
@@ -115,6 +93,12 @@ interface LightingValidationState {
 }
 
 export interface SemanticSceneValidationOptions {
+  /** Actual texture dimensions; unknown resources defer coverage diagnostics. */
+  readonly environmentImageSize?: (assetPath: string) => ImageSize | undefined;
+  /** Project aspect ratio, independent of export pixel density. */
+  readonly cameraReferenceSize?: ImageSize;
+  /** Samples actual output frame times and authored keyframes during movement. */
+  readonly cameraSampleFps?: number;
   /**
    * Optional map, record, or lookup function for audio asset durations (in seconds).
    * Used to diagnose audio playback window truncations when durations are known.
@@ -175,9 +159,51 @@ export function validateSemanticSceneStructure(
   }
 
   validateSemanticVisualStatements(contexts, characterIds, issues);
+  issues.push(...collectCameraCoverageIssues(contexts, options, document.meta.durationSeconds));
   validateCharacterOrdering(contexts, issues);
   validateSemanticAudioStatements(contexts, issues, options);
   return issues;
+}
+
+/** Background coverage pass without repeating synchronous structural checks. */
+export function validateSemanticSceneCameraCoverageAsync(
+  document: CurrentSceneDocument,
+  options: SemanticSceneValidationOptions,
+  isCurrent: () => boolean,
+): Promise<SemanticValidationIssue[]> {
+  return collectCameraCoverageIssuesAsync(
+    collectStatementValidationContexts(document), options, document.meta.durationSeconds ?? 0, isCurrent,
+  );
+}
+
+export interface PreparedCameraCoverageValidation {
+  readonly key: string;
+  readonly imagePaths: readonly string[];
+  validate(options: SemanticSceneValidationOptions, isCurrent: () => boolean): Promise<SemanticValidationIssue[]>;
+}
+
+/** Only visual inputs invalidate coverage; typing dialogue can reuse an in-flight scan. */
+export function prepareSemanticSceneCameraCoverage(document: CurrentSceneDocument): PreparedCameraCoverageValidation | null {
+  const contexts = collectStatementValidationContexts(document);
+  const visual = contexts.filter(({ statement }) => statement.type === 'camera' || statement.type === 'environmentLayer');
+  const cameras = visual.filter(({ statement }) => statement.type === 'camera');
+  if (!cameras.some(({ statement }) => statement.type === 'camera'
+    && lowerCameraPropertyTracks(statement.params).length > 0
+    && statement.params.mode !== 'follow' && statement.params.mode !== 'hitchcock' && statement.params.mode !== 'shake')) return null;
+  const imagePaths = [...new Set(visual.flatMap(({ statement }) => {
+    if (statement.type !== 'environmentLayer') return [];
+    const image = statement.params.image ?? statement.params.file;
+    return image ? [image] : [];
+  }))];
+  if (imagePaths.length === 0) return null;
+  // Only indefinitely repeating paths depend on non-visual statements' ends.
+  const looping = cameras.some(({ statement }) => statement.type === 'camera' && statement.params.mode === 'path'
+    && (statement.params.loop || statement.params.repeat === -1));
+  const sceneEnd = looping ? contexts.reduce((end, { statement }) => Math.max(end,
+    statement.time + sceneStatementDefinitionRegistry.temporalExtent(statement)), document.meta.durationSeconds ?? 0) : 0;
+  const key = JSON.stringify([document.sceneId, sceneEnd, visual.map(({ statement, actionId, actionType, location }) =>
+    [statement.id, statement.time, statement.type, statement.params, actionId, actionType, location])]);
+  return { key, imagePaths, validate: (options, isCurrent) => collectCameraCoverageIssuesAsync(visual, options, sceneEnd, isCurrent) };
 }
 
 function motionKeyOf(motion: CharacterPerformanceParams['motion']): string | undefined {
@@ -273,10 +299,6 @@ function validateSemanticVisualStatements(
     const layerId = context.statement.params.layerId;
     if (hasNonEmptyString(layerId)) environmentLayerIds.add(layerId);
   }
-  let environmentLayers = new Map<string, EnvironmentLayerCoverage>();
-  let environmentOrder = 0;
-  let cameraZoom = 1;
-  let cameraRotation = 0;
   const orderedContexts = [...contexts].sort((left, right) => (
     left.statement.time - right.statement.time
     || left.sourceOrder - right.sourceOrder
@@ -284,183 +306,12 @@ function validateSemanticVisualStatements(
   ));
 
   for (const context of orderedContexts) {
-    if (context.statement.type === 'environmentLayer') {
-      environmentLayers = updateEnvironmentLayerCoverage(environmentLayers, context.statement, environmentOrder++);
-      continue;
-    }
     if (context.statement.type === 'camera') {
-      const bottom = bottommostEnvironmentLayer(environmentLayers);
-      validateCameraCoverage(context, bottom, cameraZoom, cameraRotation, issues);
-      const next = validateCameraStatement(context, characterIds, activeFollow, cameraZoom, cameraRotation, issues);
-      activeFollow = next.follow;
-      cameraZoom = next.zoom;
-      cameraRotation = next.rotation;
+      activeFollow = validateCameraStatement(context, characterIds, activeFollow, issues);
     } else if (context.statement.type === 'lighting') {
       validateLightingStatement(context, lightingState, characterIds, environmentLayerIds, issues);
     }
   }
-}
-
-function updateEnvironmentLayerCoverage(
-  layers: ReadonlyMap<string, EnvironmentLayerCoverage>,
-  statement: Extract<SceneStatement, { type: 'environmentLayer' }>,
-  order: number,
-): Map<string, EnvironmentLayerCoverage> {
-  const next = new Map(layers);
-  if (statement.params.mode === 'remove') {
-    next.delete(statement.params.layerId);
-    return next;
-  }
-  const current = next.get(statement.params.layerId);
-  const isSet = statement.params.mode === 'set';
-  next.set(statement.params.layerId, {
-    x: statement.params.position?.[0] ?? (isSet ? 0.5 : current?.x ?? 0.5),
-    y: statement.params.position?.[1] ?? (isSet ? 0.5 : current?.y ?? 0.5),
-    scale: statement.params.scale ?? (isSet ? 1 : current?.scale ?? 1),
-    rotation: statement.params.rotation ?? (isSet ? 0 : current?.rotation ?? 0),
-    z: statement.params.z ?? current?.z ?? 0,
-    order: current?.order ?? order,
-  });
-  return next;
-}
-
-/** The bottom-most active environment layer is the backdrop (lowest z, then insertion order). */
-function bottommostEnvironmentLayer(
-  layers: ReadonlyMap<string, EnvironmentLayerCoverage>,
-): { readonly layerId: string; readonly coverage: EnvironmentLayerCoverage } | undefined {
-  let bottom: { readonly layerId: string; readonly coverage: EnvironmentLayerCoverage } | undefined;
-  for (const [layerId, coverage] of layers) {
-    if (
-      bottom === undefined
-      || coverage.z < bottom.coverage.z
-      || (coverage.z === bottom.coverage.z && coverage.order < bottom.coverage.order)
-    ) {
-      bottom = { layerId, coverage };
-    }
-  }
-  return bottom;
-}
-
-function rotatedHalfExtent(scale: number, rotationDegrees: number): number {
-  const theta = (rotationDegrees * Math.PI) / 180;
-  return (scale * (Math.abs(Math.cos(theta)) + Math.abs(Math.sin(theta)))) / 2;
-}
-
-function validateCameraCoverage(
-  context: StatementValidationContext,
-  backdrop: { readonly layerId: string; readonly coverage: EnvironmentLayerCoverage } | undefined,
-  cameraZoom: number,
-  cameraRotation: number,
-  issues: SemanticValidationIssue[],
-): void {
-  if (backdrop === undefined) return;
-  if (!Number.isFinite(cameraZoom) || cameraZoom <= 0) return;
-  const params = context.statement.params as CameraParams;
-  const {
-    x: backgroundX, y: backgroundY, scale: backgroundScale,
-    rotation: backgroundRotation, z: backgroundDepth,
-  } = backdrop.coverage;
-  const backgroundHalfExtent = rotatedHalfExtent(backgroundScale, backgroundRotation);
-
-  if (params.mode === 'focus') {
-    // Focus with a character target derives its position from the character
-    // and is clamped by the runtime; only explicit pan points are checked.
-    if (params.target !== undefined || params.position === undefined) return;
-    assertCameraPositionCoverage(
-      context,
-      params.position,
-      backdrop.layerId,
-      backgroundX,
-      backgroundY,
-      backgroundDepth,
-      backgroundHalfExtent,
-      applyZoomIntent(cameraZoom, params.zoom),
-      params.rotation ?? cameraRotation,
-      issues,
-    );
-    return;
-  }
-  if (params.mode === 'move') {
-    const target = params.to ?? params.position;
-    if (target === undefined) return;
-    assertCameraPositionCoverage(
-      context,
-      target,
-      backdrop.layerId,
-      backgroundX,
-      backgroundY,
-      backgroundDepth,
-      backgroundHalfExtent,
-      applyZoomIntent(cameraZoom, params.zoom),
-      params.rotation ?? cameraRotation,
-      issues,
-    );
-    return;
-  }
-  if (params.mode === 'path') {
-    let zoom = cameraZoom;
-    let rotation = cameraRotation;
-    for (const keyframe of [...params.keyframes].sort((left, right) => left.time - right.time)) {
-      if (keyframe.zoom !== undefined) zoom = keyframe.zoom;
-      if (keyframe.rotation !== undefined) rotation = keyframe.rotation;
-      if (keyframe.position === undefined) continue;
-      assertCameraPositionCoverage(
-        context,
-        keyframe.position,
-        backdrop.layerId,
-        backgroundX,
-        backgroundY,
-        backgroundDepth,
-        backgroundHalfExtent,
-        zoom,
-        rotation,
-        issues,
-      );
-    }
-  }
-}
-
-function applyZoomIntent(current: number, zoom: { kind: 'absolute' | 'delta'; value: number } | undefined): number {
-  if (!zoom) return current;
-  return zoom.kind === 'absolute' ? zoom.value : current + zoom.value;
-}
-
-function assertCameraPositionCoverage(
-  context: StatementValidationContext,
-  position: Vec2,
-  layerId: string,
-  backgroundX: number,
-  backgroundY: number,
-  backgroundDepth: number,
-  backgroundHalfExtent: number,
-  zoom: number,
-  rotationDegrees: number,
-  issues: SemanticValidationIssue[],
-): void {
-  if (!Number.isFinite(zoom) || zoom <= 0) return;
-  const halfView = rotatedHalfExtent(1 / zoom, rotationDegrees);
-  const epsilon = 1e-6;
-  const [px, py] = position;
-  // Match projectToScreen: depth scales the camera offset from the frame
-  // center, while the layer's authored position keeps its own offset.
-  const parallax = 1 + backgroundDepth / ARTISTIC_PARALLAX_DEPTH_SCALE;
-  const offsetX = backgroundX - 0.5 + (0.5 - px) * parallax;
-  const offsetY = backgroundY - 0.5 + (0.5 - py) * parallax;
-  const insideX = Math.abs(offsetX) <= backgroundHalfExtent - halfView + epsilon;
-  const insideY = Math.abs(offsetY) <= backgroundHalfExtent - halfView + epsilon;
-  if (insideX && insideY) return;
-  issues.push({
-    severity: 'warning',
-    message: `镜头运镜至 (${roundNumber(px)}, ${roundNumber(py)}) 超出最底部环境图层「${layerId}」的覆盖范围（zoom ${roundNumber(zoom)}、图层覆盖 ${roundNumber(backgroundHalfExtent * 2)}），画面边缘会出现黑边；请放大 zoom、扩大该图层 scale 或减小平移幅度。`,
-    actionId: context.actionId,
-    actionType: context.actionType,
-    code: SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge,
-    location: `${context.location}.params`,
-  });
-}
-
-function roundNumber(value: number): number {
-  return Math.round(value * 100) / 100;
 }
 
 function validateCharacterOrdering(
@@ -560,10 +411,8 @@ function validateCameraStatement(
   context: StatementValidationContext,
   characterIds: ReadonlySet<string>,
   activeFollow: ActiveFollow | undefined,
-  zoom: number,
-  rotation: number,
   issues: SemanticValidationIssue[],
-): CameraFrameValidation {
+): ActiveFollow | undefined {
   const params = context.statement.params as CameraParams;
 
   const nextFollow = lowerCameraPropertyTracks(params).includes('position') ? undefined : activeFollow;
@@ -584,81 +433,23 @@ function validateCameraStatement(
       if (params.target !== undefined && !(params.position !== undefined && !hasNonEmptyString(params.target))) {
         validateCameraCharacterTarget(context, params.target, characterIds, issues);
       }
-      return {
-        follow: nextFollow,
-        zoom: applyZoomIntent(zoom, params.zoom),
-        rotation: params.rotation ?? rotation,
-      };
+      return nextFollow;
     case 'move':
       validateCameraMove(context, params, issues);
-      return {
-        follow: nextFollow,
-        zoom: applyZoomIntent(zoom, params.zoom),
-        rotation: params.rotation ?? rotation,
-      };
+      return nextFollow;
     case 'path':
       validateCameraPath(context, params, issues);
-      return {
-        follow: nextFollow,
-        zoom: lastPathFrameZoom(params, zoom),
-        rotation: lastPathFrameRotation(params, rotation),
-      };
+      return nextFollow;
     case 'follow':
-      if (params.operation === 'stop') {
-        // Runtime follow stop compiles to cameraReset, restoring defaults.
-        return {
-          follow: validateCameraFollow(context, params, characterIds, activeFollow, issues),
-          zoom: 1,
-          rotation: 0,
-        };
-      }
-      return {
-        follow: validateCameraFollow(context, params, characterIds, activeFollow, issues),
-        zoom,
-        rotation,
-      };
+      return validateCameraFollow(context, params, characterIds, activeFollow, issues);
     case 'hitchcock':
       validateCameraCharacterTarget(context, params.target, characterIds, issues);
-      return {
-        follow: nextFollow,
-        zoom: params.zoomEnd,
-        rotation,
-      };
+      return nextFollow;
     case 'reset':
-      return {
-        follow: undefined,
-        zoom: 1,
-        rotation: 0,
-      };
+      return undefined;
     case 'shake':
-      return {
-        follow: activeFollow,
-        zoom,
-        rotation,
-      };
+      return activeFollow;
   }
-}
-
-function lastPathFrameZoom(
-  params: Extract<CameraParams, { mode: 'path' }>,
-  fallback: number,
-): number {
-  let zoom = fallback;
-  for (const keyframe of params.keyframes) {
-    if (keyframe.zoom !== undefined) zoom = keyframe.zoom;
-  }
-  return zoom;
-}
-
-function lastPathFrameRotation(
-  params: Extract<CameraParams, { mode: 'path' }>,
-  fallback: number,
-): number {
-  let rotation = fallback;
-  for (const keyframe of params.keyframes) {
-    if (keyframe.rotation !== undefined) rotation = keyframe.rotation;
-  }
-  return rotation;
 }
 
 function validateCameraMove(

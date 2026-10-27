@@ -1,8 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { computeCameraStateAtTime, prepareCameraZoomResolver } from '../engine/CameraStateResolver';
+import { computeCameraStateAtTime, prepareCameraStateResolver, prepareCameraZoomResolver } from '../engine/CameraStateResolver';
 import type { RuntimeTimelineAction } from '../engine/RuntimeTimelineScene';
 
 describe('computeCameraStateAtTime', () => {
+  it('samples prepared sparse paths with duplicate keys and yoyo in either time direction', () => {
+    const timeline: RuntimeTimelineAction[] = [{ _id: 'sparse-path', action: 'cameraPath', time: 0, params: {
+      repeat: 1, yoyo: true, ease: 'linear', keyframes: [
+        { time: 0, position: [0.2, 0.5], zoom: 1 },
+        { time: 1, position: [0.4, 0.5] },
+        { time: 1, position: [0.6, 0.5] },
+        { time: 2, position: [0.8, 0.5], zoom: 3 },
+      ],
+    } }];
+    const resolve = prepareCameraStateResolver(timeline, { resolveZoomAtTime: prepareCameraZoomResolver(timeline) });
+    for (const [time, x, zoom] of [[0, 0.2, 1], [1, 0.6, 2], [1.5, 0.7, 2.5],
+      [2, 0.8, 3], [2.5, 0.7, 2.5], [3, 0.6, 2], [4, 0.2, 1], [0.5, 0.3, 1.5]]) {
+      const state = resolve(time);
+      expect(state.position.x).toBeCloseTo(x);
+      expect(state.zoom).toBeCloseTo(zoom);
+    }
+  });
+
+  it('reuses writer starts without changing interrupted paths, same-time writes, or out-of-order samples', () => {
+    const timeline: RuntimeTimelineAction[] = [
+      { _id: 'pan', action: 'cameraMotion', time: 1, params: { target: [0.8, 0.6], duration: 4, _cameraProperties: ['position'] } },
+      { _id: 'path', action: 'cameraPath', time: 2, params: { keyframes: [
+        { time: 1, position: [0.3, 0.4], zoom: 2 }, { time: 3, rotation: 45, zoom: 3 },
+      ], repeat: 2, yoyo: true } },
+      { _id: 'zoom', action: 'cameraMotion', time: 3, params: { zoom: '+=0.5', duration: 2, _cameraProperties: ['zoom'] } },
+      { _id: 'interrupt', action: 'cameraMotion', time: 3, params: { target: [0.6, 0.7], duration: 3, _cameraProperties: ['position'] } },
+      { _id: 'reset', action: 'cameraReset', time: 8, params: { duration: 2 } },
+    ];
+    const deps = { resolveZoomAtTime: prepareCameraZoomResolver(timeline) };
+    const prepared = prepareCameraStateResolver(timeline, deps);
+    for (const time of [0, 1, 1.5, 2, 3, 4, 7, 8, 9, 11, 3.5, 2.5, 1, 10]) {
+      expect(prepared(time)).toEqual(computeCameraStateAtTime(timeline, time, deps));
+    }
+  });
+
   it('holds the release-time anchor after follow stop without a trajectory', () => {
     const timeline: RuntimeTimelineAction[] = [
       { _id: 'zoom', action: 'cameraMotion', time: 0, params: { zoom: 2, duration: 0, _cameraProperties: ['zoom'] } },
