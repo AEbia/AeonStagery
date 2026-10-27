@@ -36,6 +36,16 @@ status: accepted
 - 镜头旋转作用于角色、环境层与图片的画面投影；字幕等屏幕空间 UI 保持独立。画面震动在投影后、视口或输出像素换算前叠加，不改变基础镜头位置。
 - `getPoint()` 返回角色世界锚点；`getScreenPoint()` 返回经过当前镜头投影的画面坐标。两者分别用于镜头构图与屏幕交互。
 
+### 运镜黑边诊断
+
+- 判定对象是最终画面内所有可见环境图层投影后的几何覆盖并集。单层越界不等于黑边；其他图层补齐覆盖时不报警。旋转图层使用真实四边形，不能以外接矩形或画面四角是否被覆盖代替整个画面的覆盖检查。
+- 使用项目宽高比、图片实际尺寸和运行时 cover-fit、视差及摄像机求值规则。按项目输出帧时间以及路径关键帧检查运镜期间的状态；环境变换、交叉淡入淡出的出入图片和退场权重使用同一时刻的运行时重建结果。每条运镜最多报告一次，并给出检测时刻。
+- 仅检查几何覆盖，不检测图片自身的透明像素。图层或图片权重为零时不参与覆盖；缺少图片尺寸或角色镜头位置无法确定时暂缓诊断，不用舞台比例或角色原点代替实际数据。震动和未声明环境图片的纯色舞台不在此诊断范围内。
+- 环境时间线沿用正式编译的参数缺省语义；未指定变换的 `set` 使用运行时默认值。位置是否依赖角色锚点按各写入者的实际交接时刻判定，不能因被打断动作的名义时长结束而恢复为已知；接管边界归后继写入者，正常完成的终点仍参与检查。
+- 图片尺寸由异步资源校验读取并缓存，黑边提示使用独立的校验结果来源。高频编辑在停手 400ms 后合并执行；只有镜头、环境及其有效时间、诊断归属或项目视频格式等覆盖输入变化才清除旧结果并取消旧任务，对白文字等无关修改复用已有结果和进行中的采样。无限循环路径的输入还包含整个场景的派生终点，非视觉语句延长场景时也重新校验。关闭场景、切换项目或刷新资源缓存使旧任务失效，旧任务不能发布过期提示。
+- 没有可采样镜头时不读取环境图片尺寸；尺寸请求去重并共享最多 4 个并发加载槽，失效任务不再启动排队图片。刷新缓存和销毁校验器时中止待加载图片，加载失败的尺寸不作为永久缓存。
+- 逐帧检查复用镜头起点、按属性排序的路径关键帧及环境已完成动作前缀；路径属性按二分查找采样，环境仅重放仍在变化的后缀，逆序采样时重建前缀。后台采样约每 4ms 让出事件循环，并在推进采样迭代器前检查任务是否失效；该预算不包含硬实时保证，检测精度仍按输出帧与关键帧契约。
+
 ## Consequences
 
 - 纯时间线通道的播放、seek 与导出共享相同的场景时间求值规则。
@@ -45,6 +55,7 @@ status: accepted
 ## Implementation alignment
 
 - 通道求值与诊断：[`CameraChannelEvaluator.ts`](../../src/engine/CameraChannelEvaluator.ts)、[`CameraStateResolver.ts`](../../src/engine/CameraStateResolver.ts)
+- 黑边几何覆盖与资源校验：[`EnvironmentFrameCoverage.ts`](../../src/engine/EnvironmentFrameCoverage.ts)、[`CameraCoverageDiagnostics.ts`](../../src/services/semantic-scene/CameraCoverageDiagnostics.ts)、[`ValidationDaemon.ts`](../../src/engine/daemons/ValidationDaemon.ts)
 - 时间线同步、聚焦锚点与跟随交接：[`CameraCoordinator.ts`](../../src/engine/coordinators/CameraCoordinator.ts)、[`ScriptEngine.ts`](../../src/engine/ScriptEngine.ts)
 - 跟随平滑与画面震动：[`CameraFollowSmoothing.ts`](../../src/engine/CameraFollowSmoothing.ts)、[`CameraShake.ts`](../../src/engine/CameraShake.ts)
 - 角色舞台锚点：[`cameraAnchorResolver.ts`](../../src/engine/cameraAnchorResolver.ts)

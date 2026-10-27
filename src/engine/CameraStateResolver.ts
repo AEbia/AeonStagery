@@ -153,6 +153,12 @@ function contributingEventPrefixes(events: readonly TimelineEvent[]): readonly (
 }
 
 interface MotionChannels extends CameraPosition { zoom: number; rotation: number }
+interface PreparedCameraPath {
+  readonly sample: ReturnType<typeof createPreparedCameraPath>;
+  readonly writesPosition: boolean;
+  readonly writesZoom: boolean;
+  readonly writesRotation: boolean;
+}
 
 /**
  * Resolve the deterministic camera state at `time`.
@@ -162,6 +168,7 @@ interface ResolverEvaluationContext {
   readonly contributors: readonly (readonly number[])[] | null;
   readonly releaseTimes: ReadonlyMap<RuntimeTimelineAction, number>;
   readonly states: Map<number, ResolvedCameraState>;
+  readonly paths: Map<RuntimeTimelineAction, PreparedCameraPath>;
 }
 
 export function computeCameraStateAtTime(
@@ -169,10 +176,22 @@ export function computeCameraStateAtTime(
   time: number,
   deps: CameraStateResolverDeps = {},
 ): ResolvedCameraState {
-  const evaluationDeps: CameraStateResolverDeps = deps.compiledChannelOwnership === undefined
-    ? { ...deps, compiledChannelOwnership: true }
-    : deps;
-  const events = toOrderedEvents(timeline, time);
+  return resolvePreparedCameraState(time, deps, createCameraResolverContext(toOrderedEvents(timeline, time), deps));
+}
+
+/** Reuse writer starts across samples of one immutable timeline and dependency set. */
+export function prepareCameraStateResolver(
+  timeline: readonly RuntimeTimelineAction[],
+  deps: CameraStateResolverDeps = {},
+): (time: number) => ResolvedCameraState {
+  const context = createCameraResolverContext(toOrderedEvents(timeline, Infinity), deps);
+  return time => resolvePreparedCameraState(time, deps, context);
+}
+
+function createCameraResolverContext(
+  events: readonly TimelineEvent[],
+  deps: CameraStateResolverDeps,
+): ResolverEvaluationContext {
   const releaseTimes = new Map<RuntimeTimelineAction, number>();
   let nextRelease = Infinity;
   for (let index = events.length - 1; index >= 0; index--) {
@@ -184,19 +203,38 @@ export function computeCameraStateAtTime(
       || (action.action === 'cameraMotion' && compiledMotionWritesPosition(params))
       || (action.action === 'cameraPath' && compiledPathWritesPosition(params))) nextRelease = start;
   }
-  const context: ResolverEvaluationContext = {
+  return {
     events,
-    contributors: evaluationDeps.compiledChannelOwnership && evaluationDeps.resolveZoomAtTime
+    contributors: deps.compiledChannelOwnership !== false && deps.resolveZoomAtTime
       ? contributingEventPrefixes(events) : null,
     releaseTimes,
     states: new Map(),
+    paths: new Map(),
   };
+}
+
+function resolvePreparedCameraState(
+  time: number,
+  deps: CameraStateResolverDeps,
+  context: ResolverEvaluationContext,
+): ResolvedCameraState {
+  const evaluationDeps: CameraStateResolverDeps = deps.compiledChannelOwnership === undefined
+    ? { ...deps, compiledChannelOwnership: true }
+    : deps;
+  const { events } = context;
+  let low = 0;
+  let high = events.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (events[middle].time <= time) low = middle + 1;
+    else high = middle;
+  }
 
   // Resolve only requested start states. The explicit stack shares one event
   // list and avoids recursive prefix copies, scans and JavaScript stack depth.
-  // Every index and memoized state belongs to this query and is then discarded.
-  const pending = [{ end: events.length,
-    evaluation: evaluateCameraStatePrefix(events.length, time, evaluationDeps, context) }];
+  // Cached prefix states are sampled at the next writer's fixed handoff time.
+  const pending = [{ end: low,
+    evaluation: evaluateCameraStatePrefix(low, time, evaluationDeps, context) }];
   let step = pending[0].evaluation.next();
   while (true) {
     if (step.done) {
@@ -447,11 +485,19 @@ function* evaluateCameraStatePrefix(
     }
 
     if (action.action === 'cameraPath') {
-      if (deps.compiledChannelOwnership) {
+      let path = context.paths.get(action);
+      if (!path) {
         const params = action.params ?? {};
-        const writesPosition = compiledPathWritesProperty(params, 'position');
-        const writesZoom = compiledPathWritesProperty(params, 'zoom');
-        const writesRotation = compiledPathWritesProperty(params, 'rotation');
+        path = {
+          sample: createPreparedCameraPath(params),
+          writesPosition: compiledPathWritesProperty(params, 'position'),
+          writesZoom: compiledPathWritesProperty(params, 'zoom'),
+          writesRotation: compiledPathWritesProperty(params, 'rotation'),
+        };
+        context.paths.set(action, path);
+      }
+      const { writesPosition, writesZoom, writesRotation } = path;
+      if (deps.compiledChannelOwnership) {
         if (writesPosition || writesRotation || (writesZoom && !deps.resolveZoomAtTime)) {
           const startState = inheritStartCoverage(yield eventIndex);
           if (writesPosition) {
@@ -463,11 +509,11 @@ function* evaluateCameraStatePrefix(
         }
         if (writesZoom && deps.resolveZoomAtTime) channels.zoom = deps.resolveZoomAtTime(start, action);
       }
-      if (deps.compiledChannelOwnership && compiledPathWritesPosition(action.params ?? {})) {
+      if (deps.compiledChannelOwnership && writesPosition) {
         follow = null;
         composedFollowFrame = null;
       }
-      applyCameraPath(channels, coverage, action.params ?? {}, start, sampleTime);
+      path.sample(channels, coverage, start, sampleTime);
       continue;
     }
 
@@ -855,18 +901,12 @@ function applyCompiledCameraMotion(
  * segment animates only the fields its keyframe defines, and per-keyframe
  * eases mirror createPath(). Values latch after the final keyframe.
  */
-function applyCameraPath(
-  channels: MotionChannels,
-  coverage: CameraChannelCoverage,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Legacy camera paths remain extensible at this runtime boundary.
-  params: Record<string, any>,
-  start: number,
-  time: number,
-): void {
-  createPreparedCameraPath(params)(channels, coverage, start, time);
-}
-
 type PreparedCameraPathKeyframe = Record<string, unknown> & { readonly time: number };
+interface PreparedCameraPropertyKeyframe {
+  readonly time: number;
+  readonly value: number | CameraPosition;
+  readonly ease: string;
+}
 
 function createPreparedCameraPath(
   params: Readonly<Record<string, unknown>>,
@@ -885,6 +925,15 @@ function createPreparedCameraPath(
   const writesPosition = positionTrack.length > 0;
   const writesZoom = zoomTrack.length > 0;
   const writesRotation = rotationTrack.length > 0;
+  const prepareTrack = (track: readonly PreparedCameraPathKeyframe[], property: 'position' | 'zoom' | 'rotation') =>
+    track.flatMap(frame => {
+      const value = property === 'position' ? normalizePoint(frame.position) : Number(frame[property]);
+      return value === null ? [] : [{ time: frame.time, value,
+        ease: typeof frame.ease === 'string' ? frame.ease : typeof params.ease === 'string' ? params.ease : 'power2.inOut' }];
+    });
+  const positions = prepareTrack(positionTrack, 'position');
+  const zooms = prepareTrack(zoomTrack, 'zoom');
+  const rotations = prepareTrack(rotationTrack, 'rotation');
 
   return (channels, coverage, start, time) => {
     if (keyframes.length === 0) return;
@@ -894,7 +943,7 @@ function createPreparedCameraPath(
     if (writesRotation) coverage.rotation = true;
 
     let local = time - start;
-      const duration = keyframes[keyframes.length - 1].time;
+    const duration = keyframes[keyframes.length - 1].time;
     if (duration > 0) {
       const repeatValue = params.repeat;
       const infinite = params.loop === true || repeatValue === -1;
@@ -912,50 +961,43 @@ function createPreparedCameraPath(
     }
 
     const sampleProperty = (
-      property: 'position' | 'zoom' | 'rotation',
-      track: readonly PreparedCameraPathKeyframe[],
+      track: readonly PreparedCameraPropertyKeyframe[],
       initial: number | CameraPosition,
     ): number | CameraPosition => {
-      let value = initial;
-      let previousTime = 0;
-      for (const keyframe of track) {
-        const keyTime = keyframe.time;
-        const rawTarget = property === 'position' ? normalizePoint(keyframe.position) : Number(keyframe[property]);
-        if (rawTarget === null || (typeof rawTarget === 'number' && !Number.isFinite(rawTarget))) continue;
-        if (local >= keyTime) {
-          value = rawTarget;
-          previousTime = keyTime;
-          continue;
+      // Upper bound retains the last same-time key and supports yoyo / seek
+      // samples in either direction without walking the entire path.
+      let low = 0;
+      let high = track.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (track[middle].time <= local) low = middle + 1;
+        else high = middle;
+      }
+      const previous = track[low - 1];
+      const next = track[low];
+      const value = previous?.value ?? initial;
+      const previousTime = previous?.time ?? 0;
+      if (next && next.time > previousTime) {
+        const progress = Math.max(0, Math.min(1, (local - previousTime) / (next.time - previousTime)));
+        const weight = evaluateCharacterEase(next.ease, progress, 'power2.inOut');
+        if (typeof value === 'number' && typeof next.value === 'number') {
+          return value + (next.value - value) * weight;
         }
-        if (keyTime > previousTime) {
-          const progress = Math.max(0, Math.min(1, (local - previousTime) / (keyTime - previousTime)));
-          const ease = typeof keyframe.ease === 'string'
-            ? keyframe.ease
-            : typeof params.ease === 'string' ? params.ease : 'power2.inOut';
-          const weight = evaluateCharacterEase(ease, progress, 'power2.inOut');
-          if (typeof value === 'number' && typeof rawTarget === 'number') {
-            return value + (rawTarget - value) * weight;
-          }
-          if (typeof value !== 'number' && typeof rawTarget !== 'number') {
-            return {
-              x: value.x + (rawTarget.x - value.x) * weight,
-              y: value.y + (rawTarget.y - value.y) * weight,
-            };
-          }
+        if (typeof value !== 'number' && typeof next.value !== 'number') {
+          return { x: value.x + (next.value.x - value.x) * weight, y: value.y + (next.value.y - value.y) * weight };
         }
-        break;
       }
       return value;
     };
 
-    const position = sampleProperty('position', positionTrack, { x: channels.x, y: channels.y });
+    const position = sampleProperty(positions, { x: channels.x, y: channels.y });
     if (typeof position !== 'number') {
       channels.x = position.x;
       channels.y = position.y;
     }
-    const zoom = sampleProperty('zoom', zoomTrack, channels.zoom);
+    const zoom = sampleProperty(zooms, channels.zoom);
     if (typeof zoom === 'number') channels.zoom = zoom;
-    const rotation = sampleProperty('rotation', rotationTrack, channels.rotation);
+    const rotation = sampleProperty(rotations, channels.rotation);
     if (typeof rotation === 'number') channels.rotation = rotation;
   };
 }

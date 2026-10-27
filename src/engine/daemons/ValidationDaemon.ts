@@ -7,6 +7,10 @@ import type { ValidationIssue } from '../../api/types/validation';
 import { extractLive2DModelData } from '../Live2DModelData';
 import type { CharacterPerformanceParams, CurrentSceneDocument, SceneStatement } from '../../api/types/semantic-scene';
 import { sceneStatementDefinitionRegistry, validateSemanticSceneStructure } from '../../services/semantic-scene';
+import { isValidImageSize, type ImageSize } from '../EnvironmentFrameCoverage';
+import { prepareSemanticSceneCameraCoverage, type PreparedCameraCoverageValidation } from '../../services/semantic-scene/SemanticSceneValidator';
+import { DEFAULT_VIDEO_FORMAT } from '../../api/types/video-format';
+import type { ProjectSession } from '../../services/io/ProjectSession';
 
 interface AssetCacheEntry {
   exists: boolean;
@@ -32,8 +36,17 @@ export class ValidationDaemon {
 
   private assetCache: Map<string, AssetCacheEntry> = new Map();
   private modelCache: Map<string, ModelCacheEntry> = new Map();
+  private imageSizeCache = new Map<string, Promise<ImageSize | undefined>>();
+  private imageSizeLoads = new Map<Promise<ImageSize | undefined>, () => void>();
+  private asyncRequest: object | null = null;
+  private coverageRequest: object | null = null;
+  private coverageValidation: PreparedCameraCoverageValidation | null = null;
+  private coverageKey: string | null = null;
+  private coveragePromise: Promise<void> | null = null;
+  private coverageComplete = false;
   private isRunning: boolean = false;
   private unsubscribeStore: (() => void) | null = null;
+  private unsubscribeProject: (() => void) | null = null;
   private asyncTimeoutId: ReturnType<typeof setTimeout> | null = null;
   private lastVersion: number = -1;
 
@@ -42,7 +55,8 @@ export class ValidationDaemon {
     validationStore: ValidationStore,
     projectResources: ProjectResourceService,
     getBasePath: () => string,
-    resolveModelData?: (modelPath: string) => Promise<{ motions: string[]; expressions: string[] }>
+    resolveModelData?: (modelPath: string) => Promise<{ motions: string[]; expressions: string[] }>,
+    private projectChanges?: Pick<ProjectSession, 'subscribe'>,
   ) {
     this.documentStore = documentStore;
     this.validationStore = validationStore;
@@ -60,6 +74,10 @@ export class ValidationDaemon {
     this.unsubscribeStore = this.documentStore.subscribe(() => {
       this.handleDocumentChange();
     });
+    this.unsubscribeProject = this.projectChanges?.subscribe(() => {
+      this.clearAssetCache();
+      this.triggerAsyncValidation();
+    }) ?? null;
 
     // 2. Register global Window Focus listener
     if (typeof window !== 'undefined') {
@@ -73,6 +91,10 @@ export class ValidationDaemon {
   /** Stop the daemon and cleanup resources */
   dispose(): void {
     this.isRunning = false;
+    this.asyncRequest = null;
+    this.invalidateCameraCoverage();
+    this.unsubscribeProject?.();
+    this.unsubscribeProject = null;
     if (this.unsubscribeStore) {
       this.unsubscribeStore();
       this.unsubscribeStore = null;
@@ -86,12 +108,18 @@ export class ValidationDaemon {
     }
     this.assetCache.clear();
     this.modelCache.clear();
+    this.imageSizeCache.clear();
+    for (const cancel of this.imageSizeLoads.values()) cancel();
+    this.validationStore._setLoading(false);
   }
 
   /** Clear all I/O caches and model data maps */
   clearAssetCache(): void {
     this.assetCache.clear();
     this.modelCache.clear();
+    this.imageSizeCache.clear();
+    for (const cancel of this.imageSizeLoads.values()) cancel();
+    this.invalidateCameraCoverage();
     console.log('[ValidationDaemon] Asset and Model caches cleared.');
   }
 
@@ -109,12 +137,21 @@ export class ValidationDaemon {
     const semanticDocument = this.documentStore.getCurrentSceneDocumentSnapshot();
     const version = this.documentStore.version;
 
-    if (!semanticDocument || version === this.lastVersion) return;
+    if (version === this.lastVersion) return;
     this.lastVersion = version;
+    if (!semanticDocument) {
+      this.invalidateCameraCoverage();
+      this.asyncRequest = null;
+      if (this.asyncTimeoutId) clearTimeout(this.asyncTimeoutId);
+      this.asyncTimeoutId = null;
+      this.validationStore._setLoading(false);
+      return;
+    }
 
     // ─── Stage 1: Fast CPU Synchronous Validation ──────────────────
     // Executes in microseconds, immediately updates Store so red borders appear instantly
     this.validationStore._setSourceIssues('structure', validateSemanticSceneStructure(semanticDocument));
+    this.updateCameraCoverage(semanticDocument);
 
     // ─── Stage 2: Background I/O Async Checks (Debounced) ──────────
     // Debounce to prevent heavy disk checks during high frequency timeline dragging/typing
@@ -142,7 +179,15 @@ export class ValidationDaemon {
   }
 
   private async runSemanticAsyncValidation(document: CurrentSceneDocument): Promise<void> {
+    const asyncRequest = {};
+    this.asyncRequest = asyncRequest;
+    const version = this.documentStore.version;
+    const project = this.projectResources.getCurrentProject();
+    const isCurrent = () => this.isRunning && this.asyncRequest === asyncRequest
+      && this.documentStore.version === version && this.projectResources.getCurrentProject() === project;
     this.validationStore._setLoading(true);
+    this.updateCameraCoverage(document);
+    const coverage = this.runCameraCoverage();
     try {
       const issues: ValidationIssue[] = [];
       const assetChecks: Array<Promise<void>> = [];
@@ -178,7 +223,7 @@ export class ValidationDaemon {
         }
       }
       await Promise.all(assetChecks);
-
+      if (!isCurrent()) return;
       const modelDataByPath = new Map<string, Awaited<ReturnType<ValidationDaemon['getModelData']>>>();
       const loadModelData = async (modelPath: string) => {
         const cached = modelDataByPath.get(modelPath);
@@ -238,11 +283,113 @@ export class ValidationDaemon {
         appendModelKeyIssue(issues, statement, 'motion', modelData.motions);
         appendModelKeyIssue(issues, statement, 'expression', modelData.expressions);
       }
-      if (this.documentStore.version === this.lastVersion) this.validationStore._setSourceIssues('scene-assets', issues);
+      if (isCurrent()) this.validationStore._setSourceIssues('scene-assets', issues);
+      await coverage;
     } catch (error) {
       console.error('[ValidationDaemon] Semantic validation failed:', error);
     } finally {
-      this.validationStore._setLoading(false);
+      if (this.asyncRequest === asyncRequest) this.validationStore._setLoading(false);
+    }
+  }
+
+  private invalidateCameraCoverage(): void {
+    this.coverageRequest = null;
+    this.coveragePromise = null;
+    this.coverageComplete = false;
+    this.coverageKey = null;
+    this.coverageValidation = null;
+    this.validationStore._setSourceIssues('camera-coverage', []);
+  }
+
+  private updateCameraCoverage(document: CurrentSceneDocument): void {
+    const validation = prepareSemanticSceneCameraCoverage(document);
+    const format = this.projectResources.getCurrentProject()?.metadata?.videoFormat ?? DEFAULT_VIDEO_FORMAT;
+    const key = validation ? JSON.stringify([validation.key, format.width, format.height, format.fps, this.getBasePath()]) : null;
+    if (key === this.coverageKey) return;
+    this.invalidateCameraCoverage();
+    this.coverageKey = key;
+    this.coverageValidation = validation;
+  }
+
+  private runCameraCoverage(): Promise<void> {
+    if (this.coveragePromise) return this.coveragePromise;
+    const validation = this.coverageValidation;
+    if (!validation || this.coverageComplete || !this.isRunning) return Promise.resolve();
+    const request = {};
+    this.coverageRequest = request;
+    const isCurrent = () => this.isRunning && this.coverageRequest === request;
+    const format = this.projectResources.getCurrentProject()?.metadata?.videoFormat ?? DEFAULT_VIDEO_FORMAT;
+    this.coveragePromise = (async () => {
+      try {
+        const imageSizes = new Map<string, ImageSize>();
+        let next = 0;
+        // A single global load budget also bounds old jobs still awaiting I/O.
+        await Promise.all(Array.from({ length: Math.min(4, validation.imagePaths.length) }, async () => {
+          while (isCurrent() && next < validation.imagePaths.length) {
+            const path = validation.imagePaths[next++];
+            const size = await this.getImageSize(path, isCurrent);
+            if (size) imageSizes.set(path, size);
+          }
+        }));
+        if (!isCurrent()) return;
+        const issues = await validation.validate({
+          environmentImageSize: path => imageSizes.get(path), cameraReferenceSize: format, cameraSampleFps: format.fps,
+        }, isCurrent);
+        if (!isCurrent()) return;
+        this.coverageComplete = imageSizes.size === validation.imagePaths.length;
+        this.validationStore._setSourceIssues('camera-coverage', issues);
+      } catch (error) {
+        console.error('[ValidationDaemon] Camera coverage validation failed:', error);
+      } finally {
+        if (isCurrent()) this.coveragePromise = null;
+      }
+    })();
+    return this.coveragePromise;
+  }
+
+  private async getImageSize(path: string, isCurrent: () => boolean): Promise<ImageSize | undefined> {
+    if (typeof Image === 'undefined') return undefined;
+    try {
+      const remote = /^(https?:|data:|blob:)/i.test(path);
+      const resolved = remote ? path : await this.resolveProjectAwarePath(path);
+      while (isCurrent()) {
+        const cached = this.imageSizeCache.get(resolved);
+        if (cached) return cached;
+        if (this.imageSizeLoads.size < 4) break;
+        await Promise.race(this.imageSizeLoads.keys());
+      }
+      if (!isCurrent()) return undefined;
+      let cancel = () => {};
+      const pending = new Promise<ImageSize | undefined>(resolve => {
+        const image = new Image();
+        let finished = false;
+        const finish = (size?: ImageSize) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeout);
+          image.onload = null;
+          image.onerror = null;
+          resolve(isValidImageSize(size) ? size : undefined);
+        };
+        cancel = () => { finish(); image.src = ''; };
+        const timeout = setTimeout(() => cancel(), 5000);
+        image.onload = () => finish({ width: image.naturalWidth, height: image.naturalHeight });
+        image.onerror = () => finish();
+        const api = typeof window !== 'undefined' ? window.aeonStageryAPI : undefined;
+        image.src = api?.fs && !remote ? encodeURI(`asset://localhost/${resolved}`) : resolved;
+      });
+      this.imageSizeLoads.set(pending, cancel);
+      this.imageSizeCache.set(resolved, pending);
+      let size: ImageSize | undefined;
+      try {
+        size = await pending;
+        return size;
+      } finally {
+        this.imageSizeLoads.delete(pending);
+        if (!size && this.imageSizeCache.get(resolved) === pending) this.imageSizeCache.delete(resolved);
+      }
+    } catch {
+      return undefined;
     }
   }
 

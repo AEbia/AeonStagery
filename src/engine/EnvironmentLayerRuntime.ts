@@ -175,11 +175,55 @@ export function reconstructEnvironmentAtTime(
   script: RuntimeTimelineScene,
   time: number,
 ): EnvironmentLayerRuntimeSnapshot {
-  const environmentLayers = new Map<string, EnvironmentLayerRenderState>();
-  const layerOrder = new Map<string, number>();
-  let nextLayerOrder = 0;
+  return reconstructPreparedEnvironmentAtTime(normalizeTimedEnvironmentActions(script), time);
+}
 
-  for (const action of normalizeTimedEnvironmentActions(script)) {
+/** Reuse settled history; replay only the still-animating suffix per sample. */
+export function prepareEnvironmentResolver(
+  script: RuntimeTimelineScene,
+): (time: number) => EnvironmentLayerRuntimeSnapshot {
+  const actions = normalizeTimedEnvironmentActions(script);
+  let through = -Infinity;
+  const settledThrough = actions.map(action => {
+    through = Math.max(through, action.time + Math.max(0, action.params.duration ?? 1));
+    return through;
+  });
+  let settledCount = 0;
+  let settled = reconstructPreparedEnvironmentAtTime([], 0);
+  return time => {
+    let low = 0;
+    let high = actions.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (settledThrough[middle] <= time) low = middle + 1;
+      else high = middle;
+    }
+    // Samples can jump backwards when different camera properties overlap.
+    if (low < settledCount) {
+      settled = reconstructPreparedEnvironmentAtTime([], 0);
+      settledCount = 0;
+    }
+    if (low > settledCount) {
+      settled = reconstructPreparedEnvironmentAtTime(actions.slice(settledCount, low), Infinity, settled);
+      settledCount = low;
+    }
+    return reconstructPreparedEnvironmentAtTime(actions, time, settled, settledCount);
+  };
+}
+
+function reconstructPreparedEnvironmentAtTime(
+  actions: readonly TimedEnvironmentAction[],
+  time: number,
+  initial?: EnvironmentLayerRuntimeSnapshot,
+  startIndex = 0,
+): EnvironmentLayerRuntimeSnapshot {
+  const environmentLayers = new Map([...(initial?.environmentLayers ?? [])]
+    .map(([id, layer]) => [id, cloneRenderState(layer)]));
+  const layerOrder = new Map(initial?.layerOrder);
+  let nextLayerOrder = layerOrder.size;
+
+  for (let index = startIndex; index < actions.length; index++) {
+    const action = actions[index];
     if (action.time > time) break;
 
     const p = action.params;
