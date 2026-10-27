@@ -8,6 +8,7 @@ import { TimelineStatementRow, type TimelineStatementRowCommands } from '../ui/t
 import { readSemanticTimelineSnapshot } from '../ui/timeline/useSemanticTimelineSnapshot';
 import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
 import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument, type SceneStatement } from '../api/types/semantic-scene';
+import { isLightingTarget, type LightingTarget } from '../api/types/lighting-target';
 
 const testState = vi.hoisted(() => {
   const semanticDocument = {
@@ -155,6 +156,49 @@ describe('ActionInspector', () => {
     await act(async () => { fireEvent.click(target); });
     await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'Sakiko' })); });
     expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'character', id: 'sakiko' } }));
+  });
+
+  it.each(['blur', 'post'] as const)('keeps the inline %s target picker usable after selecting panorama', async (effect) => {
+    let target: LightingTarget = { kind: 'character', id: 'sakiko' };
+    const refreshDocument = () => {
+      const document: CurrentSceneDocument = {
+        schemaVersion: SCENE_SCHEMA_VERSION,
+        sceneId: 'inline-lighting-targets',
+        meta: testState.defaultSemanticDocument.meta,
+        statements: [{ id: 'lighting', time: 1, type: 'lighting', params: { effect, mode: 'set', target } }],
+      };
+      testState.semanticDocument = document;
+      const compiledScene = sceneStatementCompiler.compile(document);
+      testState.compiledScene = compiledScene;
+      return { document, compiledScene };
+    };
+    const { document, compiledScene } = refreshDocument();
+    const actionId = compiledScene.actions[0].id;
+    const replaceSourceParams = vi.fn((_id: string, params: Record<string, unknown>) => {
+      if (!isLightingTarget(params.target)) throw new Error('Expected a valid lighting target');
+      target = params.target;
+      refreshDocument();
+    });
+    const inspector = () => <ActionInspector
+      presentation="inline"
+      sceneData={{ sceneId: document.sceneId, meta: document.meta, timeline: [] }}
+      selectedActionIds={{ [actionId]: true }} setSelectedIds={vi.fn()}
+      updateAction={vi.fn()} updateParam={vi.fn()} replaceSourceParams={replaceSourceParams}
+      deleteAction={vi.fn()} onClose={vi.fn()}
+    />;
+    const view = render(inspector());
+    fireEvent.click(screen.getByRole('combobox', { name: '作用目标' }));
+    fireEvent.click(screen.getByRole('option', { name: '全景' }));
+    expect(target).toBe(effect === 'blur' ? 'global' : 'panorama');
+    await act(async () => { view.rerender(inspector()); });
+
+    const panoramaPicker = screen.getByRole('combobox', { name: '作用目标' });
+    expect(panoramaPicker.textContent).toBe('全景');
+    fireEvent.click(panoramaPicker);
+    fireEvent.click(screen.getByRole('option', { name: 'Sakiko' }));
+    expect(target).toEqual({ kind: 'character', id: 'sakiko' });
+    await act(async () => { view.rerender(inspector()); });
+    expect(screen.getByRole('combobox', { name: '作用目标' }).textContent).toBe('Sakiko');
   });
 
   it('loads model metadata only once when its own state updates', async () => {

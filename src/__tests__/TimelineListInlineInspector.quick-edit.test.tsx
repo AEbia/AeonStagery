@@ -9,6 +9,36 @@ import { TimelineListView } from '../ui/timeline/TimelineListView';
 setupInlineInspectorFixture();
 
 describe('List inline inspector quick edit', () => {
+  it.each(['tracks', 'list'] as const)('preserves camera statement names in the %s inspector list', (layoutMode) => {
+    state.timelineLayoutMode = layoutMode;
+    loadStatements([
+      { id: 'focus', time: 0, type: 'camera', params: { mode: 'focus', position: [0.3, 0.4], durationSeconds: 1 } },
+      { id: 'move', time: 1, type: 'camera', params: { mode: 'move', to: [0.6, 0.7], durationSeconds: 1 } },
+    ]);
+    renderList();
+
+    expect(screen.getByRole('group', { name: '镜头聚焦，时间 0.0 秒' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: '镜头移动，时间 1.0 秒' })).toBeTruthy();
+    expect(screen.queryByText('运镜动作')).toBeNull();
+  });
+
+  describe.each(['tracks', 'list'] as const)('%s inspector statement names', (layoutMode) => {
+    it.each([
+      { label: '变化模糊', type: 'lighting', params: { effect: 'blur', mode: 'modulate', intensity: 0.5, durationSeconds: 1 } },
+      { label: '变化后期处理', type: 'lighting', params: { effect: 'post', mode: 'modulate', bloomBrightness: 1, durationSeconds: 1 } },
+      { label: '变化色彩叠加', type: 'lighting', params: { effect: 'overlay', mode: 'modulate', id: 'overlay', intensity: 0.5, durationSeconds: 1 } },
+      { label: '变化点光源', type: 'lighting', params: { effect: 'pointLight', mode: 'modulate', id: 'light', intensity: 0.5, durationSeconds: 1 } },
+      { label: '停止 BGM', type: 'audio', params: { role: 'bgm', mode: 'stop' } },
+      { label: '停止音效', type: 'audio', params: { role: 'sfx', mode: 'stop', instanceId: 'effect' } },
+    ])('preserves $label after compilation', ({ label, type, params }) => {
+      state.timelineLayoutMode = layoutMode;
+      loadStatements([{ id: 'statement', time: 0, type, params }]);
+      renderList();
+
+      expect(screen.getByRole('group', { name: `${label}，时间 0.0 秒` })).toBeTruthy();
+    });
+  });
+
   it('displays inline editable speaker selector and dialogue text in the row when collapsed', () => {
 
     render(
