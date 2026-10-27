@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   authorMock: vi.fn(async (_intent: any) => ({})),
   setCopyBuffer: vi.fn(),
   collaborationStatus: 'disconnected',
+  timelineLayoutMode: 'list' as 'list' | 'tracks',
   characterAdapter: {
     getModelDataFromPath: vi.fn(async () => ({
       motions: ['wave', 'nod', 'mygo/alice/greet', 'mygo/alice/bow', 'mygo/bob/idle'],
@@ -72,7 +73,7 @@ vi.mock('../../ui/store/storeHooks', () => ({
 vi.mock('../../ui/SettingsStore', () => ({
   useSettings: () => ({
     settings: {
-      workbenchTimelineLayoutMode: 'list',
+      workbenchTimelineLayoutMode: state.timelineLayoutMode,
       workbenchDialogueFlowMode: 'auto',
     },
     setSetting: vi.fn(),
@@ -118,6 +119,7 @@ export function setupInlineInspectorFixture() {
     state.setCopyBuffer.mockClear();
     Object.values(state.characterAdapter).forEach((mock) => mock.mockClear());
     state.collaborationStatus = 'disconnected';
+    state.timelineLayoutMode = 'list';
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 }

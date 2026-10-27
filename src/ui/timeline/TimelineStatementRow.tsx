@@ -203,7 +203,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = `希区柯克变焦 · ${char ? char.name : (action.params.characterId || '未知角色')}`;
     typeClass = 'timeline-item--camera';
   } else if (action.action === 'cameraMotion') {
-    title = '运镜动作';
+    title = action.semanticLabel ?? '运镜动作';
     typeClass = 'timeline-item--camera';
   } else if (action.action === 'cameraReset') {
     title = '重置镜头';
@@ -233,7 +233,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = '重置光照';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'setBlur') {
-    title = '设置模糊';
+    title = action.semanticLabel ?? '设置模糊';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'resetBlur') {
     title = '重置模糊';
@@ -245,13 +245,13 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = '重置体积光';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'setPostProcessing') {
-    title = '设置后期处理';
+    title = action.semanticLabel ?? '设置后期处理';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'resetPostProcessing') {
     title = '重置后处理';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'addColorOverlay') {
-    title = '添加色彩叠加';
+    title = action.semanticLabel ?? '添加色彩叠加';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'removeColorOverlay') {
     title = '移除色彩叠加';
@@ -260,7 +260,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = '清除全部色彩叠加';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'addPointLight') {
-    title = '添加点光源';
+    title = action.semanticLabel ?? '添加点光源';
     typeClass = 'timeline-item--environment';
   } else if (action.action === 'clearPointLights') {
     title = '清除全部点光源';
@@ -290,7 +290,7 @@ export const TimelineStatementRow = React.memo(function TimelineStatementRow({ a
     title = '播放音频';
     typeClass = 'timeline-item--audio';
   } else if (action.action === 'stopAudio') {
-    title = '停止音频';
+    title = action.semanticLabel ?? '停止音频';
     typeClass = 'timeline-item--audio';
   } else if (action.action === 'setBGM') {
     title = '设置背景音乐';
