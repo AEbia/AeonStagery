@@ -256,8 +256,10 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
   - `move`：平移并调整缩放比例（Zoom）。
   - `follow`：镜头持续跟随目标移动，具备明确的启动与停止时间。
   - `path`：沿指定轨迹点平滑运动。
-  - `shake`：产生屏幕震动或冲击波晃动效果。
+  - `shake`：产生屏幕晃动或冲击波晃动效果。
   - `reset`：将镜头视角与缩放平滑重置为默认画面。
+
+角色对焦的 `targetPart` 支持 `head`（默认头部）、`chest`（胸口，推荐居中构图）、`feet`（模型底部）和 `center`（模型中心）。头部优先读取模型标记，否则与胸口一样按模型比例估算；半身模型的底部不代表脚部。部位选择只调整构图中心，人物占比仍由角色大小和镜头缩放控制。
 
 ### 2. 环境图层管理 (`environmentLayer`)
 
@@ -286,6 +288,21 @@ AeonStagery 支持引入 Live2D 模型作为角色立绘，并提供精准的空
 
 - **对象视觉风格 (`visualStyle`)**：作用于单个角色或物体本身的视觉属性，例如边缘光（Rim-light）、色调调和与融入度。
 - **场景光照 (`lighting`)**：提供全局光照预设（Preset）、色彩覆盖层（Overlay）以及点光源（PointLight），具备独立的启停与调制生命周期。
+
+“设置模糊”“变化模糊”和“重置模糊”使用 `effect: "blur"`，可分别选择任意角色或环境图层。`target` 支持角色 ID、环境层 ID，以及原有的 `global`（全景）、`characters`（全部角色）和 `background`（全部环境层）。仅处理主背景时使用 `{ "kind": "environmentLayer", "id": "background" }`。模糊与后期处理均支持 `{ "kind": "character" | "environmentLayer", "id": "<id>" }` 结构化引用，以区分同名对象和保留的范围名称；对象尚未登场时保留效果，登场后应用。对象强度独立过渡，重置指定对象不会改变其他对象的效果，Seek 和导出使用同一状态。
+
+对象选择器中的角色只显示名称；单个环境层始终显示其 `layerId`，与环境图层 ID 编辑项一致，不使用 `label`、资源文件名或顺序编号替代。资源路径只在悬停提示中提供补充信息。模糊和后期处理均提供“全部环境图层”和“全部角色”选项，整组范围与单层 ID 明确区分。
+
+“设置后期处理”使用 `lighting` 的 `effect: "post"`，目标可选全景（`panorama`）、全部角色（`{ "kind": "group", "group": "characters" }`）、全部环境图层（`{ "kind": "group", "group": "environmentLayers" }`）、单个角色 ID 或环境层 ID。变化和重置沿用同一目标。Bloom 的四项控制独立生效，支持过渡、Seek 和导出：
+
+| 参数 | 含义 | 新建“设置后期处理”的值 | WebGAL 对应参数 |
+| --- | --- | --- | --- |
+| `bloomBloomScale` | 泛光强度 | `0` | `bloom` |
+| `bloomBrightness` | 原图亮度倍率 | `1` | `bloomBrightness` |
+| `bloomBlur` | 泛光扩散半径 | `0` | `bloomBlur` |
+| `bloomThreshold` | 参与泛光的亮部阈值 | `0` | `bloomThreshold` |
+
+新建语句显式采用 WebGAL 的 Bloom 默认值。旧语句未指定 `bloomBlur` 时，仍沿用半径 `8`；未指定阈值时沿用原有初值 `0.5`。后续语句省略的参数继承该目标已有状态，重置后期处理恢复原有运行时默认值。全景后期处理作用于场景内容，字幕保持清晰。WebGAL 导入会保留四参数、作用目标和部分更新，并以 WebGAL 初值作为首次过渡的起点。
 
 ### 需要注意的规则与兼容性提示
 
@@ -496,7 +513,7 @@ AeonStagery 支持多位创作者在同一网络或局域网中联机协作编�
 | **角色位移/缩放/旋转** | `characterTransform` | **当前支持** | 平滑插值空间属性；未声明的参数自动继承；不处理登场销毁。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **角色肢体与面部表演** | `characterPerformance` | **当前支持** | 调度 Motion、Expression、注视与眨眼；需指定明确演出时长。 | [ADR-0019](adr/0019-live2d-cubism-multiversion-runtime.md) |
 | **Live2D 关键帧曲线** | `kind: 'custom'` Motion | **当前支持** | 非破坏性生成内联副本；支持多轨道曲线微调；协作独占租约。 | [ADR-0029](adr/0029-live2d-custom-motion-keyframe-authoring.md) |
-| **镜头景深与运镜** | `camera` | **当前支持** | 支持聚焦、移动、跟随、路径、震动与重置；具备启停时间。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
+| **镜头景深与运镜** | `camera` | **当前支持** | 支持聚焦、移动、跟随、路径、晃动与重置；具备启停时间。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **环境背景图层** | `environmentLayer` | **当前支持** | 图层添加、变换与移除；必须引用已存在的 Layer ID；旧别名已废弃。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **对象视觉融入与边缘光**| `visualStyle` | **当前支持** | 作用于单体对象的样式修饰，与全局滤镜严格区分。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |
 | **镜头滤镜添加** | `filterAdd` | **废弃兼容** | 历史遗留语句，仅用于播放兼容，不再提供新创作入口。 | [KSM-0003](ksm-adr/ksm-0003-semantic-scene-statements.md) |

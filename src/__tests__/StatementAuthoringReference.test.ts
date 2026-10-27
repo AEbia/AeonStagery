@@ -49,6 +49,19 @@ describe('ProjectAgentStatementAuthoringReference', () => {
     expect(text).not.toContain('optional intensity, brightness');
   });
 
+  it('documents the singular lighting target and effect-specific string resolution', () => {
+    const lighting = PROJECT_AGENT_STATEMENT_AUTHORING_REFERENCE.split('\n').find((line) => line.startsWith('- lighting:'))!;
+    expect(lighting).toContain('target?: {kind:scene}');
+    expect(lighting).toContain('{kind:character|environmentLayer,id}');
+    expect(lighting).toContain('{kind:group,group:characters|environmentLayers}');
+    const prompt = buildProjectAgentSystemPrompt({ baseSystemPrompt: 'base' });
+    expect(prompt).toContain('blur global=scene (default), background=environmentLayers group, characters=characters group');
+    expect(prompt).toContain('post panorama=scene (default)');
+    expect(prompt).toContain('other strings: character ID first, else environment-layer ID');
+    expect(lighting).not.toContain('targets:');
+    expect(lighting).not.toContain('strings are literal');
+  });
+
   it('documents the required locator fields of visualStyle and companions', () => {
     const text = PROJECT_AGENT_STATEMENT_AUTHORING_REFERENCE;
     expect(text).toContain('scope! (object)');

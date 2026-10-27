@@ -17,10 +17,10 @@ import { showToast } from '../../Toast';
 import type { ActionInspectorProps } from '../ActionInspector';
 
 interface PlayheadLifecycleTargetCommandsProps {
-  semanticDocument: any;
-  semanticItem: any;
+  semanticDocument: import('./paramControls/context').InspectorParamContext['semanticDocument'];
+  semanticItem: import('./paramControls/context').InspectorParamContext['semanticItem'];
   sceneMeta: TimelineScene['meta'];
-  semanticAuthoring: any;
+  semanticAuthoring: import('./paramControls/context').InspectorParamContext['semanticAuthoring'];
   documentStore: ReturnType<typeof useDocumentStore>;
   setSelectedIds: ActionInspectorProps['setSelectedIds'];
 }

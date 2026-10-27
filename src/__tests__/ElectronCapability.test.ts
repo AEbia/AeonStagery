@@ -79,6 +79,7 @@ function createCapability(): ElectronCapability {
       saveVideo: vi.fn(async () => ({ success: true })),
       convert: vi.fn(async () => ({ success: true })),
       getTempDir: vi.fn(async () => 'D:/temp'),
+      getEncodingCapabilities: vi.fn(async () => ({ success: true, encoders: ['libx264'] })),
       startStreamExport: vi.fn(async () => ({ success: true })),
       pushFrame: vi.fn(async () => ({ success: true })),
       pushEncodedChunk: vi.fn(async () => ({ success: true })),

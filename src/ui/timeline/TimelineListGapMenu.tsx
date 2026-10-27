@@ -5,8 +5,7 @@ import type { TimelineScene } from './semanticTimelineTypes';
 import type { SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import type { SourcedSemanticAuthoringCombo } from '../../services/template-package';
 import { StatementLibraryMenu } from './StatementLibraryMenu';
-import { listAvailableLifecycleEndCommandIds } from './insertLifecycleEndCommand';
-import { listAvailableLifecycleTargetBindingCommandIds } from './lifecycleTargetBinding';
+import { prepareSemanticStatementLibraryMenu, type SemanticStatementLibraryInsertOptions } from './semanticStatementInsertion';
 import { buildTimelineListGaps, type TimelineListGap } from './timelineListGaps';
 import type { TimelineListEditing } from './useTimelineListEditing';
 import type { TimelineStatementRowCommands } from './TimelineStatementRow';
@@ -16,25 +15,37 @@ export function useTimelineListGapMenu(sceneData: TimelineScene, snapshot: Seman
   const semanticTimelineItems = snapshot.items;
   const gapInsertPendingRef = useRef(false);
   const [activeGapMenu, setActiveGapMenu] = useState<{ gap: TimelineListGap; x: number; y: number } | null>(null);
-  const availableLifecycleEndCommandIds = useMemo(() => {
-    const document = documentStore.getCurrentSceneDocumentSnapshot();
-    if (!activeGapMenu || !document) return new Set<string>();
-    return listAvailableLifecycleEndCommandIds(
-      document,
-      activeGapMenu.gap.time,
-      { sceneMeta: sceneData.meta, charId: null },
-    );
-  }, [activeGapMenu, documentStore, sceneData.meta]);
-
-  const availableLifecycleTargetBindingCommandIds = useMemo(() => {
-    const document = documentStore.getCurrentSceneDocumentSnapshot();
-    if (!activeGapMenu || !document) return new Set<string>();
-    return listAvailableLifecycleTargetBindingCommandIds(
-      document,
-      activeGapMenu.gap.time,
-      { sceneMeta: sceneData.meta, charId: null },
-    );
-  }, [activeGapMenu, documentStore, sceneData.meta]);
+  const gapInsertOptions = useMemo<Omit<SemanticStatementLibraryInsertOptions, 'blockId'> | null>(() => {
+    if (!activeGapMenu) return null;
+    const { gap } = activeGapMenu;
+    const nextRootStatement = semanticTimelineItems
+      .slice(gap.index + 1)
+      .find((item) => item.locator.kind === 'statement');
+    const prevSpeakerId = gap.previous.source.type === 'dialogue' && typeof gap.previous.displayAction.params?.speaker === 'string'
+      ? gap.previous.displayAction.params.speaker
+      : undefined;
+    const charId = prevSpeakerId || sceneData.meta.characters?.[0]?.id;
+    return {
+      document: documentStore.getCurrentSceneDocumentSnapshot(),
+      sceneMeta: sceneData.meta,
+      anchorTime: gap.time,
+      origin: 'timeline-list-gap',
+      scope: charId
+        ? prevSpeakerId
+          ? { kind: 'inferred-character', charId, source: 'blank-menu-track' }
+          : { kind: 'character', charId }
+        : { kind: 'none' },
+      lightingTarget: { kind: 'scene' },
+      correlationPrefix: 'timeline_list_gap_insert',
+      lifecycleEndCorrelationPrefix: 'timeline_list_gap_lifecycle_end',
+      lifecycleTargetBindingCorrelationPrefix: 'timeline_list_gap_lifecycle_target_binding',
+      beforeStatementId: nextRootStatement?.statementId,
+    };
+  }, [activeGapMenu, documentStore, sceneData.meta, semanticTimelineItems]);
+  const statementCommands = useMemo(() => gapInsertOptions
+    ? prepareSemanticStatementLibraryMenu(gapInsertOptions) : null, [gapInsertOptions]);
+  const availableLifecycleEndCommandIds = statementCommands?.availableLifecycleEndCommandIds ?? new Set<string>();
+  const availableLifecycleTargetBindingCommandIds = statementCommands?.availableLifecycleTargetBindingCommandIds ?? new Set<string>();
 
   const gapContextMeta = useMemo(() => {
     if (!activeGapMenu) return undefined;
@@ -58,7 +69,7 @@ export function useTimelineListGapMenu(sceneData: TimelineScene, snapshot: Seman
   );
   return {
     activeGapMenu, setActiveGapMenu, gapInsertPendingRef, timelineListGapByIndex,
-    availableLifecycleEndCommandIds, availableLifecycleTargetBindingCommandIds, gapContextMeta,
+    availableLifecycleEndCommandIds, availableLifecycleTargetBindingCommandIds, gapContextMeta, gapInsertOptions,
   };
 }
 

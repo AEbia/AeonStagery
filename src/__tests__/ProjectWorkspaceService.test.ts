@@ -56,7 +56,32 @@ describe('ProjectWorkspaceService', () => {
     );
   });
 
-  it.each(['pink-nameplate', 'immersive-subtitle'])('materializes builtin dialogue style %s into portable project assets', async (styleId) => {
+  it('saves project format, publishes it, and reads it back when reopening', async () => {
+    const created = await service.createProjectAt('/projects/video', 'Video');
+    if (!created.success) throw new Error(created.error);
+    const changed = vi.fn();
+    const unsubscribe = service.subscribe(changed);
+    const result = await service.updateVideoFormat({ width: 1080, height: 1920, fps: 30 });
+    if (!result.success) throw new Error(result.error);
+    expect(service.getCurrentProject()?.metadata.videoFormat).toEqual({ width: 1080, height: 1920, fps: 30 });
+    expect(changed).toHaveBeenCalledTimes(1);
+    const written = fileAccess.writeFile.mock.calls.findLast(([path]: [string]) => path === '/projects/video/project.json');
+    fileAccess.readFile.mockResolvedValue({ path: '/projects/video/project.json', data: written[1] });
+    const reopened = await service.openProjectAt('/projects/video/project.json');
+    if (!reopened.success) throw new Error(reopened.error);
+    expect(reopened.project.metadata.videoFormat).toEqual({ width: 1080, height: 1920, fps: 30 });
+    unsubscribe();
+  });
+
+  it('rejects invalid project format without saving', async () => {
+    await service.createProjectAt('/projects/video', 'Video');
+    fileAccess.writeFile.mockClear();
+    expect((await service.updateVideoFormat({ width: 1921, height: 1080, fps: 60 })).success).toBe(false);
+    expect(fileAccess.writeFile).not.toHaveBeenCalled();
+    expect(service.getCurrentProject()?.metadata.videoFormat).toBeUndefined();
+  });
+
+  it.each(['pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'])('materializes builtin dialogue style %s into portable project assets', async (styleId) => {
     projectResources = new ProjectResourceService(
       fileAccess as unknown as IFileAccess,
       new ProjectPathResolver(null),
@@ -81,15 +106,23 @@ describe('ProjectWorkspaceService', () => {
     expect(presentation?.styleId).toBe(styleId);
     expect(presentation?.textbox.image).toBe(`images/templates/aeonstagery.default/ui/dialogue/${styleId}/textbox.svg`);
     expect(presentation?.namebox?.image).toBe(`images/templates/aeonstagery.default/ui/dialogue/${styleId}/namebox.svg`);
-    expect(presentation?.text.fontFile).toBe('images/templates/aeonstagery.default/fonts/JiangChengYuanTi_500W.ttf');
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
+    const fontFile = (preset.params?.text as { fontFile?: string }).fontFile;
+    expect(presentation?.text.fontFile).toBe(fontFile ? `images/templates/aeonstagery.default/${fontFile}` : undefined);
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
       `src/templates/default/assets/ui/dialogue/${styleId}/textbox.svg`,
       `D:/projects/demo/images/templates/aeonstagery.default/ui/dialogue/${styleId}/textbox.svg`,
     );
     expect(fileAccess.copyFile).toHaveBeenCalledWith(
-      'src/templates/default/assets/fonts/JiangChengYuanTi_500W.ttf',
-      'D:/projects/demo/images/templates/aeonstagery.default/fonts/JiangChengYuanTi_500W.ttf',
+      `src/templates/default/assets/ui/dialogue/${styleId}/namebox.svg`,
+      `D:/projects/demo/images/templates/aeonstagery.default/ui/dialogue/${styleId}/namebox.svg`,
     );
+    if (fontFile) {
+      expect(fileAccess.copyFile).toHaveBeenCalledWith(
+        `src/templates/default/assets/${fontFile}`,
+        `D:/projects/demo/images/templates/aeonstagery.default/${fontFile}`,
+      );
+    }
     expect(JSON.stringify(presentation)).not.toMatch(/mygo/i);
   });
 

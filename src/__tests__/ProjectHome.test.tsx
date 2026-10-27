@@ -95,6 +95,34 @@ function makeRecentProjects(count: number) {
 }
 
 describe('ProjectHome collaboration entry', () => {
+  it('validates and submits project resolution and fps during creation', async () => {
+    const props = renderHome();
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    fireEvent.change(screen.getByLabelText('宽度 (px)'), { target: { value: '1080' } });
+    fireEvent.change(screen.getByLabelText('高度 (px)'), { target: { value: '1920' } });
+    fireEvent.change(screen.getByLabelText('帧率 (fps)'), { target: { value: '0' } });
+    expect((screen.getByRole('button', { name: '创建项目' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('1–240 fps');
+    fireEvent.change(screen.getByLabelText('帧率 (fps)'), { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(props.onCreateProject).toHaveBeenCalledWith(expect.objectContaining({ videoFormat: { width: 1080, height: 1920, fps: 30 } })));
+  });
+
+  it('reveals recent projects from the button and right-click menu without opening them', async () => {
+    const showItemInFolder = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('aeonStageryAPI', { fs: { showItemInFolder } });
+    try {
+      const projects = makeRecentProjects(1);
+      const props = renderHome({ recentProjects: projects });
+      fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：Project 1' }));
+      await waitFor(() => expect(showItemInFolder).toHaveBeenCalledWith(projects[0].projectFilePath));
+      fireEvent.contextMenu(screen.getByRole('button', { name: '打开最近项目：Project 1' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: '在文件管理器中显示' }));
+      await waitFor(() => expect(showItemInFolder).toHaveBeenCalledTimes(2));
+      expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('requests renaming a recent project without opening or removing it', () => {
     const projects = makeRecentProjects(2);
     const props = renderHome({ recentProjects: projects });

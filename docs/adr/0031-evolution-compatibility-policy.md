@@ -1,6 +1,6 @@
 ---
 status: accepted
-last_verified: 2026-08-18
+last_verified: 2026-10-26
 implementation_status: implemented
 ---
 
@@ -96,9 +96,9 @@ The Compatibility Coordinator's discriminated result: `ready`, `migration_requir
 - Scene v5 is the first compatibility-aware Scene Document epoch. All v5 readers must implement Unknown Field preservation and the admission behavior in this ADR; v4 readers remain governed by KSM-0003's strict contract.
 - The v5 cutover makes one explicit exception to the general immediate-previous-epoch window: the product supports automatic migration from both scene v4 and the development-era scene v3. This exception is limited to the v5 cutover; v1, v2, and unversioned scenes still require offline migration.
 - Project Metadata v2 is the first compatibility-aware Project Metadata contract. Existing `projectVersion: 1` metadata is automatically migrated under the policy above.
-- Collaboration wire v3 is paired with scene v5 and requires `sceneSchemaVersion = 5`. Wire v2 remains the exact scene v4 contract; changing its embedded scene version in place is forbidden.
+- Collaboration wire v3 is paired with scene v5 and requires `sceneSchemaVersion = 5`. It is the only supported collaboration protocol. The V2 client, server, codecs, agreement adapters, and snapshot persistence APIs were removed on 2026-10-26; this does not remove scene v4 file migration.
 - Template manifests remain at manifest schema v2. A v5 reader accepts semantic template payloads targeting scene v4 or v5, strictly validates v4 payloads, and materializes them as canonical v5 facts. Legacy action payloads remain unsupported.
-- Collaboration v3 servers do not migrate persisted v2 rooms. An administrator must use the v2 system to export a scene v4 snapshot, migrate that snapshot through the normal v4-to-v5 scene flow, and seed a new v3 room. The original v2 room remains untouched; collaborative order/tombstone history beyond the materialized scene is not carried into v3.
+- Collaboration v3 servers reject persisted rooms with unsupported collaboration or scene schema markers without rewriting their files. To recover an old V2 room, use an older AeonStagery release to export a scene v4 snapshot, migrate that snapshot through the normal v4-to-v5 scene flow, and seed a new V3 room in a separate data directory. The current release cannot open or export V2 rooms; collaborative order/tombstone history beyond the materialized scene is not carried into V3. Both the embedded UI server and standalone CLI start V3 rooms. CLI version flags accept only `3`.
 
 ## Confirmed Scene Migration Experience
 

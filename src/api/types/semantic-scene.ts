@@ -1,3 +1,4 @@
+import type { LightingTarget } from './lighting-target';
 import type { SceneMarker, SceneMeta } from './scene-common';
 import type {
   AdvancedStyleOverride,
@@ -606,12 +607,15 @@ export interface FilterResetParams {
   durationSeconds?: number;
 }
 
-export type LightingBlurTarget = 'global' | 'background' | 'characters';
+/** Legacy groups or a character/environment layer ID; explicit object references are also supported. */
+export type LightingBlurTarget = LightingTarget;
 
 export interface LightingPostProcessingParams {
   bloomThreshold?: number;
   bloomBloomScale?: number;
   bloomBrightness?: number;
+  /** Bloom diffusion radius; omitted values retain the legacy radius of 8. */
+  bloomBlur?: number;
   rgbSplitX?: number;
   rgbSplitY?: number;
   godrayGain?: number;
@@ -624,8 +628,8 @@ export interface LightingPostProcessingParams {
   adjRed?: number;
   adjGreen?: number;
   adjBlue?: number;
-  /** Optional character/environment target; omitted targets mean the panorama. */
-  target?: string;
+  /** Legacy ID/scope or an unambiguous structured reference. */
+  target?: LightingTarget;
   /** Integrated post-process color overlay for the same target. */
   overlayColor?: string;
   overlayBlendMode?: BlendMode;
@@ -673,7 +677,7 @@ export type LightingGodraysParams =
 
 type LightingPostResetParams = LightingSingletonBase<'post'> & {
   mode: 'reset';
-  target?: string;
+  target?: LightingTarget;
 } & {
   [Key in Exclude<keyof LightingPostProcessingParams, 'target'>]?: never;
 };

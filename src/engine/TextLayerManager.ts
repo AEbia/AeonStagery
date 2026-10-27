@@ -4,8 +4,7 @@ import { stageManager } from './StageManager';
 import { settingsManager } from '../ui/SettingsStore';
 import type { TextLayerConfig, TextLayerTransformConfig } from '../api/types/textLayer';
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 class TextLayerManager {
   // Mapping of active layers and their visual containers
@@ -157,6 +156,7 @@ class TextLayerManager {
 
   public reconcileLayers(
     activeLayers: ReadonlyMap<string, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reconciliation carries heterogeneous compiled text-style fields into the existing runtime layer API; preserve extension fields at this presentation seam.
       config: Record<string, any>;
       position: [number, number];
       scale: number;
@@ -434,7 +434,7 @@ class TextLayerManager {
     const { id, position, scale, rotation, opacity, duration, ease = 'power2.inOut' } = config;
     
     const proxy = this.getProxy(id);
-    const target: any = {};
+    const target: gsap.TweenVars = {};
     if (position) {
       target.x = position[0] * STAGE_WIDTH;
       target.y = position[1] * STAGE_HEIGHT;

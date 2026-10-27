@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../../engine/StageDimensions';
 import { reconstructEnvironmentAtTime } from '../../engine/EnvironmentLayerRuntime';
 import type { EnvironmentLayerRenderImage } from '../../engine/environmentLayerModel';
 import type { TimelineScene } from './semanticTimelineTypes';
@@ -67,6 +68,7 @@ export interface VisualIntentPresetRequest {
   sceneData: TimelineScene;
   actionType: SupportedVisualIntentAction;
   anchorTime: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
   baseParams?: Record<string, any>;
   scopeCharId?: string;
 }
@@ -487,7 +489,9 @@ async function sampleImageAtPoints(imagePath: string, points: SamplePoint[]): Pr
 }
 
 function computeTimelineSceneStateAtTime(sceneData: TimelineScene, anchorTime: number) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
   const characters = new Map<string, any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
   let dialogue: any = null;
   const { background, environmentLayers } = reconstructEnvironmentAtTime(
     sceneData as EnvironmentSamplingScene,
@@ -663,12 +667,13 @@ function resolveSamplingImages(sceneData: TimelineScene, anchorTime: number): We
     .map((entry: EnvironmentLayerRenderImage) => ({ image: entry.image, weight: entry.weight ?? 1 }));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 function createTextLayerExclusion(params: Record<string, any>): SamplingExclusionRect {
   const position = Array.isArray(params.position) ? params.position : [0.5, 0.5];
   const scale = typeof params.scale === 'number' ? params.scale : 1;
   const fontSize = typeof params.fontSize === 'number' ? params.fontSize : 48;
-  const width = clamp(((params.wordWrapWidth ?? 720) / 1920) * scale, 0.14, 0.72);
-  const height = clamp((fontSize * 3.2 * scale) / 1080, 0.08, 0.3);
+  const width = clamp(((params.wordWrapWidth ?? 720) / STAGE_WIDTH) * scale, 0.14, 0.72);
+  const height = clamp((fontSize * 3.2 * scale) / STAGE_HEIGHT, 0.08, 0.3);
   return clampRect({
     xMax: position[0] + width * 0.5,
     xMin: position[0] - width * 0.5,
@@ -692,6 +697,7 @@ function resolveTextExclusionRects(sceneData: TimelineScene, anchorTime: number)
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
   const activeTextLayers = new Map<string, Record<string, any>>();
   for (const action of sceneData.timeline) {
     const actionTime = action.time ?? 0;
@@ -770,6 +776,7 @@ async function sampleVisualEnvironment(sceneData: TimelineScene, anchorTime: num
   return analyzeVisionSamples(globalSamples, localSamples, colorStopSamples);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 function buildGroundingPreset(sample: VisualSample | null, baseParams: Record<string, any>): Record<string, any> {
   if (!sample) {
     return {
@@ -793,6 +800,7 @@ function buildGroundingPreset(sample: VisualSample | null, baseParams: Record<st
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 function buildIntegrationPreset(sample: VisualSample | null, baseParams: Record<string, any>): Record<string, any> {
   if (!sample) {
     return {
@@ -826,6 +834,7 @@ function buildIntegrationPreset(sample: VisualSample | null, baseParams: Record<
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 export function isPrimaryVisualIntent(actionType: string, params?: Record<string, any>): boolean {
   if (actionType === 'setCompositeRecipe' && (params?.slot === 'grounding' || params?.slot === 'integration')) {
     return true;
@@ -833,6 +842,7 @@ export function isPrimaryVisualIntent(actionType: string, params?: Record<string
   return false;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 export function getPrimaryVisualIntentLabel(actionType: string, params?: Record<string, any>): string | null {
   if (actionType === 'setCompositeRecipe' && params?.slot === 'grounding') return '角色明暗融入';
   if (actionType === 'setCompositeRecipe' && params?.slot === 'integration') return '角色色彩融入';
@@ -845,6 +855,7 @@ export async function recommendVisualIntentInitialParams({
   anchorTime,
   baseParams = {},
   scopeCharId,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Visual sampling combines heterogeneous runtime character, dialogue, and text-style fields to build family-specific authoring presets.
 }: VisualIntentPresetRequest): Promise<Record<string, any>> {
   const slot = String(baseParams.slot || '');
 

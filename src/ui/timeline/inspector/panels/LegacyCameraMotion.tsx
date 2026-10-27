@@ -5,6 +5,8 @@ import {
   InlineNumericInput,
 } from '../../FormComponents';
 import { FormSelect } from '../../../FormSelect';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../../../api/types/camera';
+import { CAMERA_FOCUS_PART_OPTIONS, CAMERA_FOCUS_PART_HELP } from '../cameraFocusParts';
 import type { ActionInspectorProps } from '../../ActionInspector';
 import type { TimelineAction, TimelineScene } from '../../semanticTimelineTypes';
 import {
@@ -17,6 +19,7 @@ export interface LegacyCameraMotionProps {
   action: TimelineAction;
   actionType: string;
   actionId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
   sceneData: TimelineScene;
   updateParam: ActionInspectorProps['updateParam'];
@@ -33,7 +36,7 @@ export function LegacyCameraMotionSection(props: LegacyCameraMotionProps) {
     { value: 'zoom', label: '变焦' },
     ...(currentMove === 'dolly' ? [{ value: 'dolly', label: '希区柯克' }] : []),
     { value: 'rotate', label: '旋转' },
-    { value: 'shake', label: '震动' },
+    { value: 'shake', label: '晃动' },
     { value: 'follow', label: '跟随' },
   ];
 
@@ -129,12 +132,9 @@ export function LegacyCameraMotionSection(props: LegacyCameraMotionProps) {
                     <FormSelect
                       aria-label="对焦部位"
                       id={`action-${actionId}-camera-focus-part`}
-                      value={(actionParams.focus && typeof actionParams.focus === 'object' ? actionParams.focus.part : '') || 'chest'}
-                      options={[
-                        { value: 'head', label: '头部' },
-                        { value: 'chest', label: '胸部' },
-                        { value: 'center', label: '中心' },
-                      ]}
+                      value={(actionParams.focus && typeof actionParams.focus === 'object' ? actionParams.focus.part : '') || actionParams.targetPart || DEFAULT_CAMERA_FOCUS_PART}
+                      options={CAMERA_FOCUS_PART_OPTIONS}
+                      title={CAMERA_FOCUS_PART_HELP}
                       onChange={(value) => {
                         const current = (actionParams.focus && typeof actionParams.focus === 'object') ? actionParams.focus : {};
                         updateParam(actionId, 'focus', { ...current, part: value });

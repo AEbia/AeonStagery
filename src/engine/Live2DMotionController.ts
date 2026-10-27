@@ -61,13 +61,14 @@ export interface MotionRequest {
 export class Live2DMotionController {
   constructor(
     private characters: Map<string, CharacterEntry>,
-    private containers: Map<string, any>,
+    private containers: Map<string, import('pixi.js').Container>,
     private pendingMotions: Map<string, MotionRequest[]>,
     private pendingConfigs: Map<string, unknown[]>,
     private motionMutex: Map<string, Promise<void>>,
     private hardResetMutex: Map<string, Promise<void>>,
     private activeMotionLoads: Set<string>,
     _jumpingCharacters: Set<string>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Motion lifecycle code bridges opaque Cubism models and private scene state; keep the SDK compatibility seam dynamic without a false common model type.
     private getScriptEngine: () => any,
   ) {}
 
@@ -75,6 +76,7 @@ export class Live2DMotionController {
     return entry.lifecycleGeneration ?? 0;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Motion lifecycle code bridges opaque Cubism models and private scene state; keep the SDK compatibility seam dynamic without a false common model type.
   private isEntryCurrent(id: string, entry: CharacterEntry, generation: number, model: any = entry.model): boolean {
     return this.characters.get(id) === entry
       && this.getGeneration(entry) === generation
@@ -452,12 +454,12 @@ export class Live2DMotionController {
     for (const id of this.characters.keys()) {
       const entry = this.characters.get(id);
       if (entry) {
-        gsap.getTweensOf(entry.model).forEach((t: any) => t.pause());
+        gsap.getTweensOf(entry.model).forEach((t) => t.pause());
         getBoundRuntimeHandle(entry)?.focus.manageAnimations('pause');
         const container = this.containers.get(id);
-        if (container) gsap.getTweensOf(container).forEach((t: any) => t.pause());
-        const rimProxy = (entry as any).rimProxy;
-        if (rimProxy) gsap.getTweensOf(rimProxy).forEach((t: any) => t.pause());
+        if (container) gsap.getTweensOf(container).forEach((t) => t.pause());
+        const rimProxy = (entry as CharacterEntry & { rimProxy?: object }).rimProxy;
+        if (rimProxy) gsap.getTweensOf(rimProxy).forEach((t) => t.pause());
       }
     }
   }
@@ -469,12 +471,12 @@ export class Live2DMotionController {
     for (const id of this.characters.keys()) {
       const entry = this.characters.get(id);
       if (entry) {
-        gsap.getTweensOf(entry.model).forEach((t: any) => t.resume());
+        gsap.getTweensOf(entry.model).forEach((t) => t.resume());
         getBoundRuntimeHandle(entry)?.focus.manageAnimations('resume');
         const container = this.containers.get(id);
-        if (container) gsap.getTweensOf(container).forEach((t: any) => t.resume());
-        const rimProxy = (entry as any).rimProxy;
-        if (rimProxy) gsap.getTweensOf(rimProxy).forEach((t: any) => t.resume());
+        if (container) gsap.getTweensOf(container).forEach((t) => t.resume());
+        const rimProxy = (entry as CharacterEntry & { rimProxy?: object }).rimProxy;
+        if (rimProxy) gsap.getTweensOf(rimProxy).forEach((t) => t.resume());
       }
     }
   }
@@ -509,6 +511,7 @@ export class Live2DMotionController {
   /**
    * Internal helper for a complete model reset.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Motion lifecycle code bridges opaque Cubism models and private scene state; keep the SDK compatibility seam dynamic without a false common model type.
   async _hardReset(id: string, model: any, keepFocus: boolean = false): Promise<void> {
     const entryAtRequest = this.characters.get(id);
     const generationAtRequest = entryAtRequest ? this.getGeneration(entryAtRequest) : 0;

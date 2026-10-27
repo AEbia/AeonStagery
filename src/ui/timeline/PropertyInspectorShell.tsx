@@ -18,6 +18,7 @@ import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './us
 import { resolveMatchingTimelineAction } from './selectionHygiene';
 import { useApp } from '../context/AppContext';
 import { useSemanticTimelineCommands } from './useSemanticTimelineCommands';
+import type { NumericInputGesture, NumericInputGestureRegistrar } from './FormComponents';
 
 const RawScriptTab = React.lazy(async () => {
   const module = await import('./RawScriptTab');
@@ -29,12 +30,15 @@ export interface PropertyInspectorShellProps {
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared inspector edits heterogeneous semantic-family parameters selected by runtime keys; validation belongs to the authoring service.
   updateAction: (id: string, updates: any) => void;
-  updateParam: (id: string, key: string, val: any) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The shared inspector edits heterogeneous semantic-family parameters selected by runtime keys; validation belongs to the authoring service.
+  updateParam: (id: string, key: string, val: any, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  onNumericGestureStart?: NumericInputGestureRegistrar;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
   handleSave: () => void | Promise<SaveResult | undefined>;
   onDetailClose?: () => void;
-  workspaceIssues?: any[];
+  workspaceIssues?: import('../../api/types/validation').ValidationIssue[];
   inspectorView?: InspectorPanelView;
   onSelectInspectorView?: (view: InspectorPanelView) => void;
 }

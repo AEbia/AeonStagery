@@ -7,7 +7,7 @@ import {
   CollaborativeSceneAdmissionGate,
   validateCanonicalV5CollaborationAdmission,
 } from '../services/collaboration/CollaborativeSceneAdmissionGate';
-import { CollaborativeSessionOrchestratorV2 } from '../services/collaboration/CollaborativeSessionOrchestratorV2';
+import { CollaborativeSessionOrchestratorV3 } from '../services/collaboration/CollaborativeSessionOrchestratorV3';
 
 function makeCanonicalV5Scene(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -588,14 +588,13 @@ describe('Canonical v5 Collaboration Admission', () => {
 
       const mockDocumentStore = {
         getCurrentSceneDocumentSnapshot: () => sourceWithUnknown as any,
-        getHistoricalSceneDocumentV4Snapshot: () => null,
       };
 
       const mockCoordinator = {};
       const prepareSeedState = vi.fn(async () => ({ document: sourceWithUnknown as any, assets: {} }));
       const prepareLocalState = vi.fn(async () => ({ document: sourceWithUnknown as any, assets: {} }));
 
-      const orchestrator = new CollaborativeSessionOrchestratorV2();
+      const orchestrator = new CollaborativeSessionOrchestratorV3();
 
       await expect(orchestrator.start({
         endpoint: '127.0.0.1:12345',
@@ -607,7 +606,6 @@ describe('Canonical v5 Collaboration Admission', () => {
         client: mockClient as any,
         prepareSeedState,
         prepareLocalState,
-        enforceCanonicalV5Admission: true,
       })).rejects.toThrow(CollaborativeSceneAdmissionError);
 
       // Verify no network or state actions occurred

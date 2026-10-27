@@ -12,12 +12,11 @@ import gsap from 'gsap';
 import { stageManager } from './StageManager';
 import { hookSystem } from '../api/hooks';
 import { templates, DialogueConfig } from './DialogueTemplates';
-import { ImageDialogueTemplate } from './ImageDialogueTemplate';
+import { ImageDialogueTemplate, adaptDialoguePresentation } from './ImageDialogueTemplate';
 import { settingsManager } from '../ui/SettingsStore';
 import type { PreparedAssetRef, PreparedCompiledScene, PreparedRuntimeValue } from '../api/types/semantic-scene';
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 // Performance: TextMetrics Cache
 const metricsCache = new Map<string, PIXI.CanvasTextMetrics>();
@@ -80,10 +79,12 @@ class SubtitleRenderer {
     timeline: gsap.core.Timeline;
     config: DialogueConfig;
     fontSize: number;
+    fontSizeSource: 'global' | 'template';
     textSpeed: number;
   }>();
   private activeConfig: DialogueConfig | null = null;
   private activeFontSize = 48;
+  private activeFontSizeSource: 'global' | 'template' = 'global';
   private activeTextSpeed = 0.025;
   /** fontFamily → runtimeUri of dialogue fonts already registered with document.fonts. */
   private readonly loadedDialogueFonts = new Map<string, string>();
@@ -123,8 +124,10 @@ class SubtitleRenderer {
       templateId,
       presentation ? JSON.stringify(presentation) : '',
       speedKey,
+      STAGE_WIDTH, STAGE_HEIGHT,
       settingsManager.get('dialogueEntranceAnimation') !== false,
       this.getDialogueFontSize(),
+      this.getDialogueFontSizeSource(),
     ].join('_');
     return config._id ? `${config._id}_${textHash}` : textHash;
   }
@@ -132,6 +135,10 @@ class SubtitleRenderer {
   private getDialogueFontSize(): number {
     const size = settingsManager.get('dialogueFontSize');
     return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : 48;
+  }
+
+  private getDialogueFontSizeSource(): 'global' | 'template' {
+    return settingsManager.get('dialogueFontSizeSource') === 'template' ? 'template' : 'global';
   }
 
   private getCachedMetrics(text: string, style: PIXI.TextStyle): PIXI.CanvasTextMetrics {
@@ -148,6 +155,8 @@ class SubtitleRenderer {
   }
 
   showDialogue(config: DialogueConfig): gsap.core.Timeline {
+    const sourceConfig = config;
+    if (config.presentation) config = { ...config, presentation: adaptDialoguePresentation(config.presentation) };
     const {
       text: rawText,
       style = 'typewriter',
@@ -159,7 +168,7 @@ class SubtitleRenderer {
 
     const templateId = configTemplate || this.currentTemplateId;
     const dialogueTextSpeed = settingsManager.get('dialogueTextSpeed');
-    const cacheKey = this.buildDialogueCacheKey(config, templateId, dialogueTextSpeed);
+    const cacheKey = this.buildDialogueCacheKey(sourceConfig, templateId, dialogueTextSpeed);
 
     // Clean up obsolete cache entries for the same config._id
     if (config._id) {
@@ -183,6 +192,7 @@ class SubtitleRenderer {
     }
 
     const globalFontSize = this.getDialogueFontSize();
+    const fontSizeSource = this.getDialogueFontSizeSource();
     const container = new PIXI.Container();
 
     const template = config.presentation?.renderer === 'image-dialogue-v1'
@@ -216,7 +226,9 @@ class SubtitleRenderer {
     if (config.presentation?.renderer === 'image-dialogue-v1') {
       const presentation = config.presentation;
       const originalFontSize = Number(textStyle.fontSize);
-      textStyle.fontSize = fontSize + 4;
+      if (fontSizeSource === 'global' || config.fontSize !== undefined) {
+        textStyle.fontSize = fontSize + 4;
+      }
       textStyle.lineHeight = Math.round(textStyle.lineHeight * Number(textStyle.fontSize) / originalFontSize);
       const inset = Math.max(0, presentation.text.x - presentation.textbox.x);
       textStyle.wordWrapWidth = Math.max(1, Math.min(
@@ -272,6 +284,7 @@ class SubtitleRenderer {
         this.currentTimeline = tl;
         this.activeConfig = config;
         this.activeFontSize = globalFontSize;
+        this.activeFontSizeSource = fontSizeSource;
         const layer = stageManager.getLayer('subtitle');
         if (layer && !layer.destroyed) {
           if (container.parent !== layer) {
@@ -390,7 +403,7 @@ class SubtitleRenderer {
       const context = canvas.getContext('2d');
       if (context) {
         context.font = `${textStyle.fontStyle} ${textStyle.fontVariant} ${textStyle.fontWeight} ${textStyle.fontSize}px ${textStyle.fontFamily}`;
-        if ('letterSpacing' in context) (context as any).letterSpacing = `${textStyle.letterSpacing}px`;
+        if ('letterSpacing' in context) context.letterSpacing = `${textStyle.letterSpacing}px`;
 
         metrics.lines.forEach((line) => {
           const widths: number[] = [0];
@@ -485,8 +498,9 @@ class SubtitleRenderer {
     this.dialogueCache.set(cacheKey, {
       container,
       timeline: tl,
-      config,
+      config: sourceConfig,
       fontSize: globalFontSize,
+      fontSizeSource,
       textSpeed: dialogueTextSpeed,
     });
     return tl;
@@ -512,6 +526,7 @@ class SubtitleRenderer {
     if (!cached) return;
 
     if (cached.fontSize !== this.getDialogueFontSize()
+      || cached.fontSizeSource !== this.getDialogueFontSizeSource()
       || ((cached.config.style ?? 'typewriter') === 'typewriter'
         && cached.textSpeed !== settingsManager.get('dialogueTextSpeed'))) {
       // Keep the scheduled position and parent when changing a local dialogue
@@ -541,6 +556,7 @@ class SubtitleRenderer {
     this.currentTimeline = timeline;
     this.activeConfig = cached.config;
     this.activeFontSize = cached.fontSize;
+    this.activeFontSizeSource = cached.fontSizeSource;
     this.activeTextSpeed = cached.textSpeed;
 
     const layer = stageManager.getLayer('subtitle');
@@ -712,9 +728,9 @@ class SubtitleRenderer {
     }
     // PIXI.Assets caches by URI; skip already-materialized textures so an
     // unchanged scene preload is a pure Map lookup instead of a load resolve.
-    const loadAssets = (PIXI.Assets as any)?.load as ((uri: string) => Promise<unknown>) | undefined;
+    const loadAssets = PIXI.Assets?.load as ((uri: string) => Promise<unknown>) | undefined;
     if (typeof loadAssets === 'function') {
-      const missingUris = [...imageUris].filter((uri) => !(PIXI.Assets as any)?.cache?.has?.(uri));
+      const missingUris = [...imageUris].filter((uri) => !PIXI.Assets?.cache?.has?.(uri));
       if (missingUris.length > 0) {
         await Promise.all(missingUris.map((uri) => loadAssets(uri)));
       }
@@ -736,6 +752,7 @@ class SubtitleRenderer {
   public forceUpdate(): void {
     if (this.activeConfig && this.currentTimeline && (
       this.activeFontSize !== this.getDialogueFontSize()
+      || this.activeFontSizeSource !== this.getDialogueFontSizeSource()
       || ((this.activeConfig.style ?? 'typewriter') === 'typewriter'
         && this.activeTextSpeed !== settingsManager.get('dialogueTextSpeed'))
     )) {

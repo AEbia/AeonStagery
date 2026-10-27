@@ -1,8 +1,10 @@
+import type { NumericInputGesture, NumericInputGestureRegistrar } from './FormComponents';
 import React, { useState, useEffect } from 'react';
 import { useApp, useCharacterAdapter, useCollaborationPresence, useDocumentStore, usePlaybackAdapter } from '../context/AppContext';
 import { useValidationIssues, useCustomMotionEditingSnapshot } from '../store/storeHooks';
 import './Inspector.css';
 import { CharacterIntegrationControls } from './CharacterIntegrationControls';
+import { useProjectVideoFormat } from '../hooks/useProjectVideoFormat';
 
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import {
@@ -71,16 +73,15 @@ import { useModelData } from './inspector/useModelData';
 import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
 import { getStatementQuickFields } from './statementQuickFields';
 
-// These fields retain supplemental browsing/preview tools, without displaying their value again.
-const ROW_TOOL_KEYS = new Set(['file', 'model', 'motion', 'expression']);
-
 export interface ActionInspectorProps {
   semanticSnapshot?: SemanticTimelineSnapshot;
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector patches are selected by semantic family and runtime field key; the authoring service validates the resulting heterogeneous parameter changes.
   updateAction: (id: string, updates: any, isTransient?: boolean) => void;
-  updateParam: (id: string, key: string, val: any, isTransient?: boolean) => void;
+  updateParam: (id: string, key: string, val: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  onNumericGestureStart?: NumericInputGestureRegistrar;
   replaceSourceParams: (id: string, params: Record<string, unknown>) => void | Promise<unknown>;
   deleteAction: (id: string) => void;
   copyActions?: (ids: readonly string[]) => void;
@@ -103,6 +104,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
   const playbackAdapter = usePlaybackAdapter();
   const appContext = useApp();
   const documentStore = useDocumentStore();
+  const { fps: projectFps } = useProjectVideoFormat();
   const semanticSnapshot = useSemanticTimelineSnapshot(props.semanticSnapshot);
   const { document: semanticDocument } = semanticSnapshot;
   const { peers: collaborationPeers } = useCollaborationPresence();
@@ -136,7 +138,6 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     filterTemplateOptions,
     activeFilterTemplateOptions,
   } = useInspectorOptions({ sceneData, action, timelineActions, semanticDocument, semanticItem });
-  const sceneFps = semanticDocument?.meta?.fps ?? documentStore.getCurrentSceneDocumentSnapshot()?.meta?.fps ?? 60;
   const {
     customMotionConversion,
     customMotionTarget,
@@ -145,7 +146,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     isConverting,
     setIsConverting,
     estimateKeyframesForDensity,
-  } = useCustomMotionAuthoring({ semanticItem, fps: sceneFps });
+  } = useCustomMotionAuthoring({ semanticItem, fps: projectFps });
 
   const [showVisualAdvanced, setShowVisualAdvanced] = useState(false);
   const [isAutoMatchingVisual, setIsAutoMatchingVisual] = useState(false);
@@ -220,7 +221,7 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     action, actionType, actionParams, usesSourceParamForm,
     isLensFilterSourceAction, isCompositeVisualAction, isIntegrationVisualAction, isRimLightVisualAction,
     semanticItem, semanticInspectorFields, semanticInspectorFieldByKey, isCharacterEntranceAction,
-  }).filter((key) => !rowFieldKeys.has(key) || ROW_TOOL_KEYS.has(key));
+  }).filter((key) => !rowFieldKeys.has(key));
   const semanticActionLabel = action.semanticType === 'visualStyle'
     ? getVisualStyleSemanticLabel(actionParams)
     : action.semanticType === 'lighting'
@@ -287,13 +288,16 @@ export const ActionInspector = React.memo(function ActionInspector(props: Action
     customMotionValue, environmentLayers, visualTargetOptions, recipeOptions,
     modelData, isModelDataLoading, targetModelPath, currentDialogueTemplateValue, customDialogueTemplateOptions,
     updateParam, replaceSourceParams, updateResourceParam, updateSemanticSourceParam,
+    registerNumericGesture: props.onNumericGestureStart,
     updateAuthoringParam, updateDialogueSpeaker, updateDialogueTemplate,
     updateVisualSemanticOverride, characterAdapter, semanticAuthoring,
     webGalStyleImport,
   };
 
   const renderParam = (key: string) => {
-    if (rowFieldKeys.has(key) && !ROW_TOOL_KEYS.has(key)) return null;
+    // Row resource controls already include browsing and preview. Dedicated
+    // detail panels still provide additional settings such as motion conversion.
+    if (rowFieldKeys.has(key)) return null;
     const guarded = resolveGuardedParam(paramContext, key);
     if (guarded !== undefined) return guarded;
     return resolveParamControl(paramContext, key, computeParamBase(paramContext, key));

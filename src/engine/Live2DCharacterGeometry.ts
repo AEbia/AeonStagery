@@ -6,12 +6,13 @@ import type { Vec2 } from '../api/types/common';
 import type { CharacterEntry } from './Live2DConfig';
 import { STAGE_WIDTH, STAGE_HEIGHT } from './Live2DConfig';
 import { Live2DCompositeModel } from './Live2DCompositeModel';
+import { captureLive2DAnchorOffset, LIVE2D_ANCHOR_FRACTIONS } from './Live2DAnchorGeometry';
 import { getBoundRuntimeHandle } from './live2d/runtime/BoundRuntimeAccess';
 import { projectToScreen } from './Projection';
 import { resolveVec2 } from './utils/math';
 import type { TransformationProxy } from './actions/types';
 
-type CharacterCamera = { position: Vec2; zoom: number };
+type CharacterCamera = { position: Vec2; zoom: number; rotation?: number; shakeOffset?: { x: number; y: number } };
 type CharacterPoint = 'head' | 'chest' | 'feet' | 'center';
 
 type SpatialModel = {
@@ -20,8 +21,12 @@ type SpatialModel = {
   scale: { x: number; y: number; set: (x: number, y?: number) => unknown };
   _baseHeight?: number;
   _flipX?: boolean;
+  pivot?: { x: number; y: number };
+  localTransform?: { apply: (point: { x: number; y: number }) => { x: number; y: number } };
+  updateLocalTransform?: () => void;
   getBounds?: () => { x: number; y: number; width: number; height: number };
   getLocalBounds?: () => { x: number; y: number; width: number; height: number };
+  toGlobal?: (point: { x: number; y: number }) => { x: number; y: number };
 };
 
 type FilterContainer = PIXI.Container & {
@@ -35,6 +40,8 @@ export type Live2DGeometrySceneContext = {
 };
 
 export class Live2DCharacterGeometry {
+  private readonly projectedZoom = new WeakMap<PIXI.Container, number>();
+
   constructor(
     private readonly characters: ReadonlyMap<string, CharacterEntry>,
     private readonly pendingConfigs: Map<string, Partial<CharacterTransformConfig>[]>,
@@ -140,11 +147,63 @@ export class Live2DCharacterGeometry {
     return model;
   }
 
+  private resolveAnchorFraction(entry: CharacterEntry, pointName: CharacterPoint): { x: number; y: number; posed?: true } | null {
+    const character = getBoundRuntimeHandle(entry)?.character;
+    const target = entry.model instanceof Live2DCompositeModel && pointName === 'head' ? 'head' : 'main';
+    const posed = character?.getAnchor?.(pointName, target);
+    return posed ? { ...posed, posed: true }
+      : (pointName === 'head' ? character?.getHeadAnchor(target) : null)
+      ?? null;
+  }
+
   getPoint(id: string, pointName: CharacterPoint, out?: { x: number; y: number }): { x: number, y: number } | null {
     const entry = this.characters.get(id);
 
-    // 1. Prefer model-defined head hit areas when available.
-    // This gives us the semantic head anchor instead of guessing from the full container bounds.
+    // Capture posed geometry in model-local units, then compose it with the
+    // authored proxy. Camera and editor viewport transforms never enter this
+    // trajectory, and the bounds refresh does not require a render pass.
+    const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+    if (entry?.model && proxy) {
+      try {
+        const source = this.resolvePointSourceModel(entry.model, pointName);
+        const anchorFraction = this.resolveAnchorFraction(entry, pointName);
+        const logicalHeight = entry.baseHeight ?? source?._baseHeight ?? source?.height;
+        const rootModel = entry.model as SpatialModel;
+        if (source !== rootModel) source?.updateLocalTransform?.();
+        const offset = captureLive2DAnchorOffset(
+          source,
+          pointName,
+          logicalHeight,
+          anchorFraction,
+          rootModel.pivot,
+          source !== rootModel ? source?.localTransform : undefined,
+        );
+        if (offset) {
+          const flipX = entry.config?.flipX ?? source?._flipX ?? false;
+          const scale = proxy.scale ?? 1;
+          const localX = offset.x * (flipX ? -1 : 1) * STAGE_HEIGHT * scale;
+          const localY = offset.y * STAGE_HEIGHT * scale;
+          const radians = (proxy.rotation ?? 0) * Math.PI / 180;
+          const cos = Math.cos(radians);
+          const sin = Math.sin(radians);
+          const point = {
+            x: (proxy.x + localX * cos - localY * sin) / STAGE_WIDTH,
+            y: (proxy.y + localX * sin + localY * cos) / STAGE_HEIGHT,
+          };
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+          if (out) {
+            out.x = point.x;
+            out.y = point.y;
+            return out;
+          }
+          return point;
+        }
+      } catch {
+        // Try the model's measured bounds when local runtime geometry is absent.
+      }
+    }
+
+    // Prefer runtime anatomy and authored head hit areas over bounds estimates.
     if (entry?.model) {
       try {
         const model = this.resolvePointSourceModel(entry.model, pointName);
@@ -156,37 +215,59 @@ export class Live2DCharacterGeometry {
 
         if (bounds && isFinite(bounds.x) && isFinite(bounds.y) && isFinite(bounds.width) && isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
           const centerX = bounds.x + bounds.width * 0.5;
-          const centerY = bounds.y + bounds.height * 0.5;
-          const headAnchor = pointName === 'head'
-            ? getBoundRuntimeHandle(entry)?.character.getHeadAnchor(
-                entry.model instanceof Live2DCompositeModel ? 'head' : 'main',
-              )
-            : null;
+          const anchorFraction = this.resolveAnchorFraction(entry, pointName);
 
           let x = centerX;
-          let y = centerY;
-          if (headAnchor && pointName === 'head') {
-            x = bounds.x + bounds.width * headAnchor.x;
-            y = bounds.y + bounds.height * headAnchor.y;
-          } else {
-            switch (pointName) {
-              case 'head':
-                y = bounds.y + bounds.height * 0.18;
-                break;
-              case 'chest':
-                y = bounds.y + bounds.height * 0.42;
-                break;
-              case 'center':
-                y = centerY;
-                break;
-              case 'feet':
-                y = bounds.y + bounds.height * 0.95;
-                break;
+          let y = bounds.y + bounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
+          if (anchorFraction) {
+            x = bounds.x + bounds.width * anchorFraction.x;
+            y = bounds.y + bounds.height * anchorFraction.y;
+            const localBounds = anchorFraction.posed ? model?.getLocalBounds?.() : null;
+            if (localBounds && model?.toGlobal) {
+              const global = model.toGlobal({
+                x: localBounds.x + localBounds.width * anchorFraction.x,
+                y: localBounds.y + localBounds.height * anchorFraction.y,
+              });
+              x = global.x;
+              y = global.y;
             }
           }
 
-          const normalizedX = x / 1920;
-          const normalizedY = y / 1080;
+          const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+          if (proxy) {
+            // Bounds are global pixels, including editor viewport and camera
+            // transforms. Recover the model offset before composing it with
+            // the authored stage position. Use the last APPLIED zoom: the
+            // camera may already have advanced before this anchor is queried.
+            const container = this.getContainer(id);
+            const localBounds = typeof model?.getLocalBounds === 'function' && typeof model.toGlobal === 'function'
+              ? model.getLocalBounds()
+              : null;
+            let local: { x: number; y: number };
+            if (model && localBounds && localBounds.width > 0 && localBounds.height > 0 && model.toGlobal) {
+              const localCenterX = localBounds.x + localBounds.width * 0.5;
+              const localAnchorX = anchorFraction
+                ? localBounds.x + localBounds.width * anchorFraction.x
+                : localCenterX;
+              const localAnchorY = anchorFraction
+                ? localBounds.y + localBounds.height * anchorFraction.y
+                : localBounds.y + localBounds.height * LIVE2D_ANCHOR_FRACTIONS[pointName];
+              local = container.toLocal(model.toGlobal({ x: localAnchorX, y: localAnchorY }));
+            } else {
+              local = container.toLocal({ x, y });
+            }
+            const zoom = this.projectedZoom.get(container) ?? 1;
+            // Camera rotation is a presentation transform. Character anchor
+            // trajectories stay in authored world space.
+            const authoredRotation = (proxy.rotation ?? 0) * Math.PI / 180;
+            const cos = Math.cos(authoredRotation);
+            const sin = Math.sin(authoredRotation);
+            x = proxy.x + (local.x * cos - local.y * sin) / zoom;
+            y = proxy.y + (local.x * sin + local.y * cos) / zoom;
+          }
+          const normalizedX = x / STAGE_WIDTH;
+          const normalizedY = y / STAGE_HEIGHT;
+          if (!Number.isFinite(normalizedX) || !Number.isFinite(normalizedY)) return null;
           if (out) {
             out.x = normalizedX;
             out.y = normalizedY;
@@ -195,40 +276,31 @@ export class Live2DCharacterGeometry {
           return { x: normalizedX, y: normalizedY };
         }
       } catch {
-        // Fall back to proxy-based estimation below.
+        // Unavailable geometry is a missing anchor.
       }
     }
 
-    // 2. When the live model cannot provide bounds, fall back to the pure proxy estimate.
-    // This keeps seek/scrub stable even before the model is fully available.
-    const proxies = this.getSceneContext()?.transformationProxies;
-    if (proxies) {
-      const proxy = proxies.get(id);
-      if (proxy) {
-        const nx = proxy.x / 1920;
-        const ny = proxy.y / 1080;
-        const scale = proxy.scale !== undefined ? proxy.scale : 1.0;
+    // Authored origins and guessed body proportions are not posed anchors.
+    // Focus must capture the absence rather than freeze an invented target.
+    return null;
+  }
 
-        let targetY = ny;
-        switch (pointName) {
-          case 'head':   targetY = ny - 0.60 * scale; break;
-          case 'chest':  targetY = ny - 0.38 * scale; break;
-          case 'center': targetY = ny - 0.40 * scale; break;
-          case 'feet':   targetY = ny; break;
-        }
-
-        if (out) {
-          out.x = nx;
-          out.y = targetY;
-          return out;
-        }
-        return { x: nx, y: targetY };
-      }
-    }
-
-    // Final fallback.
-    if (!entry || !entry.model) return null;
-    return { x: 0.5, y: 0.5 };
+  /** Normalized picture coordinates, before editor viewport/CSS transforms. */
+  getScreenPoint(id: string, pointName: CharacterPoint, out?: { x: number; y: number }): { x: number; y: number } | null {
+    const point = this.getPoint(id, pointName, out);
+    if (!point) return null;
+    const camera = this.getCamera();
+    const proxy = this.getSceneContext()?.transformationProxies?.get(id);
+    // Without a proxy, getPoint uses the legacy measured display bounds.
+    if (!camera || !proxy) return point;
+    const projected = projectToScreen(
+      { x: point.x * STAGE_WIDTH, y: point.y * STAGE_HEIGHT, scale: 1, parallaxDepth: proxy.z ?? 0 },
+      camera,
+      { w: STAGE_WIDTH, h: STAGE_HEIGHT },
+    );
+    point.x = projected.screenX / STAGE_WIDTH;
+    point.y = projected.screenY / STAGE_HEIGHT;
+    return point;
   }
 
   getStableSampleBounds(id: string, camera: CharacterCamera | null): PIXI.Rectangle | null {
@@ -243,7 +315,7 @@ export class Live2DCharacterGeometry {
 
     const projected = camera
       ? projectToScreen(
-          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, z: proxy.z ?? 0 },
+          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, rotation: proxy.rotation, parallaxDepth: proxy.z ?? 0, drawOrder: proxy.z },
           camera,
           { w: STAGE_WIDTH, h: STAGE_HEIGHT },
         )
@@ -251,6 +323,7 @@ export class Live2DCharacterGeometry {
           screenX: proxy.x,
           screenY: proxy.y,
           screenScale: effectiveScale,
+          screenRotation: proxy.rotation ?? 0,
         };
 
     const height = STAGE_HEIGHT * effectiveScale;
@@ -276,26 +349,27 @@ export class Live2DCharacterGeometry {
     if (!proxy) return;
 
     // Resolve effective camera: explicit param > stored currentCamera > null (2D fallback)
-    const cam = camera !== undefined ? camera : this.getCamera();
+    const cam: CharacterCamera | null = camera !== undefined ? camera : this.getCamera();
 
     const container = this.getContainer(id) as FilterContainer;
     if (container) {
       // ── ECS Projection (replaces old pivot-based camera) ──
       if (cam && proxy.x !== undefined && proxy.y !== undefined) {
         const projected = projectToScreen(
-          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, z: proxy.z ?? 0 },
+          { x: proxy.x, y: proxy.y, scale: proxy.scale ?? 1, rotation: proxy.rotation, parallaxDepth: proxy.z ?? 0, drawOrder: proxy.z },
           cam,
           { w: STAGE_WIDTH, h: STAGE_HEIGHT },
         );
         if (isFinite(projected.screenX)) container.x = projected.screenX;
         if (isFinite(projected.screenY)) container.y = projected.screenY;
+        if (isFinite(projected.screenRotation)) container.angle = projected.screenRotation;
       } else {
         // 2D fallback — no camera, use raw proxy position
         if (proxy.x !== undefined && isFinite(proxy.x)) container.x = proxy.x;
         if (proxy.y !== undefined && isFinite(proxy.y)) container.y = proxy.y;
       }
 
-      if (proxy.rotation !== undefined && isFinite(proxy.rotation)) container.angle = proxy.rotation;
+      if (!cam && proxy.rotation !== undefined && isFinite(proxy.rotation)) container.angle = proxy.rotation;
 
       // ── Z-index for depth ordering ──
       if (proxy.z !== undefined && isFinite(proxy.z)) {
@@ -315,7 +389,7 @@ export class Live2DCharacterGeometry {
 
           let alphaFilter = container._alphaFilter;
           if (!alphaFilter) {
-            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity });
+            alphaFilter = new PIXI.AlphaFilter({ alpha: opacity, resolution: 'inherit' });
             alphaFilter.padding = 50;
             container._alphaFilter = alphaFilter;
           } else {
@@ -362,6 +436,7 @@ export class Live2DCharacterGeometry {
           const flipX = entry?.config?.flipX || model._flipX;
           const sign = flipX ? -1 : 1;
           model.scale.set(modelScale * sign, modelScale);
+          if (container) this.projectedZoom.set(container, cam?.zoom || 1);
         }
       }
       if (proxy.opacity !== undefined && isFinite(proxy.opacity)) {

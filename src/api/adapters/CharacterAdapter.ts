@@ -51,6 +51,10 @@ export class CharacterAdapter implements ICharacterAdapter {
     return this.manager.getPoint(id, pointName, out);
   }
 
+  getScreenPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null {
+    return this.manager.getScreenPoint(id, pointName, out);
+  }
+
   listCharacters(): string[] {
     return this.manager.listCharacters();
   }

@@ -1,3 +1,4 @@
+import type { NumericInputGesture, NumericInputGestureRegistrar } from './FormComponents';
 import { TimelineListView } from './TimelineListView';
 import { useMemo, useSyncExternalStore } from 'react';
 import {
@@ -17,8 +18,10 @@ export interface InspectorAreaProps {
   sceneData: TimelineScene;
   selectedActionIds: Record<string, boolean>;
   setSelectedIds: (ids: Record<string, boolean>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector patches carry family-specific fields through a shared callback; keep the runtime field dispatch open until the authoring service validates it.
   updateAction: (id: string, updates: any) => void;
-  updateParam: (id: string, key: string, val: any) => void;
+  updateParam: (id: string, key: string, val: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  onNumericGestureStart?: NumericInputGestureRegistrar;
   replaceSourceParams?: (id: string, params: Record<string, unknown>) => void;
   addAction: () => void;
   handleSave: () => void | Promise<SaveResult | undefined>;
@@ -27,7 +30,7 @@ export interface InspectorAreaProps {
   loadExample: () => Promise<boolean>;
   onDetailClose: () => void;
   navigatorWidth: number;
-  workspaceIssues?: any[];
+  workspaceIssues?: import('../../api/types/validation').ValidationIssue[];
   inspectorView: InspectorPanelView;
   onSelectInspectorView?: (view: InspectorPanelView) => void;
   onDetachWorkspaceTools?: () => void;

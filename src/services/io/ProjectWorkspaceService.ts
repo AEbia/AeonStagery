@@ -5,6 +5,7 @@ import {
   type ProjectVoiceGenerationConfiguration,
   type ProjectWebGalImportReceipt,
 } from '../../api/types/project';
+import { validateVideoFormat, type ProjectVideoFormat } from '../../api/types/video-format';
 import type { CurrentSceneDocument, DialogueImagePresentation } from '../../api/types/semantic-scene';
 import type { SceneMeta } from '../../api/types/scene-common';
 import { ProjectResourceService } from './ProjectResourceService';
@@ -39,6 +40,7 @@ export type RenameProjectResult =
   | { success: false; error: string };
 
 export interface CreateProjectOptions {
+  videoFormat?: ProjectVideoFormat;
   templates?: ProjectTemplateConfiguration;
   webgal?: WebGalImportInput;
 }
@@ -55,6 +57,7 @@ export class ProjectWorkspaceService {
     private setProjectRoot: (path: string) => void,
     private getTemplatePackages: () => LoadedTemplatePackage[] = () => [],
     private sceneAssets?: Pick<SceneAssetHooks, 'importAssetPath' | 'importTemplateAssetPath'>,
+    private applyVideoFormat?: (format: ProjectVideoFormat, commit: () => Promise<void>) => Promise<void>,
   ) {}
 
   getCurrentProject(): ProjectState | null {
@@ -68,6 +71,32 @@ export class ProjectWorkspaceService {
 
   subscribe(listener: () => void): () => void {
     return this.session.subscribe(listener);
+  }
+
+  async updateVideoFormat(videoFormat: ProjectVideoFormat): Promise<RenameProjectResult> {
+    const error = validateVideoFormat(videoFormat);
+    if (error) return { success: false, error };
+    const current = this.session.getCurrentProject();
+    if (!current) return { success: false, error: '请先打开项目。' };
+    try {
+      let savedProject: ProjectState | undefined;
+      const commit = async () => {
+        const active = this.session.getCurrentProject();
+        if (!active || active.rootPath !== current.rootPath || active.metadata.projectId !== current.metadata.projectId) {
+          throw new Error('当前项目已切换，请重新打开画布设置。');
+        }
+        const project = await this.projectResources.saveProjectMetadata(active, { ...active.metadata, videoFormat });
+        if (this.session.getCurrentProject() !== active) throw new Error('项目已变更，请重试。');
+        this.session.setCurrentProject(project);
+        savedProject = project;
+      };
+      if (this.applyVideoFormat) await this.applyVideoFormat(videoFormat, commit);
+      else await commit();
+      if (!savedProject) throw new Error('画布设置未保存，请重试。');
+      return { success: true, project: savedProject };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async renameProjectAt(projectFilePath: string, name: string): Promise<RenameProjectResult> {
@@ -180,8 +209,8 @@ export class ProjectWorkspaceService {
         scenePath: sceneAbsolutePath,
         webgalReport,
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -241,8 +270,8 @@ export class ProjectWorkspaceService {
       this.session.setCurrentProject(updatedProject);
 
       return { success: true, scenePath: sceneAbsolutePath, webgalReport: converted.report };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -323,8 +352,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: sceneAbsolutePath,
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -347,8 +376,8 @@ export class ProjectWorkspaceService {
       }
 
       return this.createProjectAt(rootPath, name);
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -377,8 +406,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -413,8 +442,8 @@ export class ProjectWorkspaceService {
       return sceneEntry
         ? { success: true, project, scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path) }
         : { success: false, error: 'Project contains no registered scenes' };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -442,8 +471,8 @@ export class ProjectWorkspaceService {
         project,
         scenePath: await this.resolveScenePath(project.rootPath, sceneEntry.path),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

@@ -1,8 +1,24 @@
 import * as PIXI from 'pixi.js';
 import type { DialogueImagePanelStyle, DialogueImagePresentation } from '../api/types/semantic-scene';
 import type { DialogueConfig, DialogueTemplate } from './DialogueTemplates';
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 const DEFAULT_FONT_FAMILY = "'Outfit', 'Inter', 'Noto Sans SC', 'Microsoft YaHei', sans-serif";
+
+/** Image templates are authored on a 1920×1080 design surface. Reflow the
+ * panel horizontally and preserve its top/bottom attachment, without scaling
+ * glyphs or modifying the persisted presentation. */
+export function adaptDialoguePresentation(presentation: DialogueImagePresentation): DialogueImagePresentation {
+  if (STAGE_WIDTH === 1920 && STAGE_HEIGHT === 1080) return presentation;
+  const xScale = STAGE_WIDTH / 1920;
+  const yOffset = presentation.textbox.y >= 540 ? STAGE_HEIGHT - 1080 : 0;
+  return {
+    ...presentation,
+    textbox: { ...presentation.textbox, x: presentation.textbox.x * xScale, y: presentation.textbox.y + yOffset, width: presentation.textbox.width * xScale },
+    ...(presentation.namebox ? { namebox: { ...presentation.namebox, x: presentation.namebox.x * xScale, y: presentation.namebox.y + yOffset } } : {}),
+    text: { ...presentation.text, x: presentation.text.x * xScale, y: presentation.text.y + yOffset, maxWidth: presentation.text.maxWidth * xScale },
+  };
+}
 
 export const ImageDialogueTemplate: DialogueTemplate = {
   id: 'image-dialogue-v1',
@@ -45,7 +61,7 @@ export const ImageDialogueTemplate: DialogueTemplate = {
     // Expand upward around the authored bottom edge so additional lines stay
     // on stage, and keep the nameplate attached to the textbox.
     const expansionOffset = presentation.textbox.height === undefined ? 0 : baseHeight - textboxHeight;
-    const offsetY = Math.min(0, 1080 - presentation.textbox.y - textboxHeight, expansionOffset);
+    const offsetY = Math.min(0, STAGE_HEIGHT - presentation.textbox.y - textboxHeight, expansionOffset);
     const textbox = createImagePanel({ ...presentation.textbox, y: presentation.textbox.y + offsetY }, textboxHeight);
     container.addChild(textbox);
 
@@ -113,7 +129,7 @@ function renderNamebox(
   const speakerText = new PIXI.Text({ text: config.speaker, style: {
     fontFamily: speakerStyle?.fontFamily || presentation.text.fontFamily || DEFAULT_FONT_FAMILY,
     fontSize: speakerStyle?.fontSize ?? Math.round((presentation.text.fontSize ?? config.fontSize ?? 44) * 0.9),
-    fontWeight: (speakerStyle?.fontWeight || '700') as any,
+    fontWeight: (speakerStyle?.fontWeight || '700') as import('pixi.js').TextStyleOptions['fontWeight'],
     fill: color,
     letterSpacing: speakerStyle?.letterSpacing ?? 0,
     align: speakerStyle?.align ?? 'center',

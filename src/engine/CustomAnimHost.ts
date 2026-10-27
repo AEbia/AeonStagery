@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * AeonStagery — Custom Animation Host
  *
@@ -76,6 +77,18 @@ class CustomAnimHost {
   private pendingSeekAcks: Map<string, PendingSeekAck> = new Map();
   private readonly boundMessageHandler = (event: MessageEvent) => this.handleMessage(event);
 
+  resizeStage(): void {
+    if (!this.hostContainer) return;
+    const scale = Math.min(this.hostContainer.clientWidth / STAGE_WIDTH, this.hostContainer.clientHeight / STAGE_HEIGHT);
+    for (const { iframe } of this.activeAnims.values()) {
+      iframe.style.width = `${STAGE_WIDTH}px`;
+      iframe.style.height = `${STAGE_HEIGHT}px`;
+      iframe.style.transform = `scale(${scale})`;
+      iframe.style.left = `${(this.hostContainer.clientWidth - STAGE_WIDTH * scale) / 2}px`;
+      iframe.style.top = `${(this.hostContainer.clientHeight - STAGE_HEIGHT * scale) / 2}px`;
+    }
+  }
+
   /**
    * Initialize the host by creating a container div
    * that overlays the PixiJS canvas.
@@ -141,8 +154,8 @@ class CustomAnimHost {
       position: absolute;
       top: 0;
       left: 0;
-      width: 1920px;
-      height: 1080px;
+      width: ${STAGE_WIDTH}px;
+      height: ${STAGE_HEIGHT}px;
       border: none;
       background: transparent;
       pointer-events: none;
@@ -152,12 +165,14 @@ class CustomAnimHost {
     // Scale iframe to fit container
     const scaleIframe = () => {
       if (!this.hostContainer) return;
-      const scaleX = this.hostContainer.clientWidth / 1920;
-      const scaleY = this.hostContainer.clientHeight / 1080;
+      iframe.style.width = `${STAGE_WIDTH}px`;
+      iframe.style.height = `${STAGE_HEIGHT}px`;
+      const scaleX = this.hostContainer.clientWidth / STAGE_WIDTH;
+      const scaleY = this.hostContainer.clientHeight / STAGE_HEIGHT;
       const scale = Math.min(scaleX, scaleY);
       iframe.style.transform = `scale(${scale})`;
-      iframe.style.left = `${(this.hostContainer.clientWidth - 1920 * scale) / 2}px`;
-      iframe.style.top = `${(this.hostContainer.clientHeight - 1080 * scale) / 2}px`;
+      iframe.style.left = `${(this.hostContainer.clientWidth - STAGE_WIDTH * scale) / 2}px`;
+      iframe.style.top = `${(this.hostContainer.clientHeight - STAGE_HEIGHT * scale) / 2}px`;
     };
 
     container.appendChild(iframe);
@@ -269,7 +284,7 @@ class CustomAnimHost {
     const iframe = document.createElement('iframe');
     iframe.sandbox?.add('allow-scripts');
     iframe.style.cssText = `
-      position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+      position: absolute; top: 0; left: 0; width: ${STAGE_WIDTH}px; height: ${STAGE_HEIGHT}px;
       border: none; background: transparent; pointer-events: none;
       transform-origin: top left;
     `;
@@ -321,7 +336,7 @@ class CustomAnimHost {
       };
 
       if (typeof ResizeObserver !== 'undefined') {
-        const observer = new ResizeObserver(() => undefined);
+        const observer = new ResizeObserver(() => this.resizeStage());
         anim.resizeObserver = observer;
         if (this.hostContainer) observer.observe(this.hostContainer);
       }
@@ -338,7 +353,7 @@ class CustomAnimHost {
   /**
    * Send a command to a custom animation iframe.
    */
-  sendCommand(animId: string, command: { type: string; [key: string]: any }): void {
+  sendCommand(animId: string, command: { type: string; [key: string]: unknown }): void {
     const anim = this.activeAnims.get(animId);
     if (!anim || !anim.iframe.contentWindow) return;
 
@@ -688,6 +703,7 @@ class CustomAnimHost {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Embedded animations return extensible postMessage payloads; keep dynamic decoding here rather than claim every iframe implements one fixed response.
   private resolveSeekAck(anim: ActiveCustomAnim, data: any): void {
     const responseRequestId = typeof data.requestId === 'string' ? data.requestId : undefined;
     const responseTime = typeof data.time === 'number'
@@ -735,6 +751,7 @@ class CustomAnimHost {
   }
 
   private async normalizeCaptureFrame(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Embedded animations return extensible postMessage payloads; keep dynamic decoding here rather than claim every iframe implements one fixed response.
     data: any,
     width: number,
     height: number,

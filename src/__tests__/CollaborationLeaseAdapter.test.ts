@@ -4,17 +4,16 @@ import path from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
+  type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
-import { SCENE_SCHEMA_VERSION_V4 } from '../api/types/semantic-scene';
+import { SCENE_SCHEMA_VERSION_V5 } from '../api/types/semantic-scene';
 import { CollaborationAssetStore } from '../../server/collaboration/assets';
 import { CollaborationPersistence } from '../../server/collaboration/persistence';
-import { createPresenceRegistryV2 } from '../../server/collaboration/presence';
-import { SingleRoomCollaborationRoomV2 } from '../../server/collaboration/room';
-import { CollaborationSyncSocketAdapterV2 } from '../../server/collaboration/syncSocketAdapter';
-import { createCollaborationLeaseRegistryV2, encodeCollaborationLeaseTargetV2 } from '../../server/collaboration/lease';
+import { createPresenceRegistryV3 } from '../../server/collaboration/presence';
+import { SingleRoomCollaborationRoomV3 } from '../../server/collaboration/room';
+import { CollaborationSyncSocketAdapterV3 } from '../../server/collaboration/syncSocketAdapter';
+import { createCollaborationLeaseRegistryV3, encodeCollaborationLeaseTargetV3 } from '../../server/collaboration/lease';
 
 type MessageHandler = (data: Buffer, isBinary: boolean) => void;
 type CloseHandler = () => void;
@@ -60,14 +59,14 @@ function asWebSocket(socket: FakeSocket): WebSocket {
   return socket as unknown as WebSocket;
 }
 
-function makeStateV2(): CollaborativeSceneStateV2 {
+function makeStateV3(): CollaborativeSceneStateV3 {
   return {
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
+    schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
+    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V5,
     collaborationProjectId: 'project_1',
     roomId: 'project_1:main',
-    sceneId: 'scene_v2',
-    meta: { title: 'Seeded Scene V2', fps: 60 },
+    sceneId: 'scene_v3',
+    meta: { title: 'Seeded Scene V3', fps: 60 },
     statementsById: {
       perf_1: {
         id: 'perf_1',
@@ -83,7 +82,7 @@ function makeStateV2(): CollaborativeSceneStateV2 {
   };
 }
 
-function connect(adapter: CollaborationSyncSocketAdapterV2, clientId: string): FakeSocket {
+function connect(adapter: CollaborationSyncSocketAdapterV3, clientId: string): FakeSocket {
   const socket = new FakeSocket();
   adapter.connect(asWebSocket(socket), `/sync?clientId=${clientId}&displayName=${clientId}`, 'localhost');
   return socket;
@@ -91,25 +90,25 @@ function connect(adapter: CollaborationSyncSocketAdapterV2, clientId: string): F
 
 describe('collaboration scoped edit lease (ADR-0028)', () => {
   let tempDir: string;
-  let room: SingleRoomCollaborationRoomV2;
+  let room: SingleRoomCollaborationRoomV3;
   let assets: CollaborationAssetStore;
-  let adapter: CollaborationSyncSocketAdapterV2;
+  let adapter: CollaborationSyncSocketAdapterV3;
   let clients: Set<WebSocket>;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'aeonstagery-collab-lease-'));
     const persistence = new CollaborationPersistence(tempDir);
-    room = new SingleRoomCollaborationRoomV2(persistence);
+    room = new SingleRoomCollaborationRoomV3(persistence);
     assets = new CollaborationAssetStore(tempDir);
     await assets.ensure();
-    await room.seed(makeStateV2());
+    await room.seed(makeStateV3());
     clients = new Set<WebSocket>();
-    adapter = new CollaborationSyncSocketAdapterV2({
+    adapter = new CollaborationSyncSocketAdapterV3({
       clients,
       room,
       assets,
-      presence: createPresenceRegistryV2<WebSocket>(),
-      leases: createCollaborationLeaseRegistryV2<WebSocket>(),
+      presence: createPresenceRegistryV3<WebSocket>(),
+      leases: createCollaborationLeaseRegistryV3<WebSocket>(),
     });
   });
 
@@ -120,7 +119,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
   function acquire(socket: FakeSocket, requestId: string, target: unknown): void {
     socket.emitMessage(JSON.stringify({
       type: 'lease:acquire',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       requestId,
       target,
     }), false);
@@ -129,7 +128,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
   function renew(socket: FakeSocket, requestId: string, target: unknown): void {
     socket.emitMessage(JSON.stringify({
       type: 'lease:renew',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       requestId,
       target,
     }), false);
@@ -138,7 +137,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
   function release(socket: FakeSocket, requestId: string, target: unknown): void {
     socket.emitMessage(JSON.stringify({
       type: 'lease:release',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       requestId,
       target,
     }), false);
@@ -202,13 +201,13 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
     expect(findMessage(bob, 'lease:acquired')).toBeTruthy();
   });
 
-  it.each([COLLABORATION_SCHEMA_VERSION_V2, COLLABORATION_SCHEMA_VERSION_V3] as const)(
+  it.each([COLLABORATION_SCHEMA_VERSION_V3] as const)(
     'keeps new ownership when late cancellation releases the previous request in protocol V%s',
     (schemaVersion) => {
-      const leases = createCollaborationLeaseRegistryV2<WebSocket>();
-      const correlatedAdapter = new CollaborationSyncSocketAdapterV2({
+      const leases = createCollaborationLeaseRegistryV3<WebSocket>();
+      const correlatedAdapter = new CollaborationSyncSocketAdapterV3({
         clients: new Set<WebSocket>(), room, assets, schemaVersion,
-        presence: createPresenceRegistryV2<WebSocket>(), leases,
+        presence: createPresenceRegistryV3<WebSocket>(), leases,
       });
       const alice = connect(correlatedAdapter, 'alice');
       const bob = connect(correlatedAdapter, 'bob');
@@ -223,7 +222,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
       send(alice, 'lease:acquire', 'request-B');
       // The client receives A's grant late and sends another cleanup release for A.
       send(alice, 'lease:release', 'request-A');
-      const record = leases.leasesByTarget.get(encodeCollaborationLeaseTargetV2(target));
+      const record = leases.leasesByTarget.get(encodeCollaborationLeaseTargetV3(target));
       expect(record?.requestId).toBe('request-B');
       const renewedAt = record?.lastRenewedAt;
       alice.sent = [];
@@ -242,13 +241,13 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
     },
   );
 
-  it.each([COLLABORATION_SCHEMA_VERSION_V2, COLLABORATION_SCHEMA_VERSION_V3] as const)(
+  it.each([COLLABORATION_SCHEMA_VERSION_V3] as const)(
     'preserves a reconnected client lease after late messages from its closed socket in protocol V%s',
     (schemaVersion) => {
-      const leases = createCollaborationLeaseRegistryV2<WebSocket>();
-      const correlatedAdapter = new CollaborationSyncSocketAdapterV2({
+      const leases = createCollaborationLeaseRegistryV3<WebSocket>();
+      const correlatedAdapter = new CollaborationSyncSocketAdapterV3({
         clients: new Set<WebSocket>(), room, assets, schemaVersion,
-        presence: createPresenceRegistryV2<WebSocket>(), leases,
+        presence: createPresenceRegistryV3<WebSocket>(), leases,
       });
       const oldSocket = connect(correlatedAdapter, 'alice');
       const bob = connect(correlatedAdapter, 'bob');
@@ -268,7 +267,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
       oldSocket.emitClose();
       expect(findMessage(newSocket, 'lease:released')).toBeUndefined();
       expect(findMessage(bob, 'lease:released')).toBeUndefined();
-      expect(leases.leasesByTarget.get(encodeCollaborationLeaseTargetV2(target))?.requestId).toBe('request-B');
+      expect(leases.leasesByTarget.get(encodeCollaborationLeaseTargetV3(target))?.requestId).toBe('request-B');
       send(bob, 'lease:acquire', 'request-C');
       expect(findMessage(bob, 'lease:denied')).toMatchObject({ heldByClientId: 'alice' });
       send(newSocket, 'lease:renew', 'request-B');
@@ -282,13 +281,13 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
     },
   );
 
-  it.each([COLLABORATION_SCHEMA_VERSION_V2, COLLABORATION_SCHEMA_VERSION_V3] as const)(
+  it.each([COLLABORATION_SCHEMA_VERSION_V3] as const)(
     'rejects duplicate client connections without releasing the active lease in protocol V%s',
     (schemaVersion) => {
-      const leases = createCollaborationLeaseRegistryV2<WebSocket>();
-      const correlatedAdapter = new CollaborationSyncSocketAdapterV2({
+      const leases = createCollaborationLeaseRegistryV3<WebSocket>();
+      const correlatedAdapter = new CollaborationSyncSocketAdapterV3({
         clients: new Set<WebSocket>(), room, assets, schemaVersion,
-        presence: createPresenceRegistryV2<WebSocket>(), leases,
+        presence: createPresenceRegistryV3<WebSocket>(), leases,
       });
       const alice = connect(correlatedAdapter, 'alice');
       const target = { kind: 'statement' as const, statementId: 'perf_1' };
@@ -296,7 +295,7 @@ describe('collaboration scoped edit lease (ADR-0028)', () => {
 
       const duplicate = connect(correlatedAdapter, 'alice');
       expect(duplicate.close).toHaveBeenCalledWith(1008, 'Collaboration client identity is already connected');
-      expect(leases.leasesByTarget.get(encodeCollaborationLeaseTargetV2(target))?.requestId).toBe('request-A');
+      expect(leases.leasesByTarget.get(encodeCollaborationLeaseTargetV3(target))?.requestId).toBe('request-A');
       const bob = connect(correlatedAdapter, 'bob');
       bob.emitMessage(JSON.stringify({ type: 'lease:acquire', schemaVersion, requestId: 'request-B', target }), false);
       expect(findMessage(bob, 'lease:denied')).toMatchObject({ heldByClientId: 'alice' });

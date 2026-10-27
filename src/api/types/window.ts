@@ -1,3 +1,5 @@
+import type { CrashReport, CrashRecordResult, CrashEnvironmentInfo } from './crash';
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
 import type { LayerName, Vec2 } from './common';
 import type { UpdateSource, UpdateStatus } from './updater';
 import type {
@@ -11,7 +13,7 @@ import type {
   CameraMotionConfig,
 } from './camera';
 import type { CharacterConfig, CharacterTransformConfig } from './character';
-import type { ExportConfig, ExportProgress, ExportResult } from './export';
+import type { ExportConfig, ExportProgress, ExportResult, ExportOperationResult, FFmpegConvertOptions, FFmpegStreamOptions } from './export';
 import type { HookEvent, HookContext } from './hook';
 import type {
   WorkspaceRuntimeSnapshot,
@@ -102,6 +104,8 @@ export interface CollaborationSessionSummary {
 
 export interface AeonStageryElectronAPI {
   fs: {
+    showItemInFolder?(path: string): Promise<{ success: boolean; error?: string }>;
+    openFolder?(path: string): Promise<{ success: boolean; error?: string }>;
     readFile(path: string): Promise<{ success: boolean; data?: ArrayBuffer; error?: string }>;
     readTextFile(path: string): Promise<{ success: boolean; data?: string; error?: string }>;
     readDir(path: string): Promise<{
@@ -130,8 +134,8 @@ export interface AeonStageryElectronAPI {
     removeFile(path: string): Promise<{ success: boolean; error?: string }>;
   };
   dialog: {
-    showSave(options: any): Promise<{ canceled: boolean; filePath?: string }>;
-    showOpen(options: any): Promise<{ canceled: boolean; filePaths?: string[] }>;
+    showSave(options: SaveDialogOptions): Promise<{ canceled: boolean; filePath?: string }>;
+    showOpen(options: OpenDialogOptions): Promise<{ canceled: boolean; filePaths?: string[] }>;
   };
   templates?: {
     importZip(): Promise<TemplatePackageImportResult>;
@@ -148,8 +152,15 @@ export interface AeonStageryElectronAPI {
     getProjectPath(): Promise<string>;
     getUserDataPath(): Promise<string>;
     getDefaultProjectsPath(): Promise<string>;
+    showOpenDialog?(options: OpenDialogOptions): Promise<{ canceled: boolean; filePaths?: string[] }>;
     restart(): Promise<{ success: boolean }>;
     openExternal?(url: string): Promise<{ success: boolean }>;
+  };
+  crash?: {
+    record(report: CrashReport): Promise<CrashRecordResult | { success: false; error: string }>;
+    openReportDir(): Promise<{ success: boolean }>;
+    getLatestReport(): Promise<CrashReport | null>;
+    getEnvironment(): Promise<Partial<CrashEnvironmentInfo>>;
   };
   aiProse: {
     complete(request: AiProseLlmRequest): Promise<AiProseLlmResponse>;
@@ -298,9 +309,10 @@ export interface AeonStageryElectronAPI {
   };
   export: {
     saveVideo(buffer: ArrayBuffer, path: string): Promise<{ success: boolean; error?: string }>;
-    convert(inputPath: string, outputPath: string, options?: any): Promise<{ success: boolean; error?: string; stderr?: string; path?: string }>;
+    convert(inputPath: string, outputPath: string, options?: FFmpegConvertOptions): Promise<ExportOperationResult & { path?: string }>;
     getTempDir(): Promise<string>;
-    startStreamExport(outputPath: string, options?: { fps?: number; width?: number; height?: number; codec?: string; crf?: number; vflip?: boolean; isEncoded?: boolean; bitrate?: number }): Promise<{ success: boolean; error?: string }>;
+    getEncodingCapabilities(): Promise<{ success: boolean; encoders: string[]; error?: string }>;
+    startStreamExport(outputPath: string, options?: FFmpegStreamOptions): Promise<ExportOperationResult>;
     pushFrame(frameData: Uint8Array | Uint8ClampedArray): Promise<{ success: boolean; error?: string }>;
     pushEncodedChunk(chunkData: Uint8Array): Promise<{ success: boolean; error?: string }>;
     endStreamExport(): Promise<{ success: boolean; error?: string }>;
@@ -383,17 +395,17 @@ export interface AeonStageryPublicAPI {
   export: ExportAPI;
   hooks: HookAPI;
   stage: StageAPI;
-  adapters?: any;
-  stores?: any;
-  services?: any;
+  adapters?: import('../../engine/Bootstrapper').BootstrapContext['adapters'];
+  stores?: import('../../engine/Bootstrapper').BootstrapContext['stores'];
+  services?: import('../../engine/Bootstrapper').BootstrapContext['services'];
 }
 
 export interface StageAPI {
-  getApp(): any; // PixiJS Application
+  getApp(): import('pixi.js').Application; // PixiJS Application
   getWidth(): number;
   getHeight(): number;
   /** Get a named layer container for advanced compositing */
-  getLayer(name: LayerName): any;
+  getLayer(name: LayerName): import('pixi.js').Container;
 }
 
 export interface CharacterAPI {
@@ -507,15 +519,15 @@ export interface AnimationAPI {
   /** Play a custom HTML animation */
   playCustom(htmlFile: string, duration: number, layer?: LayerName): void;
   /** Get the GSAP master timeline for advanced control */
-  getMasterTimeline(): any;
+  getMasterTimeline(): gsap.core.Timeline;
   /** Create a sub-timeline that can be composed into the master */
-  createTimeline(label?: string): any;
+  createTimeline(label?: string): gsap.core.Timeline;
   /** Add a GSAP tween to the master timeline at a specific time */
-  addTween(time: number, target: any, vars: any): void;
+  addTween(time: number, target: gsap.TweenTarget, vars: gsap.TweenVars): void;
   /** Register a custom animation preset */
-  registerPreset(name: string, factory: (target: any, config: any) => any): void;
+  registerPreset: (typeof import('../../engine/AnimationDirector').animationDirector)['registerPreset'];
   /** Play a registered preset */
-  playPreset(name: string, target: any, config?: any): void;
+  playPreset: (typeof import('../../engine/AnimationDirector').animationDirector)['playPreset'];
 }
 
 export interface SceneAPI {
@@ -538,5 +550,5 @@ export interface HookAPI {
   /** Remove a hook handler */
   off(event: HookEvent, handler: (ctx: HookContext) => void | Promise<void>): void;
   /** Emit a custom event */
-  emit(event: string, payload?: any): void;
+  emit(event: string, payload?: unknown): void;
 }

@@ -60,7 +60,7 @@ export interface CameraPathConfig {
 export interface CameraFollowConfig {
   /** Offset from character center */
   offset?: Vec2;
-  /** Follow smoothness (0 = instant, 1 = very smooth) */
+  /** 0 = instant; 0–1 maps to 0–2 seconds to close 90% of a fixed-target gap. */
   smoothing?: number;
   /** Min/max zoom limits */
   zoomRange?: [number, number];
@@ -92,6 +92,8 @@ export interface CameraHitchcockConfig {
 }
 
 export interface CameraState {
+  /** Additive screen-space offset in stage pixels; never part of position. */
+  shakeOffset?: { x: number; y: number };
   position: Vec2;
   zoom: number;
   rotation: number;
@@ -131,7 +133,7 @@ export interface CameraMotionConfig {
   /** Who/what the camera looks at */
   focus?: {
     character?: string;
-    part?: 'head' | 'chest' | 'center';
+    part?: 'head' | 'chest' | 'feet' | 'center';
     point?: Vec2;
     offsetX?: number;
     offsetY?: number;
@@ -171,7 +173,6 @@ export interface CameraMotionConfig {
   // ── Follow ──
   offset?: Vec2;
   smoothing?: number;
-  autoUnfollow?: boolean;  // stop following after duration
 
   // ── Tilt ──
   toY?: number;

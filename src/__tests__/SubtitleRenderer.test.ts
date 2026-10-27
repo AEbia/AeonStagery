@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import SubtitleRenderer from '../engine/SubtitleRenderer';
+import type { DialogueConfig } from '../engine/DialogueTemplates';
 import { DialogueCoordinator } from '../engine/coordinators/DialogueCoordinator';
 import { sceneStatementDefinitionRegistry } from '../services/semantic-scene/SceneStatementDefinitionRegistry';
 import { SEMANTIC_BUILTIN_TEMPLATE_PACKAGE } from '../services/template-package/BuiltinTemplatePackage';
+import { setStageDimensions } from '../engine/StageDimensions';
 
 const stageState = vi.hoisted(() => ({
   subtitleLayer: null as any,
@@ -94,13 +96,41 @@ describe('SubtitleRenderer', () => {
   });
 
   afterEach(() => {
+    setStageDimensions();
     gsap.globalTimeline.clear();
     vi.restoreAllMocks();
     stageState.subtitleLayer.destroy({ children: true });
     stageState.subtitleLayer = null;
   });
 
-  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('retains hidden state across dialogue playback, seek and replacement for %s', (styleId) => {
+  it('reflows an image dialogue for portrait while keeping the authored template unchanged', () => {
+    setStageDimensions({ width: 1080, height: 1920, fps: 30 });
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    const renderer = new SubtitleRenderer();
+    const config = {
+      _id: 'portrait', speaker: '', text: 'Hello', style: 'instant' as const, duration: 2,
+      presentation: {
+        renderer: 'image-dialogue-v1' as const,
+        textbox: { image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 },
+        text: { x: 198, y: 820, maxWidth: 1520, fontSize: 48, lineHeight: 68 },
+      },
+    };
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    const container = stageState.subtitleLayer.children[0] as PIXI.Container;
+    const panel = container.children[0];
+    const text = container.children.find((child): child is PIXI.Text => child instanceof PIXI.Text)!;
+    expect(panel.x).toBe(67.5);
+    expect(panel.width).toBe(945);
+    expect(panel.y).toBe(1632);
+    expect(text.y).toBe(1660);
+    expect(text.style.wordWrapWidth).toBeLessThan(1080);
+    expect(config.presentation.textbox).toEqual({ image: 'textbox.svg', x: 120, y: 792, width: 1680, height: 248 });
+    renderer.ensureDialogueOnStage(config, 1.5);
+    expect(text.y).toBe(1660);
+  });
+
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'])('retains hidden state across dialogue playback, seek and replacement for %s', (styleId) => {
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
     const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
     const config = {
@@ -188,7 +218,7 @@ describe('SubtitleRenderer', () => {
     expect(container.alpha).toBeLessThan(0.25);
   });
 
-  it.each(['pink-nameplate', 'immersive-subtitle', 'glass', 'minimal', 'classic'])('wraps long Chinese text using real Pixi metrics for %s', (styleId) => {
+  it.each(['pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle', 'glass', 'minimal', 'classic'])('wraps long Chinese text using real Pixi metrics for %s', (styleId) => {
     useRealTextMetrics();
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
     const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
@@ -214,7 +244,7 @@ describe('SubtitleRenderer', () => {
     }
   });
 
-  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'].flatMap((template) => (
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'].flatMap((template) => (
     (['typewriter', 'fadeIn', 'cinematic', 'instant'] as const).flatMap((style) => (
       [' ', '-'].map((separator) => ({ template, style, separator }))
     ))
@@ -318,27 +348,40 @@ describe('SubtitleRenderer', () => {
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
     const content = '调整字号应当更新文本测量并保持对白在舞台内自动换行'.repeat(3);
     const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((preset) => preset.id === 'pink-nameplate')!;
-    const config = { _id: 'live-font-reflow', speaker: '角色', text: content, style: 'typewriter' as const, duration: 4,
-      presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id } as any };
+    const dialogueId = 'live-font-reflow';
+    const config: DialogueConfig = {
+      _id: dialogueId, speaker: '角色', text: content, style: 'typewriter', duration: 4,
+      presentation: sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+        text: content, durationSeconds: 4,
+        presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id },
+      }, 'font-reflow-test').presentation,
+    };
+    const authoredTextStyle = config.presentation!.text;
+    const updatedFontSize = 72;
+    const expectedLineHeight = Math.round(
+      authoredTextStyle.lineHeight! * updatedFontSize / authoredTextStyle.fontSize!,
+    );
+    const dialogueStartTime = 2;
     const renderer = new SubtitleRenderer();
     const original = renderer.showDialogue(config);
-    const master = gsap.timeline({ paused: true }).add(original, 2);
+    const master = gsap.timeline({ paused: true }).add(original, dialogueStartTime);
     const coordinator = new DialogueCoordinator(renderer, { stop: vi.fn(), setTextMouthAt: vi.fn(), startAudioDrivenLipSync: vi.fn() });
+    const coordinatedDialogue = { _id: dialogueId, text: content, startTime: dialogueStartTime };
     const sync = (offset: number) => {
-      master.seek(2 + offset, true);
-      coordinator.sync(2 + offset, { ...config, startTime: 2 }, false, vi.fn(), (path) => path, vi.fn());
+      master.seek(dialogueStartTime + offset, true);
+      coordinator.sync(dialogueStartTime + offset, coordinatedDialogue, false, vi.fn(), (path) => path, vi.fn());
     };
     sync(1);
     const before = stageState.subtitleLayer.children[0] as PIXI.Container;
     const firstLines = before.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 32);
     expect(firstLines.length).toBeGreaterThan(1);
-    fontSize = 72;
+    fontSize = updatedFontSize;
     renderer.forceUpdate();
     const after = stageState.subtitleLayer.children[0] as PIXI.Container;
-    const lines = after.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === 72) as PIXI.Text[];
+    const lines = after.children.filter((child) => child instanceof PIXI.Text && child.style.fontSize === updatedFontSize) as PIXI.Text[];
     expect(lines.length).toBeGreaterThan(firstLines.length);
     expect(lines.map((line) => line.text).join('')).toBe(content);
-    expect(lines[0].style.lineHeight).toBe(93);
+    expect(lines[0].style.lineHeight).toBe(expectedLineHeight);
     const replacement = renderer.getCurrentTimeline()!;
     expect(replacement).not.toBe(original);
     expect(replacement.parent).toBe(master);
@@ -349,7 +392,7 @@ describe('SubtitleRenderer', () => {
     expect(box.y + box.height).toBeCloseTo(1040);
     expect(namebox.y - box.y).toBe(-78);
     expect(lines[0].y - box.y).toBe(38);
-    expect(lines.at(-1)!.y + 93).toBeLessThanOrEqual(1040);
+    expect(lines.at(-1)!.y + expectedLineHeight - 1).toBeLessThanOrEqual(1040);
     sync(0.15);
     expect(lines.map((line) => line.text).join('')).toBe(content.slice(0, 15));
     sync(3);
@@ -442,7 +485,94 @@ describe('SubtitleRenderer', () => {
     expect(updated.time()).toBeCloseTo(0.02);
   });
 
-  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle'])('keeps the speaker font unchanged when adjusting dialogue font size for %s', (styleId) => {
+  it.each([
+    { styleId: 'pink-nameplate', fontSize: 42, lineHeight: 52 },
+    { styleId: 'immersive-subtitle', fontSize: 42, lineHeight: 58 },
+    { styleId: 'blue-line-subtitle', fontSize: 32, lineHeight: 48 },
+  ].flatMap((preset) => [undefined, 'global', 'template'].map((source) => ({ ...preset, source }))))(
+    'renders $styleId with source $source without silently switching legacy uniform sizing',
+    ({ styleId, fontSize, lineHeight, source }) => {
+      vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+      stageState.getSetting.mockImplementation((key: string) => (
+        key === 'dialogueFontSizeSource' ? source : key === 'dialogueFontSize' ? 64 : false
+      ));
+      const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === styleId)!;
+      const config: DialogueConfig = {
+        _id: `font-source-${styleId}`, speaker: '', text: 'Hello', style: 'instant', duration: 3,
+        presentation: sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+          text: 'Hello', durationSeconds: 3,
+          presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId },
+        }, 'font-source-test').presentation,
+      };
+      const renderer = new SubtitleRenderer();
+      renderer.showDialogue(config).pause();
+      renderer.ensureDialogueOnStage(config, 1);
+      const body = (stageState.subtitleLayer.children[0] as PIXI.Container).children
+        .find((child): child is PIXI.Text => child instanceof PIXI.Text && child.text === 'Hello')!;
+      expect(body.style.fontSize).toBe(source === 'template' ? fontSize : 64);
+      expect(body.style.lineHeight).toBe(source === 'template' ? lineHeight : Math.round(lineHeight * 64 / fontSize));
+    },
+  );
+
+  it('refreshes a paused subtitle when switching font size sources and keeps its timeline position', () => {
+    useRealTextMetrics();
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    let fontSizeSource = 'global';
+    stageState.getSetting.mockImplementation((key: string) => (
+      key === 'dialogueFontSizeSource' ? fontSizeSource : key === 'dialogueFontSize' ? 64 : key === 'dialogueTextSpeed' ? 0.01 : false
+    ));
+    const preset = SEMANTIC_BUILTIN_TEMPLATE_PACKAGE.manifest.dialogueStyles!.find((style) => style.id === 'blue-line-subtitle')!;
+    const config: DialogueConfig = {
+      _id: 'font-source', speaker: '学生A', text: '喂，那是不是水濑的校服？', style: 'instant', duration: 4,
+      presentation: sceneStatementDefinitionRegistry.get('dialogue').parseParams({
+        text: '喂，那是不是水濑的校服？', durationSeconds: 4,
+        presentation: { ...preset.params, renderer: 'image-dialogue-v1', styleId: preset.id },
+      }, 'font-source-test').presentation,
+    };
+    const renderer = new SubtitleRenderer();
+    const master = gsap.timeline({ paused: true });
+    master.add(renderer.showDialogue(config), 2);
+    renderer.ensureDialogueOnStage(config, 1);
+    const readBody = () => (stageState.subtitleLayer.children[0] as PIXI.Container).children
+      .find((child): child is PIXI.Text => child instanceof PIXI.Text && child.text === config.text)!;
+    expect(readBody().style.fontSize).toBe(64);
+
+    fontSizeSource = 'template';
+    renderer.forceUpdate();
+    expect(readBody().style.fontSize).toBe(32);
+    expect(readBody().style.fontWeight).toBe('400');
+    expect(readBody().style.fontFamily).toBe('Noto Sans SC, Microsoft YaHei, sans-serif');
+    expect(renderer.getCurrentTimeline()?.parent).toBe(master);
+    expect(renderer.getCurrentTimeline()?.startTime()).toBe(2);
+    expect(renderer.getCurrentTimeline()?.time()).toBeCloseTo(1);
+
+    fontSizeSource = 'global';
+    renderer.ensureDialogueOnStage(config, 2);
+    expect(readBody().style.fontSize).toBe(64);
+    expect(renderer.getCurrentTimeline()?.time()).toBeCloseTo(2);
+  });
+
+  it('falls back to uniform sizing for an image template without an authored font size', () => {
+    vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);
+    stageState.getSetting.mockImplementation((key: string) => (
+      key === 'dialogueFontSizeSource' ? 'template' : key === 'dialogueFontSize' ? 64 : false
+    ));
+    const config: DialogueConfig = {
+      _id: 'font-source-fallback', speaker: '', text: 'Hello', style: 'instant', duration: 3,
+      presentation: {
+        renderer: 'image-dialogue-v1', textbox: { image: 'textbox.svg', x: 0, y: 740, width: 1920, height: 340 },
+        text: { x: 522, y: 884, maxWidth: 876 },
+      },
+    };
+    const renderer = new SubtitleRenderer();
+    renderer.showDialogue(config).pause();
+    renderer.ensureDialogueOnStage(config, 1);
+    const body = (stageState.subtitleLayer.children[0] as PIXI.Container).children
+      .find((child): child is PIXI.Text => child instanceof PIXI.Text && child.text === 'Hello')!;
+    expect(body.style.fontSize).toBe(64);
+  });
+
+  it.each(['glass', 'minimal', 'classic', 'pink-nameplate', 'immersive-subtitle', 'blue-line-subtitle'])('keeps the speaker font unchanged when adjusting dialogue font size for %s', (styleId) => {
     let fontSize = 32;
     stageState.getSetting.mockImplementation((key: string) => key === 'dialogueFontSize' ? fontSize : key === 'dialogueTextSpeed' ? 0.01 : '');
     vi.spyOn(PIXI.Texture, 'from').mockReturnValue(PIXI.Texture.WHITE);

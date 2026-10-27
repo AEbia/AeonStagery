@@ -21,13 +21,17 @@ import type { CameraPoint } from '../cameraMotionZoom';
 import { clampCameraCoordinate, readCameraPoint } from '../cameraMotionZoom';
 import type { InspectorParamContext } from '../paramControls/context';
 import { switchCameraFocusTarget } from '../../semanticTimelineEditing';
+import { DEFAULT_CAMERA_FOCUS_PART } from '../../../../api/types/camera';
+import { CAMERA_FOCUS_PART_OPTIONS, CAMERA_FOCUS_PART_HELP } from '../cameraFocusParts';
 
 export interface SemanticSourcePanelProps {
   rowFieldKeys: ReadonlySet<string>;
   action: TimelineAction;
   actionType: string;
   actionId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   sourceParams: Record<string, any>;
   sceneData: TimelineScene;
   isIntegrationVisualAction: boolean;
@@ -183,6 +187,7 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
           aria-label={label}
           value={typeof value === 'string' ? value : ''}
           options={options}
+          title={key === 'targetPart' ? CAMERA_FOCUS_PART_HELP : undefined}
           onChange={(nextValue) => updateCameraParam(key, nextValue)}
         />
       </div>
@@ -212,13 +217,8 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
     const renderCameraTargetPart = () => renderCameraSelect(
       '对焦部位',
       'targetPart',
-      actionParams.targetPart || 'chest',
-      [
-        { value: 'head', label: '头部' },
-        { value: 'chest', label: '胸部' },
-        { value: 'feet', label: '脚部' },
-        { value: 'center', label: '中心' },
-      ],
+      actionParams.targetPart || DEFAULT_CAMERA_FOCUS_PART,
+      CAMERA_FOCUS_PART_OPTIONS,
     );
     const zoom = actionParams.zoom && typeof actionParams.zoom === 'object'
       ? actionParams.zoom as { kind?: string; value?: number }
@@ -450,11 +450,11 @@ export function SemanticSourcePanel(props: SemanticSourcePanelProps) {
         )}
         {mode === 'shake' && (
           <>
-            {renderCameraNumber('震动强度', 'intensity', actionParams.intensity, 0.2, '0.05', '0')}
-            {renderCameraNumber('震动频率', 'frequency', actionParams.frequency, 18, '1', '0')}
-            {renderCameraDuration('震动时长', actionParams.durationSeconds ?? actionParams.duration, 0.6)}
+            {renderCameraNumber('晃动强度', 'intensity', actionParams.intensity, 0.2, '0.05', '0')}
+            {renderCameraNumber('晃动频率', 'frequency', actionParams.frequency, 18, '1', '0')}
+            {renderCameraDuration('晃动时长', actionParams.durationSeconds ?? actionParams.duration, 0.6)}
             {renderCameraBoolean('衰减', 'decay', actionParams.decay, true)}
-            {renderCameraSelect('震动方向', 'direction', actionParams.direction || 'both', [
+            {renderCameraSelect('晃动方向', 'direction', actionParams.direction || 'both', [
               { value: 'both', label: '双向' },
               { value: 'horizontal', label: '水平' },
               { value: 'vertical', label: '垂直' },

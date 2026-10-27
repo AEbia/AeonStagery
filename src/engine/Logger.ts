@@ -22,7 +22,7 @@ function resolveLevel(): LogLevel {
       if (!isNaN(parsed) && parsed >= LogLevel.NONE && parsed <= LogLevel.TRACE) return parsed;
     }
   }
-  return (import.meta as any).env?.DEV ? LogLevel.DEBUG : LogLevel.INFO;
+  return import.meta.env?.DEV ? LogLevel.DEBUG : LogLevel.INFO;
 }
 
 const CURRENT_LEVEL = resolveLevel();

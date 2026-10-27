@@ -528,15 +528,3 @@ function createSessionId(): string {
   return globalThis.crypto?.randomUUID?.()
     ?? `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
-
-export const createAiProseDraftSession = createDraft;
-export const setSourceText = updateSourceText;
-export const setMainCharacters = updateMainCharacters;
-export const markApplied = applyDraft;
-export const updateSegmentation = replaceSegmentation;
-export const updateCharacterExtraction = replaceCharacterExtraction;
-export const updateNormalization = replaceNormalization;
-export const updateRhythm = replaceRhythm;
-export const updatePreview = replacePreview;
-export const setScriptReadingSpeed = updateScriptReadingSpeed;
-export const duplicateAppliedArchive = duplicateAppliedDraft;

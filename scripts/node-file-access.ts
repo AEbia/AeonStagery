@@ -15,8 +15,8 @@ export const nodeFileAccess = {
     try {
       await stat(destPath);
       throw new Error(`Migration target already exists: "${destPath}"`);
-    } catch (error: any) {
-      if (error?.code !== 'ENOENT') throw error;
+    } catch (error: unknown) {
+      if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) throw error;
     }
     await copyFile(sourcePath, destPath);
   },

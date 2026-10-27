@@ -97,16 +97,13 @@ function makeDocument(): CurrentSceneDocument {
         },
       },
       {
-        id: 'hitchcock',
+        id: 'focus',
         time: 5,
         type: 'camera',
         params: {
-          mode: 'hitchcock',
+          mode: 'focus',
           target: '1',
-          zoomStart: 1,
-          zoomEnd: 1.2,
-          scaleStart: 1,
-          scaleEnd: 1.1,
+          zoom: { kind: 'absolute', value: 1.2 },
           durationSeconds: 1,
         },
       },
@@ -157,7 +154,7 @@ describe('SemanticCharacterDirectory', () => {
       kind: 'update-character-id',
       origin: 'timeline-list-view',
       affectedCharacterIds: ['hero'],
-      affectedStatementIds: ['line_1', 'enter', 'move', 'motion', 'follow', 'hitchcock', 'custom'],
+      affectedStatementIds: ['line_1', 'enter', 'move', 'motion', 'follow', 'focus', 'custom'],
       affectedCompanionLocators: [
         { statementId: 'line_1', companionId: 'focus' },
         { statementId: 'line_1', companionId: 'smile' },
@@ -175,7 +172,7 @@ describe('SemanticCharacterDirectory', () => {
       .toMatchObject({ target: 'hero', lookAt: { target: 'hero' } });
     expect(result.document.statements.find((statement) => statement.id === 'follow')?.params)
       .toMatchObject({ target: 'hero' });
-    expect(result.document.statements.find((statement) => statement.id === 'hitchcock')?.params)
+    expect(result.document.statements.find((statement) => statement.id === 'focus')?.params)
       .toMatchObject({ target: 'hero' });
     expect(result.document.statements.find((statement) => statement.id === 'custom')?.params)
       .toMatchObject({ target: 'hero' });

@@ -5,13 +5,14 @@ export type StagePreviewResolution = 1 | 0.5 | 0.25;
 export interface IStageAdapter {
   mount(container: HTMLElement): Promise<void>;
   setBackground(path: string, options?: { transition?: string }): Promise<void>;
-  getLayer(name: LayerName): any;
+  getLayer(name: LayerName): import('pixi.js').Container;
   getWidth(): number;
   getHeight(): number;
   getCanvas(): HTMLCanvasElement;
-  getApp(): any;
+  getApp(): import('pixi.js').Application;
   getPreviewResolution(): StagePreviewResolution;
   setPreviewResolution(resolution: StagePreviewResolution): void;
+  setProjectVideoFormat(format: import('../types/video-format').ProjectVideoFormat): void;
   pauseTicker(): void;
   resumeTicker(): void;
 }

@@ -1,6 +1,7 @@
 import type {
   AgentProjectOverview,
   AgentProjectSceneSummary,
+  AgentDialogueStyleCatalog,
 } from '../../api/types/project-agent';
 import { normalizeProjectRelativePath } from '../project-agent/ProjectAgentPathRules';
 import type { ProjectAgentOverviewPort } from '../project-agent/ProjectAgentPorts';
@@ -20,6 +21,7 @@ export interface ProjectAgentOverviewSource {
   };
   readonly scenes: readonly ProjectAgentOverviewSceneEntry[];
   readonly assetRoots?: Readonly<Record<string, unknown>>;
+  readonly dialogueStyles?: AgentDialogueStyleCatalog;
   readonly templates?: {
     readonly enabledTemplateIds: readonly string[];
     readonly defaults?: Readonly<Record<string, unknown>>;
@@ -73,6 +75,7 @@ export function sanitizeProjectAgentOverview(
     projectVersion: source.projectVersion,
     scenes,
     assetRoots,
+    ...(source.dialogueStyles ? { dialogueStyles: structuredClone(source.dialogueStyles) } : {}),
   };
   if (source.activeScene) {
     const active = sceneSummary(source.activeScene);

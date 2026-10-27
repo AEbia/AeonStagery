@@ -38,7 +38,10 @@
             "type": "characterPerformance",
             "params": {
               "target": "$character",
-              "motion": { "kind": "resource", "key": "idle" }
+              "motion": {
+                "kind": "resource",
+                "key": "idle"
+              }
             }
           }
         ]
@@ -57,7 +60,10 @@
             "params": {
               "mode": "enter",
               "id": "$character",
-              "position": [0.5, 1],
+              "position": [
+                0.5,
+                1
+              ],
               "scale": 1,
               "transition": "fadeIn",
               "durationSeconds": 0.3
@@ -89,7 +95,7 @@
               "mode": "set",
               "intensity": 1,
               "color": "#ffffff",
-              "thickness": 10,
+              "thickness": 6,
               "angle": 45,
               "softness": 2,
               "durationSeconds": 0
@@ -100,9 +106,21 @@
     }
   ],
   "dialogueStyles": [
-    { "id": "glass", "name": "玻璃", "renderer": "glass" },
-    { "id": "minimal", "name": "极简", "renderer": "minimal" },
-    { "id": "classic", "name": "经典", "renderer": "classic" },
+    {
+      "id": "glass",
+      "name": "玻璃",
+      "renderer": "glass"
+    },
+    {
+      "id": "minimal",
+      "name": "极简",
+      "renderer": "minimal"
+    },
+    {
+      "id": "classic",
+      "name": "经典",
+      "renderer": "classic"
+    },
     {
       "id": "pink-nameplate",
       "name": "粉色名牌",
@@ -131,13 +149,13 @@
         "text": {
           "fontFile": "fonts/JiangChengYuanTi_500W.ttf",
           "fontFamily": "JiangCheng Rounded",
-          "fontSize": 48,
+          "fontSize": 42,
           "fontWeight": "400",
           "color": "#505050",
           "x": 176,
           "y": 830,
           "maxWidth": 1510,
-          "lineHeight": 62
+          "lineHeight": 52
         },
         "speaker": {
           "fontFamily": "JiangCheng Rounded",
@@ -188,7 +206,8 @@
           "x": 300,
           "y": 820,
           "maxWidth": 1320,
-          "lineHeight": 63,
+          "lineHeight": 58,
+          "letterSpacing": 2,
           "align": "center",
           "strokeColor": "#242424",
           "strokeWidth": 8,
@@ -209,6 +228,65 @@
             43,
             6
           ]
+        }
+      }
+    },
+    {
+      "id": "blue-line-subtitle",
+      "name": "蓝线字幕",
+      "renderer": "image-dialogue-v1",
+      "params": {
+        "textbox": {
+          "image": "ui/dialogue/blue-line-subtitle/textbox.svg",
+          "x": 0,
+          "y": 740,
+          "width": 1920,
+          "height": 340
+        },
+        "namebox": {
+          "image": "ui/dialogue/blue-line-subtitle/namebox.svg",
+          "x": 512,
+          "y": 790,
+          "width": 1040,
+          "height": 60
+        },
+        "text": {
+          "fontFamily": "Noto Sans SC, Microsoft YaHei, sans-serif",
+          "fontSize": 32,
+          "fontWeight": "400",
+          "color": "#F5F5F7",
+          "x": 522,
+          "y": 868,
+          "maxWidth": 876,
+          "lineHeight": 48,
+          "letterSpacing": 0,
+          "align": "left",
+          "strokeWidth": 0,
+          "dropShadow": true,
+          "dropShadowColor": "#171723",
+          "dropShadowAlpha": 0.65,
+          "dropShadowBlur": 3,
+          "dropShadowDistance": 1
+        },
+        "speaker": {
+          "fontFamily": "Noto Sans SC, Microsoft YaHei, sans-serif",
+          "fontSize": 32,
+          "fontWeight": "400",
+          "color": "#F5F5F7",
+          "align": "left",
+          "padding": [
+            12,
+            0,
+            12,
+            0
+          ],
+          "strokeColor": "#42434B",
+          "strokeWidth": 3,
+          "dropShadow": true,
+          "dropShadowColor": "#171723",
+          "dropShadowAlpha": 0.6,
+          "dropShadowBlur": 3,
+          "dropShadowDistance": 1
         }
       }
     }

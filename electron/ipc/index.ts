@@ -25,7 +25,7 @@ export function registerIpcHandlers(windows: IpcWindowContext, renderer: Rendere
   const broadcastAiLlmDebugLog = createAiDebugLogBroadcaster(windows);
   const providerAccess = registerAiProseHandlers(windows, broadcastAiLlmDebugLog);
   const aiConversation = registerAiConversationHandlers(windows, providerAccess);
-  registerFileSystemHandlers();
+  registerFileSystemHandlers(windows);
   registerDialogHandlers(windows);
   registerTemplateHandlers(windows);
   registerAppHandlers(windows, renderer);

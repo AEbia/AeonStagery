@@ -77,6 +77,7 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
     store: DocumentStore;
     authoring: SemanticAuthoringApplicationService;
     authority: CustomMotionEditAuthority;
+    getFps?: () => number;
     preview?: CustomMotionPreviewProjection;
   }) {
     this.authority = options.authority;
@@ -168,6 +169,7 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
     this.conversion?.cancel();
     const previous = this.active;
     const resolved = !this.disposed ? resolveCustomMotionEditTarget(this.options.store, target) : null;
+    if (resolved) resolved.fps = this.resolveFps(this.options.store.getCurrentSceneDocumentView()!);
     if (!resolved) {
       void this.closeActive('switch-target');
       if (adopted) void adopted.authority.release(adopted.lease);
@@ -283,7 +285,7 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
           const current = resolveCustomMotionInDocument(document, record.target);
           const binding = resolveCharacterId(document, record.target);
           if (!this.isCurrent(record) || record.state !== 'held' || !record.lease
-            || !current || document.sceneId !== record.target.sceneId || (document.meta.fps ?? 60) !== fps
+            || !current || document.sceneId !== record.target.sceneId || this.resolveFps(document) !== fps
             || binding !== record.target.characterId
             || customMotionFingerprint(current) !== fingerprint) {
             throw new DroppedMotionCommit();
@@ -381,6 +383,10 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
     void this.clearStage(record).catch(() => {});
   }
 
+  private resolveFps(document: CurrentSceneDocument): number {
+    return this.options.getFps?.() ?? document.meta.fps ?? 60;
+  }
+
   private refresh(): void {
     const record = this.active;
     if (!record || record.closing) return;
@@ -390,7 +396,7 @@ export class CustomMotionEditing implements CustomMotionEditingModule {
       void this.closeActive('scene-changed');
       return;
     }
-    const fps = document.meta.fps ?? 60;
+    const fps = this.resolveFps(document);
     const characterId = resolveCharacterId(document, record.target);
     if (characterId !== record.target.characterId) {
       record.target = { ...record.target, characterId };

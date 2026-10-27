@@ -4,6 +4,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ActionInspector } from '../ui/timeline/ActionInspector';
+import { TimelineStatementRow, type TimelineStatementRowCommands } from '../ui/timeline/TimelineStatementRow';
+import { readSemanticTimelineSnapshot } from '../ui/timeline/useSemanticTimelineSnapshot';
+import { sceneStatementCompiler } from '../services/semantic-scene/SceneStatementCompiler';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument, type SceneStatement } from '../api/types/semantic-scene';
+import { isLightingTarget, type LightingTarget } from '../api/types/lighting-target';
 
 const testState = vi.hoisted(() => {
   const semanticDocument = {
@@ -31,6 +36,12 @@ const testState = vi.hoisted(() => {
     prepareDialogueStyle,
     getModelDataFromPath,
     semanticAuthoring: { author: vi.fn(async () => ({ createdStatementIds: ['created-dependency'] })) },
+    customMotionConversion: { convert: vi.fn() },
+    projectWorkspace: {
+      getCurrentProject: () => testState.currentProject,
+      subscribe: vi.fn(() => () => {}),
+      prepareDialogueStyle,
+    },
     playbackAdapter: {
       getCurrentTime: vi.fn(() => 4),
       seek: vi.fn(),
@@ -40,6 +51,7 @@ const testState = vi.hoisted(() => {
       getModelDataFromPath,
       hasCharacter: vi.fn(() => true),
       playMotion: vi.fn(),
+      sampleMotion: vi.fn(async () => ({})),
       stopAllMotions: vi.fn(),
       setExpression: vi.fn(),
     },
@@ -51,10 +63,8 @@ vi.mock('../ui/context/AppContext', () => ({
     stores: { editor: { setCopyBuffer: vi.fn() } },
     services: {
       semanticAuthoring: testState.semanticAuthoring,
-      projectWorkspace: {
-        getCurrentProject: () => testState.currentProject,
-        prepareDialogueStyle: testState.prepareDialogueStyle,
-      },
+      projectWorkspace: testState.projectWorkspace,
+      customMotionConversion: testState.customMotionConversion,
       templatePackages: {
         getSummaries: () => [{
           id: 'aeonstagery.default',
@@ -77,6 +87,7 @@ vi.mock('../ui/context/AppContext', () => ({
       },
     },
   }),
+  useOptionalApp: () => ({ services: { projectWorkspace: testState.projectWorkspace } }),
   useCharacterAdapter: () => testState.characterAdapter,
   useCollaborationPresence: () => ({ peers: [] }),
   useDocumentStore: () => ({
@@ -100,8 +111,94 @@ describe('ActionInspector', () => {
     testState.compiledScene = null;
     testState.currentProject = null;
     testState.prepareDialogueStyle.mockReset();
+    testState.characterAdapter.sampleMotion.mockReset().mockResolvedValue({});
+    testState.customMotionConversion.convert.mockReset();
     testState.semanticAuthoring.author.mockClear();
     testState.playbackAdapter.getCurrentTime.mockReturnValue(4);
+  });
+
+  it.each(['blur', 'post'] as const)('selects arbitrary characters and environment layers for %s', async (effect) => {
+    const document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'lighting-targets',
+      meta: testState.defaultSemanticDocument.meta,
+      statements: [
+        { id: 'fog', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'fog', label: '前景雾', file: 'fog.png' } },
+        { id: 'mist', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'unnamed-mist', file: 'effects/白雾.png' } },
+        { id: 'lighting', time: 1, type: 'lighting', params: { effect, mode: 'set' } },
+      ],
+    };
+    testState.semanticDocument = document;
+    const compiled = sceneStatementCompiler.compile(document);
+    testState.compiledScene = compiled;
+    const actionId = compiled.actions[compiled.actions.length - 1].id;
+    const replaceSourceParams = vi.fn();
+    render(<ActionInspector
+      sceneData={{ sceneId: document.sceneId, meta: document.meta, timeline: [] }}
+      selectedActionIds={{ [actionId]: true }} setSelectedIds={vi.fn()}
+      updateAction={vi.fn()} updateParam={vi.fn()} replaceSourceParams={replaceSourceParams}
+      deleteAction={vi.fn()} onClose={vi.fn()}
+    />);
+    const target = screen.getByRole('combobox', { name: '作用目标' });
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: '全部环境图层' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({
+      effect, target: { kind: 'group', group: 'environmentLayers' },
+    }));
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'fog' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'environmentLayer', id: 'fog' } }));
+    await act(async () => { fireEvent.click(target); });
+    const resourceOption = screen.getByRole('option', { name: 'unnamed-mist' });
+    expect(resourceOption.getAttribute('title')).toBe('effects/白雾.png');
+    await act(async () => { fireEvent.click(resourceOption); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'environmentLayer', id: 'unnamed-mist' } }));
+    await act(async () => { fireEvent.click(target); });
+    await act(async () => { fireEvent.click(screen.getByRole('option', { name: 'Sakiko' })); });
+    expect(replaceSourceParams).toHaveBeenLastCalledWith(actionId, expect.objectContaining({ effect, target: { kind: 'character', id: 'sakiko' } }));
+  });
+
+  it.each(['blur', 'post'] as const)('keeps the inline %s target picker usable after selecting panorama', async (effect) => {
+    let target: LightingTarget = { kind: 'character', id: 'sakiko' };
+    const refreshDocument = () => {
+      const document: CurrentSceneDocument = {
+        schemaVersion: SCENE_SCHEMA_VERSION,
+        sceneId: 'inline-lighting-targets',
+        meta: testState.defaultSemanticDocument.meta,
+        statements: [{ id: 'lighting', time: 1, type: 'lighting', params: { effect, mode: 'set', target } }],
+      };
+      testState.semanticDocument = document;
+      const compiledScene = sceneStatementCompiler.compile(document);
+      testState.compiledScene = compiledScene;
+      return { document, compiledScene };
+    };
+    const { document, compiledScene } = refreshDocument();
+    const actionId = compiledScene.actions[0].id;
+    const replaceSourceParams = vi.fn((_id: string, params: Record<string, unknown>) => {
+      if (!isLightingTarget(params.target)) throw new Error('Expected a valid lighting target');
+      target = params.target;
+      refreshDocument();
+    });
+    const inspector = () => <ActionInspector
+      presentation="inline"
+      sceneData={{ sceneId: document.sceneId, meta: document.meta, timeline: [] }}
+      selectedActionIds={{ [actionId]: true }} setSelectedIds={vi.fn()}
+      updateAction={vi.fn()} updateParam={vi.fn()} replaceSourceParams={replaceSourceParams}
+      deleteAction={vi.fn()} onClose={vi.fn()}
+    />;
+    const view = render(inspector());
+    fireEvent.click(screen.getByRole('combobox', { name: '作用目标' }));
+    fireEvent.click(screen.getByRole('option', { name: '全景' }));
+    expect(target).toBe(effect === 'blur' ? 'global' : 'panorama');
+    await act(async () => { view.rerender(inspector()); });
+
+    const panoramaPicker = screen.getByRole('combobox', { name: '作用目标' });
+    expect(panoramaPicker.textContent).toBe('全景');
+    fireEvent.click(panoramaPicker);
+    fireEvent.click(screen.getByRole('option', { name: 'Sakiko' }));
+    expect(target).toEqual({ kind: 'character', id: 'sakiko' });
+    await act(async () => { view.rerender(inspector()); });
+    expect(screen.getByRole('combobox', { name: '作用目标' }).textContent).toBe('Sakiko');
   });
 
   it('loads model metadata only once when its own state updates', async () => {
@@ -684,6 +781,59 @@ describe('ActionInspector', () => {
     expect(testState.characterAdapter.playMotion).toHaveBeenCalledTimes(1);
   });
 
+  it('samples and estimates conversion at project FPS when the scene has no FPS', async () => {
+    const motion = {
+      kind: 'custom',
+      durationSeconds: 2,
+      fadeInSeconds: 0,
+      derivedFrom: { key: 'wave.mtn' },
+      tracks: [{ parameterId: 'ANGLE', keyframes: [{ time: 0, value: 0 }] }],
+    };
+    testState.currentProject = { metadata: { videoFormat: { width: 1920, height: 1080, fps: 30 } } };
+    testState.semanticDocument = {
+      schemaVersion: 4,
+      sceneId: 'scene_1',
+      meta: { title: 'Motion FPS', characters: [{ id: 'sakiko', name: 'Sakiko', model: 'models/sakiko.model3.json' }] },
+      statements: [{ id: 'motion_1', time: 2, type: 'characterPerformance', params: { target: 'sakiko', motion } }],
+    };
+    testState.compiledScene = {
+      sceneId: 'scene_1',
+      meta: testState.semanticDocument.meta,
+      actions: [{
+        id: 'compiled_motion_1',
+        time: 2,
+        action: 'playMotion',
+        params: { id: 'sakiko' },
+        sourceParams: testState.semanticDocument.statements[0].params,
+        semanticType: 'characterPerformance',
+        source: { statementId: 'motion_1', outputKey: 'primary' },
+      }],
+    };
+
+    render(
+      <ActionInspector
+        sceneData={{ sceneId: 'scene_1', meta: testState.semanticDocument.meta, timeline: [] }}
+        selectedActionIds={{ compiled_motion_1: true }}
+        setSelectedIds={vi.fn()}
+        updateAction={vi.fn()}
+        updateParam={vi.fn()}
+        replaceSourceParams={vi.fn()}
+        deleteAction={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重新转换…' }));
+
+    await waitFor(() => {
+      expect(testState.characterAdapter.sampleMotion).toHaveBeenCalledWith('sakiko', 'wave.mtn', {
+        fps: 30,
+        zeroSourceFades: true,
+      });
+    });
+    expect(screen.getByText('约 60 帧')).toBeTruthy();
+  });
+
   it('does not offer narrator option for character action id select', async () => {
     testState.semanticDocument = {
       schemaVersion: 4,
@@ -1009,6 +1159,57 @@ describe('ActionInspector', () => {
     );
 
     expect(screen.getByText('power4.inOut (自定义)')).toBeTruthy();
+  });
+
+  it.each<{ statement: SceneStatement; pickerName: string; role: 'combobox' | 'textbox' }>([
+    { statement: { id: 'enter', time: 0, type: 'characterPresence', params: { mode: 'enter', id: 'sakiko' } }, pickerName: '模型变体', role: 'combobox' },
+    { statement: { id: 'environment', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'background', file: 'background/room.png' } }, pickerName: '资源路径', role: 'textbox' },
+    { statement: { id: 'image', time: 0, type: 'graphicLayer', params: { kind: 'image', mode: 'set', id: 'poster', file: 'images/poster.png' } }, pickerName: '图片文件', role: 'textbox' },
+    { statement: { id: 'audio', time: 0, type: 'audio', params: { role: 'bgm', mode: 'play', file: 'bgm/theme.ogg' } }, pickerName: '音频文件', role: 'textbox' },
+    { statement: { id: 'animation', time: 0, type: 'customAnimation', params: { target: 'sakiko', file: 'animation/effect.html', durationSeconds: 1 } }, pickerName: '动画文件', role: 'textbox' },
+    { statement: { id: 'performance', time: 0, type: 'characterPerformance', params: { target: 'sakiko', motion: { kind: 'resource', key: 'idle' }, expression: 'smile' } }, pickerName: '动作名称', role: 'combobox' },
+  ])('keeps one resource editor when expanding a $statement.type row', async ({ statement, pickerName, role }) => {
+    const document: CurrentSceneDocument = {
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'inline-resources',
+      meta: testState.defaultSemanticDocument.meta,
+      statements: [statement],
+    };
+    testState.semanticDocument = document;
+    testState.compiledScene = sceneStatementCompiler.compile(document);
+    const semanticSnapshot = readSemanticTimelineSnapshot({
+      getCurrentSceneDocumentSnapshot: () => document,
+      getCompiledSceneSnapshot: () => testState.compiledScene,
+    });
+    const commands: TimelineStatementRowCommands = {
+      setDropTarget: vi.fn(), setDragOverGapIndex: vi.fn(), setDraggingActionId: vi.fn(),
+      dropRootStatementAt: vi.fn(), handleTimeEdit: vi.fn(), handleDeleteItem: vi.fn(),
+      commitInlineParams: vi.fn(), playAction: vi.fn(), deleteActions: vi.fn(), copyActions: vi.fn(),
+      blockOfflineAuthoring: vi.fn(), setActiveGapMenu: vi.fn(), gapInsertPendingRef: { current: false },
+      handleSelect: vi.fn(), setSelectedIds: vi.fn(), toggleExpand: vi.fn(),
+    };
+    const props = {
+      action: semanticSnapshot.actions[0], realIdx: 0,
+      sceneData: { sceneId: document.sceneId, meta: document.meta, timeline: [] },
+      semanticSnapshot, commands, allowInlineExpand: true, searchActive: false,
+      isSelected: false, isRevealed: false, animateExpansion: false,
+      isOfflineEditingBlocked: false, draggingActionId: null, gapActive: false, gapDragOver: false,
+    };
+    const row = render(<TimelineStatementRow {...props} isExpanded={false} />);
+    expect(screen.getAllByRole(role, { name: pickerName })).toHaveLength(1);
+    const filePickers = row.container.querySelectorAll('.inline-file-picker').length;
+
+    await act(async () => { row.rerender(<TimelineStatementRow {...props} isExpanded />); });
+    expect(screen.getAllByRole(role, { name: pickerName })).toHaveLength(1);
+    expect(row.container.querySelectorAll('.inline-file-picker')).toHaveLength(filePickers);
+    if (statement.type === 'characterPerformance') {
+      expect(screen.getAllByRole('combobox', { name: '表情名' })).toHaveLength(1);
+      expect(screen.getByRole('button', { name: '转为自定义动作…' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('combobox', { name: pickerName }));
+      fireEvent.click(await screen.findByRole('button', { name: '预览 idle' }));
+      expect(testState.characterAdapter.playMotion).toHaveBeenCalledWith('sakiko', 'idle');
+    }
+    await act(async () => { row.unmount(); });
   });
 
   it('renders the action header only in the docked panel, not in script-action priority', async () => {

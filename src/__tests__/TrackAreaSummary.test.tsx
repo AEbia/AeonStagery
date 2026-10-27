@@ -2,10 +2,17 @@
  * @vitest-environment jsdom
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AppProvider } from '../ui/context/AppContext';
 import { TrackArea } from '../ui/timeline/TrackArea';
+import type { ICharacterAdapter } from '../api/interfaces/ICharacterAdapter';
+import type { Live2DMotionSamplingOptions } from '../engine/runtime/Live2DRuntimeContracts';
 import type { LooseTimelineAction as SceneAction } from './fixtures/TimelineTestTypes';
+import type { TimelineScene } from '../ui/timeline/semanticTimelineTypes';
+import { buildTimelineTracks } from '../ui/timeline/timelineTrackPresentation';
+import { buildSemanticTimelineReadModel } from '../ui/timeline/semanticTimelineReadModel';
+import { SCENE_SCHEMA_VERSION, type CompiledScene } from '../api/types/semantic-scene';
+import { sceneDocumentCodec, sceneStatementCompiler } from '../services/semantic-scene';
 
 function createAction(id: string, time: number, actionType: SceneAction['action'] = 'dialogue'): { id: string; action: SceneAction } {
   return {
@@ -41,6 +48,8 @@ function createValidationStore(issueIds: string[]) {
 
 function renderTrackArea(options: {
   actions?: Array<{ id: string; action: SceneAction }>;
+  sceneData?: TimelineScene;
+  compiledScene?: CompiledScene;
   pps?: number;
   containerWidth?: number;
   selectedIds?: Record<string, boolean>;
@@ -53,6 +62,7 @@ function renderTrackArea(options: {
   onDeleteActions?: (ids: readonly string[]) => void | Promise<void>;
   copyBuffer?: any[];
   services?: any;
+  characterAdapter?: Partial<Pick<ICharacterAdapter, 'getMotionDuration' | 'sampleMotion'>>;
 } = {}) {
   const actions = options.actions ?? Array.from({ length: 50 }, (_, index) => createAction(`a${index}`, index * 0.2));
   if (!options.actions) {
@@ -87,7 +97,7 @@ function renderTrackArea(options: {
       setSpeed: vi.fn(),
     } as any,
     camera: {} as any,
-    character: {} as any,
+    character: (options.characterAdapter ?? {}) as unknown as ICharacterAdapter,
     stage: {} as any,
     timeline: { select: vi.fn() } as any,
     export: {} as any,
@@ -96,7 +106,7 @@ function renderTrackArea(options: {
   const stores = {
     document: {
       sceneData: { meta: { markers: [] }, timeline: actions.map((item) => item.action) },
-      getCompiledSceneSnapshot: () => ({
+      getCompiledSceneSnapshot: () => options.compiledScene ?? ({
         sourceSchemaVersion: 2,
         sceneId: 'scene_1',
         meta: { title: 'Track Area Test' },
@@ -132,7 +142,7 @@ function renderTrackArea(options: {
   const view = render(
     <AppProvider adapters={adapters} stores={stores} services={options.services} collaboration={options.collaboration}>
       <TrackArea
-        tracks={[{ id: 'global', label: 'Global', actions }]}
+        tracks={options.sceneData ? buildTimelineTracks(options.sceneData) : [{ id: 'global', label: 'Global', actions }]}
         pps={options.pps ?? 10}
         maxTime={20}
         selectedIds={options.selectedIds ?? { a1: true }}
@@ -143,7 +153,7 @@ function renderTrackArea(options: {
         onDuplicateActions={options.onDuplicateActions}
         onDeleteActions={options.onDeleteActions}
         onSeek={onSeek}
-        sceneData={{ sceneId: 'summary-test', meta: { title: 'Summary Test', markers: [] }, timeline: actions.map((item) => item.action) }}
+        sceneData={options.sceneData ?? { sceneId: 'summary-test', meta: { title: 'Summary Test', markers: [] }, timeline: actions.map((item) => item.action) }}
         scrollLeft={0}
         containerWidth={options.containerWidth ?? 1000}
         repeatIndexMap={options.repeatIndexMap ?? new Map([['a2', 'dup']])}
@@ -171,6 +181,144 @@ describe('TrackArea summary mode', () => {
     if (!HTMLElement.prototype.setPointerCapture) {
       Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { value: vi.fn(), configurable: true });
       Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { value: vi.fn(), configurable: true });
+    }
+  });
+
+  it.each([
+    ['blur', 'set', '设置模糊'], ['blur', 'modulate', '变化模糊'], ['blur', 'reset', '重置模糊'],
+    ['post', 'set', '设置后期处理'], ['post', 'modulate', '变化后期处理'], ['post', 'reset', '重置后期处理'],
+  ] as const)('targets all environment layers when inserting %s %s from the environment row', async (effect, mode, label) => {
+    const document = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'environment-effects-menu',
+      meta: { title: 'Environment effects', characters: [{ id: 'hero', name: '主角' }] },
+      statements: [
+        { id: 'fog', time: 0, type: 'environmentLayer', params: { mode: 'set', layerId: 'fog', file: 'fog.png' } },
+        { id: 'environment-effect', time: 0, type: 'lighting', params: { effect, mode: 'set', target: { kind: 'group', group: 'environmentLayers' } } },
+        { id: 'character-effect', time: 0, type: 'lighting', params: { effect, mode: 'set', target: { kind: 'character', id: 'hero' } } },
+        { id: 'scene-effect', time: 0, type: 'lighting', params: { effect, mode: 'set', target: effect === 'blur' ? 'global' : 'panorama' } },
+        { id: 'point-light', time: 0, type: 'lighting', params: { effect: 'pointLight', mode: 'set', id: 'point_light_1', color: '#ffffff', intensity: 0.5 } },
+      ],
+    });
+    const compiled = sceneStatementCompiler.compile(document);
+    const items = buildSemanticTimelineReadModel(document, compiled);
+    const author = vi.fn(async () => ({ createdStatementIds: [] }));
+    const { container } = renderTrackArea({
+      actions: items.map((item) => ({ id: item.id, action: item.displayAction })),
+      sceneData: { sceneId: document.sceneId, meta: document.meta, timeline: items.map((item) => item.displayAction) },
+      compiledScene: compiled,
+      semanticDocument: document,
+      selectedIds: Object.fromEntries(items.filter((item) => ['fog', 'character-effect'].includes(item.statementId)).map((item) => [item.id, true])),
+      validationIssueIds: [],
+      repeatIndexMap: new Map(),
+      pps: 100,
+      services: { sceneFile: {}, semanticAuthoring: { author } },
+    });
+
+    fireEvent.contextMenu(container.querySelector('.track-row[data-track-id="environment"]')!, { clientX: 300, clientY: 100 });
+    const menu = within(screen.getByRole('dialog', { name: '空白轨道插入菜单' }));
+    expect(menu.getByRole('button', { name: '变化点光源' })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(menu.getByRole('button', { name: label }));
+    });
+
+    expect(author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'insert-statement',
+      anchorTime: 2,
+      statement: { type: 'lighting', params: expect.objectContaining({ effect, mode, target: { kind: 'group', group: 'environmentLayers' } }) },
+    }));
+  });
+
+  it.each(([
+    ['blur', 'modulate', '变化模糊'], ['blur', 'reset', '重置模糊'],
+    ['post', 'modulate', '变化后期处理'], ['post', 'reset', '重置后期处理'],
+  ] as const).flatMap(([effect, mode, label]) => (['none', 'legacy', 'structured'] as const)
+    .map((selection) => [effect, mode, label, selection] as const)))(
+    'inserts %s %s on the global row with %s and %s character selection', async (effect, mode, label, selection) => {
+    const target = effect === 'blur' ? 'global' : 'panorama';
+    const source = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'global-effects-menu',
+      meta: { title: 'Global effects', characters: [{ id: 'hero', name: '主角' }] },
+      statements: [
+        { id: 'scene-effect', time: 0, type: 'lighting', params: { effect, mode: 'set', target } },
+        { id: 'character-effect', time: 0, type: 'lighting', params: {
+          effect, mode: 'set', target: selection === 'legacy' ? 'hero' : { kind: 'character', id: 'hero' },
+        } },
+      ],
+    });
+    const compiled = sceneStatementCompiler.compile(source);
+    const items = buildSemanticTimelineReadModel(source, compiled);
+    const author = vi.fn(async () => ({ createdStatementIds: [] }));
+    const { container } = renderTrackArea({
+      sceneData: { sceneId: source.sceneId, meta: source.meta, timeline: items.map((item) => item.displayAction) },
+      compiledScene: compiled,
+      semanticDocument: source,
+      selectedIds: Object.fromEntries(compiled.actions
+        .filter((action) => selection !== 'none' && action.source.statementId === 'character-effect')
+        .map((action) => [action.id, true])),
+      validationIssueIds: [],
+      repeatIndexMap: new Map(),
+      pps: 100,
+      services: { sceneFile: {}, semanticAuthoring: { author } },
+    });
+
+    fireEvent.contextMenu(container.querySelector('.track-row[data-track-id="global"]')!, { clientX: 300, clientY: 100 });
+    const menu = within(screen.getByRole('dialog', { name: '空白轨道插入菜单' }));
+    fireEvent.click(menu.getByRole('tab', { name: '画面效果' }));
+    await act(async () => {
+      fireEvent.click(menu.getByRole('button', { name: label }));
+    });
+
+    expect(author).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'insert-statement',
+      anchorTime: 2,
+      statement: { type: 'lighting', params: expect.objectContaining({ effect, mode, target }) },
+    }));
+  });
+
+  it.each(([
+    ['blur', 'modulate', '变化模糊'], ['blur', 'reset', '重置模糊'],
+    ['post', 'modulate', '变化后期处理'], ['post', 'reset', '重置后期处理'],
+  ] as const).flatMap(([effect, mode, label]) => ['none', 'hero', 'both'].map((selection) => [effect, mode, label, selection] as const)))(
+    'offers and inserts %s %s (%s) for either character with %s selection', async (effect, mode, label, selection) => {
+    const source = sceneDocumentCodec.parseAndValidate({
+      schemaVersion: SCENE_SCHEMA_VERSION,
+      sceneId: 'character-effects-menu',
+      meta: { title: 'Character effects', characters: [{ id: 'hero', name: '主角' }, { id: 'friend', name: '朋友' }] },
+      statements: ['hero', 'friend'].map((id) => ({
+        id: `${id}-effect`, time: 0, type: 'lighting', params: { effect, mode: 'set', target: { kind: 'character', id } },
+      })),
+    });
+    const compiled = sceneStatementCompiler.compile(source);
+    const items = buildSemanticTimelineReadModel(source, compiled);
+    const author = vi.fn(async () => ({ createdStatementIds: [] }));
+    const { container } = renderTrackArea({
+      sceneData: { sceneId: source.sceneId, meta: source.meta, timeline: items.map((item) => item.displayAction) },
+      compiledScene: compiled,
+      semanticDocument: source,
+      selectedIds: Object.fromEntries(compiled.actions
+        .filter((action) => selection === 'both' || (selection === 'hero' && action.source.statementId === 'hero-effect'))
+        .map((action) => [action.id, true])),
+      validationIssueIds: [],
+      repeatIndexMap: new Map(),
+      pps: 100,
+      services: { sceneFile: {}, semanticAuthoring: { author } },
+    });
+
+    for (const id of ['hero', 'friend']) {
+      fireEvent.contextMenu(container.querySelector(`.track-row[data-track-id="char:${id}"]`)!, { clientX: 300, clientY: 100 });
+      const menu = within(screen.getByRole('dialog', { name: '空白轨道插入菜单' }));
+      fireEvent.click(menu.getByRole('tab', { name: '画面效果' }));
+      await act(async () => {
+        fireEvent.click(menu.getByRole('button', { name: label }));
+      });
+
+      expect(author).toHaveBeenLastCalledWith(expect.objectContaining({
+        kind: 'insert-statement',
+        anchorTime: 2,
+        statement: { type: 'lighting', params: expect.objectContaining({ effect, mode, target: { kind: 'character', id } }) },
+      }));
     }
   });
 
@@ -207,6 +355,58 @@ describe('TrackArea summary mode', () => {
     const target = container.querySelector('[data-tutorial-target="timeline-blank-after-entrance"]');
     expect(target).toBeTruthy();
     expect((target as HTMLElement).style.left).toBe('125px');
+  });
+
+  it('uses project FPS for conversion sampling and keyframe estimates when scene FPS is omitted', async () => {
+    const motion = { kind: 'resource', key: 'wave.mtn' };
+    const action = {
+      _id: 'motion_1',
+      action: 'playMotion',
+      semanticType: 'characterPerformance',
+      time: 2,
+      params: { target: 'hero', duration: 2, motion },
+      sourceParams: { target: 'hero', durationSeconds: 2, motion },
+    } as unknown as SceneAction;
+    const sampleMotion = vi.fn(async (_characterId: string, _motionKey: string, _options: Live2DMotionSamplingOptions) => ({
+      status: 'sampled' as const,
+      metadata: { durationSeconds: 2 },
+    }));
+    const project = { metadata: { videoFormat: { width: 1920, height: 1080, fps: 30 } } };
+    const projectWorkspace = {
+      getCurrentProject: () => project,
+      subscribe: () => () => {},
+    };
+
+    renderTrackArea({
+      actions: [{ id: 'motion_1', action }],
+      semanticDocument: {
+        schemaVersion: 5,
+        sceneId: 'scene_1',
+        meta: { title: 'Motion FPS' },
+        statements: [{
+          id: 'statement-motion_1',
+          time: 2,
+          type: 'characterPerformance',
+          params: { target: 'hero', durationSeconds: 2, motion },
+        }],
+      },
+      characterAdapter: {
+        getMotionDuration: () => 0,
+        sampleMotion,
+      },
+      services: {
+        projectWorkspace,
+        customMotionConversion: { convert: vi.fn() },
+      },
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('timeline-track-block'), { clientX: 20, clientY: 50 });
+    fireEvent.click(screen.getByRole('menuitem', { name: '转为自定义动作…' }));
+
+    await waitFor(() => {
+      expect(sampleMotion).toHaveBeenCalledWith('hero', 'wave.mtn', { fps: 30, zeroSourceFades: true });
+      expect(screen.getByText('约 60 帧')).toBeTruthy();
+    });
   });
 
   it('renders summary blocks, anchor pins, and a single portal tooltip', async () => {

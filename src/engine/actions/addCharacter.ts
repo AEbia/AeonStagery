@@ -1,12 +1,14 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import { live2DManager } from '../Live2DManager';
 import { animationDirector } from '../AnimationDirector';
 import { resolveVec2 } from '../utils/math';
 import { getLogger } from '../Logger';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
 const logger = getLogger('AddCharacterAction');
 
-export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleAddCharacter(ctx: SchedulerContext, action: RuntimeActionContract<'addCharacter'>): void {
   const { tl, resolvePath, resolvePathAsync, transformationProxies } = ctx;
   const { time, params } = action;
   const t = time || 0;
@@ -17,14 +19,15 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
   // A throw here surfaces inside a GSAP onStart callback as an unhandled
   // rejection and, via the collaboration apply path, would be misread as a sync
   // failure even though the connection and the rest of the scene are healthy.
-  const model = typeof params.model === 'string' ? params.model.trim() : '';
+  const modelPath = typeof params.model === 'string' ? params.model : '';
+  const model = modelPath.trim();
   if (!model) {
     logger.warn(`Character "${params.id}" has no model resource; leaving it off stage. Choose a Live2D model to restore it.`);
     return;
   }
 
   const hasEntrance = params.enter !== 'none' && (
-    (params.enter && params.enter !== 'none') ||
+    Boolean(params.enter) ||
     params.duration !== undefined ||
     params.enterDuration !== undefined
   );
@@ -33,10 +36,10 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
   const proxy = transformationProxies.get(params.id);
 
   if (proxy) {
-    const initVals: any = {};
+    const initVals: gsap.TweenVars = {};
     if (params.position) {
       const pos = resolveVec2(params.position);
-      initVals.x = pos.x * 1920; initVals.y = pos.y * 1080;
+      initVals.x = pos.x * STAGE_WIDTH; initVals.y = pos.y * STAGE_HEIGHT;
     }
     if (params.scale !== undefined) initVals.scale = params.scale;
     if (params.rotation !== undefined) initVals.rotation = params.rotation;
@@ -47,10 +50,10 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
     tl.set(proxy, initVals, t);
   }
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void | Promise<void>) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
 
   at(async () => {
-    const nextModelPath = resolvePathAsync ? await resolvePathAsync(params.model) : resolvePath(params.model);
+    const nextModelPath = resolvePathAsync ? await resolvePathAsync(modelPath) : resolvePath(modelPath);
     const currentEntry = live2DManager.getCharacterInfo(params.id);
     if (currentEntry) {
       if (currentEntry.modelPath !== nextModelPath) {
@@ -73,7 +76,7 @@ export function scheduleAddCharacter(ctx: SchedulerContext, action: { time?: num
   if (hasEntrance) {
     const proxy = transformationProxies.get(params.id);
     const dur = params.duration ?? params.enterDuration ?? 0.6;
-    const preset = params.enter || 'fadeIn';
+    const preset = params.enter === 'fade' ? 'fadeIn' : params.enter || 'fadeIn';
     const entranceTl = animationDirector.characterEnter(params.id, preset, dur, params.enterEase, proxy, targetOpacity);
     tl.add(entranceTl, t);
   }

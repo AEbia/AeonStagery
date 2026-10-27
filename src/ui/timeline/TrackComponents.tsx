@@ -223,7 +223,7 @@ const LifecycleBoundaryOpacityOverlay = React.memo(({
 
 LifecycleBoundaryOpacityOverlay.displayName = 'LifecycleBoundaryOpacityOverlay';
 
-export function getActionDisplayLabel(actionType: string, params?: Record<string, any>): string {
+export function getActionDisplayLabel(actionType: string, params?: Record<string, unknown>): string {
   switch (actionType) {
     case 'dialogue':
       return '对话';
@@ -403,13 +403,13 @@ export const TrackBlock = React.memo(({
   };
 
   const getIcon = () => {
-    const IconComp = (ActionIcons as any)[action.semanticIconKey ?? action.action] || ActionIcons.default;
+    const IconComp = ActionIcons[(action.semanticIconKey ?? action.action) as keyof typeof ActionIcons] || ActionIcons.default;
     return <IconComp aria-hidden="true" width={isCompact ? 16 : 14} height={isCompact ? 16 : 14} style={{ opacity: 0.8 }} />;
   };
 
   const MOVE_LABELS: Record<string, string> = {
     push: '推', pull: '拉', pan: '摇', tilt: '直摇',
-    zoom: '变焦', rotate: '旋转', dolly: '希区柯克', shake: '震动',
+    zoom: '变焦', rotate: '旋转', dolly: '希区柯克', shake: '晃动',
   };
 
   const EASING_LABELS: Record<string, string> = {
@@ -641,7 +641,7 @@ export const TrackSummaryBlock = React.memo(({
     action: segment.dominantActionType,
     semanticCategory: segment.dominantCategory as TimelineAction['semanticCategory'],
   });
-  const IconComp = (ActionIcons as any)[segment.dominantIconKey ?? segment.dominantActionType] || ActionIcons.default;
+  const IconComp = ActionIcons[(segment.dominantIconKey ?? segment.dominantActionType) as keyof typeof ActionIcons] || ActionIcons.default;
   const statusSeverity = segment.issueSeverity ?? (segment.hasRepeatWarning ? 'warning' : null);
   const compactMode = width < 34;
   const showIcon = width >= 38;

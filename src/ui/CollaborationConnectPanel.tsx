@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   CollaborationConnectionStatus,
-  CollaborationPresencePeerV2,
+  CollaborationPresencePeerV3,
 } from '../api/types/collaboration';
 import type { ProjectState } from '../api/types/project';
 import type { CurrentSceneDocument, SceneDocumentV5 } from '../api/types/semantic-scene';
@@ -18,7 +18,7 @@ import { deriveCollaborationStatusUx } from '../services/collaboration/Collabora
 import { IconCheck, IconCopy, IconEye, IconEyeOff, IconUsers, IconX } from './icons';
 import { CollaborationAssetHandshakePanel } from './CollaborationAssetHandshakePanel';
 import { CollaborationResourceAgreementDialog } from './CollaborationResourceAgreementDialog';
-import { CollaborationServerSceneAgreementDialogV2 } from './CollaborationServerSceneAgreementDialogV2';
+import { CollaborationServerSceneAgreementDialogV3 } from './CollaborationServerSceneAgreementDialogV3';
 import { withCollaborationAccessToken } from '../services/collaboration/CollaborationTransport';
 import { useOutsidePointerDown } from './hooks/useOutsidePointerDown';
 import type { SemanticCollaborationSessionController } from './useSemanticCollaborationSession';
@@ -50,7 +50,7 @@ interface CollaborationConnectPanelProps {
   currentProject: ProjectState | null;
   sceneDocument: CurrentSceneDocument | SceneDocumentV5 | null;
   status: CollaborationConnectionStatus;
-  peers: CollaborationPresencePeerV2[];
+  peers: CollaborationPresencePeerV3[];
   controller: SemanticCollaborationSessionController;
   serverCredentials?: CollaborationServerCredentials | null;
   disabled?: boolean;
@@ -597,7 +597,7 @@ export function CollaborationConnectPanel({
       )}
 
       {controller.serverSceneAgreement && (
-        <CollaborationServerSceneAgreementDialogV2
+        <CollaborationServerSceneAgreementDialogV3
           localDocument={controller.serverSceneAgreement.localDocument}
           serverDocument={controller.serverSceneAgreement.serverDocument}
           serverState={controller.serverSceneAgreement.serverState}

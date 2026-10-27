@@ -3,28 +3,23 @@ import type {
   CollaborativeAssetManifestEntry,
   CollaborativeCompanionGroup,
   CollaborativeCompanionRecord,
-  CollaborativeSceneMetaV4,
   CollaborativeSceneMetaV5,
-  CollaborativeSceneStateV2,
   CollaborativeSceneStateV3,
   CollaborativeStatementRecord,
   CollaborativeTombstoneRecord,
-  CollaborativeTombstonesV2,
+  CollaborativeTombstonesV3,
 } from '../../api/types/collaboration';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
 } from '../../api/types/collaboration';
 import type { SceneMarker } from '../../api/types/scene-common';
 import {
-  SCENE_SCHEMA_VERSION_V4,
   SCENE_SCHEMA_VERSION_V5,
 } from '../../api/types/semantic-scene';
 import type { SceneVisualBlock, SegmentVisualRecord, StyleRecipeRecord, VisualTargetRecord } from '../../api/types/visual';
 import {
-  filterTombstonedCollaborativeRecordsV2,
   filterTombstonedCollaborativeRecordsV3,
-} from './CollaborativeStateTombstonesV2';
+} from './CollaborativeStateTombstonesV3';
 
 export const COLLABORATIVE_SCENE_ROOT = 'collaborativeScene';
 
@@ -174,7 +169,7 @@ function createCompanionGroupsMap(
 }
 
 function createCompanionTombstonesMap(
-  companions: NonNullable<CollaborativeTombstonesV2['companions']>,
+  companions: NonNullable<CollaborativeTombstonesV3['companions']>,
 ): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
   Object.entries(companions).forEach(([statementId, tombstones]) => {
@@ -183,7 +178,7 @@ function createCompanionTombstonesMap(
   return map;
 }
 
-function createTombstonesMapV2(tombstones: CollaborativeTombstonesV2): Y.Map<unknown> {
+function createTombstonesMapV3(tombstones: CollaborativeTombstonesV3): Y.Map<unknown> {
   const map = new Y.Map<unknown>();
   if (tombstones.statements) map.set('statements', createRecordMap(tombstones.statements));
   if (tombstones.companions) map.set('companions', createCompanionTombstonesMap(tombstones.companions));
@@ -199,7 +194,7 @@ function getOrCreateTombstonesMap(root: Y.Map<unknown>): Y.Map<unknown> {
   const existing = root.get('tombstones');
   if (existing instanceof Y.Map) return existing;
   const map = isRecord(existing)
-    ? createTombstonesMapV2(existing as CollaborativeTombstonesV2)
+    ? createTombstonesMapV3(existing as CollaborativeTombstonesV3)
     : new Y.Map<unknown>();
   root.set('tombstones', map);
   return map;
@@ -247,20 +242,20 @@ interface CollaborativeEntityYDocChanges<TRecord> {
 
 interface CollaborativeEntityYDocWriter<TRecord> extends CollaborativeEntityYDocChanges<TRecord> {
   records: Y.Map<TRecord>;
-  tombstoneKey: keyof CollaborativeTombstonesV2;
+  tombstoneKey: keyof CollaborativeTombstonesV3;
   normalizeRecord?: (id: string, record: TRecord) => TRecord;
 }
 
 interface CollaborativeRootEntityDescriptor<TRecord> {
   recordKey: string;
-  tombstoneKey: keyof CollaborativeTombstonesV2;
+  tombstoneKey: keyof CollaborativeTombstonesV3;
   getRecords(root: Y.Map<unknown>): Y.Map<TRecord>;
   normalizeRecord?: (id: string, record: TRecord) => TRecord;
 }
 
 interface CollaborativeVisualEntityDescriptor<TRecord> {
   visualKey: keyof SceneVisualBlock;
-  tombstoneKey: keyof CollaborativeTombstonesV2;
+  tombstoneKey: keyof CollaborativeTombstonesV3;
   getRecords(root: Y.Map<unknown>): Y.Map<TRecord>;
 }
 
@@ -361,11 +356,11 @@ function readTombstoneSection(value: unknown): Record<string, CollaborativeTombs
   return undefined;
 }
 
-function readCompanionTombstones(value: unknown): CollaborativeTombstonesV2['companions'] | undefined {
+function readCompanionTombstones(value: unknown): CollaborativeTombstonesV3['companions'] | undefined {
   if (!value) return undefined;
   if (!isRecord(value) && !(value instanceof Y.Map)) return undefined;
 
-  const companions: NonNullable<CollaborativeTombstonesV2['companions']> = {};
+  const companions: NonNullable<CollaborativeTombstonesV3['companions']> = {};
   if (value instanceof Y.Map) {
     value.forEach((entry, statementId) => {
       const tombstones = readTombstoneSection(entry);
@@ -381,13 +376,13 @@ function readCompanionTombstones(value: unknown): CollaborativeTombstonesV2['com
   return Object.keys(companions).length > 0 ? companions : undefined;
 }
 
-function readTombstonesV2(root: Y.Map<unknown>): CollaborativeTombstonesV2 | undefined {
+function readTombstonesV3(root: Y.Map<unknown>): CollaborativeTombstonesV3 | undefined {
   const value = root.get('tombstones');
   if (!value) return undefined;
   if (!isRecord(value) && !(value instanceof Y.Map)) return undefined;
 
-  const tombstones: CollaborativeTombstonesV2 = {};
-  const getSection = (key: keyof CollaborativeTombstonesV2): unknown => (
+  const tombstones: CollaborativeTombstonesV3 = {};
+  const getSection = (key: keyof CollaborativeTombstonesV3): unknown => (
     value instanceof Y.Map ? value.get(key) : value[key]
   );
 
@@ -485,7 +480,7 @@ function getOrCreateGroupCompanionOrderYArray(group: Y.Map<unknown>): Y.Array<st
   return array;
 }
 
-function getOrCreateV2CompanionTombstonesMap(
+function getOrCreateV3CompanionTombstonesMap(
   root: Y.Map<unknown>,
   statementId: string,
 ): Y.Map<CollaborativeTombstoneRecord> {
@@ -495,7 +490,7 @@ function getOrCreateV2CompanionTombstonesMap(
     ? existingCompanions as Y.Map<unknown>
     : createCompanionTombstonesMap(
       isRecord(existingCompanions)
-        ? existingCompanions as NonNullable<CollaborativeTombstonesV2['companions']>
+        ? existingCompanions as NonNullable<CollaborativeTombstonesV3['companions']>
         : {},
     );
   if (!(existingCompanions instanceof Y.Map)) tombstones.set('companions', companions);
@@ -509,14 +504,14 @@ function getOrCreateV2CompanionTombstonesMap(
   return section;
 }
 
-function readExistingV2CompanionTombstoneSection(
+function readExistingV3CompanionTombstoneSection(
   root: Y.Map<unknown>,
   statementId: string,
 ): Record<string, CollaborativeTombstoneRecord> | Y.Map<CollaborativeTombstoneRecord> | undefined {
   const tombstones = root.get('tombstones');
   const companionTombstones = tombstones instanceof Y.Map
     ? tombstones.get('companions')
-    : (tombstones as CollaborativeTombstonesV2 | undefined)?.companions;
+    : (tombstones as CollaborativeTombstonesV3 | undefined)?.companions;
 
   if (companionTombstones instanceof Y.Map) {
     const section = companionTombstones.get(statementId);
@@ -569,40 +564,6 @@ function readCompanionGroups(root: Y.Map<unknown>): Record<string, Collaborative
   return Object.keys(groups).length > 0 ? groups : undefined;
 }
 
-export function writeCollaborativeStateV2ToYDoc(
-  doc: Y.Doc,
-  state: CollaborativeSceneStateV2,
-  origin = 'seed',
-): void {
-  const filteredState = filterTombstonedCollaborativeRecordsV2(state);
-  doc.transact(() => {
-    const root = doc.getMap<unknown>(COLLABORATIVE_SCENE_ROOT);
-    clearMap(root);
-
-    root.set('schemaVersion', filteredState.schemaVersion);
-    root.set('sceneSchemaVersion', filteredState.sceneSchemaVersion);
-    root.set('collaborationProjectId', filteredState.collaborationProjectId);
-    root.set('roomId', filteredState.roomId);
-    root.set('sceneId', filteredState.sceneId);
-    root.set('meta', cloneJson(filteredState.meta));
-    if (filteredState.visual) root.set('visual', createVisualMap(filteredState.visual));
-    if (filteredState.tombstones) root.set('tombstones', createTombstonesMapV2(filteredState.tombstones));
-
-    root.set('statementsById', createRecordMap<CollaborativeStatementRecord>(filteredState.statementsById));
-
-    root.set('statementOrder', Y.Array.from(filteredState.statementOrder));
-
-    if (filteredState.companionGroupsByStatementId) {
-      root.set(
-        'companionGroupsByStatementId',
-        createCompanionGroupsMap(filteredState.companionGroupsByStatementId),
-      );
-    }
-    root.set('markersById', createRecordMap<SceneMarker>(filteredState.markersById ?? {}));
-    root.set('assets', createRecordMap<CollaborativeAssetManifestEntry>(filteredState.assets ?? {}));
-  }, origin);
-}
-
 export function writeCollaborativeStateV3ToYDoc(
   doc: Y.Doc,
   state: CollaborativeSceneStateV3,
@@ -620,7 +581,7 @@ export function writeCollaborativeStateV3ToYDoc(
     root.set('sceneId', filteredState.sceneId);
     root.set('meta', cloneJson(filteredState.meta));
     if (filteredState.visual) root.set('visual', createVisualMap(filteredState.visual));
-    if (filteredState.tombstones) root.set('tombstones', createTombstonesMapV2(filteredState.tombstones));
+    if (filteredState.tombstones) root.set('tombstones', createTombstonesMapV3(filteredState.tombstones));
 
     root.set('statementsById', createRecordMap<CollaborativeStatementRecord>(filteredState.statementsById));
 
@@ -637,7 +598,7 @@ export function writeCollaborativeStateV3ToYDoc(
   }, origin);
 }
 
-export function writeCollaborativeStatementChangesV2ToYDoc(
+export function writeCollaborativeStatementChangesV3ToYDoc(
   doc: Y.Doc,
   changes: CollaborativeStatementChanges,
   origin = 'local',
@@ -661,7 +622,7 @@ export function writeCollaborativeStatementChangesV2ToYDoc(
       const group = companionGroups?.get(statementId);
       if (group instanceof Y.Map) {
         const companionsById = readRecordMapValue<CollaborativeCompanionRecord>(group.get('companionsById'));
-        const companionTombstones = getOrCreateV2CompanionTombstonesMap(root, statementId);
+        const companionTombstones = getOrCreateV3CompanionTombstonesMap(root, statementId);
         Object.keys(companionsById).forEach((companionId) => {
           setTombstoneIfMissing(companionTombstones, companionId, changes.deletedAt, changes.deletedBy);
         });
@@ -680,7 +641,7 @@ export function writeCollaborativeStatementChangesV2ToYDoc(
   }, origin);
 }
 
-export function writeCollaborativeCompanionChangesV2ToYDoc(
+export function writeCollaborativeCompanionChangesV3ToYDoc(
   doc: Y.Doc,
   changes: CollaborativeCompanionChanges,
   origin = 'local',
@@ -696,8 +657,8 @@ export function writeCollaborativeCompanionChangesV2ToYDoc(
     );
     const companionsById = getOrCreateGroupCompanionsYMap(group);
     const companionTombstones = changes.deleteCompanionIds?.length
-      ? getOrCreateV2CompanionTombstonesMap(root, changes.statementId)
-      : readExistingV2CompanionTombstoneSection(root, changes.statementId);
+      ? getOrCreateV3CompanionTombstonesMap(root, changes.statementId)
+      : readExistingV3CompanionTombstoneSection(root, changes.statementId);
 
     for (const companionId of changes.deleteCompanionIds ?? []) {
       companionsById.delete(companionId);
@@ -790,53 +751,6 @@ export function writeCollaborativeRecipeOverlayChangesToYDoc(
   }, origin);
 }
 
-export function readCollaborativeStateV2FromYDoc(doc: Y.Doc): CollaborativeSceneStateV2 | null {
-  const root = doc.getMap<unknown>(COLLABORATIVE_SCENE_ROOT);
-  const schemaVersion = root.get('schemaVersion');
-  const sceneSchemaVersion = root.get('sceneSchemaVersion');
-  const collaborationProjectId = root.get('collaborationProjectId');
-  const roomId = root.get('roomId');
-  const sceneId = root.get('sceneId');
-  const meta = root.get('meta') as CollaborativeSceneMetaV4 | undefined;
-
-  if (
-    schemaVersion !== COLLABORATION_SCHEMA_VERSION_V2 ||
-    sceneSchemaVersion !== SCENE_SCHEMA_VERSION_V4 ||
-    typeof collaborationProjectId !== 'string' ||
-    typeof roomId !== 'string' ||
-    typeof sceneId !== 'string' ||
-    !meta
-  ) {
-    return null;
-  }
-
-  const companionGroupsByStatementId = readCompanionGroups(root);
-  const markersById = readRecordMap<SceneMarker>(root, 'markersById');
-  const visual = readVisual(root);
-  const assets = readRecordMap<CollaborativeAssetManifestEntry>(root, 'assets');
-  const tombstones = readTombstonesV2(root);
-
-  return filterTombstonedCollaborativeRecordsV2({
-    schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
-    sceneSchemaVersion: SCENE_SCHEMA_VERSION_V4,
-    collaborationProjectId,
-    roomId,
-    sceneId,
-    meta: cloneJson(meta),
-    statementsById: readRecordMap<CollaborativeStatementRecord>(root, 'statementsById'),
-    statementOrder: readStringArray(root, 'statementOrder'),
-    ...(companionGroupsByStatementId ? { companionGroupsByStatementId } : {}),
-    ...(Object.keys(markersById).length > 0 ? { markersById } : {}),
-    ...(visual ? { visual: cloneJson(visual) } : {}),
-    ...(Object.keys(assets).length > 0 ? { assets } : {}),
-    ...(tombstones ? { tombstones: cloneJson(tombstones) } : {}),
-  });
-}
-
-export function hasCollaborativeStateV2(doc: Y.Doc): boolean {
-  return readCollaborativeStateV2FromYDoc(doc) !== null;
-}
-
 export function readCollaborativeStateV3FromYDoc(doc: Y.Doc): CollaborativeSceneStateV3 | null {
   const root = doc.getMap<unknown>(COLLABORATIVE_SCENE_ROOT);
   const schemaVersion = root.get('schemaVersion');
@@ -861,7 +775,7 @@ export function readCollaborativeStateV3FromYDoc(doc: Y.Doc): CollaborativeScene
   const markersById = readRecordMap<SceneMarker>(root, 'markersById');
   const visual = readVisual(root);
   const assets = readRecordMap<CollaborativeAssetManifestEntry>(root, 'assets');
-  const tombstones = readTombstonesV2(root);
+  const tombstones = readTombstonesV3(root);
 
   return filterTombstonedCollaborativeRecordsV3({
     schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,

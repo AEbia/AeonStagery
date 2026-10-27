@@ -1,7 +1,6 @@
 
 
-export const STAGE_WIDTH = 1920;
-export const STAGE_HEIGHT = 1080;
+export { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 export const BACKGROUND_LAYER_ID = 'background';
 
 export type EnvironmentLayoutMode = 'cover' | 'tile';
@@ -69,6 +68,7 @@ export function isEnvironmentMutationAction(action: { action: string }): boolean
   ].includes(action.action);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Environment state is projected from heterogeneous historical action bags; keep the decoding input open and the returned EnvironmentLayerState typed.
 export function createEnvironmentState(params: Record<string, any>): EnvironmentLayerState {
   const defaults = getDefaultEnvironmentTransform();
   return {

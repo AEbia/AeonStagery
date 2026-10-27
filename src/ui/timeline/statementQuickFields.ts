@@ -16,6 +16,8 @@ export function getStatementQuickFields(item: SemanticTimelineReadModelItem, sce
     if (!quickKeys.has(field.key)) return false;
     // Keep visual targets and recipes in their dedicated detail selectors.
     if (item.source.type === 'visualStyle' && ['target', 'recipeId'].includes(field.key)) return false;
+    // Lighting targets use the detail picker for both structured objects and panorama strings.
+    if (item.source.type === 'lighting' && field.key === 'target') return false;
     // Integration overrides replace the top-level values; their editor remains in details.
     if (item.source.type === 'visualStyle' && source.slot === 'integration'
       && field.key === 'intensity' && source.semanticOverride && typeof source.semanticOverride === 'object') return false;

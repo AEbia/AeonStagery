@@ -8,6 +8,7 @@ function createExportApi() {
     pushFrame: vi.fn().mockResolvedValue({ success: true }),
     pushEncodedChunk: vi.fn().mockResolvedValue({ success: true }),
     endStreamExport: vi.fn().mockResolvedValue({ success: true }),
+    cancelExport: vi.fn().mockResolvedValue({ success: true }),
   };
 }
 
@@ -55,7 +56,7 @@ class MockVideoFrame {
 class MockEncodedVideoChunk {
   readonly byteLength: number;
 
-  constructor(private readonly bytes: Uint8Array) {
+  constructor(private readonly bytes: Uint8Array, readonly timestamp: number) {
     this.byteLength = bytes.byteLength;
   }
 
@@ -65,6 +66,7 @@ class MockEncodedVideoChunk {
 }
 
 class MockVideoEncoder {
+  static isConfigSupported = vi.fn(async (config: VideoEncoderConfig) => ({ supported: true, config }));
   static instances: MockVideoEncoder[] = [];
   state = 'configured';
   encodeQueueSize = 0;
@@ -81,7 +83,7 @@ class MockVideoEncoder {
 
   encode(frame: MockVideoFrame, options: unknown): void {
     this.encodedFrames.push({ frame, options });
-    const chunk = new MockEncodedVideoChunk(new Uint8Array([0, 0, 0, 2, 0xaa, 0xbb]));
+    const chunk = new MockEncodedVideoChunk(new Uint8Array([0, 0, 0, 2, 0xaa, 0xbb]), frame.timestamp);
     const metadata = {
       decoderConfig: {
         description: new Uint8Array([
@@ -112,7 +114,7 @@ describe('capture backend stream cleanup', () => {
     await backend.init(createInitConfig());
     api.endStreamExport.mockResolvedValueOnce({ success: false, error: 'stream cleanup failed' });
     await expect(backend.abort()).resolves.toBeUndefined();
-    expect(api.endStreamExport).toHaveBeenCalledTimes(1);
+    expect(api.cancelExport).toHaveBeenCalledTimes(1);
 
     const finishApi = createExportApi();
     const finishBackend = new RawPixelsBackend(finishApi);
@@ -130,7 +132,7 @@ describe('capture backend stream cleanup', () => {
       await backend.init(createInitConfig());
       api.endStreamExport.mockResolvedValueOnce({ success: false, error: 'stream cleanup failed' });
       await expect(backend.abort()).resolves.toBeUndefined();
-      expect(api.endStreamExport).toHaveBeenCalledTimes(1);
+      expect(api.cancelExport).toHaveBeenCalledTimes(1);
 
       const finishApi = createExportApi();
       const finishBackend = new WebCodecsBackend(finishApi);
@@ -195,6 +197,40 @@ describe('capture backend stream cleanup', () => {
     });
   });
 
+  it.each([
+    [1920, 1080, 60, 12_000_000, '2A'],
+    [2560, 1440, 30, 12_000_000, '32'],
+    [2560, 1440, 60, 12_000_000, '33'],
+    [1440, 2560, 60, 12_000_000, '33'],
+    [3840, 2160, 30, 40_000_000, '33'],
+    [3840, 2160, 60, 40_000_000, '34'],
+    [3840, 2160, 120, 40_000_000, '3C'],
+    [7680, 4320, 60, 40_000_000, '3D'],
+    [7680, 4320, 120, 40_000_000, '3E'],
+    [1920, 1080, 60, 60_000_000, '32'],
+    [8192, 16, 30, 12_000_000, '33'],
+  ])('selects a compatible H.264 level for %ix%i at %i fps and %i bps', async (width, height, fps, bitrate, level) => {
+    await withMockWebCodecs(async () => {
+      const backend = new WebCodecsBackend(createExportApi());
+      await backend.init({ ...createInitConfig(), width, height, fps, bitrate });
+      expect(MockVideoEncoder.instances[0].configuredWith).toEqual(expect.objectContaining({
+        codec: `avc1.4D00${level}`, width, height, framerate: fps, bitrate,
+      }));
+      await backend.abort();
+    });
+  });
+
+  it('rejects output beyond H.264 level limits before starting the stream', async () => {
+    await withMockWebCodecs(async () => {
+      const api = createExportApi();
+      const backend = new WebCodecsBackend(api);
+      await expect(backend.init({ ...createInitConfig(), width: 8192, height: 8192 }))
+        .rejects.toThrow('H.264 level');
+      expect(api.startStreamExport).not.toHaveBeenCalled();
+      expect(MockVideoEncoder.instances).toHaveLength(0);
+    });
+  });
+
   it('WebCodecsBackend encodes canvas frames as Annex B chunks and closes frame handles', async () => {
     await withMockWebCodecs(async () => {
       const api = createExportApi();
@@ -203,8 +239,8 @@ describe('capture backend stream cleanup', () => {
       await backend.init(createInitConfig());
       await backend.encodeFrame({
         canvas: {} as HTMLCanvasElement,
-        frameIndex: 60,
-        fps: 30,
+        frameIndex: 0,
+        fps: 60,
       });
       await backend.finish();
 
@@ -216,7 +252,7 @@ describe('capture backend stream cleanup', () => {
         framerate: 60,
       }));
       expect(encoder.encodedFrames[0].options).toEqual({ keyFrame: true });
-      expect(encoder.encodedFrames[0].frame.timestamp).toBeCloseTo(2_000_000);
+      expect(encoder.encodedFrames[0].frame.timestamp).toBe(0);
       expect(encoder.encodedFrames[0].frame.closed).toBe(true);
       expect(api.pushEncodedChunk).toHaveBeenCalledWith(new Uint8Array([
         0, 0, 0, 1, 0x67, 0x64,

@@ -45,6 +45,25 @@ const WEBGAL_STAGE_HEIGHT = 1440;
 // figure converts to `scale: 1.1`.
 const SCALE_COMPENSATION = 1.1 / 0.8;
 
+const WEBGAL_BEVEL_DEFAULTS = {
+  bevel: 0,
+  bevelThickness: 0,
+  bevelRed: 255,
+  bevelGreen: 255,
+  bevelBlue: 255,
+  bevelRotation: 0,
+  bevelSoftness: 0,
+};
+const WEBGAL_BEVEL_KEYS = Object.keys(WEBGAL_BEVEL_DEFAULTS) as (keyof typeof WEBGAL_BEVEL_DEFAULTS)[];
+
+const WEBGAL_BLOOM_DEFAULTS = {
+  bloom: 0,
+  bloomBrightness: 1,
+  bloomBlur: 0,
+  bloomThreshold: 0,
+};
+const WEBGAL_BLOOM_KEYS = Object.keys(WEBGAL_BLOOM_DEFAULTS) as (keyof typeof WEBGAL_BLOOM_DEFAULTS)[];
+
 // WebGAL attaches dialogue voice as a bare `-path.wav` flag. Anything that
 // looks like an audio file and carries no value is treated as the voice.
 const AUDIO_FLAG_PATTERN = /\.(wav|ogg|mp3|m4a|flac|aac)$/i;
@@ -75,6 +94,8 @@ interface ConversionContext {
   speakerToCharacterId: Map<string, string>;
   figureIdToCharacterId: Map<string, string>;
   lastTransform: Map<string, TrackedTransform>;
+  lastBevel: Map<string, typeof WEBGAL_BEVEL_DEFAULTS>;
+  lastBloom: Map<string, typeof WEBGAL_BLOOM_DEFAULTS>;
   currentModel: Map<string, string>;
   present: Set<string>;
   lastFocusedCharacterId?: string;
@@ -140,6 +161,8 @@ export function convertWebGalToSceneDocument(
     speakerToCharacterId: new Map(),
     figureIdToCharacterId: new Map(),
     lastTransform: new Map(),
+    lastBevel: new Map(),
+    lastBloom: new Map(),
     currentModel: new Map(),
     present: new Set(),
     fallbackCharacterIndex: 0,
@@ -393,6 +416,22 @@ function handleChangeFigure(
     context.report.stats.figureEnters += 1;
     context.present.add(characterId);
     context.currentModel.set(characterId, model);
+    // A new figure instance starts with WebGAL's neutral bevel. Emit that
+    // state after a previous appearance so absolute seek cannot reuse it.
+    if (context.lastBevel.delete(characterId)) {
+      emitTransformEffects(
+        { ...WEBGAL_BEVEL_DEFAULTS, unknown: [] },
+        { kind: 'character', characterId, lineNumber, durationSeconds: 0 },
+        context,
+      );
+    }
+    if (context.lastBloom.delete(characterId)) {
+      emitTransformEffects(
+        { ...WEBGAL_BLOOM_DEFAULTS, unknown: [] },
+        { kind: 'character', characterId, lineNumber, durationSeconds: 0 },
+        context,
+      );
+    }
     emitTransformEffects(
       parseWebGalTransform(flags.transform),
       { kind: 'character', characterId, lineNumber, durationSeconds: enterDuration },
@@ -618,21 +657,40 @@ function emitTransformEffects(
   if (effects.colorRed !== undefined) post.adjRed = effects.colorRed / 255;
   if (effects.colorGreen !== undefined) post.adjGreen = effects.colorGreen / 255;
   if (effects.colorBlue !== undefined) post.adjBlue = effects.colorBlue / 255;
-  if (effects.bloomThreshold !== undefined) post.bloomThreshold = effects.bloomThreshold;
-  if (effects.bloomBlur !== undefined) post.bloomBloomScale = effects.bloomBlur / 10;
-  if (effects.bloomBrightness !== undefined) post.bloomBrightness = effects.bloomBrightness;
-  if (effects.bloom !== undefined) {
-    // WebGAL has no separate bloom strength; drive it through the bloom
-    // brightness so a raised bloom visibly brightens the glow.
-    post.bloomBrightness = (effects.bloomBrightness ?? 1) * (0.5 + effects.bloom / 2);
+  const postTarget = kind === 'background' ? 'background' : characterId;
+  if (postTarget && WEBGAL_BLOOM_KEYS.some((key) => effects[key] !== undefined)) {
+    // WebGAL's container defaults differ from Aeon's legacy post-processing
+    // defaults. Preserve all four controls and per-target partial updates.
+    const previousBloom = context.lastBloom.get(postTarget);
+    if (!previousBloom && durationSeconds > 0) {
+      // Seed the transition from WebGAL's neutral state, rather than Aeon's
+      // legacy threshold/radius. This also makes absolute seek reproducible.
+      context.drafts.push({
+        time: context.cursor,
+        type: 'lighting',
+        params: {
+          effect: 'post', mode: 'set', target: postTarget,
+          bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0,
+          durationSeconds: 0,
+        },
+      });
+    }
+    const bloom = { ...(previousBloom ?? WEBGAL_BLOOM_DEFAULTS) };
+    for (const key of WEBGAL_BLOOM_KEYS) bloom[key] = effects[key] ?? bloom[key];
+    context.lastBloom.set(postTarget, bloom);
+    post.bloomBloomScale = bloom.bloom;
+    post.bloomBrightness = bloom.bloomBrightness;
+    post.bloomBlur = bloom.bloomBlur;
+    post.bloomThreshold = bloom.bloomThreshold;
   }
   if (effects.rgbFilm !== undefined && effects.rgbFilm > 0) {
     post.rgbSplitX = RGB_SPLIT_AMOUNT;
     post.rgbSplitY = RGB_SPLIT_AMOUNT;
   }
 
-  const hasPostValues = Object.values(post).some((value) => value !== undefined && value !== 'post' && value !== 'set');
+  const hasPostValues = Object.keys(post).some((key) => !['effect', 'mode', 'durationSeconds'].includes(key));
   if (hasPostValues) {
+    post.target = postTarget;
     context.drafts.push({ time: context.cursor, type: 'lighting', params: post });
   }
 
@@ -644,27 +702,33 @@ function emitTransformEffects(
     });
   }
 
-  if (kind === 'character' && characterId
-    && (effects.bevel !== undefined || effects.bevelThickness !== undefined)) {
+  const hasBevel = WEBGAL_BEVEL_KEYS.some((key) => effects[key] !== undefined);
+  if (kind === 'character' && characterId && hasBevel) {
+    // WebGAL initializes every bevel control to zero (white light color).
+    // Materialize these values so Aeon's authoring defaults cannot turn a
+    // partial transform such as { bevelThickness: 8 } into a visible light.
+    const bevel = { ...(context.lastBevel.get(characterId) ?? WEBGAL_BEVEL_DEFAULTS) };
+    for (const key of WEBGAL_BEVEL_KEYS) bevel[key] = effects[key] ?? bevel[key];
+    context.lastBevel.set(characterId, bevel);
     const params: VisualStyleParams = {
       scope: 'object',
       target: characterId,
       slot: 'rim-light',
       mode: 'set',
       durationSeconds,
+      intensity: bevel.bevel,
+      thickness: bevel.bevelThickness,
+      color: rgbToHex(bevel.bevelRed, bevel.bevelGreen, bevel.bevelBlue),
+      angle: bevel.bevelRotation,
+      // WebGAL stores softness as a fraction of thickness. The scene model
+      // retains its pixel-radius contract for compatibility with saved scenes.
+      softness: bevel.bevelSoftness * bevel.bevelThickness,
     };
-    if (effects.bevel !== undefined) params.intensity = effects.bevel;
-    if (effects.bevelThickness !== undefined) params.thickness = effects.bevelThickness;
-    if (effects.bevelRed !== undefined || effects.bevelGreen !== undefined || effects.bevelBlue !== undefined) {
-      params.color = rgbToHex(effects.bevelRed, effects.bevelGreen, effects.bevelBlue);
-    }
-    if (effects.bevelRotation !== undefined) params.angle = effects.bevelRotation;
-    if (effects.bevelSoftness !== undefined) params.softness = effects.bevelSoftness;
     context.drafts.push({ time: context.cursor, type: 'visualStyle', params });
   }
 
   const dropped: string[] = [];
-  if (kind !== 'character' && (effects.bevel !== undefined || effects.bevelThickness !== undefined)) {
+  if (kind !== 'character' && hasBevel) {
     dropped.push('bevel 倒角（仅支持人物边缘光）');
   }
   if (effects.oldFilm !== undefined && effects.oldFilm > 0) dropped.push('oldFilm 老电影');

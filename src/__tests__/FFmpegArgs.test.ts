@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFFmpegConvertArgs } from '../../electron/ffmpeg-args';
+import { buildFFmpegConvertArgs, buildFFmpegStreamArgs, buildFFmpegVideoArgs } from '../../electron/ffmpeg-args';
 
 function filterComplex(args: string[]): string {
   const index = args.indexOf('-filter_complex');
@@ -22,6 +22,46 @@ function generatedVolumeFilters(filter: string): string[] {
 }
 
 describe('FFmpeg convert args', () => {
+  it.each(['libvpx-vp9', 'libaom-av1'])('uses codec-specific constant quality controls for %s', codec => {
+    const args = buildFFmpegVideoArgs({ codec, crf: 28, speed: 'quality' });
+    expect(args).toEqual(expect.arrayContaining(['-crf', '28', '-b:v', '0', '-cpu-used']));
+    expect(args).not.toContain('-preset');
+  });
+
+  it('preserves fractional Mbps and uses a frame-rate-dependent keyframe interval', () => {
+    const args = buildFFmpegVideoArgs({ codec: 'libx264', bitrate: 3.5, speed: 'fast' }, 24);
+    expect(args).toEqual(expect.arrayContaining(['-b:v', '3.5M', '-g', '48', '-preset', 'veryfast']));
+  });
+
+  it('copies native HEVC and IVF streams without adding encoding settings', () => {
+    const hevc = buildFFmpegStreamArgs('/out/hevc.mp4', { inputFormat: 'hevc' });
+    expect(hevc).toEqual(expect.arrayContaining(['-f', 'hevc', '-c:v', 'copy', '-tag:v', 'hvc1', '-movflags', '+faststart']));
+    const ivf = buildFFmpegStreamArgs('/out/av1.webm', { inputFormat: 'ivf' });
+    expect(ivf).toEqual(expect.arrayContaining(['-f', 'ivf', '-c:v', 'copy']));
+    expect(ivf).not.toContain('-r');
+    expect(ivf).not.toContain('-bsf:v');
+    expect(ivf).not.toContain('-preset');
+  });
+  it('applies CRF to the final transcode instead of a target bitrate', () => {
+    const args = buildFFmpegConvertArgs('/tmp/intermediate.mp4', '/out/final.mp4', {
+      codec: 'libx265', crf: 24,
+    });
+    expect(args).toEqual(expect.arrayContaining(['-crf', '24']));
+    expect(args).not.toContain('-b:v');
+  });
+
+  it.each(['libx264', 'libx265', 'libaom-av1'])('does not use target bitrate as a cap when %s uses CRF', codec => {
+    const args = buildFFmpegVideoArgs({ codec, bitrate: 1, crf: 20 });
+    expect(args).toEqual(expect.arrayContaining(['-crf', '20']));
+    if (codec === 'libaom-av1') {
+      expect(args.slice(args.indexOf('-b:v'), args.indexOf('-b:v') + 2)).toEqual(['-b:v', '0']);
+    } else {
+      expect(args).not.toContain('-b:v');
+    }
+    expect(args).not.toContain('-maxrate');
+    expect(args).not.toContain('-bufsize');
+  });
+
   it('caps mixed audio output to the exported video duration', () => {
     const args = buildFFmpegConvertArgs('/tmp/video.mp4', '/out/final.mp4', {
       fps: 30,
@@ -31,7 +71,7 @@ describe('FFmpeg convert args', () => {
       ],
     }, () => true);
 
-    expect(args).toContain('-shortest');
+    expect(args).not.toContain('-shortest');
     expect(args.slice(-3)).toEqual(['-t', '5', '/out/final.mp4']);
   });
 

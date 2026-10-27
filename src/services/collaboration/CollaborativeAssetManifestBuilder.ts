@@ -5,7 +5,6 @@ import {
   type ProjectRelativeAssetPath,
 } from '../../api/types/collaboration';
 import type {
-  HistoricalSceneDocumentV4,
   SceneDocumentV5,
 } from '../../api/types/semantic-scene';
 import type { IFileAccess } from '../io/IFileAccess';
@@ -14,15 +13,13 @@ import {
   browserCollaborativeAssetHashAdapter,
   buildBundleManifestEntry,
   buildSingleFileManifestEntry,
-  collectLive2DAssetBundleClosure,
-  collectCollaborativeSceneDocumentV4AssetRefs,
-  collectCollaborativeSceneDocumentV5AssetRefs,
   collectCollaborativeSceneAssetRefs,
+  collectCollaborativeSceneDocumentV5AssetRefs,
+  collectLive2DAssetBundleClosure,
   dirnameProjectRelativePath,
   fingerprintCollaborativeAssetFile,
-  getCollaborativeSceneDocumentV4AssetReferenceKeys as getCollaborativeSceneDocumentV4AssetReferenceKeysFromPolicy,
-  getCollaborativeSceneDocumentV5AssetReferenceKeys as getCollaborativeSceneDocumentV5AssetReferenceKeysFromPolicy,
   getCollaborativeAssetReferenceKeys as getCollaborativeAssetReferenceKeysFromPolicy,
+  getCollaborativeSceneDocumentV5AssetReferenceKeys as getCollaborativeSceneDocumentV5AssetReferenceKeysFromPolicy,
   hashCollaborativeAssetBundle,
   joinProjectRelativePath,
   orderCollaborativeManifestFiles,
@@ -41,10 +38,6 @@ const textEncoder = new TextEncoder();
 
 export function getCollaborativeAssetReferenceKeys(scene: LegacyCollaborativeScene): ProjectRelativeAssetPath[] {
   return getCollaborativeAssetReferenceKeysFromPolicy(scene);
-}
-
-export function getCollaborativeSceneDocumentV4AssetReferenceKeys(document: HistoricalSceneDocumentV4): ProjectRelativeAssetPath[] {
-  return getCollaborativeSceneDocumentV4AssetReferenceKeysFromPolicy(document);
 }
 
 export function getCollaborativeSceneDocumentV5AssetReferenceKeys(document: SceneDocumentV5): ProjectRelativeAssetPath[] {
@@ -78,19 +71,6 @@ export function hasUnchangedCollaborativeAssetReferences(
   options?: Pick<CollaborativeAssetManifestBuilderOptions, 'fileAccess' | 'projectResources'>,
 ): boolean | Promise<boolean> {
   const nextRefs = collectCollaborativeSceneAssetRefs(scene);
-  if (!hasSameManifestReferences(nextRefs, previousManifest)) return false;
-
-  if (!options) return true;
-
-  return manifestFilesMatchCurrentDisk(previousManifest ?? {}, options);
-}
-
-export function hasUnchangedCollaborativeSceneDocumentV4AssetReferences(
-  document: HistoricalSceneDocumentV4,
-  previousManifest: CollaborativeAssetManifest | undefined,
-  options?: Pick<CollaborativeAssetManifestBuilderOptions, 'fileAccess' | 'projectResources'>,
-): boolean | Promise<boolean> {
-  const nextRefs = collectCollaborativeSceneDocumentV4AssetRefs(document);
   if (!hasSameManifestReferences(nextRefs, previousManifest)) return false;
 
   if (!options) return true;
@@ -159,10 +139,6 @@ export class CollaborativeAssetManifestBuilder {
 
   async buildForScene(scene: LegacyCollaborativeScene): Promise<CollaborativeAssetManifest> {
     return this.buildForRefs(collectCollaborativeSceneAssetRefs(scene));
-  }
-
-  async buildForSceneDocumentV4(document: HistoricalSceneDocumentV4): Promise<CollaborativeAssetManifest> {
-    return this.buildForRefs(collectCollaborativeSceneDocumentV4AssetRefs(document));
   }
 
   async buildForSceneDocumentV5(document: SceneDocumentV5): Promise<CollaborativeAssetManifest> {

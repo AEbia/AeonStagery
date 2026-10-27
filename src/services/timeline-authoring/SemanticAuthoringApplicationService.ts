@@ -5,7 +5,6 @@ import type {
 import { AUTHORING_SCHEMA_VERSION } from '../../api/types/authoring';
 import type { CharacterDirectoryCommand } from '../../api/types/character-directory';
 import type { AgentValidateSceneDiagnostic } from '../../api/types/project-agent';
-import type { ProjectTemplateConfiguration } from '../../api/types/project';
 import type { CurrentSceneDocument, DialogueImagePresentation } from '../../api/types/semantic-scene';
 import type { DocumentStore } from '../../ui/store/DocumentStore';
 import type { AiScriptSegmentSemanticCompileResult } from '../ai-authoring/AiScriptSegmentCompiler';
@@ -21,6 +20,7 @@ import {
 import type { SemanticDocumentCoordinator } from '../document/SemanticDocumentCoordinator';
 import { getSceneDocumentCanonicalOrder, withSceneDocumentCanonicalOrder } from '../semantic-scene/SceneDocumentCanonicalOrder';
 import { SemanticTimelineAuthoringService } from './SemanticTimelineAuthoringService';
+import { applyDialogueDefaultsToCreatedStatements, type DialogueDefaultsReader } from './dialogueDefaults';
 import type {
   MaterializedResourceReceipt,
   ResourceAuthoringService,
@@ -76,10 +76,6 @@ export interface SemanticCharacterResourceReceipt {
 /** Read at commit time so queued writes use the current workbench preference. */
 export interface DialogueFlowModeReader {
   getDialogueFlowMode(): 'auto' | 'manual';
-}
-
-export interface DialogueDefaultsReader {
-  getDialogueDefaults(): Pick<ProjectTemplateConfiguration, 'dialoguePresentation' | 'dialogueTemplate' | 'defaults'> | undefined;
 }
 
 export interface DialogueStyleRefresh {
@@ -252,29 +248,11 @@ export class SemanticAuthoringApplicationService {
     document: CurrentSceneDocument,
     createdStatementIds: readonly string[],
   ): CurrentSceneDocument {
-    if (createdStatementIds.length === 0) return document;
-    const defaults = this.dialogueDefaults?.getDialogueDefaults();
-    const styleId = defaults?.defaults?.dialogueStyleId;
-    const builtin = styleId === 'glass' || styleId === 'minimal' || styleId === 'classic' ? styleId : undefined;
-    const presentation = builtin ? undefined : defaults?.dialoguePresentation;
-    const template = builtin ?? defaults?.dialogueTemplate;
-    if (!presentation && !template) return document;
-
-    const createdIds = new Set(createdStatementIds);
-    return withSceneDocumentCanonicalOrder({
-      ...document,
-      statements: document.statements.map((statement) => {
-        if (!createdIds.has(statement.id) || statement.type !== 'dialogue'
-          || statement.params.presentation || statement.params.template) return statement;
-        return {
-          ...statement,
-          params: {
-            ...statement.params,
-            ...(presentation ? { presentation: JSON.parse(JSON.stringify(presentation)) } : { template }),
-          },
-        };
-      }),
-    }, getSceneDocumentCanonicalOrder(document));
+    return applyDialogueDefaultsToCreatedStatements(
+      document,
+      createdStatementIds,
+      () => this.dialogueDefaults?.getDialogueDefaults(),
+    );
   }
 
   replaceDocument(

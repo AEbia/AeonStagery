@@ -5,15 +5,16 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssetBrowserModal } from '../ui/AssetBrowserModal';
 import { InlineFilePicker } from '../ui/InlineFilePicker';
-import { ResourceFileBrowser } from '../ui/ResourceFileBrowser';
 
 const mocks = vi.hoisted(() => ({
   readMergedDirectory: vi.fn(),
+  getResourceDirectoryLocations: vi.fn(),
   sceneAssetService: undefined as { importAssetPath: ReturnType<typeof vi.fn> } | undefined,
 }));
 
 vi.mock('../ui/ResourceLibrary', () => ({
   readMergedDirectory: mocks.readMergedDirectory,
+  getResourceDirectoryLocations: mocks.getResourceDirectoryLocations,
 }));
 
 vi.mock('../ui/context/AppContext', () => ({
@@ -22,20 +23,75 @@ vi.mock('../ui/context/AppContext', () => ({
 }));
 
 describe('Resource entry points', () => {
+  it('reveals the selected template source without importing it, and dismisses its context menu before the modal', async () => {
+    const showItemInFolder = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('aeonStageryAPI', { fs: { showItemInFolder } });
+    mocks.readMergedDirectory.mockResolvedValue([{
+      name: 'room.png', isDirectory: false, path: '/templates/demo/assets/room.png',
+      templateResource: { templateId: 'demo', packageRelativePath: 'assets/room.png' },
+    }]);
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(<AssetBrowserModal value="" initialDir="background" onSelect={onSelect} onClose={onClose} />);
+    const row = await screen.findByRole('button', { name: /^room\.png/ });
+    fireEvent.contextMenu(row);
+    fireEvent.keyDown(screen.getByRole('menuitem'), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole('menuitem', { name: '在文件管理器中显示' }));
+    await waitFor(() => expect(showItemInFolder).toHaveBeenCalledWith('/templates/demo/assets/room.png'));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps file-manager errors visible inside the modal and permits retry', async () => {
+    const openFolder = vi.fn().mockResolvedValue({ success: false, error: '文件已移动，请检查后重试。' });
+    vi.stubGlobal('aeonStageryAPI', { fs: { openFolder } });
+    mocks.readMergedDirectory.mockResolvedValue([{ name: 'room.png', isDirectory: false, path: '/project/room.png' }]);
+    render(<AssetBrowserModal value="" initialDir="background" onSelect={vi.fn()} onClose={vi.fn()} />);
+    await screen.findByRole('button', { name: /^room\.png/ });
+    const button = screen.getByRole('button', { name: '打开当前资源文件夹' });
+    fireEvent.click(button);
+    expect((await screen.findByRole('alert')).textContent).toContain('文件已移动');
+    expect(screen.getByRole('button', { name: /^room\.png/ })).toBeTruthy();
+    await waitFor(() => expect(button.hasAttribute('disabled')).toBe(false));
+    openFolder.mockResolvedValue({ success: true });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     mocks.readMergedDirectory.mockReset();
     mocks.readMergedDirectory.mockResolvedValue([]);
+    mocks.getResourceDirectoryLocations.mockReset();
+    mocks.getResourceDirectoryLocations.mockResolvedValue([{ path: '/project/background', source: '项目' }]);
     mocks.sceneAssetService = undefined;
   });
 
-  it('exposes images and sfx in the standard resource browser', () => {
-    render(<ResourceFileBrowser />);
-
-    fireEvent.click(screen.getByRole('button', { name: '文件资源' }));
-
-    expect(screen.getByRole('button', { name: 'images/' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'sfx/' })).toBeTruthy();
+  it('has one folder action for the directory and keeps single-click resource import unchanged', async () => {
+    const openFolder = vi.fn().mockResolvedValue({ success: true });
+    vi.stubGlobal('aeonStageryAPI', { fs: { openFolder } });
+    mocks.readMergedDirectory.mockResolvedValue([
+      { name: 'room.png', isDirectory: false, path: '/project/background/room.png' },
+      { name: 'sky.png', isDirectory: false, path: '/project/background/sky.png' },
+    ]);
+    mocks.sceneAssetService = { importAssetPath: vi.fn().mockResolvedValue('background/room.png') };
+    const onSelect = vi.fn();
+    const onClose = vi.fn();
+    render(<AssetBrowserModal value="" initialDir="background" onSelect={onSelect} onClose={onClose} />);
+    const room = await screen.findByRole('button', { name: /^room\.png/ });
+    expect(screen.getAllByRole('button', { name: '打开当前资源文件夹' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /在文件管理器中显示/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '打开当前资源文件夹' }));
+    await waitFor(() => expect(openFolder).toHaveBeenCalledExactlyOnceWith('/project/background'));
+    expect(mocks.sceneAssetService.importAssetPath).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(room);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith('background/room.png'));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('opens image-filtered asset browsing in images and keeps source/path/readiness visible', async () => {
@@ -115,7 +171,7 @@ describe('Resource entry points', () => {
       />,
     );
 
-    expect(await screen.findByRole('button', { name: /missing-reference\.wav/ })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /^missing-reference\.wav/ })).toBeTruthy();
   });
 
   it('keeps a missing inline path editable without readiness meta text', () => {
@@ -170,7 +226,7 @@ describe('Resource entry points', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /hero\.png/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^hero\.png/ }));
 
     expect((await screen.findByRole('alert')).textContent).toContain('资源服务不可用');
     expect(onSelect).not.toHaveBeenCalled();
@@ -195,7 +251,7 @@ describe('Resource entry points', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: /hero\.png/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^hero\.png/ }));
 
     expect((await screen.findByRole('alert')).textContent).toContain('import failed');
     expect(onSelect).not.toHaveBeenCalled();
@@ -215,12 +271,12 @@ describe('Resource entry points', () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
     render(<AssetBrowserModal value="" initialDir="background" filters={[{ name: '图片', extensions: ['png'] }]} onSelect={onSelect} onClose={onClose} />);
-    await screen.findByRole('button', { name: /room\.png/ });
+    await screen.findByRole('button', { name: /^room\.png/ });
     expect(screen.getByText('模板：Demo')).toBeTruthy();
     expect(screen.queryByText('audio.ogg')).toBeNull();
     fireEvent.change(screen.getByPlaceholderText('搜索资源…'), { target: { value: 'room' } });
     expect(screen.queryByRole('button', { name: /other\.png/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /room\.png/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^room\.png/ }));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('background/templates/demo/assets/background/room.png'));
     expect(importFile).toHaveBeenCalledWith(templateResource, path, 'background');
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -234,7 +290,7 @@ describe('Resource entry points', () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
     render(<AssetBrowserModal value="" initialDir="figure" onSelect={onSelect} onClose={onClose} />);
-    fireEvent.click(await screen.findByRole('button', { name: /model\.model3\.json/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^model\.model3\.json/ }));
     expect((await screen.findByRole('alert')).textContent).toContain('模板资源文件不存在');
     expect(onSelect).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -247,10 +303,10 @@ describe('Resource entry points', () => {
     } } });
     mocks.readMergedDirectory.mockResolvedValue([{ name: 'room.png', isDirectory: false, path: '/templates/demo/room.png' }]);
     render(<AssetBrowserModal value="" initialDir="background" onSelect={vi.fn()} onClose={vi.fn()} />);
-    await screen.findByRole('button', { name: /room\.png/ });
+    await screen.findByRole('button', { name: /^room\.png/ });
     mocks.readMergedDirectory.mockResolvedValue([]);
     act(() => refresh());
     await screen.findByText('当前目录下没有匹配资源');
-    expect(screen.queryByRole('button', { name: /room\.png/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^room\.png/ })).toBeNull();
   });
 });

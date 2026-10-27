@@ -42,6 +42,7 @@ import type { ProjectAgentWritePorts } from './ProjectAgentPorts';
 import { toolFail, toolOk } from './ProjectAgentPathRules';
 import type { ProjectAgentTaskState } from './ProjectAgentTaskState';
 import type { SemanticAuthoringGateError } from '../timeline-authoring/SemanticAuthoringApplicationService';
+import { applyDialogueDefaultsToCreatedStatements } from '../timeline-authoring/dialogueDefaults';
 
 const EMPTY_COUNTS: SemanticScenePatchCountsV1 = Object.freeze({
   insertedStatements: 0,
@@ -296,6 +297,24 @@ export class ProjectAgentWriteTools {
     } catch (error) {
       return toolFail(mapPatchError(error));
     }
+
+    const createdStatementIds = applyResult.insertedIdentities
+      .filter((identity) => identity.companionId === undefined)
+      .map((identity) => identity.statementId);
+    for (const operation of sourceOperations ?? []) {
+      if (operation.kind === 'updateStatement' && operation.patch.type === 'dialogue'
+        && binding.document.statements.find((statement) => statement.id === operation.statementId)?.type !== 'dialogue') {
+        createdStatementIds.push(operation.statementId);
+      }
+    }
+    applyResult = {
+      ...applyResult,
+      candidate: applyDialogueDefaultsToCreatedStatements(
+        applyResult.candidate,
+        createdStatementIds,
+        () => this.ports.dialogueDefaults?.getDialogueDefaults(),
+      ),
+    };
 
     const facts = buildOutcomeFacts(
       // Sole caller passes the resolved source operations; an empty list

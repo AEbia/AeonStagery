@@ -13,10 +13,20 @@ import type {
   Live2DRuntimeAdapter,
 } from './Live2DRuntimeContracts';
 import { Cubism2PixiLive2DModelControls } from './Cubism2PixiLive2DModelControls';
+import {
+  isCubism2Config,
+  isCubism2ModelClass,
+  isRuntimeClock,
+  readSdkProperty,
+  type Cubism2Config,
+  type Cubism2ModelClass,
+} from './sdkBoundary';
+import { installLive2DRenderPreparation } from '../live2d/runtime/Live2DRenderPreparation';
+import { guardExternalGl } from '../live2d/runtime/Cubism2RenderGuardSeam';
 
 type Cubism2Module = {
-  Live2DModel?: any;
-  config?: any;
+  Live2DModel?: unknown;
+  config?: unknown;
 };
 
 type Cubism2ModuleLoader = () => Promise<Cubism2Module>;
@@ -30,8 +40,8 @@ export const defaultCubism2RuntimeDescriptor: Live2DRuntimeDescriptor = {
 export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
   public readonly id = 'pixi-live2d-display-cubism2';
   public readonly supported = true;
-  private modelClass: any = null;
-  private moduleConfig: any = null;
+  private modelClass: Cubism2ModelClass | null = null;
+  private moduleConfig: unknown = null;
   private ready = false;
   private initPromise: Promise<void> | null = null;
   private readonly bakeCore = new Cubism2BakeRenderCore();
@@ -69,7 +79,7 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
       }
 
       const module = await this.loadModule();
-      this.modelClass = 'Live2DModel' in module ? module.Live2DModel ?? null : null;
+      this.modelClass = isCubism2ModelClass(module.Live2DModel) ? module.Live2DModel : null;
       this.moduleConfig = 'config' in module ? module.config ?? null : this.modelClass?.config ?? null;
 
       const cubism2Config = this.getConfig()?.cubism2;
@@ -91,8 +101,9 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     return this.ready;
   }
 
-  private getConfig(): any {
-    return this.modelClass?.config ?? this.moduleConfig;
+  private getConfig(): Cubism2Config | null {
+    const config = this.modelClass?.config ?? this.moduleConfig;
+    return isCubism2Config(config) ? config : null;
   }
 
   createModelHandle(
@@ -113,7 +124,16 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
     if (!this.modelClass?.from) {
       throw new Error('Cubism 2 Live2DModel class is not available.');
     }
-    return this.modelClass.from(modelUrl, options);
+    const model = await this.modelClass.from(modelUrl, options);
+    const prepare = model.prepareForRender?.bind(model);
+    if (prepare) {
+      this.bakeCore.installInternalModelGuard(model.internalModel);
+      installLive2DRenderPreparation(model, (renderer) => {
+        this.bakeCore.ensureBakeContextBound(model, renderer);
+        guardExternalGl(renderer, prepare);
+      });
+    }
+    return model;
   }
 
   getUnsupportedMessage(modelPath: string): string | null {
@@ -126,9 +146,8 @@ export class Cubism2PixiLive2DAdapter implements Live2DRuntimeAdapter {
 
   private getClock(): Live2DRuntimeClock | null {
     if (typeof window === 'undefined') return null;
-    const utSystem = (window as any).UtSystem;
-    if (!utSystem || typeof utSystem.getUserTimeMSec !== 'function') return null;
-    return utSystem;
+    const utSystem = readSdkProperty(window, 'UtSystem');
+    return isRuntimeClock(utSystem) ? utSystem : null;
   }
 
   createFallbackModel(renderer?: PIXI.Renderer): Live2DModelDisplayObject {

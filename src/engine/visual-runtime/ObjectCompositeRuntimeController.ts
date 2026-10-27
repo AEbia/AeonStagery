@@ -69,6 +69,7 @@ interface ObjectCompositeEffectSpec {
 }
 
 const OWNED_FILTER = '__visualCompositeOwnedFilter';
+type CompositeFilter = PIXI.Filter & { [OWNED_FILTER]?: boolean };
 type ColorStopSet = [number, number, number, number];
 type EnvironmentSamplingMode = 'interactive' | 'export';
 const INTERACTIVE_PROBE_SMOOTH_DT_CAP_SECONDS = 1 / 24;
@@ -849,12 +850,13 @@ function resolveCompositeEffectForTarget(
 function commitFilters(displayObject: PIXI.Container, filters: PIXI.Filter[] | null): void {
   displayObject.filters = filters;
   if (displayObject instanceof PIXI.Container) {
-    (displayObject as any)._filtersDirty = true;
+    (displayObject as typeof displayObject & { _filtersDirty?: boolean })._filtersDirty = true;
   }
 }
 
 function markOwnedFilter<T extends PIXI.Filter>(filter: T): T {
-  (filter as any)[OWNED_FILTER] = true;
+  filter.resolution = 'inherit';
+  (filter as CompositeFilter)[OWNED_FILTER] = true;
   return filter;
 }
 
@@ -900,8 +902,8 @@ function syncRgbSplitFilter(filter: RGBSplitFilter, effect: NonNullable<ObjectCo
 
 function updateOwnedFilters(displayObject: PIXI.Container, effect: ObjectCompositeEffectSpec): void {
   const existingFilters = (displayObject.filters as PIXI.Filter[] | null) || [];
-  const externalFilters = existingFilters.filter(filter => !(filter as any)[OWNED_FILTER]);
-  const ownedFilters = existingFilters.filter(filter => Boolean((filter as any)[OWNED_FILTER]));
+  const externalFilters = existingFilters.filter(filter => !(filter as CompositeFilter)[OWNED_FILTER]);
+  const ownedFilters = existingFilters.filter(filter => Boolean((filter as CompositeFilter)[OWNED_FILTER]));
   const nextOwned: PIXI.Filter[] = [];
 
   const takeOwnedFilter = <T extends PIXI.Filter>(predicate: (filter: PIXI.Filter) => filter is T): T | null => {
@@ -996,28 +998,28 @@ function readCurrentEnvironmentProbe(displayObject: PIXI.Container | null): Envi
 }
 
 function getDisplayBounds(displayObject: PIXI.Container | null): RectLike | null {
-  if (!displayObject || typeof (displayObject as any).getBounds !== 'function') return null;
+  if (!displayObject || typeof displayObject.getBounds !== 'function') return null;
   try {
-    return (displayObject as any).getBounds() as RectLike;
+    return displayObject.getBounds() as RectLike;
   } catch {
     return null;
   }
 }
 
 function getEffectiveEnvironmentZ(backgroundTarget: PIXI.Container): number {
-  const parentZ = Number((backgroundTarget.parent as any)?.zIndex);
+  const parentZ = Number(backgroundTarget.parent?.zIndex);
   if (Number.isFinite(parentZ)) return parentZ;
-  const ownZ = Number((backgroundTarget as any).zIndex);
+  const ownZ = Number(backgroundTarget.zIndex);
   return Number.isFinite(ownZ) ? ownZ : 0;
 }
 
 function getCameraNeutralDisplayOrigin(
   backgroundTarget: PIXI.Container,
-  camera?: { position: any; zoom: number } | null,
+  camera?: { position: import('../../api/types/common').Vec2; zoom: number } | null,
 ): { x: number; y: number; scaleX: number; scaleY: number; rotation: number } | null {
   const zoom = camera && Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
-  let x = Number((backgroundTarget as any).x);
-  let y = Number((backgroundTarget as any).y);
+  let x = Number(backgroundTarget.x);
+  let y = Number(backgroundTarget.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     return null;
   }
@@ -1033,10 +1035,10 @@ function getCameraNeutralDisplayOrigin(
     y = worldY - (0.5 - position.y) * STAGE_HEIGHT * parallax;
   }
 
-  const scale = (backgroundTarget as any).scale;
+  const scale = backgroundTarget.scale;
   const scaleX = Number(scale?.x ?? 1) / zoom;
   const scaleY = Number(scale?.y ?? 1) / zoom;
-  const rotation = Number((backgroundTarget as any).rotation ?? 0);
+  const rotation = Number(backgroundTarget.rotation ?? 0);
   if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || Math.abs(scaleX) <= 0.0001 || Math.abs(scaleY) <= 0.0001) {
     return null;
   }
@@ -1054,7 +1056,7 @@ function getCameraNeutralBackgroundLocalPoint(
   backgroundTarget: PIXI.Container,
   worldX: number,
   worldY: number,
-  camera?: { position: any; zoom: number } | null,
+  camera?: { position: import('../../api/types/common').Vec2; zoom: number } | null,
 ): PIXI.Point | null {
   const origin = getCameraNeutralDisplayOrigin(backgroundTarget, camera);
   if (!origin) return null;
@@ -1124,9 +1126,9 @@ function getProxyAnchoredBackgroundLocalPoint(
 }
 
 function getBackgroundLocalBounds(backgroundTarget: PIXI.Container): RectLike | null {
-  if (typeof (backgroundTarget as any).getLocalBounds !== 'function') return null;
+  if (typeof backgroundTarget.getLocalBounds !== 'function') return null;
   try {
-    return (backgroundTarget as any).getLocalBounds() as RectLike;
+    return backgroundTarget.getLocalBounds() as RectLike;
   } catch {
     return null;
   }
@@ -1185,15 +1187,19 @@ function getBackgroundLocalProbeSource(
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const texture = (backgroundTarget as any).texture as PIXI.Texture | undefined;
   if (!texture) return null;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const textureSource = (texture as any).source;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const baseTexture = (texture as any).baseTexture;
   const source = (
     baseTexture?.resource?.source ||
     textureSource?.resource?.source ||
     textureSource?.resource ||
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
     (texture as any).resource?.source ||
     baseTexture?.realSource ||
     textureSource
@@ -1203,7 +1209,9 @@ function getBackgroundLocalProbeSource(
     return null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const imageKey = (backgroundTarget as any).__imageKey
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
     ?? (texture as any).textureCacheIds?.[0]
     ?? baseTexture?.uid
     ?? textureSource?.uid
@@ -1239,21 +1247,28 @@ function getBackgroundStableProbeKey(backgroundTarget: PIXI.Container | null): s
     return 'background:none';
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const texture = (backgroundTarget as any).texture as PIXI.Texture | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const baseTexture = (texture as any)?.baseTexture;
   const source = (
     baseTexture?.resource?.source ||
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
     (texture as any)?.resource?.source ||
     baseTexture?.realSource ||
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
     (texture as any)?.source
   ) as CanvasImageSource | null | undefined;
   const dimensions = getCanvasImageSourceDimensions(source);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const imageKey = (backgroundTarget as any).__imageKey
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
     ?? (texture as any)?.textureCacheIds?.[0]
     ?? baseTexture?.uid
-    ?? (backgroundTarget as any).name
+    ?? backgroundTarget.name
     ?? backgroundTarget.constructor?.name
     ?? 'unknown';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const layoutMode = (backgroundTarget as any).__layoutMode ?? 'cover';
   const sizeKey = dimensions ? `${dimensions.width}x${dimensions.height}` : 'unknown-size';
   return `background:${String(imageKey)}:${String(layoutMode)}:${sizeKey}`;
@@ -1261,6 +1276,7 @@ function getBackgroundStableProbeKey(backgroundTarget: PIXI.Container | null): s
 
 function getDisplayCompositionKey(root: PIXI.Container): string {
   const parts: string[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Composition probes legacy Pixi texture resources and heterogeneous display objects; this compatibility boundary supports fields absent from current Pixi declarations.
   const visit = (displayObject: any) => {
     const scale = displayObject.scale;
     const pivot = displayObject.pivot;
@@ -1368,7 +1384,7 @@ function mapWorldBoundsToBackgroundLocalRegion(
   worldBounds: RectLike,
   backgroundLocalBounds: RectLike,
   environmentProxy?: EnvironmentLayerProxySnapshot | null,
-  camera?: { position: any; zoom: number } | null,
+  camera?: { position: import('../../api/types/common').Vec2; zoom: number } | null,
 ): PIXI.Rectangle | null {
   if (backgroundLocalBounds.width <= 0 || backgroundLocalBounds.height <= 0) {
     return null;
@@ -2025,7 +2041,7 @@ class ObjectCompositeRuntimeController {
       }
 
       const app = stageManager.getApp();
-      const extractCanvas = (app.renderer as any)?.extract?.canvas?.bind((app.renderer as any).extract);
+      const extractCanvas = app.renderer?.extract?.canvas?.bind(app.renderer.extract);
       if (typeof extractCanvas !== 'function') {
         this.backgroundProbeCache.data = null;
         this.backgroundProbeCache.width = 0;
@@ -2092,7 +2108,7 @@ class ObjectCompositeRuntimeController {
     }
 
     const backgroundTarget = this.getBackgroundSamplingTarget();
-    const worldTargetBounds = (live2DManager as any).getStableWorldSampleBounds?.(targetId) as RectLike | null | undefined;
+    const worldTargetBounds = live2DManager.getStableWorldSampleBounds?.(targetId) as RectLike | null | undefined;
     if (!backgroundTarget) {
       return override?.environmentColor
         ? createFallbackProbe(parseColor(override.environmentColor) ?? 0x808080, override)
@@ -2101,14 +2117,14 @@ class ObjectCompositeRuntimeController {
 
     if (this.backgroundProbeCache.coordinateSpace === 'background-local') {
       const backgroundLocalBounds = getBackgroundLocalBounds(backgroundTarget);
-      const environmentProxy = (live2DManager as any).getEnvironmentLayerProxy?.(BACKGROUND_LAYER_ID) as EnvironmentLayerProxySnapshot | null | undefined;
+      const environmentProxy = live2DManager.getEnvironmentLayerProxy?.(BACKGROUND_LAYER_ID) as EnvironmentLayerProxySnapshot | null | undefined;
       let localRegion = backgroundLocalBounds && worldTargetBounds
         ? mapWorldBoundsToBackgroundLocalRegion(
             backgroundTarget,
             worldTargetBounds,
             backgroundLocalBounds,
             environmentProxy ?? null,
-            environmentProxy ? null : ((live2DManager as any).currentCamera ?? null),
+            environmentProxy ? null : (live2DManager.currentCamera ?? null),
           )
         : null;
       if (backgroundLocalBounds && localRegion) {
@@ -2228,7 +2244,7 @@ class ObjectCompositeRuntimeController {
   private targetHasOwnedFilters(targetId: VisualTargetId, targetType: VisualTargetType): boolean {
     const displayObject = this.getTargetDisplayObject(targetId, targetType);
     return Boolean(
-      ((displayObject?.filters as PIXI.Filter[] | null) || []).some(filter => Boolean((filter as any)[OWNED_FILTER])),
+      ((displayObject?.filters as PIXI.Filter[] | null) || []).some(filter => Boolean((filter as CompositeFilter)[OWNED_FILTER])),
     );
   }
 
@@ -2237,7 +2253,7 @@ class ObjectCompositeRuntimeController {
     if (!targetType) return;
     const displayObject = this.getTargetDisplayObject(targetId, targetType);
     if (!displayObject) return;
-    const remaining = ((displayObject.filters as PIXI.Filter[] | null) || []).filter(filter => !(filter as any)[OWNED_FILTER]);
+    const remaining = ((displayObject.filters as PIXI.Filter[] | null) || []).filter(filter => !(filter as CompositeFilter)[OWNED_FILTER]);
     commitFilters(displayObject, remaining.length > 0 ? remaining : null);
   }
 }

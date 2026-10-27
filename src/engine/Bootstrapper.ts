@@ -108,6 +108,7 @@ import type { ProjectAgentService, ProjectAgentTargetVerificationResult } from '
 import type { ProjectAgentTargetIdentityRef } from '../services/project-agent-service/ProjectAgentTargetIdentity';
 import type { ProjectAgentOverviewSource } from '../services/project-agent-service/ProjectAgentOverviewPort';
 import { createProjectAgentOverviewPort } from '../services/project-agent-service/ProjectAgentOverviewPort';
+import { describeProjectAgentDialogueStyles } from '../services/project-agent-service/ProjectAgentDialogueStyles';
 import type { ProjectAgentReadPorts, ProjectAgentWritePorts } from '../services/project-agent/ProjectAgentPorts';
 import type { ProjectAgentSceneSnapshot } from '../services/project-agent/ProjectAgentPorts';
 import { createProjectAgentProjectReadPorts } from '../services/project-agent/ProjectAgentProjectReadPorts';
@@ -116,6 +117,7 @@ import { createProjectAgentImageReadPort } from '../services/project-agent/Proje
 import { ProjectAgentImageSessionCache } from '../services/project-agent/ProjectAgentImageSessionCache';
 import { ProjectAgentIFileAccessFs } from '../services/project-agent/ProjectAgentProjectFs';
 import type { ProjectState } from '../api/types/project';
+import { DEFAULT_VIDEO_FORMAT } from '../api/types/video-format';
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 
 export type BootstrapAiProseOptions = Omit<
@@ -298,14 +300,17 @@ export interface BootstrapContext {
 export function bootstrap(options?: {
   stores?: { document?: DocumentStore; playback?: PlaybackStore; editor?: EditorStore };
   getScriptEngine?: () => ScriptEngine;
-  getLightingSystem?: () => any;
-  getLive2DManager?: () => any;
+  getLightingSystem?: () => typeof defaultLightingSystem;
+  getLive2DManager?: () => typeof live2DManager;
   aiProse?: BootstrapAiProseOptions;
 }): BootstrapContext {
   const getScriptEngine = options?.getScriptEngine ?? (() => defaultScriptEngine);
   const getLightingSystem = options?.getLightingSystem ?? (() => defaultLightingSystem);
   const getLive2DManager = options?.getLive2DManager ?? (() => live2DManager);
   const disposeDialogueFontSize = settingsManager.subscribeKey('dialogueFontSize', () => {
+    subtitleRenderer.forceUpdate();
+  });
+  const disposeDialogueFontSizeSource = settingsManager.subscribeKey('dialogueFontSizeSource', () => {
     subtitleRenderer.forceUpdate();
   });
   const disposeDialogueTextSpeed = settingsManager.subscribeKey('dialogueTextSpeed', () => {
@@ -368,12 +373,21 @@ export function bootstrap(options?: {
     resolveAsset: (source, assetContext) => sceneAssets.resolveSemanticRuntimeAsset(source, assetContext),
     prepareSource: (source) => sceneAssets.normalizeSemanticSource(source),
   });
+  const stageAdapter = new StageAdapter();
+  let activeVideoFormat = DEFAULT_VIDEO_FORMAT;
+  const setProjectVideoFormat = (format: typeof DEFAULT_VIDEO_FORMAT) => {
+    stageAdapter.setProjectVideoFormat(format);
+    activeVideoFormat = format;
+  };
   const semanticDocumentCoordinator = new SemanticDocumentCoordinator(
     documentStore,
     semanticPipeline,
     projectionRuntime,
     durationSink,
-    async (bundle) => sceneAssets.hydratePreparedRuntimeConfigs(bundle.prepared),
+    async (bundle) => {
+      setProjectVideoFormat(projectSession.getCurrentProject()?.metadata.videoFormat ?? DEFAULT_VIDEO_FORMAT);
+      await sceneAssets.hydratePreparedRuntimeConfigs(bundle.prepared);
+    },
   );
   const semanticAuthoring = new SemanticAuthoringApplicationService(
     documentStore,
@@ -431,6 +445,9 @@ export function bootstrap(options?: {
   };
   const aiProse = createAiProseAuthoringComposition({
     ...options?.aiProse,
+    dialogueDefaults: options?.aiProse?.dialogueDefaults ?? {
+      getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates,
+    },
     ...(aiProseConfiguration ? { configuration: aiProseConfiguration } : {}),
     transport: aiProseTransport,
     pipelineOptions: aiProsePipelineOptions,
@@ -482,6 +499,7 @@ export function bootstrap(options?: {
   const characterAdapter = new CharacterAdapter();
   const customMotionEditing = new CustomMotionEditing({
     store: documentStore, authoring: semanticAuthoring,
+    getFps: () => projectSession.getCurrentProject()?.metadata.videoFormat?.fps ?? DEFAULT_VIDEO_FORMAT.fps,
     authority: new InMemoryCustomMotionEditAuthority(),
     preview: {
       apply: (input) => getScriptEngine()?.previewCustomMotion(input),
@@ -490,12 +508,14 @@ export function bootstrap(options?: {
   });
   const customMotionConversion = new CustomMotionConversion({
     store: documentStore, authoring: semanticAuthoring, editing: customMotionEditing,
+    getFps: () => projectSession.getCurrentProject()?.metadata.videoFormat?.fps ?? DEFAULT_VIDEO_FORMAT.fps,
     sampleMotion: (characterId, motionKey, options) => characterAdapter.sampleMotion(characterId, motionKey, options),
   });
   let editingProject = projectSession.getCurrentProject();
   const disposeMotionProjectLifecycle = projectSession.subscribe(() => {
     const next = projectSession.getCurrentProject();
-    if (!next || next.rootPath !== editingProject?.rootPath || next.metadata.projectId !== editingProject?.metadata.projectId) {
+    if (!next || next.rootPath !== editingProject?.rootPath || next.metadata.projectId !== editingProject?.metadata.projectId
+      || (next.metadata.videoFormat?.fps ?? 60) !== (editingProject?.metadata.videoFormat?.fps ?? 60)) {
       void customMotionConversion.cancel();
       void customMotionEditing.closeActive('project-changed').catch(() => {});
     }
@@ -557,6 +577,7 @@ export function bootstrap(options?: {
             ? { activeScene: { name: activeEntry.name, path: activeEntry.path } }
             : {}),
           scenes: project?.metadata.scenes ?? [],
+          dialogueStyles: describeProjectAgentDialogueStyles(project?.metadata.templates, templatePackageCatalog.getPackages()),
           ...(project?.metadata
             ? { assetRoots: Object.fromEntries(Object.entries(project.metadata.assetRoots)) }
             : {}),
@@ -590,6 +611,7 @@ export function bootstrap(options?: {
     },
   };
   const projectAgentWritePorts: ProjectAgentWritePorts = {
+    dialogueDefaults: { getDialogueDefaults: () => projectSession.getCurrentProject()?.metadata.templates },
     scene: projectAgentReadPorts.scene,
     validation: {
       // Strict authoring gate (ADR0023): source schema + complete semantic
@@ -927,6 +949,14 @@ export function bootstrap(options?: {
     },
     () => [...templatePackageCatalog.getPackages()],
     sceneAssets,
+    (format, commit) => {
+      let previous = activeVideoFormat;
+      return semanticDocumentCoordinator.updateRuntimeConfiguration(
+        () => { previous = activeVideoFormat; setProjectVideoFormat(format); },
+        () => setProjectVideoFormat(previous),
+        commit,
+      );
+    },
   );
   const libraryRoots = new LibraryRoots(
     projectWorkspace,
@@ -1011,7 +1041,8 @@ export function bootstrap(options?: {
     setLoopEnabled: (v: boolean) => getScriptEngine()?.setLoopEnabled(v),
     setSpeed: (s: number) => getScriptEngine()?.setPlaybackSpeed(s),
     getCurrentTime: () => getScriptEngine()?.getCurrentTime() ?? 0,
-    previewTransform: (id: string, updates: any) => getScriptEngine()?.previewTransform(id, updates),
+    previewTransform: (id, updates) => getScriptEngine()?.previewTransform(id, updates),
+    previewEnvironmentLayerTransform: (layerId, updates) => getScriptEngine()?.previewEnvironmentLayerTransform(layerId, updates),
     getDuration: () => getScriptEngine()?.getDuration() ?? 0,
     setSilentMode: (v: boolean) => getScriptEngine()?.setSilentMode(v),
     getBasePath: () => getScriptEngine()?.getBasePath() ?? '',
@@ -1020,7 +1051,6 @@ export function bootstrap(options?: {
   });
 
   const cameraAdapter = new CameraAdapter();
-  const stageAdapter = new StageAdapter();
   const timelineAdapter = new TimelineAdapter(editorStore);
 
   const exportAdapter = new ExportAdapter(
@@ -1036,6 +1066,7 @@ export function bootstrap(options?: {
 
   // 4. Daemons & Sync
   const autoSaveDaemon = new AutoSaveDaemon();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AutoSaveDaemon uses DocumentStore's legacy private listener set; keep this adapter boundary explicit without exposing private store internals.
   const disposeDaemon = autoSaveDaemon.attach(documentStore as any, {
     forceSave: async () => {
       const result = await sceneFileService.save();
@@ -1048,7 +1079,8 @@ export function bootstrap(options?: {
     validationStore,
     projectResources,
     () => getScriptEngine()?.getBasePath() ?? '',
-    (modelPath: string) => characterAdapter.getModelDataFromPath(modelPath)
+    (modelPath: string) => characterAdapter.getModelDataFromPath(modelPath),
+    projectSession,
   );
   validationDaemon.start();
 
@@ -1105,6 +1137,7 @@ export function bootstrap(options?: {
   );
 
   if (typeof window !== 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- This legacy bootstrap bridge patches runtime internals incrementally; typing it as a complete public object would misrepresent the initialization state.
     const publicApi = (window.AeonStagery || {}) as any;
     publicApi.character = characterAdapter;
     publicApi.camera = cameraAdapter;
@@ -1199,6 +1232,7 @@ export function bootstrap(options?: {
       const closeMotionEditing = customMotionEditing.closeActive('disposed');
       const closeMotionConversion = customMotionConversion.dispose();
       disposeDialogueFontSize();
+      disposeDialogueFontSizeSource();
       disposeDialogueTextSpeed();
       playbackAdapter.dispose();
       disposeProjectAgentSupplementRelay();

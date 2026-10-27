@@ -68,6 +68,7 @@ class Live2DManager {
   private basePath: string = '';
   private _isExportMode: boolean = false; // Only used by ExportDialog (fast export path). Bake uses BakeEngine with independent models.
   private _initPromise: Promise<void> | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   private _scriptEngine: any = null;
 
   /**
@@ -182,6 +183,7 @@ class Live2DManager {
   /**
    * Link the ScriptEngine to this manager for transformation proxy synchronization.
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   setScriptEngine(engine: any): void {
     this._scriptEngine = engine;
     setScriptEngineForSetup(engine);
@@ -658,7 +660,7 @@ class Live2DManager {
    * Live2D focus following the target in real time instead of locking the gaze
    * direction captured when the lookAt action first fired.
    */
-  syncLookAtFollows(characterStates: Map<string, any>): void {
+  syncLookAtFollows(characterStates: ReadonlyMap<string, { lookAt?: { target?: string; focus?: readonly [number, number] } | null }>): void {
     if (!this._shouldUpdate && !this._scriptEngine?.isReconstructing) return;
     for (const [id, state] of characterStates) {
       const lookAt = state?.lookAt;
@@ -714,6 +716,10 @@ class Live2DManager {
     return this.characterGeometry.getPoint(id, pointName, out);
   }
 
+  getScreenPoint(id: string, pointName: 'head' | 'chest' | 'feet' | 'center', out?: { x: number; y: number }): { x: number; y: number } | null {
+    return this.characterGeometry.getScreenPoint(id, pointName, out);
+  }
+
   getPosition(id: string): { x: number; y: number } | null {
     return this.getPoint(id, 'center');
   }
@@ -740,9 +746,9 @@ class Live2DManager {
   }
 
   /**
-   * Add a directional rim light to a character using a drop shadow approach.
+   * Add a directional highlight along the character's inner contour.
    */
-  setRimLight(id: string, color: string | number = 0xFFFFFF, intensity: number = 1.0, thickness: number = 10, angle: number = 45, softness: number = 2, duration: number = 1.0, sceneTime?: number): void {
+  setRimLight(id: string, color: string | number = 0xFFFFFF, intensity: number = 1.0, thickness: number = 6, angle: number = 45, softness: number = 2, duration: number = 1.0, sceneTime?: number): void {
     this.rimLights.setRimLight(id, { color, intensity, thickness, angle, softness, duration }, sceneTime);
   }
 
@@ -991,6 +997,7 @@ class Live2DManager {
     console.groupEnd();
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- The legacy scene bridge accesses private transform registries as well as the scene clock; retain this narrow duck-typed boundary without exposing private engine state.
   setEngine(engine: any): void {
     this._scriptEngine = engine;
   }

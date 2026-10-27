@@ -1,50 +1,43 @@
 import { WebSocket, type RawData } from 'ws';
 import { COLLABORATION_LIMITS, parseCollaborationRequestUrl } from './security';
 import type {
-  CollaborationLeaseClientMessageV2,
   CollaborationLeaseClientMessageV3,
-  CollaborationLeaseServerMessageV2,
   CollaborationLeaseServerMessageV3,
-  CollaborationPresenceClientMessageV2,
   CollaborationPresenceClientMessageV3,
 } from '../../src/api/types/collaboration';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
   COLLABORATION_SCHEMA_VERSION_V3,
 } from '../../src/api/types/collaboration';
 import {
-  applyPresencePingV2,
-  connectPresenceSocketV2,
+  applyPresencePingV3,
+  connectPresenceSocketV3,
   createPresenceIdentity,
-  disconnectPresenceSocketV2,
-  handlePresenceSocketMessageV2,
-  type PresenceRegistryV2,
+  disconnectPresenceSocketV3,
+  handlePresenceSocketMessageV3,
+  type PresenceRegistryV3,
 } from './presence';
 import type { CollaborationAssetStore } from './assets';
 import {
-  validateCollaborativeAssetAvailabilityV2,
   validateCollaborativeAssetAvailabilityV3,
 } from './assetAvailability';
 import {
   assertCollaborationProjectId,
-  SingleRoomCollaborationRoomV2,
   SingleRoomCollaborationRoomV3,
-  validateCollaborativeSceneCodecV2,
   validateCollaborativeSceneCodecV3,
 } from './room';
 import {
-  acquireCollaborationLeaseV2,
-  createCollaborationLeaseRegistryV2,
-  expireCollaborationLeasesV2,
-  releaseAllCollaborationLeasesV2,
-  releaseCollaborationLeaseV2,
-  renewCollaborationLeaseV2,
-  type CollaborationLeaseRegistryV2,
+  acquireCollaborationLeaseV3,
+  createCollaborationLeaseRegistryV3,
+  expireCollaborationLeasesV3,
+  releaseAllCollaborationLeasesV3,
+  releaseCollaborationLeaseV3,
+  renewCollaborationLeaseV3,
+  type CollaborationLeaseRegistryV3,
 } from './lease';
 import { isCollaborationLeaseClientMessage } from '../../src/services/collaboration/CollaborationLeaseProtocol';
 
-function createLeaseRegistry(): CollaborationLeaseRegistryV2<WebSocket> {
-  return createCollaborationLeaseRegistryV2<WebSocket>();
+function createLeaseRegistry(): CollaborationLeaseRegistryV3<WebSocket> {
+  return createCollaborationLeaseRegistryV3<WebSocket>();
 }
 
 function rawDataToUint8Array(data: RawData): Uint8Array {
@@ -64,25 +57,25 @@ function rawDataToUtf8(data: RawData): string {
   return Buffer.from(rawDataToUint8Array(data)).toString('utf8');
 }
 
-export interface CollaborationSyncSocketAdapterV2Options {
+export interface CollaborationSyncSocketAdapterV3Options {
   clients: Set<WebSocket>;
-  room: SingleRoomCollaborationRoomV2 | SingleRoomCollaborationRoomV3;
+  room: SingleRoomCollaborationRoomV3;
   assets: CollaborationAssetStore;
-  presence: PresenceRegistryV2<WebSocket>;
-  leases?: CollaborationLeaseRegistryV2<WebSocket>;
-  schemaVersion?: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3;
+  presence: PresenceRegistryV3<WebSocket>;
+  leases?: CollaborationLeaseRegistryV3<WebSocket>;
+  schemaVersion?: typeof COLLABORATION_SCHEMA_VERSION_V3;
   expectedProjectId?: string;
 }
 
-export class CollaborationSyncSocketAdapterV2 {
+export class CollaborationSyncSocketAdapterV3 {
   private static readonly PING_INTERVAL_MS = 3000;
   private static readonly PING_TIMEOUT_MS = 9000;
   private readonly clients: Set<WebSocket>;
-  private readonly room: SingleRoomCollaborationRoomV2 | SingleRoomCollaborationRoomV3;
+  private readonly room: SingleRoomCollaborationRoomV3;
   private readonly assets: CollaborationAssetStore;
-  private readonly presence: PresenceRegistryV2<WebSocket>;
-  private readonly leases: CollaborationLeaseRegistryV2<WebSocket>;
-  private readonly schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V2 | typeof COLLABORATION_SCHEMA_VERSION_V3;
+  private readonly presence: PresenceRegistryV3<WebSocket>;
+  private readonly leases: CollaborationLeaseRegistryV3<WebSocket>;
+  private readonly schemaVersion: typeof COLLABORATION_SCHEMA_VERSION_V3;
   private readonly expectedProjectId?: string;
   private readonly pingTimers = new Map<WebSocket, ReturnType<typeof setInterval>>();
   private readonly pingStartedAt = new Map<WebSocket, number>();
@@ -93,20 +86,16 @@ export class CollaborationSyncSocketAdapterV2 {
   private readonly messageRates = new Map<WebSocket, { startedAt: number; count: number }>();
   private readonly leaseExpiryTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(options: CollaborationSyncSocketAdapterV2Options) {
+  constructor(options: CollaborationSyncSocketAdapterV3Options) {
     this.clients = options.clients;
     this.room = options.room;
     this.assets = options.assets;
     this.presence = options.presence;
-    this.schemaVersion = options.schemaVersion ?? (
-      options.room instanceof SingleRoomCollaborationRoomV3
-        ? COLLABORATION_SCHEMA_VERSION_V3
-        : COLLABORATION_SCHEMA_VERSION_V2
-    );
+    this.schemaVersion = COLLABORATION_SCHEMA_VERSION_V3;
     this.expectedProjectId = options.expectedProjectId;
     this.leases = options.leases ?? createLeaseRegistry();
     this.leaseExpiryTimer = setInterval(() => {
-      const expired = expireCollaborationLeasesV2(this.leases);
+      const expired = expireCollaborationLeasesV3(this.leases);
       for (const record of expired) {
         this.broadcastJson({ type: 'lease:released', schemaVersion: this.schemaVersion, target: record.target });
       }
@@ -135,7 +124,7 @@ export class CollaborationSyncSocketAdapterV2 {
     this.clients.add(socket);
     this.send(socket, Buffer.from(this.room.encodeStateAsUpdate()));
 
-    const connection = connectPresenceSocketV2(this.presence, socket, identity, this.schemaVersion);
+    const connection = connectPresenceSocketV3(this.presence, socket, identity, this.schemaVersion);
     for (const message of connection.socketMessages) {
       this.send(socket, JSON.stringify(message));
     }
@@ -157,11 +146,11 @@ export class CollaborationSyncSocketAdapterV2 {
       this.stopPingMonitoring(socket);
       this.clients.delete(socket);
       this.messageRates.delete(socket);
-      const disconnection = disconnectPresenceSocketV2(this.presence, socket, this.schemaVersion);
+      const disconnection = disconnectPresenceSocketV3(this.presence, socket, this.schemaVersion);
       for (const message of disconnection.broadcastMessages) {
         this.broadcastJson(message);
       }
-      const released = releaseAllCollaborationLeasesV2(this.leases, socket);
+      const released = releaseAllCollaborationLeasesV3(this.leases, socket);
       for (const record of released) {
         this.broadcastJson({ type: 'lease:released', schemaVersion: this.schemaVersion, target: record.target });
       }
@@ -189,7 +178,7 @@ export class CollaborationSyncSocketAdapterV2 {
       if (socket.readyState !== WebSocket.OPEN) return;
       const pendingSince = this.pingStartedAt.get(socket);
       if (pendingSince !== undefined) {
-        if (Date.now() - pendingSince >= CollaborationSyncSocketAdapterV2.PING_TIMEOUT_MS) {
+        if (Date.now() - pendingSince >= CollaborationSyncSocketAdapterV3.PING_TIMEOUT_MS) {
           this.stopPingMonitoring(socket);
           socket.terminate();
         }
@@ -207,11 +196,11 @@ export class CollaborationSyncSocketAdapterV2 {
       const startedAt = this.pingStartedAt.get(socket);
       if (startedAt === undefined) return;
       this.pingStartedAt.delete(socket);
-      const update = applyPresencePingV2(this.presence, socket, Date.now() - startedAt, this.schemaVersion);
+      const update = applyPresencePingV3(this.presence, socket, Date.now() - startedAt, this.schemaVersion);
       if (update) this.broadcastJson(update);
     });
     measure();
-    const timer = setInterval(measure, CollaborationSyncSocketAdapterV2.PING_INTERVAL_MS);
+    const timer = setInterval(measure, CollaborationSyncSocketAdapterV3.PING_INTERVAL_MS);
     timer.unref?.();
     this.pingTimers.set(socket, timer);
   }
@@ -240,7 +229,7 @@ export class CollaborationSyncSocketAdapterV2 {
       socket.close(1009, 'Collaboration message exceeds limit');
       return;
     }
-    let message: CollaborationPresenceClientMessageV2 | CollaborationPresenceClientMessageV3 | undefined;
+    let message: CollaborationPresenceClientMessageV3 | undefined;
     if (!isBinary) {
       try {
         message = JSON.parse(rawDataToUtf8(data));
@@ -249,7 +238,7 @@ export class CollaborationSyncSocketAdapterV2 {
       }
     }
 
-    const presenceResult = handlePresenceSocketMessageV2(
+    const presenceResult = handlePresenceSocketMessageV3(
       this.presence,
       socket,
       isBinary,
@@ -313,23 +302,14 @@ export class CollaborationSyncSocketAdapterV2 {
     try {
       // Reserve the queue budget before copying the payload retained by the mutation queue.
       update = rawDataToUint8Array(data);
-      applyPromise = this.room instanceof SingleRoomCollaborationRoomV3
-        ? this.room.applyUpdate(
-            update,
-            async (state) => {
-              assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
-              validateCollaborativeSceneCodecV3(state);
-              await validateCollaborativeAssetAvailabilityV3(state, this.assets);
-            },
-          )
-        : this.room.applyUpdate(
-            update,
-            async (state) => {
-              assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
-              validateCollaborativeSceneCodecV2(state);
-              await validateCollaborativeAssetAvailabilityV2(state, this.assets);
-            },
-          );
+      applyPromise = this.room.applyUpdate(
+        update,
+        async (state) => {
+          assertCollaborationProjectId(state.collaborationProjectId, this.expectedProjectId);
+          validateCollaborativeSceneCodecV3(state);
+          await validateCollaborativeAssetAvailabilityV3(state, this.assets);
+        },
+      );
     } catch (error) {
       releasePendingUpdate();
       throw error;
@@ -337,9 +317,9 @@ export class CollaborationSyncSocketAdapterV2 {
 
     void applyPromise.then(() => {
       this.broadcastBinary(update, socket);
-    }).catch((error: any) => {
+    }).catch((error: unknown) => {
       const message = error && typeof error === 'object' && 'code' in error
-        ? 'Internal collaboration server error' : error?.message || 'Invalid collaboration update';
+        ? 'Internal collaboration server error' : (error instanceof Error ? error.message : undefined) || 'Invalid collaboration update';
       if (socket.readyState === WebSocket.OPEN) {
         this.send(socket, JSON.stringify({ type: 'collaboration:error', message }));
       }
@@ -348,8 +328,8 @@ export class CollaborationSyncSocketAdapterV2 {
 
   private handleLeaseMessage(
     socket: WebSocket,
-    leaseMessage: CollaborationLeaseClientMessageV2 | CollaborationLeaseClientMessageV3,
-  ): Array<CollaborationLeaseServerMessageV2 | CollaborationLeaseServerMessageV3> {
+    leaseMessage: CollaborationLeaseClientMessageV3,
+  ): Array<CollaborationLeaseServerMessageV3> {
     const peer = this.presence.peersBySocket.get(socket);
     if (!peer) return [];
     if (leaseMessage.schemaVersion !== this.schemaVersion) return [];
@@ -363,20 +343,20 @@ export class CollaborationSyncSocketAdapterV2 {
 
     switch (leaseMessage.type) {
       case 'lease:acquire': {
-        const result = acquireCollaborationLeaseV2(this.leases, socket, clientId, requestId, target);
+        const result = acquireCollaborationLeaseV3(this.leases, socket, clientId, requestId, target);
         if (result.granted) {
-          return [{ type: 'lease:acquired', schemaVersion, requestId, target } as any];
+          return [{ type: 'lease:acquired', schemaVersion, requestId, target }];
         }
-        return [{ type: 'lease:denied', schemaVersion, requestId, target, heldByClientId: result.heldByClientId } as any];
+        return [{ type: 'lease:denied', schemaVersion, requestId, target, heldByClientId: result.heldByClientId }];
       }
       case 'lease:renew': {
-        const renewed = renewCollaborationLeaseV2(this.leases, socket, clientId, requestId, target);
+        const renewed = renewCollaborationLeaseV3(this.leases, socket, clientId, requestId, target);
         return renewed
-          ? [{ type: 'lease:acquired', schemaVersion, requestId, target } as any]
+          ? [{ type: 'lease:acquired', schemaVersion, requestId, target }]
           : [];
       }
       case 'lease:release': {
-        releaseCollaborationLeaseV2(this.leases, socket, clientId, target, requestId);
+        releaseCollaborationLeaseV3(this.leases, socket, clientId, target, requestId);
         return [];
       }
     }

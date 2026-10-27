@@ -5,9 +5,11 @@ import { resolveVec2 } from './utils/math';
 
 export type MoveHandlerFn = (
   this: CameraController,
-  config: CameraMotionConfig,
+  config: CameraMotionConfig & { resolveFocusPosition?: CameraFocusPositionResolver },
   ease: string
 ) => gsap.core.Tween | gsap.core.Timeline;
+
+export type CameraFocusPositionResolver = (characterId: string, part: string) => { x: number; y: number } | null;
 
 export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
@@ -22,15 +24,15 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       characterId, targetPart = 'head', target,
       duration = 2.0, delay = 0,
     } = config;
-    const ox = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetX : undefined) ?? 0;
-    const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
+    const ox = config.focus?.offsetX ?? 0;
+    const oy = config.focus?.offsetY ?? 0;
     
-    const targetZoom = config.zoom !== undefined ? config.zoom : `+=0.3`;
+    const targetZoom: number | string = config.zoom !== undefined ? config.zoom : '+=0.3';
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay }, config.resolveFocusPosition);
     }
-    return this.moveTo({ target: target ?? [0.5, 0.4], zoom: targetZoom as any, duration, ease, delay });
+    return this.moveTo({ target: target ?? [0.5, 0.4], zoom: targetZoom, duration, ease, delay });
   },
 
   /**
@@ -43,15 +45,15 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       characterId, targetPart = 'center', target,
       duration = 2.0, delay = 0,
     } = config;
-    const ox = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetX : undefined) ?? 0;
-    const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
+    const ox = config.focus?.offsetX ?? 0;
+    const oy = config.focus?.offsetY ?? 0;
     
-    const targetZoom = config.zoom !== undefined ? config.zoom : `-=0.3`;
+    const targetZoom: number | string = config.zoom !== undefined ? config.zoom : '-=0.3';
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom as any, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom: targetZoom, duration, ease, delay }, config.resolveFocusPosition);
     }
-    return this.moveTo({ target: target ?? [0.5, 0.5], zoom: targetZoom as any, duration, ease, delay });
+    return this.moveTo({ target: target ?? [0.5, 0.5], zoom: targetZoom, duration, ease, delay });
   },
 
   /**
@@ -62,16 +64,16 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
    */
   pan(config, ease) {
     const { characterId, targetPart = 'chest', target, to, strength, duration = 1.0, delay = 0 } = config;
-    const ox = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetX : undefined) ?? 0;
-    const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
+    const ox = config.focus?.offsetX ?? 0;
+    const oy = config.focus?.offsetY ?? 0;
     
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     const tl = gsap.timeline({ delay });
-    let targetX: any = 0.5;
-    let targetY: any = 0.5;
+    let targetX: number | string = 0.5;
+    let targetY: number | string | undefined = 0.5;
     
     if (to || target) {
       const p = resolveVec2(to || target!);
@@ -84,14 +86,14 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       targetY = undefined;
     }
     
-    const vars: any = { duration, ease, onUpdate: () => this.applyTransform() };
+    const vars: gsap.TweenVars = { duration, ease, onUpdate: () => this.applyTransform() };
     if (targetX !== undefined) vars.x = targetX;
     if (targetY !== undefined) vars.y = targetY;
     
     tl.to(this.state.position, vars, 0);
 
     if (config.zoom !== undefined || config.angle !== undefined) {
-      const anim: any = {};
+      const anim: gsap.TweenVars = {};
       if (config.zoom !== undefined) anim.zoom = config.zoom;
       if (config.angle !== undefined) anim.rotation = config.angle;
       tl.to(this.state, { ...anim, duration, ease, onUpdate: () => this.applyTransform() }, 0);
@@ -110,7 +112,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     const tl = gsap.timeline({ delay });
     const pos = this.state.position as { x: number; y: number };
 
-    let endY: any = 0.7;
+    let endY: number | string = 0.7;
     if (toY !== undefined) {
       endY = toY;
     } else if (strength !== undefined) {
@@ -125,7 +127,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     }, 0);
 
     if (config.zoom !== undefined || config.angle !== undefined) {
-      const anim: any = {};
+      const anim: gsap.TweenVars = {};
       if (config.zoom !== undefined) anim.zoom = config.zoom;
       if (config.angle !== undefined) anim.rotation = config.angle;
       tl.to(this.state, { ...anim, duration, ease, onUpdate: () => this.applyTransform() }, 0);
@@ -144,10 +146,10 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       characterId, targetPart = 'center', target,
       zoom = 1.5, duration = 1.0, delay = 0,
     } = config;
-    const ox = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetX : undefined) ?? 0;
-    const oy = (config.focus && typeof config.focus === 'object' ? (config.focus as any).offsetY : undefined) ?? 0;
+    const ox = config.focus?.offsetX ?? 0;
+    const oy = config.focus?.offsetY ?? 0;
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, offsetX: ox, offsetY: oy, zoom, duration, ease, delay }, config.resolveFocusPosition);
     }
     return this.moveTo({ target: target ?? [0.5, 0.5], zoom, duration, ease, delay });
   },
@@ -164,7 +166,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
       : angle;
 
     if (characterId) {
-      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay });
+      return this.moveTo({ targetCharacter: characterId, targetPart, rotation: totalAngle, zoom: zoomEnd, duration, ease, delay }, config.resolveFocusPosition);
     }
 
     if (target) {
@@ -172,7 +174,7 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     }
 
     const tl = gsap.timeline({ delay });
-    const vars: any = { duration, ease, onUpdate: () => this.applyTransform() };
+    const vars: gsap.TweenVars = { duration, ease, onUpdate: () => this.applyTransform() };
     if (zoomEnd !== undefined) {
       tl.to(this.state, { rotation: totalAngle, zoom: zoomEnd, ...vars }, 0);
     } else {
@@ -235,13 +237,12 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
   /**
    * follow — Continuous character tracking via PixiJS ticker.
    *   Uses smooth lerp towards the character's current position each frame.
-   *   When autoUnfollow is true (default), stops after duration.
+   *   Tracking persists until an explicit release; timing only delays its start.
    */
   follow(config, _ease) {
     const {
-      characterId, duration = 2.0, delay = 0,
+      characterId, delay = 0,
       offset = [0, -0.1], smoothing = 0.85,
-      autoUnfollow = true,
     } = config;
 
     if (!characterId) {
@@ -252,10 +253,6 @@ export const MOVE_HANDLERS: Record<string, MoveHandlerFn> = {
     tl.call(() => {
       this.follow(characterId, { offset, smoothing });
     });
-    if (autoUnfollow) {
-      tl.to({}, { duration }, '>');
-      tl.call(() => this.unfollow());
-    }
     return tl;
   },
 };

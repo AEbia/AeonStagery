@@ -1,5 +1,32 @@
 import type { RuntimeTimelineAction } from '../RuntimeTimelineScene';
-import { computeCameraStateAtTime, type CameraStateResolverDeps } from '../CameraStateResolver';
+import type { CameraFollowConfig, CameraState } from '../../api/types/camera';
+import { computeCameraStateAtTime, findFollowReleaseInstant, type CameraPosition, type CameraStateResolverDeps } from '../CameraStateResolver';
+import { resolveVec2 } from '../utils/math';
+import { computeCameraShakeAtTime, type CameraShakeOffset } from '../CameraShake';
+import { collectCameraDiagnostics, evaluateCameraChannels, getPreparedCameraZoomResolver, type CameraEvaluationOutput, type CameraLogicalReferenceSize } from '../CameraChannelEvaluator';
+
+/** Whether all camera channels can be evaluated without live character geometry. */
+export function usesUnifiedCameraChannels(timeline: readonly RuntimeTimelineAction[]): boolean {
+  return !timeline.some(({ action, params }) => {
+    if (action === 'cameraFollow' || action === 'cameraUnfollow' || action === 'cameraHitchcock') return true;
+    if (action !== 'cameraMotion') return false;
+    const focus: unknown = params.focus;
+    return params.move === 'follow' || params.move === 'dolly'
+      || typeof params.characterId === 'string' || typeof params.targetCharacter === 'string'
+      || (typeof focus === 'object' && focus !== null && 'character' in focus
+        && typeof focus.character === 'string');
+  });
+}
+
+interface CameraCoordinatorDeps extends CameraStateResolverDeps {
+  logicalReferenceSize?: CameraLogicalReferenceSize;
+  revision?: string | number;
+  trajectoryRevision?: string | number;
+  /** Preliminary seeks run before visible models have been materialized. */
+  captureFocus?: boolean;
+  /** Frame reads retain live pursuit, including its frozen position on pause. */
+  retainFollowPosition?: boolean;
+}
 
 interface ResolvedStatePatch {
   position?: { x: number; y: number };
@@ -8,83 +35,170 @@ interface ResolvedStatePatch {
 }
 
 interface CameraMuscle {
-  follow(characterId: string, config?: { offset?: any; smoothing?: number }): void;
+  getState(): CameraState;
+  follow(characterId: string, config?: CameraFollowConfig): void;
   unfollow(): void;
   tickFollow(forceUpdate?: boolean): void;
-  resetShake(): void;
-  getShakeTimeline(): gsap.core.Timeline | null;
+  applyShakeOffset(offset: CameraShakeOffset): void;
   /** Hard-set the given camera channels (baseline restoration on seeks). */
   applyResolvedState(patch: ResolvedStatePatch): void;
 }
 
 export class CameraCoordinator {
   private controller: CameraMuscle;
+  private focusTimeline?: readonly RuntimeTimelineAction[];
+  private focusRevision?: string | number;
+  private readonly focusAnchors = new Map<string, CameraPosition | null>();
+  private activeFollowKey?: string;
+  private activeFollowAction?: RuntimeTimelineAction;
+  // Only the current pursuit and its last release frame are retained. These
+  // are live playback state, never a prepared trajectory or a seek history.
+  private liveFollow?: { action: RuntimeTimelineAction; releaseTime: number };
+  private followRelease?: { action: RuntimeTimelineAction; releaseTime: number; position: CameraPosition };
 
   constructor(controller: CameraMuscle) {
     this.controller = controller;
+  }
+
+  private withCapturedFocus(timeline: readonly RuntimeTimelineAction[], deps: CameraCoordinatorDeps): CameraStateResolverDeps {
+    if (this.focusTimeline !== timeline || this.focusRevision !== deps.revision) {
+      this.focusAnchors.clear();
+      this.focusTimeline = timeline;
+      this.focusRevision = deps.revision;
+      this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
+      this.liveFollow = undefined;
+      this.followRelease = undefined;
+    }
+    return {
+      ...deps,
+      resolveFocusPosition: (characterId, start, part) =>
+        this.resolveFocusPosition(characterId, start, part, deps, deps.captureFocus !== false),
+    };
+  }
+
+  private resolveFocusPosition(
+    characterId: string, start: number, part: string | undefined, deps: CameraCoordinatorDeps, capture: boolean,
+  ): CameraPosition | null {
+    const key = JSON.stringify([characterId, start, part]);
+    if (this.focusAnchors.has(key)) return this.focusAnchors.get(key) ?? null;
+    const anchor = deps.resolveFocusPosition
+      ? deps.resolveFocusPosition(characterId, start, part)
+      : deps.resolveCharacterPositionAtTime
+        ? deps.resolveCharacterPositionAtTime(characterId, start, part)
+        : deps.resolveCharacterPosition?.(characterId, part) ?? null;
+    const point = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y) ? { ...anchor } : null;
+    if (capture) this.focusAnchors.set(key, point);
+    return point;
   }
 
   /**
    * Scan the timeline at the given time and determine the correct
    * camera follow + shake state.
    *
-   * Channel lifecycle authority is the deterministic camera state resolver
-   * (KSM-0003 runtime parity gate): channels no writer covers at/before the
-   * query time are restored to their stage baseline instead of keeping
-   * whatever a GSAP tween or the follow ticker last left behind.
+   * Basic channels use pure evaluation. Character cameras use the visible
+   * stage anchors and the existing follow controller; they never request
+   * isolated model simulation. Explicit trajectory callers remain supported.
    */
   sync(
     time: number,
     timeline: readonly RuntimeTimelineAction[],
-    deps: CameraStateResolverDeps = {},
-  ): void {
-    const resolved = computeCameraStateAtTime(timeline, time, deps);
-
-    // 1. Reconcile Camera Follow (ticker stays registered so forward playback
-    // keeps tracking smoothly).
-    if (resolved.follow) {
-      this.controller.follow(resolved.follow.characterId, {
-        offset: [resolved.follow.offset.x, resolved.follow.offset.y],
-        smoothing: resolved.follow.smoothing,
+    deps: CameraCoordinatorDeps = {},
+  ): CameraEvaluationOutput {
+    if (deps.anchorTrajectories !== undefined || usesUnifiedCameraChannels(timeline)) {
+      const resolved = evaluateCameraChannels({
+        timeline,
+        sceneTime: time,
+        logicalReferenceSize: deps.logicalReferenceSize ?? { width: 1920, height: 1080 },
+        anchorTrajectories: deps.anchorTrajectories ?? [],
+        revision: deps.revision,
+        trajectoryRevision: deps.trajectoryRevision,
       });
-      // Snap to the live anchor first; the deterministic hard-set below wins
-      // for this landing frame.
-      this.controller.tickFollow(true);
-    } else {
       this.controller.unfollow();
+      this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
+      this.controller.applyShakeOffset(resolved.shake);
+      this.controller.applyResolvedState(resolved);
+      return resolved;
     }
+    const evaluationDeps = this.withCapturedFocus(timeline, deps);
+    if (!deps.retainFollowPosition) {
+      this.liveFollow = undefined;
+      this.followRelease = undefined;
+    } else if (this.liveFollow && time >= this.liveFollow.releaseTime) {
+      this.followRelease = { ...this.liveFollow, position: resolveVec2(this.controller.getState().position) };
+      this.liveFollow = undefined;
+    }
+    const resolverDeps: CameraStateResolverDeps = {
+      ...evaluationDeps,
+      resolveZoomAtTime: deps.resolveZoomAtTime ?? getPreparedCameraZoomResolver({ timeline, revision: deps.revision }),
+      resolveLiveFollowRelease: (action, atTime) => this.followRelease?.action === action && atTime >= this.followRelease.releaseTime
+        ? this.followRelease.position : null,
+    };
+    const resolved = computeCameraStateAtTime(timeline, time, resolverDeps);
 
-    // 2. Reconcile Camera Shake
-    let activeShake: RuntimeTimelineAction | null = null;
-    for (const action of timeline) {
-      if (action.action === 'cameraShake') {
+    // Keep pursuit on the live follow ticker. Scene-time reads must not snap
+    // it to the reconstruction approximation or re-register it every frame.
+    if (resolved.follow) {
+      const followKey = JSON.stringify(resolved.follow);
+      let action: RuntimeTimelineAction | undefined;
+      for (const candidate of timeline) {
+        if (candidate.action === 'cameraFollow' && candidate.params.characterId
+          && (candidate.time ?? 0) <= time && (!action || (candidate.time ?? 0) >= (action.time ?? 0))) action = candidate;
+      }
+      const enteringFollow = action !== this.activeFollowAction;
+      if (deps.retainFollowPosition && enteringFollow && action) {
         const start = action.time ?? 0;
-        const duration = action.params?.duration ?? 0.5;
-        if (time >= start && time <= start + duration) {
-          activeShake = action;
+        const actionIndex = timeline.indexOf(action);
+        const prefix = timeline.filter((candidate, index) => (candidate.time ?? 0) < start
+          || ((candidate.time ?? 0) === start && index < actionIndex));
+        const entry = computeCameraStateAtTime(prefix, start, resolverDeps);
+        this.controller.applyResolvedState({ position: entry.position });
+      }
+      if (!deps.retainFollowPosition || this.activeFollowKey !== followKey || enteringFollow) {
+        this.controller.follow(resolved.follow.characterId, {
+          offset: [resolved.follow.offset.x, resolved.follow.offset.y],
+          smoothing: resolved.follow.smoothing,
+        });
+        this.activeFollowKey = followKey;
+      }
+      this.activeFollowAction = action;
+      if (!deps.retainFollowPosition) this.controller.tickFollow(true);
+      // A reconstructed follow can resume playback directly into its release
+      // frame. Register it now so that first frame hands off the live pursuit.
+      if (!this.liveFollow) {
+        if (action) {
+          this.liveFollow = { action, releaseTime: findFollowReleaseInstant(timeline, action) };
         }
       }
+    } else {
+      this.controller.unfollow();
+      this.activeFollowKey = undefined;
+      this.activeFollowAction = undefined;
+      this.liveFollow = undefined;
     }
 
-    // If no active shake on timeline at this time, kill any active shake timeline
-    if (!activeShake) {
-      const shakeTl = this.controller.getShakeTimeline();
-      if (shakeTl) {
-        shakeTl.kill();
-      }
-      this.controller.resetShake();
-    }
+    // 2. Reconstruct finite shake without killing any scheduled timeline.
+    const shake = computeCameraShakeAtTime(timeline, time);
+    this.controller.applyShakeOffset(shake);
 
-    // 3. Hard-set the full reconstructed state. GSAP only re-renders tweens
-    // whose window the playhead actually crosses, so a jump landing in the
-    // post-region of every camera tween (e.g. seeking back out of a long
-    // follow) would otherwise keep whatever the follow ticker or an earlier
-    // render left behind. The resolver output IS the timeline truth for
-    // seek/export; GSAP remains authoritative only while playing forward.
+    // Property tracks and captured focus destinations share the same current-
+    // time evaluation for playback and seeks. Only live pursuit owns position
+    // during frame reads; a seek/export restores its approximate landing frame.
     this.controller.applyResolvedState({
-      position: { ...resolved.position },
+      ...(!deps.retainFollowPosition || !resolved.follow ? { position: { ...resolved.position } } : {}),
       zoom: resolved.zoom,
       rotation: resolved.rotation,
     });
+    return {
+      ...resolved,
+      ...(deps.retainFollowPosition && resolved.follow
+        ? { position: resolveVec2(this.controller.getState().position) } : {}),
+      shake,
+      diagnostics: collectCameraDiagnostics({ timeline, sceneTime: time,
+        logicalReferenceSize: deps.logicalReferenceSize ?? { width: 1920, height: 1080 } }, resolved,
+      // Reading diagnostics cannot capture a previously unqueried focus.
+      (characterId, start, part) => this.resolveFocusPosition(characterId, start, part, deps, false)),
+    };
   }
 }

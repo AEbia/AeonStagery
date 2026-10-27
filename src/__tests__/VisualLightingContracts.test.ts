@@ -38,6 +38,51 @@ function makeDocument(statements: unknown[], visual?: unknown) {
 }
 
 describe('visual and lighting source contracts', () => {
+  it('round-trips bloom radius and interpolates it independently for panorama and character targets', () => {
+    const document = makeDocument([
+      {
+        id: 'panorama-bloom', time: 0, type: 'lighting',
+        params: { effect: 'post', mode: 'set', bloomBlur: 0, durationSeconds: 0 },
+      },
+      {
+        id: 'hero-bloom', time: 0, type: 'lighting',
+        params: { effect: 'post', mode: 'set', target: 'hero', bloomBlur: 0, durationSeconds: 0 },
+      },
+      {
+        id: 'hero-diffusion', time: 1, type: 'lighting',
+        params: { effect: 'post', mode: 'modulate', target: 'hero', bloomBlur: 20, durationSeconds: 2 },
+      },
+      {
+        id: 'hero-reset', time: 4, type: 'lighting',
+        params: { effect: 'post', mode: 'reset', target: 'hero', durationSeconds: 2 },
+      },
+    ]);
+    const saved = sceneDocumentCodec.prepareForSave(document);
+    const compiled = sceneStatementCompiler.compile(sceneDocumentCodec.parseAndValidate(JSON.parse(JSON.stringify(saved))));
+    const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
+    expect(compiled.actions[2].params.bloomBlur).toBe(20);
+    expect(deriveLightingSnapshotAtTime(2, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(10);
+    expect(deriveLightingSnapshotAtTime(3, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(20);
+    expect(deriveLightingSnapshotAtTime(5, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(14);
+    expect(deriveLightingSnapshotAtTime(6, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(8);
+    expect(deriveLightingSnapshotAtTime(0, timeline).postProcessingTargets['character:hero'].bloomBlur).toBe(0);
+    expect(deriveLightingSnapshotAtTime(2, timeline).postProcessing.bloomBlur).toBe(0);
+  });
+
+  it('retains legacy bloom defaults for statements without a diffusion radius', () => {
+    const document = makeDocument([{
+      id: 'legacy-bloom', time: 0, type: 'lighting',
+      params: { effect: 'post', mode: 'set', bloomBloomScale: 0.4 },
+    }]);
+    const saved = sceneDocumentCodec.prepareForSave(document);
+    expect(saved.statements[0].params).not.toHaveProperty('bloomBlur');
+    const compiled = sceneStatementCompiler.compile(saved);
+    const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
+    expect(deriveLightingSnapshotAtTime(1, timeline).postProcessing).toMatchObject({
+      bloomBloomScale: 0.4, bloomThreshold: 0.5, bloomBlur: 8,
+    });
+  });
+
   it('accepts every common blend mode in visual integration and lighting overlay fields', () => {
     expect(BLEND_MODES).toEqual(EXPECTED_BLEND_MODES);
 
@@ -188,8 +233,8 @@ describe('visual and lighting source contracts', () => {
     ]);
     expect(sceneStatementCompiler.compile(document).actions.map((action) => action.params)).toEqual([
       { target: 'panorama', adjGamma: 1.1 },
-      { target: 'hero', adjContrast: 1.2 },
-      { target: 'hero' },
+      { target: 'character:hero', adjContrast: 1.2 },
+      { target: 'character:hero' },
     ]);
   });
 

@@ -7,7 +7,7 @@ import { WmdlConfigRegistry } from '../engine/WmdlConfigRegistry';
 import type { ProjectState } from '../api/types/project';
 import {
   SCENE_SCHEMA_VERSION,
-  SCENE_SCHEMA_VERSION_V4,
+  SCENE_SCHEMA_VERSION_V5,
   type PreparedCompiledScene,
 } from '../api/types/semantic-scene';
 import { SemanticScenePipeline } from '../services/semantic-scene';
@@ -307,8 +307,8 @@ describe('SceneAssetService collaborative asset preparation', () => {
       () => '',
     );
 
-    const projectized = await service.prepareCollaborativeV2SceneDocumentAssetReferences({
-      schemaVersion: SCENE_SCHEMA_VERSION_V4,
+    const projectized = await service.prepareCollaborativeV5SceneDocumentAssetReferences({
+      schemaVersion: SCENE_SCHEMA_VERSION_V5,
       sceneId: 'semantic-scene',
       meta: {
         title: 'Mounted assets',
@@ -436,8 +436,8 @@ describe('SceneAssetService collaborative asset preparation', () => {
       () => '',
     );
 
-    const projectized = await service.prepareCollaborativeV2SceneDocumentAssetReferences({
-      schemaVersion: SCENE_SCHEMA_VERSION_V4,
+    const projectized = await service.prepareCollaborativeV5SceneDocumentAssetReferences({
+      schemaVersion: SCENE_SCHEMA_VERSION_V5,
       sceneId: 'semantic-scene',
       meta: { title: 'Mounted collision' },
       statements: [
@@ -660,7 +660,11 @@ describe('SceneAssetService collaborative asset preparation', () => {
     await service.hydratePreparedRuntimeConfigs(scene);
 
     expect(fileAccess.readFile).toHaveBeenCalledWith('D:/projects/demo/figure/rana/rana.wmdl');
-    expect(registry.get('figure/rana/rana.wmdl')?.modelRelativePath).toBe('D:/projects/demo/figure/rana/model.json');
-    expect(registry.get(runtimeUri)?.subModels[0].modelRelativePath).toBe('D:/projects/demo/figure/rana/face/model.json');
+    expect(registry.get('figure/rana/rana.wmdl')).toMatchObject({
+      modelRelativePath: 'D:/projects/demo/figure/rana/model.json',
+    });
+    expect(registry.get(runtimeUri)).toMatchObject({
+      subModels: [{ modelRelativePath: 'D:/projects/demo/figure/rana/face/model.json' }],
+    });
   });
 });

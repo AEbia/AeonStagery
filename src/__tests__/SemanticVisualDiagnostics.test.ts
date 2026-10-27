@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValidationDaemon } from '../engine/daemons/ValidationDaemon';
+import { projectToScreen } from '../engine/Projection';
 import { DocumentStore } from '../ui/store/DocumentStore';
 import { ValidationStore } from '../ui/store/ValidationStore';
 import {
   sceneDocumentCodec,
-  validateSemanticSceneStructure,
+  validateSemanticSceneStructure as validateWithoutImageMetadata,
 } from '../services/semantic-scene';
 import {
   SEMANTIC_VISUAL_DIAGNOSTIC_CODES,
@@ -12,6 +13,11 @@ import {
 import type { CurrentSceneDocument } from '../api/types/semantic-scene';
 import type { ProjectResourceService } from '../services/io/ProjectResourceService';
 import type { ResourceResolution } from '../api/types/project';
+
+// These geometry fixtures use artwork matching the default stage aspect.
+const validateSemanticSceneStructure = (document: CurrentSceneDocument) => validateWithoutImageMetadata(document, {
+  environmentImageSize: () => ({ width: 1920, height: 1080 }),
+});
 
 function makeDocument(statements: unknown[]): CurrentSceneDocument {
   return sceneDocumentCodec.parseAndValidate({
@@ -251,6 +257,41 @@ describe('semantic visual diagnostics', () => {
     expect(validateSemanticSceneStructure(document)).toEqual([]);
   });
 
+  it('allows another follow after an explicit stop at the same time', () => {
+    const document = makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero',
+      } },
+      { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
+      { id: 'follow_again', time: 3, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero',
+      } },
+    ]);
+
+    const issues = validateSemanticSceneStructure(document);
+
+    expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraFollowStopWithoutActiveTarget, 'follow_stop'))
+      .toBeUndefined();
+    expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraFollowOverlap, 'follow_again'))
+      .toBeUndefined();
+  });
+
+  it('accepts durationless follow starts and stops', () => {
+    const validDocument = makeDocument([
+      { id: 'follow_start', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'start', target: 'hero',
+      } },
+      { id: 'follow_stop', time: 3, type: 'camera', params: { mode: 'follow', operation: 'stop', target: 'hero' } },
+    ]);
+
+    expect(validateSemanticSceneStructure(validDocument)).toEqual([]);
+    expect(() => makeDocument([
+      { id: 'follow_stop_with_duration', time: 1, type: 'camera', params: {
+        mode: 'follow', operation: 'stop', target: 'hero', durationSeconds: 1,
+      } },
+    ])).toThrow(/durationSeconds/);
+  });
+
   it('validates post targets against declared objects without requiring active-time presence', () => {
     const document = makeDocument([
       {
@@ -313,6 +354,10 @@ describe('semantic visual diagnostics', () => {
         time: 1,
         type: 'camera',
         params: { mode: 'move', to: [0.75, 0.5] },
+      },
+      {
+        id: 'reset-before-covered-move', time: 1.99, type: 'camera',
+        params: { mode: 'reset', durationSeconds: 0 },
       },
       {
         id: 'move-pan-zoom-safe',
@@ -394,7 +439,7 @@ describe('semantic visual diagnostics', () => {
         id: 'move-no-bg',
         time: 4,
         type: 'camera',
-        params: { mode: 'move', to: [0.9, 0.5] },
+        params: { mode: 'move', to: [0.9, 0.5], durationSeconds: 0.5 },
       },
       {
         id: 'bg-recover',
@@ -428,7 +473,79 @@ describe('semantic visual diagnostics', () => {
       .toBeDefined();
   });
 
-  it('uses the bottom-most environment layer as the backdrop', () => {
+  it('keeps a scaled backdrop covered when negative depth reduces camera parallax', () => {
+    const document = makeDocument([
+      {
+        id: 'park',
+        time: 0,
+        type: 'environmentLayer',
+        params: { mode: 'set', layerId: 'background', file: 'background/park.png', scale: 1.4, z: -200 },
+      },
+      {
+        id: 'lounge',
+        time: 1.9,
+        type: 'environmentLayer',
+        params: { mode: 'set', layerId: 'background4', file: 'background/lounge.png', scale: 1.15, z: -200 },
+      },
+      {
+        id: 'move-covered',
+        time: 16.6,
+        type: 'camera',
+        params: {
+          mode: 'move', to: [0.75, 0.5], zoom: { kind: 'absolute', value: 1 },
+          rotation: 0, durationSeconds: 1, ease: 'smooth',
+        },
+      },
+    ]);
+
+    expect(issueFor(validateSemanticSceneStructure(document), SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'move-covered'))
+      .toBeUndefined();
+  });
+
+  describe.each(['move', 'focus', 'path'] as const)('%s camera coverage with parallax', mode => {
+    it.each([
+      { depth: -200, position: [0.75, 0.5], background: [0.5, 0.5], exposed: false },
+      { depth: -200, position: [0.5, 0.75], background: [0.5, 0.5], exposed: false },
+      { depth: -200, position: [0.84, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: 0, position: [0.75, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: 200, position: [0.65, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: -500, position: [0.95, 0.5], background: [0.5, 0.5], exposed: false },
+      { depth: -1000, position: [0.75, 0.5], background: [0.5, 0.5], exposed: true },
+      { depth: -200, position: [0.9, 0.5], background: [0.6, 0.5], exposed: false },
+      { depth: -200, position: [0.5, 0.5], background: [0.75, 0.5], exposed: true },
+    ])('matches rendered edges for depth $depth at $position with backdrop at $background', ({ depth, position, background, exposed }) => {
+      const scale = 1.4;
+      const projected = projectToScreen(
+        { x: background[0], y: background[1], scale, parallaxDepth: depth },
+        { position: { x: position[0], y: position[1] }, zoom: 1 },
+        { w: 1, h: 1 },
+      );
+      const halfSize = projected.screenScale / 2;
+      const renderedExposure = projected.screenX - halfSize > 1e-6
+        || projected.screenX + halfSize < 1 - 1e-6
+        || projected.screenY - halfSize > 1e-6
+        || projected.screenY + halfSize < 1 - 1e-6;
+      expect(renderedExposure).toBe(exposed);
+
+      const document = makeDocument([
+        {
+          id: 'backdrop', time: 0, type: 'environmentLayer',
+          params: { mode: 'set', layerId: 'background', file: 'background/room.png', position: background, scale, z: depth },
+        },
+        {
+          id: 'camera', time: 1, type: 'camera',
+          params: mode === 'path'
+            ? { mode, keyframes: [{ time: 0, position: [0.5, 0.5] }, { time: 1, position }] }
+            : mode === 'focus' ? { mode, position } : { mode, to: position },
+        },
+      ]);
+
+      expect(issueFor(validateSemanticSceneStructure(document), SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'camera') !== undefined)
+        .toBe(exposed);
+    });
+  });
+
+  it('allows an upper layer to cover the exposed area of a lower layer', () => {
     const document = makeDocument([
       {
         id: 'bg-room',
@@ -465,7 +582,7 @@ describe('semantic visual diagnostics', () => {
     const issues = validateSemanticSceneStructure(document);
 
     expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'move-pan-unsafe'))
-      .toMatchObject({ message: expect.stringContaining('「room」') });
+      .toBeUndefined();
     expect(issueFor(issues, SEMANTIC_VISUAL_DIAGNOSTIC_CODES.cameraBlackEdge, 'move-pan-covered-by-fog'))
       .toBeUndefined();
   });
@@ -509,14 +626,14 @@ describe('semantic visual diagnostics', () => {
   });
 
   it('leaves a whole missing external library to the project dependency scan', async () => {
-    const { daemon, validationStore, resolveStatus, document } = makeMountDaemon({
+    const { daemon, validationStore, resolveStatus } = makeMountDaemon({
       status: 'mount-unbound',
       mountId: 'library',
       reference: '@mount/library/vocal/line.ogg',
       relativePath: 'vocal/line.ogg',
     });
 
-    await runMountValidation(daemon, document);
+    await runMountValidation(daemon, validationStore);
 
     expect(resolveStatus).toHaveBeenCalledWith('@mount/library/vocal/line.ogg');
     // A missing library is aggregated once per mount by the project dependency
@@ -525,7 +642,7 @@ describe('semantic visual diagnostics', () => {
   });
 
   it('still reports a specific file that is missing from a bound library', async () => {
-    const { daemon, validationStore, document } = makeMountDaemon({
+    const { daemon, validationStore } = makeMountDaemon({
       status: 'asset-missing',
       mountId: 'library',
       reference: '@mount/library/vocal/line.ogg',
@@ -535,7 +652,7 @@ describe('semantic visual diagnostics', () => {
       boundVia: 'project-binding',
     });
 
-    await runMountValidation(daemon, document);
+    await runMountValidation(daemon, validationStore);
 
     expect(issuesForStatement(validationStore, 'mounted-voice')).toEqual([
       expect.objectContaining({
@@ -552,8 +669,9 @@ function makeMountDaemon(resolution: ResourceResolution) {
   const documentStore = new DocumentStore();
   const validationStore = new ValidationStore();
   const resolveStatus = vi.fn(async () => resolution);
+  const project = { rootPath: 'D:/project' };
   const projectResources = {
-    getCurrentProject: () => ({ rootPath: 'D:/project' }),
+    getCurrentProject: () => project,
     resolveForRead: async (relativePath: string) => `D:/project/${relativePath}`,
     resolveStatus,
   } as unknown as ProjectResourceService;
@@ -565,15 +683,20 @@ function makeMountDaemon(resolution: ResourceResolution) {
     params: { speakerId: 'hero', text: 'Missing mount', durationSeconds: 1, voice: '@mount/library/vocal/line.ogg' },
   }]);
   documentStore._replaceCurrentSceneDocumentSnapshot(document);
-  (daemon as any).lastVersion = documentStore.version;
-  return { daemon, validationStore, resolveStatus, document };
+  return { daemon, validationStore, resolveStatus };
 }
 
 async function runMountValidation(
   daemon: ValidationDaemon,
-  document: ReturnType<typeof makeDocument>,
+  validationStore: ValidationStore,
 ): Promise<void> {
-  await (daemon as any).runSemanticAsyncValidation(document);
+  daemon.start();
+  try {
+    daemon.triggerAsyncValidation();
+    await vi.waitFor(() => expect(validationStore.loading).toBe(false));
+  } finally {
+    daemon.dispose();
+  }
 }
 
 function issuesForStatement(validationStore: ValidationStore, actionId: string) {

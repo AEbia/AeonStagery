@@ -19,10 +19,18 @@ import type {
 } from './Live2DRuntimeContracts';
 import type { Live2DRuntimeControlPort } from './Live2DRuntimeControlPort';
 import { finiteOrUndefined, resolveCubismParameterId, resolveHeadAnchorFromSettings } from './modelMetadata';
+import { resolveCubismModelAnchor, type CubismAnchorModel } from './CubismModelAnchors';
 import { applyRuntimeFocus, manageRuntimeFocusAnimations } from '../live2d/runtime/RuntimeFocus';
+import {
+  isExternalPerformanceMethod,
+  isGenericExternalPerformanceMethod,
+  isPerformanceCompatibility,
+  readExpressionNames,
+  readSdkProperty,
+} from './sdkBoundary';
 
 async function registerExternalPerformance(
-  model: any,
+  model: unknown,
   kind: 'motion' | 'expression',
   runtimeKey: string,
   source: PreparedAssetRef,
@@ -36,9 +44,9 @@ async function registerExternalPerformance(
       diagnostics: ['Cubism 3+ submodel identifiers are unavailable; targetSubmodels cannot be resolved safely.'],
     };
   }
-  const method = model?.[`registerExternal${kind === 'motion' ? 'Motion' : 'Expression'}`];
-  const generic = model?.registerExternalPerformance;
-  if (typeof method !== 'function' && typeof generic !== 'function') {
+  const method = readSdkProperty(model, `registerExternal${kind === 'motion' ? 'Motion' : 'Expression'}`);
+  const generic = readSdkProperty(model, 'registerExternalPerformance');
+  if (!isExternalPerformanceMethod(method) && !isGenericExternalPerformanceMethod(generic)) {
     return {
       status: 'incompatible',
       missingParameterIds: [],
@@ -48,10 +56,18 @@ async function registerExternalPerformance(
   }
 
   try {
-    const result = typeof method === 'function'
+    const result = isExternalPerformanceMethod(method)
       ? await method.call(model, runtimeKey, source, metadata)
-      : await generic.call(model, kind, runtimeKey, source, metadata);
-    if (result && typeof result === 'object' && 'status' in result) return result as PerformanceCompatibility;
+      : isGenericExternalPerformanceMethod(generic)
+        ? await generic.call(model, kind, runtimeKey, source, metadata)
+        : undefined;
+    if (isPerformanceCompatibility(result)) return result;
+    if (readSdkProperty(result, 'status') !== undefined) {
+      return {
+        status: 'incompatible', missingParameterIds: [], ignoredParameterIds: [],
+        diagnostics: [`Cubism 3+ external ${kind} registration returned an invalid compatibility report.`],
+      };
+    }
     return { status: 'compatible', missingParameterIds: [], ignoredParameterIds: [], diagnostics: [] };
   } catch (error) {
     return {
@@ -106,9 +122,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
     ])],
     getAvailableExpressions: (model) => {
       const definitions = model?.internalModel?.settings?.expressions;
-      const configured = Array.isArray(definitions)
-        ? definitions.map((definition: any) => definition.Name).filter(Boolean)
-        : Object.keys(definitions ?? {});
+      const configured = readExpressionNames(definitions);
       return [...new Set([...configured, ...(model?.getExternalPerformanceKeys?.('expression') ?? [])])];
     },
     getMotionDuration: (model, motionKey) => model?.getMotionDuration?.(motionKey, 0) ?? 0,
@@ -525,6 +539,7 @@ export class CubismPixiLive2DAdapter implements Live2DRuntimeAdapter {
       .filter(Boolean),
     manageFocusAnimations: (model, action) => manageRuntimeFocusAnimations(this.controls.getFocusControllers(model), action),
     getHeadAnchor: (model) => resolveHeadAnchorFromSettings(model?.internalModel?.settings),
+    getAnchor: (model, anchor) => resolveCubismModelAnchor(model as CubismAnchorModel, anchor),
   };
 
   async init(): Promise<void> {

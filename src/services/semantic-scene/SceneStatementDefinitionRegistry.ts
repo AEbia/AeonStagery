@@ -5,6 +5,7 @@ import type {
   StatementFamily,
   StatementParamsByFamily,
 } from '../../api/types/semantic-scene';
+import { type LightingTarget, lightingTargetKey } from '../../api/types/lighting-target';
 import {
   UnknownSceneDiscriminatorError,
 } from './SceneDocumentContractErrors';
@@ -152,6 +153,19 @@ export class SceneStatementDefinitionRegistry {
     return this.get(family).parseParams(input, path);
   }
 
+  renameCharacterReferences(
+    statement: Pick<SceneStatement, 'type' | 'params'>,
+    currentId: string,
+    nextId: string,
+    characterIds: ReadonlySet<string>,
+  ): boolean {
+    const definition = this.get(statement.type);
+    const params = definition.renameCharacterReferences?.(statement.params as never, currentId, nextId, characterIds);
+    if (!params || params === statement.params) return false;
+    statement.params = params;
+    return true;
+  }
+
   temporalExtent(statement: SceneStatement): number {
     const definition = this.get(statement.type);
     return definition.temporalExtent(statement.params as never);
@@ -211,6 +225,7 @@ export class SceneStatementDefinitionRegistry {
 
   timelineLifecyclePresentation(
     statement: Pick<SceneStatement, 'type' | 'params'>,
+    lightingCharacterIds?: ReadonlySet<string>,
   ): ResolvedSceneStatementLifecyclePresentation | undefined {
     const params = statement.params as unknown as Record<string, unknown>;
     const presentations = this.get(statement.type).lifecyclePresentations ?? [];
@@ -225,7 +240,7 @@ export class SceneStatementDefinitionRegistry {
           ? 'end'
           : undefined;
       if (!boundary) continue;
-      const stateKey = resolveLifecycleStateKey(presentation.target, params);
+      const stateKey = resolveLifecycleStateKey(presentation.target, params, lightingCharacterIds);
       if (!stateKey) continue;
       const transitionDurationField = presentation.transitionDurationFields?.[boundary];
       const transitionDurationValue = transitionDurationField ? params[transitionDurationField] : undefined;
@@ -248,6 +263,7 @@ export class SceneStatementDefinitionRegistry {
 
   timelineStateSpanDependency(
     statement: Pick<SceneStatement, 'type' | 'params'>,
+    lightingCharacterIds?: ReadonlySet<string>,
   ): ResolvedSceneStatementStateSpanDependency | undefined {
     const params = statement.params as unknown as Record<string, unknown>;
     for (const dependency of this.get(statement.type).stateSpanDependencies ?? []) {
@@ -260,7 +276,7 @@ export class SceneStatementDefinitionRegistry {
       ) {
         continue;
       }
-      const stateKey = resolveLifecycleStateKey(dependency.target, params);
+      const stateKey = resolveLifecycleStateKey(dependency.target, params, lightingCharacterIds);
       if (!stateKey) continue;
       return {
         presentationTypeKey: dependency.presentationTypeKey,
@@ -365,6 +381,7 @@ export class SceneStatementDefinitionRegistry {
 function resolveLifecycleStateKey(
   target: TimelineStateSpanTargetRule,
   params: Readonly<Record<string, unknown>>,
+  lightingCharacterIds?: ReadonlySet<string>,
 ): string | undefined {
   const values: string[] = [];
   for (const field of target.fields) {
@@ -373,13 +390,12 @@ function resolveLifecycleStateKey(
     values.push(`${field}=${JSON.stringify(value)}`);
   }
   for (const field of target.optionalFields ?? []) {
-    const value = params[field];
-    // Post-processing's omitted target is the panorama. Keep omitted and
-    // explicit panorama statements in the same lifecycle state span so a
-    // reset/modulate operation cannot accidentally pair with another target.
-    if (value === undefined && target.namespace === 'lighting:post' && field === 'target') {
-      values.push(`${field}=${JSON.stringify('panorama')}`);
-      continue;
+    let value = params[field];
+    // Omitted and explicit defaults must share a lifecycle state span.
+    if (field === 'target'
+      && (target.namespace === 'lighting:post' || target.namespace === 'lighting:blur')) {
+      const effect = target.namespace === 'lighting:post' ? 'post' : 'blur';
+      value = lightingTargetKey(params[field] as LightingTarget | undefined, effect, lightingCharacterIds ?? new Set());
     }
     if (value === undefined) continue;
     if (typeof value !== 'string' || value.length === 0) return undefined;

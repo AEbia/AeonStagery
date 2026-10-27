@@ -309,8 +309,6 @@ export class AiProseDraftPersistence {
   }
 }
 
-export const AiProseDraftRepository = AiProseDraftPersistence;
-
 function validateForSave(draft: DraftSession, expectedStatus: 'active' | 'applied'): DraftSession {
   if (draft.status !== expectedStatus) {
     if (draft.status === 'applied') {

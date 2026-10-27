@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * AeonStagery — Lighting System
  *
@@ -113,6 +114,15 @@ class LightingSystem {
 
     this.rgbSplitFilter = new RGBSplitFilter({ red: [0, 0], green: [0, 0], blue: [0, 0] });
     this.rgbSplitFilter.enabled = false;
+
+    // Parent filters rasterize their entire subtree before Live2D draws.
+    // Follow the current render target so 4K preview and capture keep detail.
+    for (const filter of [
+      this.colorFilter, this.blurFilter, this.bgBlurFilter, this.charBlurFilter,
+      this.godrayFilter, this.bloomFilter, this.adjustmentFilter, this.rgbSplitFilter,
+    ]) {
+      filter.resolution = 'inherit';
+    }
   }
 
   /**
@@ -280,8 +290,8 @@ class LightingSystem {
     this.removeVignette();
 
     const layer = stageManager.getLayer('overlay');
-    const w = 1920;
-    const h = 1080;
+    const w = STAGE_WIDTH;
+    const h = STAGE_HEIGHT;
 
     const canvas = document.createElement('canvas');
     canvas.width = w;
@@ -336,7 +346,7 @@ class LightingSystem {
     const layer = stageManager.getLayer('overlay');
     const flash = new PIXI.Graphics();
     flash.beginFill(color, intensity);
-    flash.drawRect(0, 0, 1920, 1080);
+    flash.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     flash.endFill();
     flash.alpha = 0;
     layer.addChild(flash);
@@ -548,7 +558,7 @@ class LightingSystem {
     });
   }
 
-  deriveLightingSnapshotAtTime(time: number, timeline: readonly any[], visualOverlay: VisualLightingOverlay | null = null): LightingSnapshot {
+  deriveLightingSnapshotAtTime(time: number, timeline: Parameters<typeof deriveLightingSnapshotForTime>[1], visualOverlay: VisualLightingOverlay | null = null): LightingSnapshot {
     return deriveLightingSnapshotForTime(time, timeline, visualOverlay);
   }
 
@@ -623,7 +633,10 @@ class LightingSystem {
     this.bloomFilter.threshold = effective.bloomThreshold;
     this.bloomFilter.bloomScale = effective.bloomBloomScale;
     this.bloomFilter.brightness = effective.bloomBrightness;
-    this.bloomFilter.enabled = !suspendSceneFilters && effective.bloomBloomScale > 0.01;
+    this.bloomFilter.blur = effective.bloomBlur;
+    this.bloomFilter.enabled = !suspendSceneFilters && (
+      effective.bloomBloomScale > 0 || effective.bloomBrightness !== 1
+    );
 
     this.rgbSplitFilter.red = [effective.rgbSplitX, effective.rgbSplitY];
     this.rgbSplitFilter.blue = [-effective.rgbSplitX, -effective.rgbSplitY];
@@ -662,12 +675,12 @@ class LightingSystem {
 
     if (!this.scenePostOverlay) {
       this.scenePostOverlay = new PIXI.Graphics();
-      (this.scenePostOverlay as any).name = 'panorama-post-processing-overlay';
-      (this.scenePostOverlay as any).zIndex = Number.MAX_SAFE_INTEGER;
-      if (typeof (scene as any).addChild === 'function') {
+      this.scenePostOverlay.name = 'panorama-post-processing-overlay';
+      this.scenePostOverlay.zIndex = Number.MAX_SAFE_INTEGER;
+      if (typeof scene.addChild === 'function') {
         scene.addChild(this.scenePostOverlay);
       }
-    } else if (this.scenePostOverlay.parent !== scene && typeof (scene as any).addChild === 'function') {
+    } else if (this.scenePostOverlay.parent !== scene && typeof scene.addChild === 'function') {
       scene.addChild(this.scenePostOverlay);
     }
 
@@ -676,8 +689,8 @@ class LightingSystem {
       ? state.overlayColor
       : parseInt(String(state.overlayColor).replace(/^#/, '0x'), 16);
     const safeColor = Number.isFinite(color) ? color : 0;
-    if (typeof (overlay as any).clear === 'function') {
-      (overlay as any).clear();
+    if (typeof overlay.clear === 'function') {
+      overlay.clear();
     }
     overlay.beginFill(safeColor, 1);
     overlay.drawRect(0, 0, stageManager.getWidth(), stageManager.getHeight());
@@ -685,7 +698,7 @@ class LightingSystem {
     overlay.alpha = intensity;
     overlay.visible = intensity > 0.001;
     overlay.blendMode = state.overlayBlendMode;
-    (overlay as any)._filtersDirty = true;
+    (overlay as typeof overlay & { _filtersDirty?: boolean })._filtersDirty = true;
   }
 
   private shouldSuspendSceneFiltersForWarmup(): boolean {
@@ -702,7 +715,7 @@ class LightingSystem {
       const overlay = new PIXI.Graphics();
       const hex = parseInt(entry.color.replace('#', '0x'));
       overlay.beginFill(hex, 1.0);
-      overlay.drawRect(0, 0, 1920, 1080);
+      overlay.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
       overlay.endFill();
       overlay.alpha = entry.intensity;
       overlay.blendMode = entry.mode;
@@ -749,7 +762,7 @@ class LightingSystem {
     const overlay = new PIXI.Graphics();
     const hex = typeof color === 'string' ? parseInt(color.replace('#', '0x')) : color;
     overlay.beginFill(hex, 1.0);
-    overlay.drawRect(0, 0, 1920, 1080);
+    overlay.drawRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     overlay.endFill();
     overlay.alpha = 0;
     overlay.blendMode = mode;
@@ -869,9 +882,9 @@ class LightingSystem {
       let light = this.authoredPointLights.get(id);
       if (!light || light.destroyed) {
         if (light) this.authoredPointLights.delete(id);
-        light = this.createPointLight(id, entry.x, entry.y, entry.color, entry.radius, this.authoredPointLights);
+        light = this.createPointLight(id, entry.x * STAGE_WIDTH / 1920, entry.y * STAGE_HEIGHT / 1080, entry.color, entry.radius, this.authoredPointLights);
       } else {
-        this.updatePointLight(light, entry.x, entry.y, entry.color, entry.radius);
+        this.updatePointLight(light, entry.x * STAGE_WIDTH / 1920, entry.y * STAGE_HEIGHT / 1080, entry.color, entry.radius);
       }
       light.alpha = entry.alpha;
     });
@@ -1060,7 +1073,7 @@ class LightingSystem {
    * at any given time in the timeline. Highly performant, linear interpolation-aware,
    * and completely deterministic for seek/scrubbing compatibility.
    */
-  reconcile(time: number, timeline: any[]): void {
+  reconcile(time: number, timeline: Parameters<typeof deriveLightingSnapshotForTime>[1]): void {
     this.applySnapshot(this.deriveLightingSnapshotAtTime(time, timeline, this.visualOverlayState));
 
     // Re-trigger continuous godray animation during playback if needed

@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../../engine/StageDimensions';
 import React, { useEffect, useRef } from 'react';
 import { usePlaybackAdapter, useTimelineAdapter } from '../context/AppContext';
 import { useValidationIssues } from '../store/storeHooks';
@@ -8,20 +9,40 @@ import type { TimelineAction } from './semanticTimelineTypes';
 import { resolveVec2 } from '../../engine/utils/math';
 import { IconCheck, IconError, IconExternalLink, IconWarning } from '../icons';
 import { useSemanticTimelineSnapshot, type SemanticTimelineSnapshot } from './useSemanticTimelineSnapshot';
+import type { TransformationProxy } from '../../engine/actions/types';
+import type { ValidationIssue } from '../../api/types/validation';
 
 const ENGINE_SNAPSHOT_SCAN_INTERVAL_MS = 1000 / 15;
+
+interface EngineCameraSnapshot {
+  x: number;
+  y: number;
+  zoom: number;
+  rot: number;
+}
+
+interface EngineCharacterSnapshot {
+  id: string;
+  name: string;
+  proxy: TransformationProxy;
+}
+
+interface EngineSnapshot {
+  cam?: EngineCameraSnapshot;
+  chars?: EngineCharacterSnapshot[];
+}
 
 // -------------------------------------------------------------
 // Tab 1: Engine Snapshot
 // -------------------------------------------------------------
 export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: SceneMeta }> = ({ action, sceneMeta }) => {
   const playbackAdapter = usePlaybackAdapter();
-  const [snapshot, setSnapshot] = React.useState<{cam?: any, chars?: any[]}>({});
+  const [snapshot, setSnapshot] = React.useState<EngineSnapshot>({});
   const lastScanAtRef = useRef(Number.NEGATIVE_INFINITY);
-  const snapshotRef = useRef<{cam?: any, chars?: any[]}>({});
+  const snapshotRef = useRef<EngineSnapshot>({});
   const characterMetaById = React.useMemo(() => {
     const map = new Map<string, { name: string; hasModel: boolean }>();
-    sceneMeta.characters?.forEach((character: any) => {
+    sceneMeta.characters?.forEach((character) => {
       map.set(character.id, {
         name: character.name || character.id,
         hasModel: !!character.model,
@@ -30,7 +51,7 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
     return map;
   }, [sceneMeta]);
 
-  const areSnapshotsEqual = (a: {cam?: any, chars?: any[]}, b: {cam?: any, chars?: any[]}) => {
+  const areSnapshotsEqual = (a: EngineSnapshot, b: EngineSnapshot) => {
     if (!a.cam || !b.cam) {
       return !a.cam && !b.cam && (a.chars?.length || 0) === (b.chars?.length || 0);
     }
@@ -54,8 +75,8 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
       if (
         left.id !== right.id ||
         left.name !== right.name ||
-        Math.round((left.proxy.x / 1920) * 100) !== Math.round((right.proxy.x / 1920) * 100) ||
-        Math.round((left.proxy.y / 1080) * 100) !== Math.round((right.proxy.y / 1080) * 100) ||
+        Math.round((left.proxy.x / STAGE_WIDTH) * 100) !== Math.round((right.proxy.x / STAGE_WIDTH) * 100) ||
+        Math.round((left.proxy.y / STAGE_HEIGHT) * 100) !== Math.round((right.proxy.y / STAGE_HEIGHT) * 100) ||
         Number((left.proxy.z ?? 0).toFixed(1)) !== Number((right.proxy.z ?? 0).toFixed(1)) ||
         Number(left.proxy.scale.toFixed(1)) !== Number(right.proxy.scale.toFixed(1)) ||
         Number(left.proxy.opacity.toFixed(1)) !== Number(right.proxy.opacity.toFixed(1))
@@ -76,7 +97,7 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
       const cam = cameraController.getState();
       const camPos = resolveVec2(cam.position);
 
-      const chars: any[] = [];
+      const chars: EngineCharacterSnapshot[] = [];
       scriptEngine.transformationProxies.forEach((proxy, id) => {
         const cMeta = characterMetaById.get(id);
         if (!cMeta?.hasModel) return;
@@ -148,7 +169,7 @@ export const EngineSnapshotTab: React.FC<{ action?: TimelineAction, sceneMeta: S
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{c.name}</span>
                 <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '4px 8px', borderRadius: 'var(--radius-sm)' }}>
-                  {((c.proxy.x/1920)*100).toFixed(0)}% , {((c.proxy.y/1080)*100).toFixed(0)}% <span style={{ opacity: 0.5 }}>z:{c.proxy.z?.toFixed(1) || '0'}</span>
+                  {((c.proxy.x/STAGE_WIDTH)*100).toFixed(0)}% , {((c.proxy.y/STAGE_HEIGHT)*100).toFixed(0)}% <span style={{ opacity: 0.5 }}>z:{c.proxy.z?.toFixed(1) || '0'}</span>
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -222,7 +243,7 @@ function getEaseSvgPath(ease: string) {
 // -------------------------------------------------------------
 // Tab 3: Diagnostics
 // -------------------------------------------------------------
-export const DiagnosticsTab: React.FC<{ globalIssues?: any[], semanticSnapshot?: SemanticTimelineSnapshot }> = ({ semanticSnapshot }) => {
+export const DiagnosticsTab: React.FC<{ globalIssues?: readonly ValidationIssue[], semanticSnapshot?: SemanticTimelineSnapshot }> = ({ semanticSnapshot }) => {
   const { issues, loading } = useValidationIssues();
   const timelineAdapter = useTimelineAdapter();
   const playbackAdapter = usePlaybackAdapter();

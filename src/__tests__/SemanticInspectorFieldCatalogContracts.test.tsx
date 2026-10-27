@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../ui/context/AppContext', () => ({
+  useOptionalApp: () => null,
   useApp: () => ({
     stores: { editor: { setCopyBuffer: vi.fn() } },
     services: { semanticAuthoring: state.semanticAuthoring },
@@ -242,13 +243,14 @@ describe('semantic Inspector field catalog contracts', () => {
     expect(visualResetKeys).toEqual(['scope', 'target', 'slot', 'mode', 'durationSeconds']);
     expect(postKeys).toEqual(expect.arrayContaining([
       'target',
-      'bloomThreshold', 'bloomBloomScale', 'bloomBrightness', 'rgbSplitX', 'rgbSplitY',
+      'bloomThreshold', 'bloomBloomScale', 'bloomBrightness', 'bloomBlur', 'rgbSplitX', 'rgbSplitY',
       'godrayGain', 'godrayLacunarity', 'godrayAngle', 'adjGamma', 'adjContrast',
       'adjSaturation', 'adjBrightness', 'adjRed', 'adjGreen', 'adjBlue',
       'overlayColor', 'overlayBlendMode', 'overlayIntensity', 'durationSeconds',
     ]));
     expect(materializeSemanticInspectorParams('lighting', { effect: 'post', mode: 'set' })).toMatchObject({
       target: 'panorama',
+      bloomBlur: 8,
       overlayBlendMode: 'multiply',
       overlayIntensity: 0,
     });
@@ -282,10 +284,13 @@ describe('semantic Inspector field catalog contracts', () => {
     expect(rimLightFields.find((field) => field.key === 'thickness')?.valueType).toBe('number');
     expect(rimLightFields.find((field) => field.key === 'angle')?.valueType).toBe('number');
     expect(rimLightFields.find((field) => field.key === 'softness')?.valueType).toBe('number');
+    expect(rimLightFields.find((field) => field.key === 'softness')).toMatchObject({
+      min: '0', popoverMax: '20', step: '0.5',
+    });
     expect(materialized).toMatchObject({
       intensity: 1,
       color: '#ffffff',
-      thickness: 10,
+      thickness: 6,
       angle: 45,
       softness: 2,
       durationSeconds: 0,

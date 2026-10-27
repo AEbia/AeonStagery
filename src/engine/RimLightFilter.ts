@@ -2,13 +2,13 @@ import * as PIXI from 'pixi.js';
 import { PIXI_V8_FILTER_VERTEX } from './PixiV8Filter';
 
 /**
- * A single-pass, alpha-driven rim light for Live2D containers.
+ * A single-pass inner contour light matching WebGAL's highlight-only bevel.
  *
  * DropShadowFilter is a multi-pass filter. Cubism 2 renders with its own GL
  * program and can leave Pixi's shader cache pointing at that program while the
- * filter pipeline is being restored. Keeping the rim light in one pass also
- * makes the intended visual contract explicit: only pixels outside the model
- * alpha receive light; the model body is never recolored by the effect.
+ * filter pipeline is being restored. Evaluate the directional motion-blurred
+ * alpha mask inline so softness does not require another render pass. At
+ * fractional offsets this approximates the two-pass mask's interpolation.
  */
 export const RIM_LIGHT_FRAGMENT = `
 in vec2 vTextureCoord;
@@ -28,22 +28,19 @@ float sampleAlpha(vec2 uv) {
   return texture(uTexture, clamp(uv, uInputClamp.xy, uInputClamp.zw)).a;
 }
 
-float directionalAlpha(vec2 uv, vec2 direction, vec2 tangent, float radius) {
-  vec2 offset = vec2(uInputSize.z * radius, uInputSize.w * radius);
-  float sampleRadius = max(radius, 0.0);
-  float maxAlpha = 0.0;
-
-  maxAlpha = max(maxAlpha, sampleAlpha(uv - direction * offset));
-  maxAlpha = max(maxAlpha, sampleAlpha(uv - direction * offset - tangent * offset * 0.65));
-  maxAlpha = max(maxAlpha, sampleAlpha(uv - direction * offset + tangent * offset * 0.65));
-  maxAlpha = max(maxAlpha, sampleAlpha(uv - tangent * offset * 0.65));
-  maxAlpha = max(maxAlpha, sampleAlpha(uv + tangent * offset * 0.65));
-
-  // Keep a stable center sample when the requested thickness is zero.
-  if (sampleRadius <= 0.0) {
-    maxAlpha = sampleAlpha(uv);
+float maskAlpha(vec2 uv, vec2 transform) {
+  float alpha = sampleAlpha(uv);
+  if (rimSoftness > 0.0) {
+    // WebGAL uses MotionBlurFilter with kernelSize=11, offset=0 and
+    // velocity=-direction*thickness*softness. Its kernel includes the
+    // center sample plus ten taps at i/10 - 0.5 (i=0..9).
+    vec2 velocity = -transform * rimSoftness;
+    for (int i = 0; i < 10; i++) {
+      alpha += sampleAlpha(uv + velocity * (float(i) / 10.0 - 0.5));
+    }
+    alpha /= 11.0;
   }
-  return maxAlpha;
+  return alpha;
 }
 
 void main(void) {
@@ -53,29 +50,22 @@ void main(void) {
     return;
   }
 
-  vec2 direction = normalize(rimDirection);
-  vec2 tangent = vec2(-direction.y, direction.x);
-  float outerAlpha = directionalAlpha(vTextureCoord, direction, tangent, rimThickness);
-  float softness = max(rimSoftness, 0.0);
-  if (softness > 0.0) {
-    float midAlpha = directionalAlpha(vTextureCoord, direction, tangent, rimThickness + softness * 0.5);
-    float farAlpha = directionalAlpha(vTextureCoord, direction, tangent, rimThickness + softness);
-    outerAlpha = max(outerAlpha, midAlpha * 0.65);
-    outerAlpha = max(outerAlpha, farAlpha * 0.3);
-  }
-
-  // Subtract the current alpha and gate by transparent area. This prevents
-  // the source pixels inside the character from becoming a white silhouette.
-  float edgeAlpha = clamp((outerAlpha - source.a) * rimAlpha, 0.0, 1.0);
-  edgeAlpha *= 1.0 - source.a;
-  vec4 rim = vec4(rimColor * edgeAlpha, edgeAlpha);
-  finalColor = source + rim;
+  vec2 transform = rimDirection * rimThickness * uInputSize.zw;
+  float light = maskAlpha(vTextureCoord - transform, transform);
+  float strength = clamp((source.a - light) * rimAlpha, 0.0, 1.0);
+  // Filter textures use premultiplied alpha. Blend in straight color space,
+  // then premultiply again so antialiased edges remain valid PMA pixels.
+  // WebGAL disables bevel shadows, so there is no opposite-side darkening.
+  vec3 sourceColor = source.a > 0.0 ? source.rgb / source.a : vec3(0.0);
+  vec3 highlight = vec3(1.0) - (vec3(1.0) - sourceColor) * (vec3(1.0) - rimColor);
+  finalColor = vec4(mix(sourceColor, highlight, strength) * source.a, source.a);
 }
 `;
 
 export interface RimLightFilterOptions {
   distance?: number;
   rotation?: number;
+  /** Directional mask blur radius in pixels. */
   blur?: number;
   alpha?: number;
   color?: number;
@@ -97,6 +87,8 @@ export class RimLightFilter extends PIXI.Filter {
 
   constructor(options: RimLightFilterOptions = {}) {
     super({
+      resolution: 'inherit',
+      padding: 1,
       glProgram: PIXI.GlProgram.from({
         vertex: PIXI_V8_FILTER_VERTEX,
         fragment: RIM_LIGHT_FRAGMENT,
@@ -121,14 +113,13 @@ export class RimLightFilter extends PIXI.Filter {
     this.alpha = options.alpha ?? 0;
   }
 
-  apply(filterManager: any, input: any, output: any, clearMode?: any): void {
+  override apply(filterManager: PIXI.FilterSystem, input: PIXI.Texture, output: PIXI.RenderSurface, clearMode: boolean): void {
     // Cubism 2 can leave its own program bound while Pixi still caches a
     // previous program. Invalidate that cache immediately before FilterSystem
     // binds this filter so all uniform locations belong to the program in use.
-    // v8 seam: GlShaderSystem.resetState() (v7's shader.reset() is gone; `?.`
-    // on it silently did nothing). Still optional-chained because the WebGPU
-    // renderer exposes no `shader` system at all.
-    filterManager?.renderer?.shader?.resetState?.();
+    // WebGPU has no GL shader system to reset.
+    const shader = filterManager.renderer.shader;
+    if ('resetState' in shader) shader.resetState();
     filterManager.applyFilter(this, input, output, clearMode);
   }
 
@@ -139,7 +130,7 @@ export class RimLightFilter extends PIXI.Filter {
   set distance(value: number) {
     this._distance = Math.max(0, finiteOr(value, 0));
     this.uniforms.rimThickness = this._distance;
-    this.updatePadding();
+    this.updateMaskGeometry();
   }
 
   get rotation(): number {
@@ -159,8 +150,7 @@ export class RimLightFilter extends PIXI.Filter {
 
   set blur(value: number) {
     this._blur = Math.max(0, finiteOr(value, 0));
-    this.uniforms.rimSoftness = this._blur;
-    this.updatePadding();
+    this.updateMaskGeometry();
   }
 
   get alpha(): number {
@@ -184,8 +174,14 @@ export class RimLightFilter extends PIXI.Filter {
     uniform[2] = (this._color & 0xff) / 255;
   }
 
-  private updatePadding(): void {
-    this.padding = this._distance + this._blur * 2;
+  private updateMaskGeometry(): void {
+    this.uniforms.rimSoftness = this._distance > 0 ? this._blur / this._distance : 0;
+    // Cubism's raster coverage can touch the filter frame after its drawable
+    // bounds are rounded. A one-pixel border can therefore contain opacity;
+    // clamping shifted mask taps to it erases part of the head contour. Reserve
+    // the full sampling footprint plus a transparent guard band independently
+    // of the entrance AlphaFilter's temporary padding.
+    this.padding = Math.ceil(this._distance + this._blur * 0.5) + 1;
   }
 }
 

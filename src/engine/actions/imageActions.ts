@@ -1,32 +1,27 @@
 import { stageManager } from '../StageManager';
-import { eventBus } from '../../api/events';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
-let imageActionErrorCounter = 0;
+type ImageActionStagePort = Pick<
+  typeof stageManager,
+  'reportImageError' | 'registerImageAction' | 'beginImageRequest' | 'cancelImageRequest'
+  | 'addImage' | 'transformImage' | 'removeImage'
+>;
+
+const imageActionStage: ImageActionStagePort = stageManager;
 
 function reportImageActionError(id: string | undefined, file: string, error: unknown): void {
-  const reporter = (stageManager as any).reportImageError;
-  if (typeof reporter === 'function') {
-    reporter.call(stageManager, id, file, error);
-    return;
-  }
-
-  const detail = error instanceof Error ? error.message : String(error);
-  void eventBus.emit('toast:show', {
-    id: `image_action_${Date.now()}_${++imageActionErrorCounter}`,
-    message: `Failed to resolve image asset "${file}": ${detail}. Choose an available image resource and retry.`,
-    type: 'error',
-  });
+  imageActionStage.reportImageError(id, file, error);
 }
 
-export function scheduleAddImage(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleAddImage(ctx: SchedulerContext, action: RuntimeActionContract<'addImage'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
   const file = typeof params.file === 'string' ? params.file.trim() : '';
 
-  (stageManager as any).registerImageAction?.({
+  imageActionStage.registerImageAction({
     id: params.id,
     file,
     position: params.position,
@@ -41,16 +36,16 @@ export function scheduleAddImage(ctx: SchedulerContext, action: { time?: number;
     duration: 0.001,
     onStart: () => {
       if (!file) {
-        if (params.id && typeof (stageManager as any).cancelImageRequest === 'function') {
-          (stageManager as any).cancelImageRequest(params.id);
+        if (params.id) {
+          imageActionStage.cancelImageRequest(params.id);
         }
         // Empty paths are script-authoring diagnostics. Playback keeps the
         // layer absent instead of turning an incomplete draft into a toast.
         return;
       }
 
-      const requestVersion = params.id && typeof (stageManager as any).beginImageRequest === 'function'
-        ? (stageManager as any).beginImageRequest(params.id, {
+      const requestVersion = params.id
+        ? imageActionStage.beginImageRequest(params.id, {
           file,
           position: params.position,
           scale: params.scale ?? 1,
@@ -83,14 +78,14 @@ export function scheduleAddImage(ctx: SchedulerContext, action: { time?: number;
             z: params.z,
           };
           if (requestVersion !== undefined) {
-            stageManager.addImage(imageConfig, requestVersion);
+            imageActionStage.addImage(imageConfig, requestVersion);
           } else {
-            stageManager.addImage(imageConfig);
+            imageActionStage.addImage(imageConfig);
           }
         })
         .catch((error) => {
-          if (params.id && requestVersion !== undefined && typeof (stageManager as any).cancelImageRequest === 'function') {
-            (stageManager as any).cancelImageRequest(params.id, requestVersion);
+          if (params.id && requestVersion !== undefined) {
+            imageActionStage.cancelImageRequest(params.id, requestVersion);
           }
           reportImageActionError(params.id, file, error);
           console.error(`[ImageAction] Failed to resolve image asset "${file}":`, error);
@@ -99,14 +94,14 @@ export function scheduleAddImage(ctx: SchedulerContext, action: { time?: number;
   }, t);
 }
 
-export function scheduleTransformImage(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleTransformImage(ctx: SchedulerContext, action: RuntimeActionContract<'transformImage'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
   if (!params.id) return;
 
-  tl.add(stageManager.transformImage({
+  tl.add(imageActionStage.transformImage({
     id: params.id,
     position: params.position,
     scale: params.scale,
@@ -119,12 +114,12 @@ export function scheduleTransformImage(ctx: SchedulerContext, action: { time?: n
   }), t);
 }
 
-export function scheduleRemoveImage(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleRemoveImage(ctx: SchedulerContext, action: RuntimeActionContract<'removeImage'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
   if (!params.id) return;
 
-  tl.add(stageManager.removeImage(params.id, params.duration ?? 0, params.ease), t);
+  tl.add(imageActionStage.removeImage(params.id, params.duration ?? 0, params.ease), t);
 }

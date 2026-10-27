@@ -692,7 +692,8 @@ function parseReceipt(input: unknown, path: string): AiProseDraftSession['receip
     if (!Array.isArray(root[key])) invalid(`${path}.${key}`, 'Expected an array');
   }
   if (root.timeRange !== undefined) expectRecord(root.timeRange, `${path}.timeRange`);
-  return cloneJson(root) as AiProseDraftSession['receipt'];
+  // Keep this as the shallow, backward-compatible legacy receipt boundary; it is not full semantic receipt validation.
+  return cloneJson(root) as unknown as AiProseDraftSession['receipt'];
 }
 
 function parseTaskStatus(value: unknown, path: string): AiProseTaskStatus {
@@ -816,7 +817,7 @@ function setLegacyDefault(root: JsonRecord, key: string, value: unknown): void {
 }
 
 function ensurePlanFingerprint(root: JsonRecord): void {
-  const segmentation = root.segmentation;
+  const segmentation = root.segmentation as JsonRecord | null | undefined;
   if (!segmentation || typeof segmentation !== 'object' || Array.isArray(segmentation)) return;
   if (Object.prototype.hasOwnProperty.call(segmentation, 'planFingerprint')) return;
   if (
@@ -830,7 +831,7 @@ function ensurePlanFingerprint(root: JsonRecord): void {
     segmentation.planFingerprint = createAiProseSegmentationFingerprintFromState(
       root.sourceText,
       root.targetBatchSize,
-      segmentation,
+      segmentation as Parameters<typeof createAiProseSegmentationFingerprintFromState>[2],
     );
     return;
   }
@@ -841,4 +842,4 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-type JsonRecord = Record<string, any>;
+type JsonRecord = Record<string, unknown>;

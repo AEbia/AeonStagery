@@ -606,6 +606,7 @@ async function validatePanelAssets(
 ): Promise<void> {
   const assetRoot = manifest.assets?.root ?? WEBGAL_PACKAGE_ASSET_ROOT;
   for (const style of manifest.dialogueStyles ?? []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Imported WebGAL style parameters vary by template version; keep the dynamic conversion boundary without inventing a closed legacy schema.
     const params = style.params as Record<string, any> | undefined;
     const references = [
       params?.textbox?.image,

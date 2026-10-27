@@ -5,35 +5,26 @@ import {
 } from '../api/types/authoring';
 import {
   SCENE_SCHEMA_VERSION,
-  SCENE_SCHEMA_VERSION_V4,
   type CurrentSceneDocument,
-  type HistoricalSceneDocumentV4,
 } from '../api/types/semantic-scene';
 import type {
   CollaborativeAssetManifest,
-  CollaborativeSceneStateV2,
   CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import type {
   SemanticDocumentProjectionRuntimePort,
 } from '../services/document/DocumentProjectionPorts';
 import { SemanticDocumentCoordinator } from '../services/document/SemanticDocumentCoordinator';
-import { CollaborativeRemoteApplyPipelineV2 } from '../services/collaboration/CollaborativeRemoteApplyPipelineV2';
-import {
-  createCollaborativeSceneStateV2FromDocument,
-} from '../services/collaboration/CollaborativeSceneStateV2';
 import {
   createCollaborativeSceneStateV3FromDocument,
   materializeCollaborativeSceneDocumentV5,
 } from '../services/collaboration/CollaborativeSceneStateV3';
-import { CollaborativeDocumentLayerV2 } from '../services/collaboration/CollaborativeDocumentLayerV2';
 import { CollaborativeDocumentLayerV3 } from '../services/collaboration/CollaborativeDocumentLayerV3';
-import type { CollaborativeClientPortV2 } from '../services/collaboration/CollaborativeClientPortV2';
 import type { CollaborativeClientPortV3 } from '../services/collaboration/CollaborativeClientPortV3';
 import {
   getSceneDocumentCanonicalOrder,
-  SemanticScenePipeline,
   sceneStatementCompiler,
+  SemanticScenePipeline,
 } from '../services/semantic-scene';
 import { preparedSceneToRuntimeTimelineScene } from '../engine/PreparedRuntimeScene';
 import { SemanticAuthoringApplicationService } from '../services/timeline-authoring/SemanticAuthoringApplicationService';
@@ -47,6 +38,7 @@ import {
 import semanticManifest from '../templates/default/manifest.v2.json';
 import { DocumentStore } from '../ui/store/DocumentStore';
 import type { ResourceAuthoringService } from '../services/resource-authoring';
+import { CollaborativeRemoteApplyPipelineV3 } from '../services/collaboration/CollaborativeRemoteApplyPipelineV3';
 
 function makeDocument(): CurrentSceneDocument {
   return {
@@ -105,13 +97,6 @@ function makeDocument(): CurrentSceneDocument {
         },
       },
     ],
-  };
-}
-
-function makeV4Document(): HistoricalSceneDocumentV4 {
-  return {
-    ...makeDocument(),
-    schemaVersion: SCENE_SCHEMA_VERSION_V4,
   };
 }
 
@@ -250,7 +235,7 @@ describe('semantic backend integration', () => {
     ]);
   });
 
-  it('loads and saves v2 source through SceneFileService without decompile', async () => {
+  it('loads and saves v3 source through SceneFileService without decompile', async () => {
     const { store, coordinator } = makeServices();
     const writes: Array<{ path: string; data: string }> = [];
     const fileAccess: IFileAccess = {
@@ -614,18 +599,18 @@ describe('semantic backend integration', () => {
       .toEqual([expect.objectContaining({ id: 'focus' })]);
   });
 
-  it('preserves companion order when materializing collaboration v2 state', async () => {
+  it('preserves companion order when materializing collaboration v3 state', async () => {
     const { store, coordinator } = makeServices();
-    const document = makeV4Document();
+    const document = makeDocument();
     document.statements[0].companions = [
       { id: 'expression', anchor: 'start', offset: 0, type: 'characterPerformance', params: { target: '$speaker', expression: 'smile' } },
       ...(document.statements[0].companions ?? []),
     ];
-    const state = createCollaborativeSceneStateV2FromDocument(document, {
+    const state = createCollaborativeSceneStateV3FromDocument(document, {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
-    const pipeline = new CollaborativeRemoteApplyPipelineV2({ coordinator });
+    const pipeline = new CollaborativeRemoteApplyPipelineV3({ coordinator });
 
     await pipeline.applyWithPreparation(state);
     expect(store.getCurrentSceneDocumentSnapshot()?.statements[0].companions?.map((companion) => companion.id))
@@ -730,27 +715,27 @@ describe('semantic backend integration', () => {
     });
   });
 
-  it('applies collaboration v2 state through the semantic pipeline', async () => {
+  it('applies collaboration v3 state through the semantic pipeline', async () => {
     const { store, coordinator } = makeServices();
-    const state = createCollaborativeSceneStateV2FromDocument(makeV4Document(), {
+    const state = createCollaborativeSceneStateV3FromDocument(makeDocument(), {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
     state.meta.title = 'Remote title';
-    const pipeline = new CollaborativeRemoteApplyPipelineV2({ coordinator });
+    const pipeline = new CollaborativeRemoteApplyPipelineV3({ coordinator });
     await pipeline.applyWithPreparation(state);
     expect(store.getCurrentSceneDocumentSnapshot()?.meta.title).toBe('Remote title');
   });
 
   it('applies joined collaboration state to the project default scene path for local saves', async () => {
     const { store, coordinator } = makeServices();
-    const state = createCollaborativeSceneStateV2FromDocument(makeV4Document(), {
+    const state = createCollaborativeSceneStateV3FromDocument(makeDocument(), {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
     state.meta.title = 'Joined main scene';
     const writes: Array<{ path: string | undefined; title: string | undefined }> = [];
-    const pipeline = new CollaborativeRemoteApplyPipelineV2({
+    const pipeline = new CollaborativeRemoteApplyPipelineV3({
       coordinator,
       getApplyScenePath: () => 'D:/project/project/main.scene.json',
       afterApplyState: async (_state, document, path) => {
@@ -765,9 +750,9 @@ describe('semantic backend integration', () => {
     expect(writes).toEqual([{ path: 'D:/project/project/main.scene.json', title: 'Joined main scene' }]);
   });
 
-  it('joins a collaboration v2 layer and applies the initial remote document', async () => {
+  it('joins a collaboration v3 layer and applies the initial remote document', async () => {
     const { store, coordinator } = makeServices();
-    const state = createCollaborativeSceneStateV2FromDocument(makeV4Document(), {
+    const state = createCollaborativeSceneStateV3FromDocument(makeDocument(), {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
@@ -775,7 +760,7 @@ describe('semantic backend integration', () => {
     const stateListeners = new Set<(next: typeof state | null) => void>();
     const connectionListeners = new Set<(connected: boolean) => void>();
     const prepareLocalState = vi.fn();
-    const client: CollaborativeClientPortV2 = {
+    const client: CollaborativeClientPortV3 = {
       join: vi.fn(async () => state),
       seed: vi.fn(async () => undefined),
       getState: vi.fn(() => state),
@@ -791,7 +776,7 @@ describe('semantic backend integration', () => {
       connectRealtime: async () => connectionListeners.forEach((listener) => listener(true)),
       isRealtimeConnected: () => true,
     };
-    const layer = new CollaborativeDocumentLayerV2({
+    const layer = new CollaborativeDocumentLayerV3({
       documentStore: store,
       coordinator,
       client,
@@ -809,14 +794,14 @@ describe('semantic backend integration', () => {
 
   it('does not require server scene agreement for subsequent remote script edits', async () => {
     const { store, coordinator } = makeServices();
-    const state = createCollaborativeSceneStateV2FromDocument(makeV4Document(), {
+    const state = createCollaborativeSceneStateV3FromDocument(makeDocument(), {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
     const stateListeners = new Set<(next: typeof state | null) => void>();
     const connectionListeners = new Set<(connected: boolean) => void>();
     const beforeApplyState = vi.fn(async (..._args: unknown[]) => undefined);
-    const client: CollaborativeClientPortV2 = {
+    const client: CollaborativeClientPortV3 = {
       join: vi.fn(async () => state),
       seed: vi.fn(async () => undefined),
       getState: vi.fn(() => state),
@@ -832,7 +817,7 @@ describe('semantic backend integration', () => {
       connectRealtime: async () => connectionListeners.forEach((listener) => listener(true)),
       isRealtimeConnected: () => true,
     };
-    const layer = new CollaborativeDocumentLayerV2({
+    const layer = new CollaborativeDocumentLayerV3({
       documentStore: store,
       coordinator,
       client,
@@ -929,17 +914,17 @@ describe('semantic backend integration', () => {
     localDocument.meta.title = 'Explicit host title';
     await coordinator.applyDocument(localDocument);
 
-    const remoteDocument = makeV4Document();
+    const remoteDocument = makeDocument();
     remoteDocument.meta.title = 'Stale server title';
-    const remoteState = createCollaborativeSceneStateV2FromDocument(remoteDocument, {
+    const remoteState = createCollaborativeSceneStateV3FromDocument(remoteDocument, {
       collaborationProjectId: 'project-1',
       roomId: 'room-1',
     });
-    let currentState: CollaborativeSceneStateV2 | null = remoteState;
-    const stateListeners = new Set<(next: CollaborativeSceneStateV2 | null) => void>();
+    let currentState: CollaborativeSceneStateV3 | null = remoteState;
+    const stateListeners = new Set<(next: CollaborativeSceneStateV3 | null) => void>();
     const connectionListeners = new Set<(connected: boolean) => void>();
     const beforeApplyState = vi.fn(async () => undefined);
-    const client: CollaborativeClientPortV2 = {
+    const client: CollaborativeClientPortV3 = {
       join: vi.fn(async () => remoteState),
       seed: vi.fn(async (state) => {
         currentState = state;
@@ -958,7 +943,7 @@ describe('semantic backend integration', () => {
       connectRealtime: async () => connectionListeners.forEach((listener) => listener(true)),
       isRealtimeConnected: () => true,
     };
-    const layer = new CollaborativeDocumentLayerV2({
+    const layer = new CollaborativeDocumentLayerV3({
       documentStore: store,
       coordinator,
       client,
@@ -973,7 +958,7 @@ describe('semantic backend integration', () => {
     expect(client.seed).not.toHaveBeenCalled();
     expect(beforeApplyState).toHaveBeenCalledTimes(1);
     const [, hostApplyOptions] = beforeApplyState.mock.calls[0] as unknown as [
-      CollaborativeSceneStateV2,
+      CollaborativeSceneStateV3,
       { requireServerSceneAgreement: boolean },
     ];
     expect(hostApplyOptions).toMatchObject({ requireServerSceneAgreement: true });

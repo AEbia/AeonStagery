@@ -430,14 +430,14 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .validation-pill--error {
-  color: var(--error);
+  color: var(--error-text);
   border-color: color-mix(in srgb, var(--error) 30%, transparent);
   background: color-mix(in srgb, var(--error) 9%, var(--bg-surface));
   animation: uiSoftPulse 1800ms var(--ease-standard) infinite;
 }
 
 .validation-pill--warning {
-  color: var(--warning);
+  color: var(--warning-text);
   border-color: color-mix(in srgb, var(--warning) 34%, transparent);
   background: color-mix(in srgb, var(--warning) 10%, var(--bg-surface));
 }
@@ -459,7 +459,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .collaboration-trigger--connected {
-  color: var(--success);
+  /* §5.6: text uses a readable shade; decoration keeps the semantic color. */
+  color: var(--success-text);
   border-color: color-mix(in srgb, var(--success) 28%, transparent);
   background: color-mix(in srgb, var(--success) 10%, var(--bg-surface));
 }

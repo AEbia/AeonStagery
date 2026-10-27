@@ -1,9 +1,56 @@
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { replaceFileWithPlatformCompatibility } from '../file-replacement';
+import { createWindowSenderGuards, type IpcWindowContext } from './windows';
 
-export function registerFileSystemHandlers() {
+export function registerFileSystemHandlers(windows?: IpcWindowContext) {
+  const guards = windows ? createWindowSenderGuards(windows) : undefined;
+  async function resolveNativePath(filePath: unknown): Promise<string> {
+    if (typeof filePath !== 'string' || !filePath.trim()
+      || /[\u0000-\u001f]/.test(filePath)
+      || !path.isAbsolute(filePath)
+      || (/^[a-z][a-z\d+.-]*:/i.test(filePath) && !/^[a-z]:[\\/]/i.test(filePath))) {
+      throw new Error('只能定位绝对文件系统路径。');
+    }
+    const absolutePath = await fs.promises.realpath(filePath);
+    if (!path.isAbsolute(absolutePath)) throw new Error('无法解析为绝对文件系统路径。');
+    if (/\.asar[\\/]/i.test(absolutePath)) {
+      throw new Error('此资源位于应用安装包中，请先导入项目再定位。');
+    }
+    return absolutePath;
+  }
+
+  ipcMain.handle('fs:showItemInFolder', async (event, filePath: unknown) => {
+    try {
+      if (!guards?.isMainWindowFrameSender(event)) throw new Error('无法从此窗口定位文件。');
+      const absolutePath = await resolveNativePath(filePath);
+      shell.showItemInFolder(absolutePath);
+      return { success: true };
+    } catch (error: unknown) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { success: false, error: '文件不存在或已移动，请检查路径后重试。' };
+      }
+      return { success: false, error: error instanceof Error ? error.message : '文件定位失败，请检查文件是否存在。' };
+    }
+  });
+
+  ipcMain.handle('fs:openFolder', async (event, folderPath: unknown) => {
+    try {
+      if (!guards?.isMainWindowFrameSender(event)) throw new Error('无法从此窗口打开文件夹。');
+      const absolutePath = await resolveNativePath(folderPath);
+      if (!(await fs.promises.stat(absolutePath)).isDirectory()) throw new Error('目标不是文件夹。');
+      const error = await shell.openPath(absolutePath);
+      if (error) throw new Error(error);
+      return { success: true };
+    } catch (error: unknown) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { success: false, error: '文件夹不存在或已移动，请检查资源库设置后重试。' };
+      }
+      return { success: false, error: error instanceof Error ? error.message : '文件夹打开失败，请重试。' };
+    }
+  });
+
   function resolveFileSystemPath(filePath: string): string {
     if (typeof filePath !== 'string' || filePath.trim().length === 0) {
       throw new Error('File path must be a non-empty string');
@@ -22,8 +69,8 @@ export function registerFileSystemHandlers() {
       const buffer = await fs.promises.readFile(absolutePath);
       const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
       return { success: true, data };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -35,8 +82,8 @@ export function registerFileSystemHandlers() {
         : path.resolve(app.getAppPath(), filePath);
       const text = fs.readFileSync(absolutePath, 'utf-8');
       return { success: true, data: text };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -56,8 +103,8 @@ export function registerFileSystemHandlers() {
           path: path.join(absolutePath, e.name),
         })),
       };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -78,8 +125,8 @@ export function registerFileSystemHandlers() {
           mtimeMs: lstat.mtimeMs,
         },
       };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -90,8 +137,8 @@ export function registerFileSystemHandlers() {
         ? filePath
         : path.resolve(app.getAppPath(), filePath);
       return { success: true, data: fs.realpathSync(absolutePath) };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -113,8 +160,8 @@ export function registerFileSystemHandlers() {
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, Buffer.from(data));
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -128,8 +175,8 @@ export function registerFileSystemHandlers() {
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
       fs.writeFileSync(absolutePath, data, 'utf-8');
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -140,8 +187,8 @@ export function registerFileSystemHandlers() {
         : path.resolve(app.getAppPath(), dirPath);
       fs.mkdirSync(absolutePath, { recursive: true });
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -156,8 +203,8 @@ export function registerFileSystemHandlers() {
       await fs.promises.mkdir(path.dirname(absoluteDest), { recursive: true });
       await fs.promises.copyFile(absoluteSource, absoluteDest);
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
 
@@ -167,8 +214,8 @@ export function registerFileSystemHandlers() {
       const absoluteDestination = resolveFileSystemPath(destinationPath);
       await replaceFileWithPlatformCompatibility(absoluteSource, absoluteDestination);
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -176,8 +223,8 @@ export function registerFileSystemHandlers() {
     try {
       await fs.promises.rm(filePath, { force: true });
       return { success: true };
-    } catch (error: any) {
-      return { success: false, error: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 }

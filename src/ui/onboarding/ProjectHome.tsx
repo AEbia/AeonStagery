@@ -11,6 +11,7 @@ import type {
 import type { CollaborationAssetHandshakeState } from '../../services/collaboration/CollaborationAssetHandshake';
 import type { TemplatePackageSummary } from '../../services/template-package';
 import type { RecentProjectEntry } from '../SettingsStore';
+import { FileRevealButton, FileRevealContext } from '../FileRevealActions';
 import { CollaborationAssetHandshakePanel } from '../CollaborationAssetHandshakePanel';
 import {
   buildAvailableCharacterPresets,
@@ -28,6 +29,8 @@ import {
 } from '../../services/import/webgal';
 import { InfoTip, Tooltip } from '../Tooltip';
 import { useModalDialog } from '../hooks/useModalDialog';
+import { VideoFormatFields } from '../VideoFormatFields';
+import { DEFAULT_VIDEO_FORMAT, validateVideoFormat, type ProjectVideoFormat } from '../../api/types/video-format';
 import './projectHome.css';
 
 interface WebGalAssetSource {
@@ -65,7 +68,7 @@ interface ProjectHomeProps {
   externalLibraryPaths: string[];
   templatePackages?: TemplatePackageSummary[];
   recentProjects: RecentProjectEntry[];
-  onCreateProject: (payload: { name: string; rootPath: string; templates?: ProjectTemplateConfiguration; webgal?: WebGalImportInput }) => void | Promise<void>;
+  onCreateProject: (payload: { name: string; rootPath: string; videoFormat?: ProjectVideoFormat; templates?: ProjectTemplateConfiguration; webgal?: WebGalImportInput }) => void | Promise<void>;
   onBrowseCreateLocation: (currentPath: string) => Promise<string | null>;
   onRegisterWebGalAssetSource: () => Promise<WebGalAssetSource | null>;
   onBrowseCollaborationDirectory: (currentPath: string) => Promise<string | null>;
@@ -75,7 +78,7 @@ interface ProjectHomeProps {
   onOpenRecentProject: (projectFilePath: string) => void | Promise<void>;
   onRenameRecentProject: (project: RecentProjectEntry) => void;
   onRemoveRecentProject: (projectFilePath: string) => void;
-  onHostNewCollaboration: (payload: { name: string; rootPath: string; displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
+  onHostNewCollaboration: (payload: { name: string; rootPath: string; videoFormat?: ProjectVideoFormat; displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
   onHostExistingCollaboration: (payload: { displayName: string; port: number; allowNetwork?: boolean; password?: string }) => void | Promise<void>;
   onJoinCollaboration: (payload: { endpoint: string; displayName: string; rootPath: string; password?: string }) => void | Promise<void>;
   onStopCollaborationServer: () => void | Promise<void>;
@@ -161,6 +164,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const [createView, setCreateView] = useState<CreateView>('form');
   const [transitionDirection, setTransitionDirection] = useState<'forward' | 'backward'>('forward');
   const [projectName, setProjectName] = useState(defaultProjectName);
+  const [videoFormat, setVideoFormat] = useState<ProjectVideoFormat>({ ...DEFAULT_VIDEO_FORMAT });
+  const videoFormatError = validateVideoFormat(videoFormat);
   const [projectRootPath, setProjectRootPath] = useState(defaultRootPath);
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>(() => templatePackages.map((templatePackage) => templatePackage.id));
   const hasCustomizedTemplateSelectionRef = useRef(false);
@@ -394,13 +399,14 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const handleCreate = async () => {
     const trimmedName = projectName.trim();
     const trimmedRootPath = projectRootPath.trim().replace(/[\\/]+$/, '');
-    if (!trimmedName || !trimmedRootPath || isSubmitting) return;
+    if (!trimmedName || !trimmedRootPath || isSubmitting || videoFormatError) return;
 
     setIsSubmitting(true);
     try {
       await onCreateProject({
         name: trimmedName,
         rootPath: trimmedRootPath,
+        videoFormat,
         templates: {
           enabledTemplateIds: selectedTemplateIds,
           defaults: Object.keys(defaultOverrides).length > 0 ? defaultOverrides : undefined,
@@ -456,8 +462,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       const next = [...webgalScriptFiles, ...loaded];
       setWebgalScriptFiles(next);
       setWebgalScriptReport(mergeScriptsReport(next, webgalSpeed, webgalChapterTransition));
-    } catch (error: any) {
-      window.alert(`读取 WebGAL 剧本失败：${error?.message || String(error)}`);
+    } catch (error: unknown) {
+      window.alert(`读取 WebGAL 剧本失败：${(error instanceof Error ? error.message : String(error))}`);
     } finally {
       setIsReadingWebgalScript(false);
     }
@@ -595,13 +601,14 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const handleHostNew = async () => {
     const trimmedName = hostProjectName.trim();
     const trimmedRootPath = hostProjectRootPath.trim().replace(/[\\/]+$/, '');
-    if (!trimmedName || !trimmedRootPath || isSubmitting) return;
+    if (!trimmedName || !trimmedRootPath || isSubmitting || videoFormatError) return;
 
     setIsSubmitting(true);
     try {
       await onHostNewCollaboration({
         name: trimmedName,
         rootPath: trimmedRootPath,
+        videoFormat,
         displayName: collaborationName.trim() || '导演',
         port: parseCollaborationPort(),
         allowNetwork,
@@ -807,6 +814,13 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                     </div>
                   </Field>
                 </div>
+
+                <section className="ph-stagger-3" aria-labelledby="create-video-title">
+                  <h3 id="create-video-title" className="ph-field-label">画布与帧率</h3>
+                  <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="create-video" disabled={isSubmitting} />
+                  <p className="video-format__message">分辨率和帧率将保存在此项目中，创建后可在画布设置中调整。</p>
+                  {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
+                </section>
 
                 <div className="ph-stagger-3">
                   <TemplatePackageSelector
@@ -1028,7 +1042,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
                     onClick={() => { void handleCreate(); }}
-                    disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting}
+                    disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting || !!videoFormatError}
                   >
                     {isSubmitting ? '正在创建...' : '创建项目'}
                   </button>
@@ -1384,6 +1398,12 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                     </label>
                   </div>
                 </div>
+                <section aria-labelledby="host-video-title">
+                  <h3 id="host-video-title" className="ph-field-label">画布与帧率</h3>
+                  <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="host-video" disabled={isSubmitting} />
+                  <p className="video-format__message">保存在此项目中；协作成员需使用相同的画布与帧率。</p>
+                  {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
+                </section>
                 <div className="ph-footer-row">
                   <div className="ph-hint-text">
                     <span>{allowNetwork ? '连接范围还受系统防火墙和路由器端口转发规则影响' : '仅本机连接'}</span>
@@ -1391,7 +1411,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                   <button
                     className="btn btn--primary ph-btn-primary-compact"
                     onClick={() => { void handleHostNew(); }}
-                    disabled={!hostProjectName.trim() || !hostProjectRootPath.trim() || isSubmitting}
+                    disabled={!hostProjectName.trim() || !hostProjectRootPath.trim() || isSubmitting || !!videoFormatError}
                   >
                     {isSubmitting ? '正在主持...' : '创建并主持'}
                   </button>
@@ -1605,6 +1625,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                 {recentProjects.length > 0 ? (
                   <div className="ph-recent-list">
                     {recentProjects.slice(0, MAX_RECENT_PROJECTS).map((project) => (
+                      <FileRevealContext key={`${project.projectFilePath}:${project.lastOpenedAt}`} path={project.projectFilePath} name={project.name}>
                       <div
                         key={`${project.projectFilePath}:${project.lastOpenedAt}`}
                         className="ph-recent-item"
@@ -1625,6 +1646,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           <span className="ph-recent-time">{formatRecentTime(project.lastOpenedAt)}</span>
                         </button>
                         <div className="ph-recent-actions">
+                          <FileRevealButton path={project.projectFilePath} name={project.name} compact />
                           <button
                             type="button"
                             className="btn btn--icon"
@@ -1646,6 +1668,7 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
                           </button>
                         </div>
                       </div>
+                      </FileRevealContext>
                     ))}
                   </div>
                 ) : (

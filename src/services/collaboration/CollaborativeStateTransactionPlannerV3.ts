@@ -6,13 +6,13 @@ import type {
 import {
   addCollaborativeTombstonesForDeletedRecordsV3,
   filterTombstonedCollaborativeRecordsV3,
-} from './CollaborativeStateTombstonesV2';
+} from './CollaborativeStateTombstonesV3';
 import { jsonEquals } from './CollaborativeJson';
 
 export {
   addCollaborativeTombstonesForDeletedRecordsV3,
   filterTombstonedCollaborativeRecordsV3,
-} from './CollaborativeStateTombstonesV2';
+} from './CollaborativeStateTombstonesV3';
 
 export interface CollaborativeStateTransactionCapabilitiesV3 {
   statements: boolean;

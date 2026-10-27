@@ -8,12 +8,14 @@ export interface TimelineAction {
   _seq?: number;
   time?: number;
   action: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Timeline presentation combines heterogeneous statement/companion parameter schemas; retain their open presentation shape and validate writes in authoring.
   params: Record<string, any>;
   semanticType?: StatementFamily;
   semanticCategory?: StatementCategory;
   semanticLabel?: string;
   semanticIconKey?: string;
   /** Source statement/companion params carried for the semantic inspector cutover. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Timeline presentation combines heterogeneous statement/companion parameter schemas; retain their open presentation shape and validate writes in authoring.
   sourceParams?: Record<string, any>;
   /**
    * ADR-0022 placeholder presentation only: for uncompiled characterPerformance

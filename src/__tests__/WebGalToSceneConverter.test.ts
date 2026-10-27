@@ -12,6 +12,8 @@ import {
   sceneStatementCompiler,
 } from '../services/semantic-scene';
 import { convertWebGalToSceneDocument, joinWebGalScriptTexts } from '../services/import/webgal/WebGalToSceneConverter';
+import { resolveRimLightStateAtTime } from '../engine/RimLightResolver';
+import { deriveLightingSnapshotAtTime } from '../engine/LightingSnapshot';
 
 const SAMPLE_SCRIPT = readFileSync(join(process.cwd(), 'src/__tests__/fixtures/webgal-sample-script.txt'), 'utf8');
 
@@ -746,7 +748,7 @@ describe('convertWebGalToSceneDocument', () => {
     expect(params.target).toBe('background');
   });
 
-  it('maps bevel onto the character rim-light edge light', () => {
+  it('maps bevel onto the character inner contour highlight', () => {
     const { document } = convertWebGalToSceneDocument(
       'changeFigure:soyo/model.json -id=1 '
       + '-transform={"bevel":1,"bevelThickness":8,"bevelRed":255,"bevelGreen":183,"bevelBlue":0,"bevelRotation":30,"bevelSoftness":0.8};',
@@ -761,7 +763,72 @@ describe('convertWebGalToSceneDocument', () => {
     expect(params.thickness).toBe(8);
     expect(params.color).toBe('#ffb700');
     expect(params.angle).toBe(30);
-    expect(params.softness).toBe(0.8);
+    expect(params.softness).toBeCloseTo(6.4);
+  });
+
+  it.each([
+    { transform: { bevelThickness: 8 }, intensity: 0, thickness: 8 },
+    { transform: { bevel: 0.8 }, intensity: 0.8, thickness: 0 },
+    { transform: { bevel: 0.8, bevelThickness: 8 }, intensity: 0.8, thickness: 8 },
+    { transform: { bevelRotation: 90 }, intensity: 0, thickness: 0, angle: 90 },
+    { transform: { bevelSoftness: 0.8 }, intensity: 0, thickness: 0, softness: 0 },
+    { transform: { bevelRed: 0 }, intensity: 0, thickness: 0, color: '#00ffff' },
+  ])('materializes WebGAL bevel defaults for $transform', ({ transform, intensity, thickness, angle, softness, color }) => {
+    const { document } = convertWebGalToSceneDocument(
+      `changeFigure:soyo/model.json -id=1 -duration=0 -transform=${JSON.stringify(transform)};`,
+    );
+    const params = paramsOf(firstByType(document, 'visualStyle'), 'visualStyle');
+    const expected = {
+      intensity, thickness,
+      angle: angle ?? 0,
+      softness: softness ?? 0,
+      color: color ?? '#ffffff',
+    };
+    expect(params).toMatchObject(expected);
+    const compiled = sceneStatementCompiler.compile(sceneDocumentCodec.parseAndValidate(document));
+    expect(resolveRimLightStateAtTime({
+      visual: compiled.visual,
+      timeline: compiled.actions.map((action) => ({ ...action, _id: action.id })),
+    }, compiled.durationSeconds).get('soyo')).toMatchObject({
+      ...expected,
+      alpha: intensity,
+    });
+  });
+
+  it('reports background bevel controls even when only rotation or color is supplied', () => {
+    const { document, report } = convertWebGalToSceneDocument(
+      'changeBg:A.png -transform={"bevelRotation":90,"bevelRed":0};',
+    );
+    expect(statementsOf(document, 'visualStyle')).toHaveLength(0);
+    expect(report.notes.some((note) => note.message.includes('bevel'))).toBe(true);
+  });
+
+  it('keeps previously assigned bevel controls across partial transforms per character', () => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bevelThickness":8,"bevelRed":0};'
+      + 'changeFigure:anon/model.json -id=2 -transform={"bevel":1};'
+      + 'setTransform:{"bevel":0.8,"bevelRotation":30} -target=1;'
+      + 'setTransform:{"bevelGreen":0,"bevelSoftness":0.8} -target=1;'
+      + 'setTransform:{"bevel":0} -target=1;',
+    );
+    const rims = statementsOf(document, 'visualStyle').map((statement) => paramsOf(statement, 'visualStyle'));
+    expect(rims[1]).toMatchObject({ target: 'anon', intensity: 1, thickness: 0, color: '#ffffff' });
+    expect(rims[2]).toMatchObject({ target: 'soyo', intensity: 0.8, thickness: 8, color: '#00ffff', angle: 30 });
+    expect(rims[3]).toMatchObject({ target: 'soyo', intensity: 0.8, thickness: 8, color: '#0000ff', angle: 30, softness: 6.4 });
+    expect(rims[4]).toMatchObject({ target: 'soyo', intensity: 0, thickness: 8, color: '#0000ff' });
+  });
+
+  it.each(['changeFigure:none -id=1;', 'chapterBreak:none;'])('clears a previous bevel when a figure re-enters after %s', (exit) => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bevel":1,"bevelThickness":8};'
+      + exit + 'changeFigure:soyo/model.json -id=1;',
+    );
+    const compiled = sceneStatementCompiler.compile(document);
+    const states = resolveRimLightStateAtTime({
+      visual: compiled.visual,
+      timeline: compiled.actions.map((action) => ({ ...action, _id: action.id })),
+    }, compiled.durationSeconds);
+    expect(states.get('soyo')).toMatchObject({ alpha: 0, thickness: 0, angle: 0, softness: 0 });
   });
 
   it('maps bloom, rgbFilm and godrayFilm onto lighting statements', () => {
@@ -770,14 +837,60 @@ describe('convertWebGalToSceneDocument', () => {
       + '-transform={"bloom":1,"bloomThreshold":0.8,"rgbFilm":1,"godrayFilm":1};',
     );
     const lighting = statementsOf(document, 'lighting');
-    const post = lighting.find((statement) => paramsOf(statement, 'lighting').effect === 'post');
+    const post = lighting.filter((statement) => paramsOf(statement, 'lighting').effect === 'post').at(-1);
     const postParams = paramsOf(post!, 'lighting');
     if (postParams.effect !== 'post') throw new Error('expected post');
     expect(postParams.bloomThreshold).toBe(0.8);
     expect(postParams.bloomBrightness).toBe(1);
+    expect(postParams).toMatchObject({ target: 'soyo', bloomBloomScale: 1, bloomBlur: 0 });
     expect(postParams.rgbSplitX).toBeGreaterThan(0);
     const godrays = lighting.find((statement) => paramsOf(statement, 'lighting').effect === 'godrays');
     expect(godrays).toBeDefined();
+  });
+
+  it('preserves all four bloom controls and sticky partial updates independently per target', () => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bloom":0.7,"bloomBrightness":1.1,"bloomBlur":20,"bloomThreshold":0.6};'
+      + 'changeFigure:anon/model.json -id=2 -transform={"bloom":0.3};'
+      + 'changeBg:room.png -transform={"bloomBlur":12};'
+      + 'setTransform:{"bloomBlur":30} -target=1;'
+      + 'setTransform:{"bloom":0,"bloomBrightness":1,"bloomBlur":0,"bloomThreshold":0} -target=1;',
+    );
+    const posts = statementsOf(document, 'lighting')
+      .map((statement) => paramsOf(statement, 'lighting'))
+      .filter((params) => params.effect === 'post' && params.durationSeconds !== 0);
+    expect(posts).toHaveLength(5);
+    expect(posts[0]).toMatchObject({ target: 'soyo', bloomBloomScale: 0.7, bloomBrightness: 1.1, bloomBlur: 20, bloomThreshold: 0.6 });
+    expect(posts[1]).toMatchObject({ target: 'anon', bloomBloomScale: 0.3, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0 });
+    expect(posts[2]).toMatchObject({ target: 'background', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 12, bloomThreshold: 0 });
+    expect(posts[3]).toMatchObject({ target: 'soyo', bloomBloomScale: 0.7, bloomBrightness: 1.1, bloomBlur: 30, bloomThreshold: 0.6 });
+    expect(posts[4]).toMatchObject({ target: 'soyo', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0 });
+  });
+
+  it('starts imported bloom transitions from WebGAL defaults without changing panorama state', () => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -duration=1000 -transform={"bloom":1,"bloomBlur":20,"bloomThreshold":0.6};',
+    );
+    const compiled = sceneStatementCompiler.compile(document);
+    const timeline = compiled.actions.map((action) => ({ ...action, _id: action.id }));
+    const snapshot = deriveLightingSnapshotAtTime(0.5, timeline);
+    expect(snapshot.postProcessingTargets['character:soyo']).toMatchObject({
+      bloomBloomScale: 0.5, bloomBrightness: 1, bloomBlur: 10, bloomThreshold: 0.3,
+    });
+    expect(snapshot.postProcessing).toMatchObject({ bloomBloomScale: 0, bloomBlur: 8, bloomThreshold: 0.5 });
+  });
+
+  it.each(['changeFigure:none -id=1;', 'chapterBreak:none;'])('clears bloom when a figure re-enters after %s', (exit) => {
+    const { document } = convertWebGalToSceneDocument(
+      'changeFigure:soyo/model.json -id=1 -transform={"bloom":1,"bloomBlur":20};'
+      + exit + 'changeFigure:soyo/model.json -id=1;',
+    );
+    const posts = statementsOf(document, 'lighting')
+      .map((statement) => paramsOf(statement, 'lighting'))
+      .filter((params) => params.effect === 'post');
+    expect(posts.at(-1)).toMatchObject({
+      target: 'soyo', bloomBloomScale: 0, bloomBrightness: 1, bloomBlur: 0, bloomThreshold: 0, durationSeconds: 0,
+    });
   });
 
   it('reports dropped filters instead of silently losing them', () => {

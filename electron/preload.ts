@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AeonStageryElectronAPI } from '../src/api/types/window';
+import type { UpdateStatus } from '../src/api/types/updater';
 import type {
   WorkspaceRuntimeSnapshot,
   WorkspaceToolsCommand,
@@ -40,9 +42,13 @@ import type { WebGalScssImportInstallRequest } from '../src/api/types/template-p
  * AeonStagery Preload Bridge
  * Exposes safe IPC methods to the renderer process.
  */
-contextBridge.exposeInMainWorld('aeonStageryAPI', {
+const electronAPI = {
   // ─── File System ───────────────────────────────────────
   fs: {
+    showItemInFolder: (filePath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('fs:showItemInFolder', filePath),
+    openFolder: (folderPath: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('fs:openFolder', folderPath),
     readFile: (filePath: string) =>
       ipcRenderer.invoke('fs:readFile', filePath),
     readTextFile: (filePath: string) =>
@@ -70,9 +76,9 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
 
   // ─── Dialogs ───────────────────────────────────────────
   dialog: {
-    showSave: (options: any) =>
+    showSave: (options: Parameters<AeonStageryElectronAPI['dialog']['showSave']>[0]) =>
       ipcRenderer.invoke('dialog:showSave', options),
-    showOpen: (options: any) =>
+    showOpen: (options: Parameters<AeonStageryElectronAPI['dialog']['showOpen']>[0]) =>
       ipcRenderer.invoke('dialog:showOpen', options),
   },
   templates: {
@@ -268,10 +274,11 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
   export: {
     saveVideo: (videoBuffer: ArrayBuffer, outputPath: string) =>
       ipcRenderer.invoke('export:saveVideo', videoBuffer, outputPath),
-    convert: (inputPath: string, outputPath: string, options?: any) =>
+    convert: (inputPath: string, outputPath: string, options?: Parameters<AeonStageryElectronAPI['export']['convert']>[2]) =>
       ipcRenderer.invoke('ffmpeg:convert', inputPath, outputPath, options),
     getTempDir: () => ipcRenderer.invoke('ffmpeg:getTempDir'),
-    startStreamExport: (outputPath: string, options?: any) =>
+    getEncodingCapabilities: () => ipcRenderer.invoke('ffmpeg:getEncodingCapabilities'),
+    startStreamExport: (outputPath: string, options?: Parameters<AeonStageryElectronAPI['export']['startStreamExport']>[1]) =>
       ipcRenderer.invoke('ffmpeg:startStreamExport', outputPath, options),
     pushFrame: (frameData: Uint8Array | Uint8ClampedArray) =>
       ipcRenderer.invoke('ffmpeg:pushFrame', frameData),
@@ -281,7 +288,7 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       ipcRenderer.invoke('ffmpeg:endStreamExport'),
     cancelExport: () => ipcRenderer.invoke('ffmpeg:cancelExport'),
     onLog: (callback: (msg: string) => void) => {
-      const listener = (_event: any, msg: string) => callback(msg);
+      const listener = (_event: Electron.IpcRendererEvent, msg: string) => callback(msg);
       ipcRenderer.on('ffmpeg:log', listener);
       return () => ipcRenderer.removeListener('ffmpeg:log', listener);
     }
@@ -304,8 +311,8 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
     checkForUpdates: (source?: 'oss' | 'github') => ipcRenderer.invoke('updater:checkForUpdates', source),
     downloadUpdate: () => ipcRenderer.invoke('updater:downloadUpdate'),
     installUpdate: () => ipcRenderer.invoke('updater:installUpdate'),
-    onStatus: (callback: (status: any) => void) => {
-      const listener = (_event: any, status: any) => callback(status);
+    onStatus: (callback: (status: UpdateStatus) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => callback(status);
       ipcRenderer.on('updater:status', listener);
       return () => ipcRenderer.removeListener('updater:status', listener);
     },
@@ -313,27 +320,27 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
 
   // ─── GPT-SoVITS ───────────────────────────────────────
   gptSovits: {
-    status: (config: any) =>
+    status: (config: Parameters<AeonStageryElectronAPI['gptSovits']['status']>[0]) =>
       ipcRenderer.invoke('gptSovits:status', config),
-    start: (config: any) =>
+    start: (config: Parameters<AeonStageryElectronAPI['gptSovits']['start']>[0]) =>
       ipcRenderer.invoke('gptSovits:start', config),
     stop: () =>
       ipcRenderer.invoke('gptSovits:stop'),
-    generateDialogueVoice: (input: any) =>
+    generateDialogueVoice: (input: Parameters<AeonStageryElectronAPI['gptSovits']['generateDialogueVoice']>[0]) =>
       ipcRenderer.invoke('gptSovits:generateDialogueVoice', input),
   },
 
   voiceAuthoring: {
-    scanCatalog: (request: any) => ipcRenderer.invoke('voiceAuthoring:scanCatalog', request),
+    scanCatalog: (request: Parameters<AeonStageryElectronAPI['voiceAuthoring']['scanCatalog']>[0]) => ipcRenderer.invoke('voiceAuthoring:scanCatalog', request),
     pickReferenceAudio: (multiple: boolean) => ipcRenderer.invoke('voiceAuthoring:pickReferenceAudio', multiple),
     listPresets: () => ipcRenderer.invoke('voiceAuthoring:listPresets'),
     resolveReference: (presetId: string, referenceId: string) => ipcRenderer.invoke('voiceAuthoring:resolveReference', presetId, referenceId),
-    savePreset: (request: any) => ipcRenderer.invoke('voiceAuthoring:savePreset', request),
+    savePreset: (request: Parameters<AeonStageryElectronAPI['voiceAuthoring']['savePreset']>[0]) => ipcRenderer.invoke('voiceAuthoring:savePreset', request),
     renamePreset: (presetId: string, name: string) => ipcRenderer.invoke('voiceAuthoring:renamePreset', presetId, name),
     duplicatePreset: (presetId: string, name?: string) => ipcRenderer.invoke('voiceAuthoring:duplicatePreset', presetId, name),
     deletePreset: (presetId: string) => ipcRenderer.invoke('voiceAuthoring:deletePreset', presetId),
     publishTemplateProfile: (presetId: string) => ipcRenderer.invoke('voiceAuthoring:publishTemplateProfile', presetId),
-    generateCandidate: (request: any) => ipcRenderer.invoke('voiceAuthoring:generateCandidate', request),
+    generateCandidate: (request: Parameters<AeonStageryElectronAPI['voiceAuthoring']['generateCandidate']>[0]) => ipcRenderer.invoke('voiceAuthoring:generateCandidate', request),
     clearSession: (sessionId: string) => ipcRenderer.invoke('voiceAuthoring:clearSession', sessionId),
   },
 
@@ -385,4 +392,6 @@ contextBridge.exposeInMainWorld('aeonStageryAPI', {
       return () => ipcRenderer.removeListener('workspaceTools:windowState', listener);
     },
   },
-});
+} satisfies AeonStageryElectronAPI;
+
+contextBridge.exposeInMainWorld('aeonStageryAPI', electronAPI);

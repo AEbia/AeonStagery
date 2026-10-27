@@ -1,5 +1,5 @@
 export interface DirectoryPickerPort {
-  showOpen(options: { title: string; properties: string[] }): Promise<{ canceled: boolean; filePaths?: string[] }>;
+  showOpen(options: { title: string; properties: Array<'openDirectory'> }): Promise<{ canceled: boolean; filePaths?: string[] }>;
 }
 
 export interface SettingsDialogPolicy {

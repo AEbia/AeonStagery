@@ -1,8 +1,9 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import type { TransformationProxy } from '../actions/types';
 
 const DEFAULTS: TransformationProxy = {
-  x: 960,
-  y: 540,
+  get x() { return STAGE_WIDTH / 2; },
+  get y() { return STAGE_HEIGHT / 2; },
   scale: 1,
   rotation: 0,
   opacity: 1,

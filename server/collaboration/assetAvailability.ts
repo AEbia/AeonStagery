@@ -2,17 +2,14 @@ import { createHash } from 'node:crypto';
 import type {
   CollaborativeAssetFileEntry,
   CollaborativeAssetManifestEntry,
-  CollaborativeSceneStateV2,
   CollaborativeSceneStateV3,
   ContentHash,
   ProjectRelativeAssetPath,
 } from '../../src/api/types/collaboration';
 import type {
-  HistoricalSceneDocumentV4,
   SceneDocumentV5,
   SceneStatement,
 } from '../../src/api/types/semantic-scene';
-import { materializeCollaborativeSceneDocumentV4 } from '../../src/services/collaboration/CollaborativeSceneStateV2';
 import { materializeCollaborativeSceneDocumentV5 } from '../../src/services/collaboration/CollaborativeSceneStateV3';
 import {
   hashCollaborativeAssetBundle,
@@ -188,7 +185,7 @@ function addSourceAssetRef(refs: Set<ProjectRelativeAssetPath>, value: string | 
 }
 
 function collectSceneDocumentAssetReferenceKeys(
-  document: HistoricalSceneDocumentV4 | SceneDocumentV5,
+  document: SceneDocumentV5,
 ): ProjectRelativeAssetPath[] {
   const refs = new Set<ProjectRelativeAssetPath>();
 
@@ -222,30 +219,6 @@ function collectSceneDocumentAssetReferenceKeys(
   }
 
   return Array.from(refs).sort();
-}
-
-function collectSceneDocumentV4AssetReferenceKeys(document: HistoricalSceneDocumentV4): ProjectRelativeAssetPath[] {
-  return collectSceneDocumentAssetReferenceKeys(document);
-}
-
-export async function validateCollaborativeAssetAvailabilityV2(
-  state: CollaborativeSceneStateV2,
-  assetStore: CollaborationAssetStore,
-): Promise<void> {
-  const document = materializeCollaborativeSceneDocumentV4(state);
-  const requiredAssetRefs = collectSceneDocumentV4AssetReferenceKeys(document);
-  const manifest = state.assets ?? {};
-
-  for (const projectRelativePath of requiredAssetRefs) {
-    const entry = manifest[projectRelativePath];
-    if (!entry) {
-      fail(`missing manifest entry for referenced asset "${projectRelativePath}"`);
-    }
-  }
-
-  for (const [entryKey, entry] of Object.entries(manifest)) {
-    await verifyManifestEntry(assetStore, entryKey, entry);
-  }
 }
 
 export async function validateCollaborativeAssetAvailabilityV3(

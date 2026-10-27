@@ -17,6 +17,24 @@ type RecentLibraryItem = {
   id: string;
 };
 
+type StatementLibrarySelectionData = { blockId: string } | { templateId: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function hasArrayItems(value: unknown, key: string, minimumLength: number): boolean {
+  if (!isRecord(value)) return false;
+  const items = value[key];
+  return Array.isArray(items) && items.length >= minimumLength;
+}
+
+function getArrayLength(value: unknown, key: string): number | null {
+  if (!isRecord(value)) return null;
+  const items = value[key];
+  return Array.isArray(items) ? items.length : null;
+}
+
 const readRecentItems = (): RecentLibraryItem[] => {
   if (typeof window === 'undefined') return [];
 
@@ -46,26 +64,21 @@ export const isMultiStatementCombo = (t: SourcedSemanticAuthoringCombo): boolean
       case 'timelineFragment':
         return (
           (t.payload.statements?.length ?? 0) > 1 ||
-          ((t.payload.statements?.[0] as any)?.companions?.length ?? 0) > 0
+          hasArrayItems(t.payload.statements?.[0], 'companions', 1)
         );
       default:
         break;
     }
-    if (Array.isArray((t.payload as any).statements)) {
-      return (t.payload as any).statements.length > 1;
-    }
+    const payloadStatementCount = getArrayLength(t.payload, 'statements');
+    if (payloadStatementCount !== null) return payloadStatementCount > 1;
   }
-  if (Array.isArray((t as any).statements)) {
-    return (t as any).statements.length > 1;
-  }
-  if (Array.isArray((t as any).actions)) {
-    return (t as any).actions.length > 1;
-  }
-  return false;
+  const statementCount = getArrayLength(t, 'statements');
+  if (statementCount !== null) return statementCount > 1;
+  return (getArrayLength(t, 'actions') ?? 0) > 1;
 };
 
 export const StatementBlockLibrary: React.FC<{
-  onSelectAction?: (type: 'statement' | 'template', data: any) => void;
+  onSelectAction?: (type: 'statement' | 'template', data: StatementLibrarySelectionData) => void;
   templates?: SourcedSemanticAuthoringCombo[];
   style?: React.CSSProperties;
   className?: string;
@@ -190,7 +203,7 @@ export const StatementBlockLibrary: React.FC<{
   };
 
   // Click handlers instead of drag
-  const handleSelect = (type: 'statement' | 'template', id: string, data: any) => {
+  const handleSelect = (type: 'statement' | 'template', id: string, data: StatementLibrarySelectionData) => {
     if (isOffline) {
       showToast('共享编辑已暂停；请重新加入后才能编辑。', 'warning');
       return;
@@ -305,7 +318,7 @@ export const StatementBlockLibrary: React.FC<{
                     );
                   }
 
-                  const IconComp = (ActionIcons as any)[entry.statement.icon] || (ActionIcons as any).default;
+                  const IconComp = ActionIcons[entry.statement.icon as keyof typeof ActionIcons] || ActionIcons.default;
                   return (
                     <button
                       key={`statement:${entry.statement.id}`}
@@ -371,7 +384,7 @@ export const StatementBlockLibrary: React.FC<{
                           );
                         }
 
-                        const IconComp = (ActionIcons as any)[entry.statement.icon] || (ActionIcons as any).default;
+                        const IconComp = ActionIcons[entry.statement.icon as keyof typeof ActionIcons] || ActionIcons.default;
                         return (
                           <button
                             key={`statement:${entry.statement.id}`}
@@ -443,7 +456,7 @@ export const StatementBlockLibrary: React.FC<{
                       </div>
                       <div className="statement-block-library__action-grid">
                         {cards.map(c => {
-                          const IconComp = (ActionIcons as any)[c.icon] || (ActionIcons as any).default;
+                          const IconComp = ActionIcons[c.icon as keyof typeof ActionIcons] || ActionIcons.default;
                           return (
                             <button key={c.id}
                               type="button"
@@ -521,7 +534,7 @@ export const StatementBlockLibrary: React.FC<{
                     </div>
                     <div className="statement-block-library__action-grid">
                       {groups.get(activeCategory)!.map(c => {
-                        const IconComp = (ActionIcons as any)[c.icon] || (ActionIcons as any).default;
+                        const IconComp = ActionIcons[c.icon as keyof typeof ActionIcons] || ActionIcons.default;
                         return (
                           <button key={c.id}
                             type="button"

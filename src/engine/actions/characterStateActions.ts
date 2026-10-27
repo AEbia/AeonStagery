@@ -6,6 +6,7 @@ import {
 import { resolveLookAtFocus, type LookAtPointLookup } from '../lookAtFocus';
 import type { CharacterMotionOutput } from '../../api/types/semantic-scene';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
 function resolveLookAtPointLookup(): LookAtPointLookup | undefined {
   return typeof live2DManager.getPoint === 'function'
@@ -13,24 +14,24 @@ function resolveLookAtPointLookup(): LookAtPointLookup | undefined {
     : undefined;
 }
 
-export function scheduleCharacterLookAt(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCharacterLookAt(ctx: SchedulerContext, action: RuntimeActionContract<'characterLookAt'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
   at(() => {
     const [focusX, focusY] = resolveLookAtFocus(params, resolveLookAtPointLookup(), params.id);
     live2DManager.lookAt(params.id, focusX, focusY, params.duration ?? 0.5);
   });
 }
 
-export function scheduleCharacterBlink(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleCharacterBlink(ctx: SchedulerContext, action: RuntimeActionContract<'characterBlink'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
   at(() => {
     const hasRange = typeof params.intervalRange === 'number' && Number.isFinite(params.intervalRange);
     if (hasRange) {
@@ -52,7 +53,7 @@ export function scheduleCharacterBlink(ctx: SchedulerContext, action: { time?: n
   });
 }
 
-export function schedulePlayMotion(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function schedulePlayMotion(ctx: SchedulerContext, action: RuntimeActionContract<'playMotion'>): void {
   const { tl, isReconstructing, takeSnapshot } = ctx;
   const { time, params } = action;
   const t = time || 0;
@@ -61,7 +62,7 @@ export function schedulePlayMotion(ctx: SchedulerContext, action: { time?: numbe
   const motionKey = resolveMotionKey(params.motion);
   if (!id || (!customMotion && !motionKey)) return;
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
   at(() => {
     if (isReconstructing()) return;
     const currentTime = tl.time();
@@ -96,26 +97,26 @@ function resolveRequiredString(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value : '';
 }
 
-export function scheduleSetExpression(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleSetExpression(ctx: SchedulerContext, action: RuntimeActionContract<'setExpression'>): void {
   const { tl, isReconstructing } = ctx;
   const { time, params } = action;
   const t = time || 0;
   const id = resolveRequiredString(params.id);
   if (!id) return;
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
   at(() => {
     if (isReconstructing()) return;
-    live2DManager.setExpression(id, params.expression);
+    live2DManager.setExpression(id, params.expression ?? null);
   });
 }
 
-export function scheduleSetCharacterRimLight(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function scheduleSetCharacterRimLight(ctx: SchedulerContext, action: RuntimeActionContract<'setCharacterRimLight'>): void {
   const { tl } = ctx;
   const { time, params } = action;
   const t = time || 0;
 
-  const at = (fn: () => any) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
+  const at = (fn: () => void) => { tl.to({}, { duration: 0.001, onStart: () => { fn(); } }, t); };
   at(() => { 
     if (params.mode === 'reset') {
       const baseline = ctx.getRimLightBaseline?.(params.id);
@@ -131,7 +132,7 @@ export function scheduleSetCharacterRimLight(ctx: SchedulerContext, action: { ti
       params.id, 
       params.color ?? '#ffffff', 
       params.intensity ?? 1.0, 
-      params.thickness ?? 10, 
+      params.thickness ?? 6, 
       params.angle ?? 45, 
       params.softness ?? 2,
       params.duration ?? 0

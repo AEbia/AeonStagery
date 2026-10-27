@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 /**
  * AeonStagery — Bake Engine
  *
@@ -173,7 +174,7 @@ export class BakeEngine {
     const isCurrent = () => this.checkToken(token, taskVersion);
 
     this.snapshotHistory = [];
-    
+
     // Reset all loaded models to their idle state to prevent parameter carryover
     const reset = await this.resetAllModelsToIdle(isCurrent);
     if (!reset || !isCurrent()) return { snapshotHistory: [] };
@@ -314,7 +315,7 @@ export class BakeEngine {
 
     eventBus.emit(silent ? 'pb-daemon:start' : 'bake:start', { sceneId: script.sceneId, title: script.meta.title });
 
-    const effectiveEnd = Math.min(rangeEnd, totalDuration);
+    const effectiveEnd = rangeEnd;
     // Seeded characters are already on stage at rangeStart. Treating them as a
     // first addCharacter appearance would idle-reset the seed pose and restart
     // any in-flight Live2D fade-in from T-pose (ADR-0029 handoff).
@@ -336,9 +337,9 @@ export class BakeEngine {
             if (entry && targetResolvedPath && entry.modelPath !== targetResolvedPath) {
               motionRuntime.releaseCharacter(id, entry.injectedParams);
               this.removeModel(id);
-              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model!) ?? state.model!, isCurrent);
             } else if (!entry && targetResolvedPath) {
-              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model) ?? state.model, isCurrent);
+              await this.loadModel(id, targetResolvedPath, modelSources.get(state.model!) ?? state.model!, isCurrent);
             }
 
             if (!isCurrent()) break;
@@ -357,7 +358,7 @@ export class BakeEngine {
                 const expressionTime = state.expression?.time;
                 expressionUpdates.set(id, {
                   key: expressionKey,
-                  elapsedSeconds: Number.isFinite(expressionTime) ? Math.max(0, simTime - expressionTime) : Number.POSITIVE_INFINITY,
+                  elapsedSeconds: Number.isFinite(expressionTime) ? Math.max(0, simTime - expressionTime!) : Number.POSITIVE_INFINITY,
                   previousKey: state.expression?.previousKey,
                 });
               }
@@ -371,7 +372,7 @@ export class BakeEngine {
 
               if (state.position) {
                 const pos = resolveVec2(state.position);
-                entry.displayObject.position.set(pos.x * 1920, pos.y * 1080);
+                entry.displayObject.position.set(pos.x * STAGE_WIDTH, pos.y * STAGE_HEIGHT);
               }
               if (state.scale !== undefined) entry.displayObject.scale.set(state.scale, state.scale);
               if (state.rotation !== undefined) entry.displayObject.rotation = state.rotation;
@@ -528,7 +529,7 @@ export class BakeEngine {
 
   private scanAssets(script: RuntimeTimelineScene, modelSources: ReadonlyMap<string, string>) {
     const requiredMotions = new Map<string, Set<string>>(); // ModelPath -> Set of motion keys
-    
+
     // Track the active model path for each character ID as we scan the timeline
     const activeModelMap = new Map<string, string>();
 
@@ -712,8 +713,8 @@ export class BakeEngine {
 
   private applyDialogueInjectedParams(
     entry: BakeModel,
-    dialogue: any,
-    characters: Map<string, any>,
+    dialogue: ReturnType<typeof computeSceneStateAtTime>['dialogue'],
+    characters: ReturnType<typeof computeSceneStateAtTime>['characters'],
     simTime: number,
   ): void {
     const isActiveSpeaker = dialogue?.speakerId === entry.id && characters.has(entry.id);
@@ -739,8 +740,8 @@ export class BakeEngine {
    */
   private applyBakeMotionState(
     entry: BakeModel,
-    state: any,
-    dialogue: any,
+    state: NonNullable<ReturnType<ReturnType<typeof computeSceneStateAtTime>['characters']['get']>>,
+    dialogue: ReturnType<typeof computeSceneStateAtTime>['dialogue'],
     simTime: number,
     motionRuntime: BakeMotionRuntime,
   ): void {
@@ -763,7 +764,7 @@ export class BakeEngine {
       intent: {
         output: state.motion.output,
         priority: state.motion.priority,
-        time: state.motion.time,
+        time: state.motion.time!,
       },
       simTime,
       injectedParams: entry.injectedParams,

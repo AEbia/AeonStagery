@@ -80,7 +80,7 @@ flowchart TD
 | 视觉区域 / 控件 | 职责描述 | 相关文件与组件 |
 | --- | --- | --- |
 | **标题与项目状态** | Logo 与品牌名（打开项目后悬停或键盘聚焦时变为“返回主页”入口）、软件版本 Badge、当前打开项目名称（点击重命名，与首页最近项目共用重命名对话框） | [`src/App.tsx`](../src/App.tsx)、[`src/ui/ProjectRenameDialog.tsx`](../src/ui/ProjectRenameDialog.tsx) |
-| **快速操作按钮** | 返回主页（保存并关闭项目、退出当前协作会话）；切换/打开项目 (`IconFolder`)；场景更改始终自动保存，保存快捷键（默认 Ctrl+S）可立即保存并显示成功提示 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/hooks/useAppProjectClose.ts`](../src/ui/hooks/useAppProjectClose.ts)、[`src/ui/hooks/useAppShortcuts.ts`](../src/ui/hooks/useAppShortcuts.ts) |
+| **快速操作按钮** | 返回主页（保存并关闭项目、退出当前协作会话）；编辑器的文件夹图标打开当前项目目录（主页仍用于打开项目，Ctrl+O 仍可切换项目）；场景更改始终自动保存，保存快捷键（默认 Ctrl+S）可立即保存并显示成功提示 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/ProjectFileActions.tsx`](../src/ui/ProjectFileActions.tsx)、[`src/ui/hooks/useAppProjectClose.ts`](../src/ui/hooks/useAppProjectClose.ts)、[`src/ui/hooks/useAppShortcuts.ts`](../src/ui/hooks/useAppShortcuts.ts) |
 | **校验指示器 (Validation Pill)** | 显示场景语法与校验错误/警告数量，点击定位问题 | [`src/App.tsx`](../src/App.tsx)、[`src/ui/store/ValidationStore.ts`](../src/ui/store/ValidationStore.ts) |
 | **协作连接面板** | 房间连接状态指示器、在线用户头像列表、连接配置浮窗 | [`src/ui/CollaborationConnectPanel.tsx`](../src/ui/CollaborationConnectPanel.tsx) |
 | **视图与构图辅助** | 构图九宫格/辅助线开关 (`IconTarget`) | [`src/App.tsx`](../src/App.tsx) (`gizmosVisible`) |
@@ -149,14 +149,16 @@ flowchart TD
 
 两种布局的语句列表均由 [`useVirtualTimelineRows`](../src/ui/timeline/useVirtualTimelineRows.tsx) 测量行高并按视口挂载，保留正在编辑的焦点行；内联检查器复用列表的 semantic read model。快捷文本控件复用 `FormComponents` 的远端感知草稿，失焦提交、Escape 取消，避免逐字符重建场景。左栏拖拽由 `useResizableLayout` 管理，宽度在拖拽结束时持久化。
 
+行内展开区通过 `getStatementQuickFields` 排除语句行已承载的参数，包括文件选择、模型变体及动作／表情资源选择与预览；动作转换、自定义动作编辑、语音工作台等额外功能仍由详情区提供。轨道优先的独立属性检查器保留完整参数表单。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |
 | **视图选择器** | 顶部 Tab 切换（剧本动作 / 工作区调试工具） | [`src/ui/timeline/InspectorViewPicker.tsx`](../src/ui/timeline/InspectorViewPicker.tsx) |
-| **剧本时间轴大纲** | 当前场景动作的树状/列表大纲视图，支持拖拽重排与快速查找 | [`src/ui/timeline/TimelineListView.tsx`](../src/ui/timeline/TimelineListView.tsx)、[`src/ui/SequentialFlowPanel.tsx`](../src/ui/SequentialFlowPanel.tsx) |
+| **剧本时间轴大纲** | 当前场景动作的树状/列表大纲视图，支持拖拽重排与快速查找 | [`src/ui/timeline/TimelineListView.tsx`](../src/ui/timeline/TimelineListView.tsx) |
 | **语句块库 (Block Library)** | 可拖拽/点击添加到时间轴的预设动作块库（最近使用条目上限降为 6 条；希区柯克变焦与角色接地语句块已退役） | [`src/ui/StatementBlockLibrary.tsx`](../src/ui/StatementBlockLibrary.tsx)、[`src/ui/timeline/StatementLibraryMenu.tsx`](../src/ui/timeline/StatementLibraryMenu.tsx) |
 | **动作属性表单 (Action Inspector)** | 当前选中动作的各项参数编辑（对白、立绘、镜头、转场、音效等） | [`src/ui/timeline/ActionInspector.tsx`](../src/ui/timeline/ActionInspector.tsx)、[`src/ui/timeline/ActionInspectorTabs.tsx`](../src/ui/timeline/ActionInspectorTabs.tsx) |
-| **目标与角色绑定选择器** | 角色选择、镜头通道选择、光照与特效目标下拉 | [`src/ui/timeline/TargetPicker.tsx`](../src/ui/timeline/TargetPicker.tsx)、[`src/ui/timeline/LightingTargetPicker.tsx`](../src/ui/timeline/LightingTargetPicker.tsx) |
+| **目标与角色绑定选择器** | 角色选择、镜头通道选择、光照与特效目标下拉 | [`src/ui/timeline/LightingTargetPicker.tsx`](../src/ui/timeline/LightingTargetPicker.tsx) |
 | **Live2D 参数展示** | 选中角色的动作库、表情库、物理参数映射表单 | [`src/ui/timeline/live2dParameterPresentation.ts`](../src/ui/timeline/live2dParameterPresentation.ts)、[`src/ui/timeline/characterPerformancePresentation.ts`](../src/ui/timeline/characterPerformancePresentation.ts) |
 | **角色目录与管理** | 角色进出场、层级排序、外观预设配置 | [`src/ui/timeline/CharacterDirectoryPanel.tsx`](../src/ui/timeline/CharacterDirectoryPanel.tsx)、[`src/ui/timeline/CharacterIntegrationControls.tsx`](../src/ui/timeline/CharacterIntegrationControls.tsx) |
 | **上下文面板** | 场景元数据、全局演出节奏、环境变量配置 | [`src/ui/timeline/ContextPanel.tsx`](../src/ui/timeline/ContextPanel.tsx) |
@@ -168,12 +170,12 @@ flowchart TD
 | 弹窗名称 | 唤起途径 | 核心组件 | 关联子组件 / 样式 |
 | --- | --- | --- | --- |
 | **全局设置 (Settings)** | 顶栏更多菜单 / 快捷键 `Ctrl+,` / 事件 `ui:openSettings` | [`src/ui/SettingsDialog.tsx`](../src/ui/SettingsDialog.tsx) | 包含通用外观、快捷键设置、以及「项目模板」(`templates`) 页签（管理模板包启用、优先级、默认样式覆盖、角色导入、模板 ZIP 包直接导入与 AI 表演画像配置）：[`src/ui/shortcuts/ShortcutSettingsPanel.tsx`](../src/ui/shortcuts/ShortcutSettingsPanel.tsx)、[`src/ui/templates/TemplateProjectConfigDialog.tsx`](../src/ui/templates/TemplateProjectConfigDialog.tsx)、[`src/ui/templates/TemplatePerformanceProfileEditor.tsx`](../src/ui/templates/TemplatePerformanceProfileEditor.tsx)、[`src/ui/settingsNavigation.ts`](../src/ui/settingsNavigation.ts) |
-| **AI 创作工作台 (AI Prose)** | 顶栏「AI 铺戏」按钮 | [`src/ui/AiProseWorkbench.tsx`](../src/ui/AiProseWorkbench.tsx)、[`src/ui/AgentGeneratorPanel.tsx`](../src/ui/AgentGeneratorPanel.tsx) | [`src/ui/FormalSceneEnhancementPanel.tsx`](../src/ui/FormalSceneEnhancementPanel.tsx)、[`src/ui/AiScriptSegmentPanel.tsx`](../src/ui/AiScriptSegmentPanel.tsx)、[`src/ui/AiProseTrace.tsx`](../src/ui/AiProseTrace.tsx)、[`src/ui/ai-prose-workbench.css`](../src/ui/ai-prose-workbench.css) |
+| **AI 创作工作台 (AI Prose)** | 顶栏「AI 铺戏」按钮 | [`src/ui/AiProseWorkbench.tsx`](../src/ui/AiProseWorkbench.tsx)、[`src/ui/AgentGeneratorPanel.tsx`](../src/ui/AgentGeneratorPanel.tsx) | [`src/ui/FormalSceneEnhancementPanel.tsx`](../src/ui/FormalSceneEnhancementPanel.tsx)、[`src/ui/AiProseTrace.tsx`](../src/ui/AiProseTrace.tsx)、[`src/ui/ai-prose-workbench.css`](../src/ui/ai-prose-workbench.css) |
 | **语音工作台 (Voice Workbench)** | 顶栏「语音」按钮 | [`src/ui/voice/VoiceWorkbench.tsx`](../src/ui/voice/VoiceWorkbench.tsx) | 与 GPT-SoVITS 语音服务对接，管理角色声音预设 |
 | **软件更新 (Software Updates)** | 全局设置 → 关于 | [`src/ui/settings/UpdateSettingsPanel.tsx`](../src/ui/settings/UpdateSettingsPanel.tsx) | OSS / GitHub 增量下载渠道选择、检查、下载与重启安装；GitHub 缺少块图时尝试从 OSS 补取，更新策略见 [ADR-0036](adr/0036-update-channels-and-differential-baselines.md) |
-| **项目主页与新手引导** | 首次启动或关闭项目后全屏呈现 | [`src/ui/onboarding/ProjectHome.tsx`](../src/ui/onboarding/ProjectHome.tsx) | 欢迎页、最近项目、模板 ZIP 导入（`onImportTemplate`）、[`src/ui/onboarding/FirstLessonController.tsx`](../src/ui/onboarding/FirstLessonController.tsx)、[`src/ui/onboarding/SetupWizard.tsx`](../src/ui/onboarding/SetupWizard.tsx)、[`src/ui/onboarding/SpotlightOverlay.tsx`](../src/ui/onboarding/SpotlightOverlay.tsx) |
+| **项目主页与新手引导** | 首次启动或关闭项目后全屏呈现 | [`src/ui/onboarding/ProjectHome.tsx`](../src/ui/onboarding/ProjectHome.tsx) | 欢迎页、最近项目、模板 ZIP 导入（`onImportTemplate`）、[`src/ui/onboarding/FirstLessonController.tsx`](../src/ui/onboarding/FirstLessonController.tsx)、[`src/ui/onboarding/SpotlightOverlay.tsx`](../src/ui/onboarding/SpotlightOverlay.tsx) |
 | **视频导出对话框** | 顶栏「导出」按钮 | [`src/ui/ExportDialog.tsx`](../src/ui/ExportDialog.tsx) | 场景渲染为视频的分辨率、码率与编码进度 |
-| **资源库与文件选择** | 各种动作选择图片/音频/模型时 | [`src/ui/AssetBrowserModal.tsx`](../src/ui/AssetBrowserModal.tsx) | [`src/ui/ResourceFileBrowser.tsx`](../src/ui/ResourceFileBrowser.tsx)、[`src/ui/ResourcePanel.tsx`](../src/ui/ResourcePanel.tsx) |
+| **资源库与文件选择** | 各种动作选择图片/音频/模型时；单击文件仍直接导入，工具栏统一打开当前资源目录；文件夹入口仅提供项目目录与外部库目录，多个来源时选择实际位置；模板资源仍可浏览和选择 | [`src/ui/AssetBrowserModal.tsx`](../src/ui/AssetBrowserModal.tsx)、[`src/ui/ResourceFolderButton.tsx`](../src/ui/ResourceFolderButton.tsx) | [`src/ui/ResourceLibrary.ts`](../src/ui/ResourceLibrary.ts)、[`src/ui/FileRevealActions.tsx`](../src/ui/FileRevealActions.tsx) |
 | **WebGal 重生成** | 顶栏「重新生成」按钮 | [`src/ui/WebGalRegenerateDialog.tsx`](../src/ui/WebGalRegenerateDialog.tsx) | WebGal 单文件场景重新解析确认 |
 | **场景迁移确认** | 打开旧版本场景（如 v3/v4 自动迁移至 Scene v5）时触发 | [`src/ui/SceneMigrationConfirmationDialog.tsx`](../src/ui/SceneMigrationConfirmationDialog.tsx) | [`src/ui/hooks/useSceneMigrationDialog.ts`](../src/ui/hooks/useSceneMigrationDialog.ts) |
 | **更新日志与公告** | 顶栏「公告」按钮 / 更多菜单 | [`src/ui/changelog/ChangelogDialog.tsx`](../src/ui/changelog/ChangelogDialog.tsx) | [`src/ui/changelog/changelog.css`](../src/ui/changelog/changelog.css) |

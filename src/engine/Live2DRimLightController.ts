@@ -1,5 +1,5 @@
 /** Owns rim-light commands, delayed entrance replay and absolute seek reconciliation. */
-import type * as PIXI from 'pixi.js';
+import * as PIXI from 'pixi.js';
 import gsap from 'gsap';
 import type { CharacterEntry } from './Live2DConfig';
 import type { RimLightStyleState } from '../api/types/visual';
@@ -105,8 +105,7 @@ export class Live2DRimLightController {
     const proxy = entry.rimProxy;
     if (!proxy) return;
 
-    // Tween only the rim alpha; the filter keeps the source pixels opaque over
-    // the generated rim so the character body masks the light.
+    // Tween only highlight strength; the filter preserves the model alpha.
     gsap.killTweensOf(proxy);
     if ('enabled' in filter) filter.enabled = true;
 
@@ -249,7 +248,7 @@ export class Live2DRimLightController {
       filter = new RimLightFilter({
         distance: thickness,
         rotation: angle,
-        blur: 2,
+        blur: 0,
         alpha: 0,
         color: 0xFFFFFF,
       });
@@ -257,7 +256,15 @@ export class Live2DRimLightController {
       entry.rimProxy = { alpha: 0 };
 
       const currentFilters = container.filters || [];
-      container.filters = [...currentFilters, filter];
+      // Entrance opacity must be applied after lighting, so the contour mask
+      // stays at model opacity throughout the fade (including queued lights).
+      const opacityIndex = currentFilters.findIndex((current) => current instanceof PIXI.AlphaFilter);
+      const insertIndex = opacityIndex < 0 ? currentFilters.length : opacityIndex;
+      container.filters = [
+        ...currentFilters.slice(0, insertIndex),
+        filter,
+        ...currentFilters.slice(insertIndex),
+      ];
     }
     return filter;
   }

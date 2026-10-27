@@ -6,7 +6,7 @@
  * ensure 100% test isolation.
  */
 export class WmdlConfigRegistry {
-  private configs = new Map<string, any>();
+  private configs = new Map<string, unknown>();
 
   private normalize(p: string): string {
     if (!p) return '';
@@ -25,7 +25,7 @@ export class WmdlConfigRegistry {
   /**
    * Retrieve composed config by model path
    */
-  public get(path: string): any | undefined {
+  public get(path: string): unknown | undefined {
     if (!path) return undefined;
     const query = this.normalize(path);
     
@@ -51,7 +51,7 @@ export class WmdlConfigRegistry {
   /**
    * Register a composed config
    */
-  public register(path: string, config: any): void {
+  public register(path: string, config: unknown): void {
     this.configs.set(path, config);
   }
 

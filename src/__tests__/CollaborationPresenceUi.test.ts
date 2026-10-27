@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  COLLABORATION_SCHEMA_VERSION_V2,
-  type CollaborationPresencePeerV2,
+  COLLABORATION_SCHEMA_VERSION_V3,
+  type CollaborationPresencePeerV3,
 } from '../api/types/collaboration';
 import {
   derivePresencePatchFromSelection,
@@ -14,14 +14,14 @@ import {
 
 describe('semantic collaboration presence UI helpers', () => {
   const self = { clientId: 'self-1', displayName: '导演' };
-  const peerA: CollaborationPresencePeerV2 = {
+  const peerA: CollaborationPresencePeerV3 = {
     clientId: 'peer-a',
     displayName: '分镜师',
     selectedStatementIds: ['line-1'],
     editingTarget: { kind: 'statement', statementId: 'line-1' },
     playheadTime: 1.25,
   };
-  const peerB: CollaborationPresencePeerV2 = {
+  const peerB: CollaborationPresencePeerV3 = {
     clientId: 'peer-b',
     displayName: '灯光',
     selectedStatementIds: [],
@@ -29,31 +29,31 @@ describe('semantic collaboration presence UI helpers', () => {
     playheadTime: 12,
   };
 
-  it('reduces v2 snapshot/update/remove messages while excluding self', () => {
+  it('reduces v3 snapshot/update/remove messages while excluding self', () => {
     const snapshot = reducePresenceMessage([], {
       type: 'presence:snapshot',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       peers: [selfPeer(), peerA],
     }, self.clientId);
     expect(snapshot).toEqual([peerA]);
 
     const updated = reducePresenceMessage(snapshot, {
       type: 'presence:update',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       peer: peerB,
     }, self.clientId);
     expect(updated).toEqual([peerA, peerB]);
 
     const ignoresSelf = reducePresenceMessage(updated, {
       type: 'presence:update',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       peer: selfPeer(['line-self']),
     }, self.clientId);
     expect(ignoresSelf).toEqual([peerA, peerB]);
 
     const removed = reducePresenceMessage(ignoresSelf, {
       type: 'presence:remove',
-      schemaVersion: COLLABORATION_SCHEMA_VERSION_V2,
+      schemaVersion: COLLABORATION_SCHEMA_VERSION_V3,
       clientId: peerA.clientId,
     }, self.clientId);
     expect(removed).toEqual([peerB]);
@@ -89,7 +89,7 @@ describe('semantic collaboration presence UI helpers', () => {
   });
 
   it('resolves peers by semantic statement or companion locator', () => {
-    const companionPeer: CollaborationPresencePeerV2 = {
+    const companionPeer: CollaborationPresencePeerV3 = {
       clientId: 'peer-c',
       displayName: '剪辑',
       selectedStatementIds: ['line-1'],
@@ -102,7 +102,7 @@ describe('semantic collaboration presence UI helpers', () => {
     expect(summarizeLocatorEditingPeers([peerB], { statementId: 'missing' })).toBeNull();
   });
 
-  function selfPeer(selectedStatementIds: string[] = []): CollaborationPresencePeerV2 {
+  function selfPeer(selectedStatementIds: string[] = []): CollaborationPresencePeerV3 {
     return {
       clientId: self.clientId,
       displayName: self.displayName,

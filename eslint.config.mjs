@@ -42,10 +42,22 @@ export default tseslint.config(
     },
     plugins: {
       'react-hooks': reactHooks,
+      '@typescript-eslint': tseslint.plugin,
     },
     rules: {
       'react-hooks/exhaustive-deps': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
       'react-hooks/rules-of-hooks': 'error',
+    },
+  },
+  {
+    // Test fixtures use incomplete runtime/browser stubs, private-state probes,
+    // and deliberately invalid inputs. Allowing any at this boundary keeps the
+    // fixture focused on the behavior under test without full subsystem setup.
+    // Hook correctness and the other lint rules still apply to test components.
+    files: ['src/__tests__/**/*.{ts,tsx}', 'tests/e2e/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
   {

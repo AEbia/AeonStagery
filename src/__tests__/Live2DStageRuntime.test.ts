@@ -13,6 +13,9 @@ import { createCubismModelFixture } from './helpers/cubismModelFixture';
 import { acquireSharedRuntimeClockLock, releaseSharedRuntimeClockLock } from '../engine/live2d/runtime/Live2DRuntimeClockCoordinator';
 import { createLive2DModelHandle } from '../engine/live2d/runtime/Live2DRuntimeControlModule';
 import { mockControls } from './helpers/mockLive2DRuntimeAdapter';
+import { Bounds, Container, ObservablePoint } from 'pixi.js';
+import { stageManager } from '../engine/StageManager';
+import { installLive2DRenderPreparation } from '../engine/live2d/runtime/Live2DRenderPreparation';
 
 function createStage(callbacks: Omit<Live2DStageRuntimeCallbacks, 'getCamera' | 'isExportMode' | 'applyIntent'>) {
   return new Live2DStageRuntime({
@@ -74,6 +77,48 @@ describe('Live2DStageRuntime', () => {
       }),
     } as unknown as Live2DRuntimeAdapter;
     vi.spyOn(runtimeAdapter, 'getLive2DRuntimeAdapter').mockReturnValue(adapter);
+  });
+
+  it('settles cold drawable geometry before publishing a character anchor', async () => {
+    const resources = new Live2DModelResources(() => '');
+    let drawableReady = false;
+    const container = new Container();
+    const anchor = new ObservablePoint({ _onUpdate: () => {
+      const bounds = model.getLocalBounds();
+      container.pivot.set(bounds.x + bounds.width * anchor.x, bounds.y + bounds.height * anchor.y);
+    } });
+    const model = Object.assign(container, {
+      anchor,
+      getLocalBounds: () => drawableReady ? new Bounds(300, 300, 1700, 2880) : new Bounds(0, 0, 2000, 2500),
+    });
+    installLive2DRenderPreparation(model, () => { drawableReady = true; });
+    vi.spyOn(resources, 'loadCharacter').mockImplementation(async (_id, _path, ready) => {
+      await ready({ model, modelUrl: 'hero.model.json', runtime, isCurrent: () => true, release: () => {} });
+    });
+    const renderer = {} as Parameters<NonNullable<Container['onRender']>>[0];
+    const app = vi.spyOn(stageManager, 'getApp').mockReturnValue({
+      ticker: { add: () => {} }, renderer,
+    } as unknown as ReturnType<typeof stageManager.getApp>);
+    const layer = vi.spyOn(stageManager, 'getLayer').mockReturnValue(new Container());
+    try {
+      const stage = new Live2DStageRuntime({
+        dispatchMotion, describeInvalidModelState: () => null,
+        repairCorruptedModel: vi.fn().mockResolvedValue(undefined), maybeInstallCustomMotionStage: () => {},
+        resolveCustomMotionSceneTime: () => 0,
+        getScriptEngine: () => ({ transformationProxies: new Map([['hero', {
+          x: 960, y: 1242, scale: 1.3, rotation: 0, opacity: 1, z: 0,
+        }]]) }),
+        getCamera: () => null, isExportMode: () => false, applyIntent: () => {},
+      }, resources);
+      await stage.addCharacter('hero', 'hero.model.json', { position: [0.5, 1.15], scale: 1.3 });
+      const anchors = ['head', 'chest', 'feet', 'center'] as const;
+      const captured = anchors.map(part => stage.geometry.getPoint('hero', part));
+      model.onRender?.(renderer);
+      expect(anchors.map(part => stage.geometry.getPoint('hero', part))).toEqual(captured);
+    } finally {
+      app.mockRestore();
+      layer.mockRestore();
+    }
   });
 
   it('drains pending motion intent before committing the frame', async () => {

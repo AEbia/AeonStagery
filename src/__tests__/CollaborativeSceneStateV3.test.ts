@@ -1,7 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   COLLABORATION_SCHEMA_VERSION_V3,
-  type CollaborativeSceneStateV2,
   type CollaborativeSceneStateV3,
 } from '../api/types/collaboration';
 import {
@@ -140,7 +139,6 @@ describe('CollaborativeSceneStateV3', () => {
     expect(state.visual?.recipeOverlay?.warm_grade).toBeDefined();
 
     expectTypeOf(state).toMatchTypeOf<CollaborativeSceneStateV3>();
-    expectTypeOf(state).not.toMatchTypeOf<CollaborativeSceneStateV2>();
   });
 
   it('materializes canonical SceneDocumentV5 preserving statement/companion ordering, markers, and visual block', () => {

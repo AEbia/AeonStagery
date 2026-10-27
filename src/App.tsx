@@ -8,6 +8,7 @@ import {
   IconAiProse,
   IconArrowLeft,
   IconBell,
+  IconCanvasSettings,
   IconCrosshair,
   IconFilm,
   IconFolder,
@@ -32,6 +33,8 @@ import {
 } from './ui/store/storeHooks';
 import { removeRecentProject, useSettings } from './ui/SettingsStore';
 import { useViewport } from './ui/hooks/useViewport';
+import { ProjectFileActions } from './ui/ProjectFileActions';
+import { useDetailsDismissal } from './ui/hooks/useDetailsDismissal';
 import { StatusBar } from './ui/StatusBar';
 import { ToastContainer } from './ui/Toast';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -42,6 +45,7 @@ import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
 import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
+import { ProjectSettingsDialog } from './ui/ProjectSettingsDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
 import { TemplatePackageSelector } from './ui/templates/TemplateCapabilityConfig';
 import { TemplateProjectConfigDialog } from './ui/templates/TemplateProjectConfigDialog';
@@ -140,6 +144,8 @@ function AppContent({ contextValue, sessionBindings }: {
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
   const [renameTarget, setRenameTarget] = useState<{ name: string; projectFilePath: string } | null>(null);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  useEffect(() => { setShowProjectSettings(false); }, [currentProject?.rootPath, currentProject?.metadata.projectId]);
   const {
     collaborationController, collaborationServerStatus, effectiveServerCredentials,
     shouldShowCollaborationPanel, handleHostNewCollaboration, handleHostExistingCollaboration,
@@ -172,12 +178,16 @@ function AppContent({ contextValue, sessionBindings }: {
     contextValue, semanticDocument, currentProject, layout,
   );
   const showProjectHome = initialized && !initError && (!currentProject || isCollaborationJoinHomeLocked);
+  const moreMenuRef = useDetailsDismissal();
   const stageRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
   const {
-    viewport, handleStageMouseDown, handleStageReset, handleResetZoom,
+    viewport, actualScale, handleStageMouseDown, handleStageReset, handleResetZoom,
     handleRecenter, handleZoomIn, handleZoomOut, isPanning,
-  } = useViewport(stageRef, !showProjectHome);
+  } = useViewport(stageRef, !showProjectHome, {
+    width: contextValue.adapters.stage.getWidth(),
+    height: contextValue.adapters.stage.getHeight(),
+  });
   useAppShortcuts({
     contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
@@ -233,6 +243,7 @@ function AppContent({ contextValue, sessionBindings }: {
             </span>
           </button>
           {currentProject && (
+            <>
             <button
               type="button"
               className="top-bar__project-name"
@@ -243,8 +254,10 @@ function AppContent({ contextValue, sessionBindings }: {
               <span>{currentProject.metadata.name}</span>
               <IconPencil width={12} height={12} />
             </button>
+            <ProjectFileActions project={currentProject} disabled={isClosingProject} />
+            </>
           )}
-          <button
+          {!currentProject && <button
             className="btn btn--icon top-bar__project-action"
             onClick={() => void handleOpenProject()}
             disabled={isClosingProject}
@@ -252,7 +265,7 @@ function AppContent({ contextValue, sessionBindings }: {
             aria-label="打开项目"
           >
             <IconFolder width={15} height={15} />
-          </button>
+          </button>}
         </div>
         <div className="top-bar__actions">
           <div className="top-bar__group top-bar__group--status" aria-label="状态">
@@ -329,12 +342,25 @@ function AppContent({ contextValue, sessionBindings }: {
               <IconFilm width={14} height={14} /> 导出
             </button>
           </div>
-          <details className="top-bar__more">
+          <details className="top-bar__more" ref={moreMenuRef}>
             <summary className="btn btn--icon" title="更多操作" aria-label="更多操作">
               <span aria-hidden="true">•••</span>
               {hasUnreadChangelog && <span className="top-bar__unread-badge" aria-label="有未读更新" />}
             </summary>
             <div className="top-bar__menu" role="menu">
+              <button
+                className="top-bar__menu-item"
+                disabled={!currentProject || showProjectHome}
+                onClick={event => {
+                  const details = event.currentTarget.closest('details');
+                  if (details) details.open = false;
+                  setShowProjectSettings(true);
+                }}
+                role="menuitem"
+              >
+                <IconCanvasSettings width={15} height={15} />
+                画布设置
+              </button>
               <button
                 className="top-bar__menu-item"
                 onClick={() => {
@@ -438,9 +464,9 @@ function AppContent({ contextValue, sessionBindings }: {
                     type="button"
                     className="stage-viewport-hud__btn stage-viewport-hud__btn--zoom-pill"
                     onClick={handleResetZoom}
-                    title="点击重置缩放至 100%（渲染器始终完整显示舞台，100% 即适配窗口基准）"
+                    title="当前缩放相对舞台实际像素；点击适配窗口（100% 表示 1 个舞台像素对应 1 个界面像素）"
                   >
-                    {Math.round(viewport.zoom * 100)}%
+                    {Math.round(actualScale * 100)}%
                   </button>
                   <button
                     type="button"
@@ -625,6 +651,15 @@ function AppContent({ contextValue, sessionBindings }: {
             setShowWebGalRegenerate(false);
             return handleRegenerateWebGalScene(speed);
           }}
+        />
+      )}
+
+      {showProjectSettings && currentProject && !showProjectHome && (
+        <ProjectSettingsDialog
+          key={currentProject.metadata.projectId}
+          project={currentProject}
+          workspace={contextValue.services.projectWorkspace}
+          onClose={() => setShowProjectSettings(false)}
         />
       )}
 

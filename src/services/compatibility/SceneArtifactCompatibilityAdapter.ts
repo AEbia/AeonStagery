@@ -31,7 +31,7 @@ export class SceneArtifactCompatibilityAdapter
   }
 
   parseProjection(source: unknown): SceneDocumentV5 {
-    return this.codec.parseKnownProjection(source as any) as any;
+    return this.codec.parseKnownProjection(source);
   }
 
   resolveBackupRelativePath(_artifactPath: string, now: Date, basename: string): string {

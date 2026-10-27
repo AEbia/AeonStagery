@@ -6,7 +6,7 @@ function getCrashReportsDir(): string {
   return path.join(app.getPath('userData'), 'crash-reports');
 }
 
-async function writeCrashReportFiles(report: any): Promise<string> {
+async function writeCrashReportFiles(report: { timestamp?: string; reportId?: string }): Promise<string> {
   const dir = getCrashReportsDir();
   await fs.promises.mkdir(dir, { recursive: true });
   const sanitizedTimestamp = (report.timestamp || new Date().toISOString()).replace(/[:.]/g, '-');
@@ -68,9 +68,9 @@ export function registerCrashHandlers() {
     try {
       const filePath = await writeCrashReportFiles(report);
       return { success: true, reportId: report.reportId, filePath };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[AeonStagery] Failed to record crash report:', error);
-      return { success: false, error: error?.message ?? String(error) };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 

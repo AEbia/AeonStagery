@@ -12,6 +12,7 @@ import {
   type ProjectWebGalImportReceipt,
 } from '../../api/types/project';
 import type { ProjectVoiceProfile } from '../voice/VoiceAuthoringTypes';
+import { validateVideoFormat, type ProjectVideoFormat } from '../../api/types/video-format';
 
 export class ProjectMetadataCodec {
   parseKnownProjection(input: unknown): ProjectMetadataV2 {
@@ -52,6 +53,7 @@ export class ProjectMetadataCodec {
     const voiceGeneration = parseVoiceGeneration(input.voiceGeneration);
     const voiceProfiles = parseVoiceProfiles(input.voiceProfiles);
     const webGalImport = parseWebGalImport(input.webGalImport);
+    const videoFormat = parseVideoFormat(input.videoFormat);
 
     return Object.freeze({
       projectId: input.projectId,
@@ -62,6 +64,7 @@ export class ProjectMetadataCodec {
       defaultSceneId: input.defaultSceneId,
       scenes,
       assetRoots,
+      ...(videoFormat !== undefined ? { videoFormat } : {}),
       ...(embeddedLibraryMounts !== undefined ? { embeddedLibraryMounts } : {}),
       ...(templates !== undefined ? { templates } : {}),
       ...(voiceGeneration !== undefined ? { voiceGeneration } : {}),
@@ -69,6 +72,17 @@ export class ProjectMetadataCodec {
       ...(webGalImport !== undefined ? { webGalImport } : {}),
     });
   }
+}
+
+function parseVideoFormat(input: unknown): ProjectVideoFormat | undefined {
+  if (input === undefined) return undefined;
+  if (!isRecord(input) || typeof input.width !== 'number' || typeof input.height !== 'number' || typeof input.fps !== 'number') {
+    throw new Error('Expected width, height and fps numbers at project.videoFormat');
+  }
+  const format = { width: input.width, height: input.height, fps: input.fps };
+  const error = validateVideoFormat(format);
+  if (error) throw new Error(`Invalid project.videoFormat: ${error}`);
+  return Object.freeze(format);
 }
 
 function parseEmbeddedLibraryMounts(input: unknown): EmbeddedLibraryMount[] | undefined {
@@ -223,7 +237,7 @@ function parseTemplates(input: unknown): ProjectTemplateConfiguration | undefine
     : undefined;
 
   const dialoguePresentation = input.dialoguePresentation && isRecord(input.dialoguePresentation)
-    ? (cloneJson(input.dialoguePresentation) as any)
+    ? (cloneJson(input.dialoguePresentation) as unknown as NonNullable<ProjectTemplateConfiguration['dialoguePresentation']>)
     : undefined;
 
   return Object.freeze({
@@ -342,7 +356,7 @@ function parseWebGalImport(input: unknown): ProjectWebGalImportReceipt | undefin
     sceneTitle: input.sceneTitle,
     scenePath: input.scenePath,
     generatedAt: input.generatedAt,
-    ...(input.report ? { report: cloneJson(input.report) as any } : {}),
+    ...(input.report ? { report: cloneJson(input.report) as ProjectWebGalImportReceipt['report'] } : {}),
   });
 }
 

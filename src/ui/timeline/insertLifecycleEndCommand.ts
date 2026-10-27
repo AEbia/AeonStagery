@@ -73,11 +73,11 @@ function draftInputForStart(
   }
 
   if (
-    (forceStartTarget || nextInput.stateTarget === undefined)
+    (forceStartTarget || (nextInput.lightingTarget === undefined && nextInput.stateTarget === undefined))
     && startStatement.type === 'lighting'
-    && typeof params.target === 'string'
+    && (startStatement.params.effect === 'blur' || startStatement.params.effect === 'post')
   ) {
-    nextInput.stateTarget = params.target;
+    nextInput.lightingTarget = startStatement.params.target ?? { kind: 'scene' };
   }
 
   return nextInput;
@@ -142,6 +142,7 @@ export function resolveLifecycleEndCommand(
   let candidates = preferred.length > 0 ? preferred : endable;
 
   if (command.match === 'draft-state-key') {
+    const lightingCharacterIds = new Set((document.meta.characters ?? []).map((character) => character.id));
     // Build the probe against each candidate start so preferred starts do not inherit
     // a stale editor-selected target, while sibling visual reset commands stay exact.
     let sawResolvableStateKey = false;
@@ -154,7 +155,7 @@ export function resolveLifecycleEndCommand(
         preferredStartStatementIds.has(record.statementId),
       ));
       const probeLifecycle = probeDraft
-        ? sceneStatementDefinitionRegistry.timelineLifecyclePresentation(probeDraft)
+        ? sceneStatementDefinitionRegistry.timelineLifecyclePresentation(probeDraft, lightingCharacterIds)
         : undefined;
       if (!probeLifecycle?.stateKey) return true;
       sawResolvableStateKey = true;
@@ -228,11 +229,11 @@ export function insertLifecycleEndCommand(
     readonly input?: SemanticStatementBlockDraftInput;
     readonly metadata: LifecycleEndAuthoringMetadata;
   },
+  table: LifecyclePairTable = buildLifecyclePairTable(document),
 ): InsertLifecycleEndResult {
   if (NON_INSERTABLE_SEMANTIC_STATEMENT_BLOCK_IDS.has(args.blockId)) {
     return { ok: false, reason: 'invalid-draft', message: '该语句仅保留旧场景兼容，不能新建' };
   }
-  const table = buildLifecyclePairTable(document);
   const target = resolveLifecyclePair(table, args.targetStartStatementId);
   if (!target || target.role !== 'start') {
     return { ok: false, reason: 'not-found', message: '找不到要结束的生命周期开始语句' };
@@ -295,6 +296,7 @@ export function insertLifecycleEndFromMenu(
   input: SemanticStatementBlockDraftInput,
   metadata: LifecycleEndAuthoringMetadata,
   preferredStartStatementIds: ReadonlySet<string> = new Set(),
+  table: LifecyclePairTable = buildLifecyclePairTable(document),
 ): InsertLifecycleEndResult {
   const resolved = resolveLifecycleEndCommand(
     document,
@@ -302,6 +304,7 @@ export function insertLifecycleEndFromMenu(
     atTime,
     input,
     preferredStartStatementIds,
+    table,
   );
   if (!resolved) {
     return {
@@ -316,7 +319,7 @@ export function insertLifecycleEndFromMenu(
     blockId,
     input,
     metadata,
-  });
+  }, table);
 }
 
 export type { SemanticAuthorIntent };

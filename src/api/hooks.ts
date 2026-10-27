@@ -34,7 +34,7 @@ class HookSystem {
   /**
    * Emit a custom event through both hooks and event bus.
    */
-  emit(event: string, payload?: any): void {
+  emit(event: string, payload?: unknown): void {
     eventBus.emit(event, payload);
   }
 
@@ -42,7 +42,7 @@ class HookSystem {
    * Execute all registered hooks for an event.
    * Returns the context (check ctx.prevented for cancellation).
    */
-  async execute(event: HookEvent, data?: any): Promise<HookContext> {
+  async execute(event: HookEvent, data?: unknown): Promise<HookContext> {
     const ctx: HookContext = {
       event,
       timestamp: performance.now(),

@@ -1,3 +1,4 @@
+import { STAGE_WIDTH, STAGE_HEIGHT } from '../StageDimensions';
 import type { CharacterInfo } from '../../api/types/character';
 import type { SnapshotStore } from '../SnapshotStore';
 import type { ProxyRegistry } from './ProxyRegistry';
@@ -11,21 +12,21 @@ import type { Live2DMotionSamplingResult } from '../runtime/Live2DRuntimeContrac
 
 interface DesiredCharState {
   id: string;
-  model: string;
-  config: Record<string, any>;
+  model?: string;
+  config: Record<string, unknown>;
   /** Scene time of the latest addCharacter for this on-stage lifetime. */
   lifecycleStartTime?: number;
   position?: [number, number];
   scale?: number;
   rotation?: number;
   opacity?: number;
-  motion?: { output: CharacterMotionOutput; priority?: number; time: number };
+  motion?: { output: CharacterMotionOutput; priority?: number; time?: number } | null;
   expression?: {
-    key: string;
+    key: string | null | undefined;
     time?: number;
     /** Expression in effect immediately before the target's start time. */
     previousKey?: string | null;
-  };
+  } | null;
   lookAt?: {
     /** Gaze target: another character's id (“注视目标”). */
     target?: string;
@@ -41,8 +42,8 @@ interface DesiredCharState {
     fromFocus?: readonly [number, number];
     toFocus?: readonly [number, number];
     focus?: readonly [number, number];
-  };
-  blink?: { enabled: boolean; intervalMs: number; startTime?: number; intervalRangeMs?: number };
+  } | null;
+  blink?: { enabled: boolean; intervalMs: number; startTime?: number; intervalRangeMs?: number } | null;
   z?: number;
 }
 
@@ -101,18 +102,18 @@ interface Live2DMuscle {
   listCharacters(): string[];
   hasCharacter(id: string): boolean;
   getCharacterInfo?(id: string): CharacterInfo | null;
-  applySnapshot(id: string, snap: any): void;
-  captureSnapshot(id: string): any;
+  applySnapshot(id: string, snap: ModelSnapshot): void;
+  captureSnapshot(id: string): ModelSnapshot | null;
   restoreSeekState?(id: string, input: {
-    snapshot?: any;
-    handoffSnapshot?: any;
+    snapshot?: ModelSnapshot | null;
+    handoffSnapshot?: ModelSnapshot | null;
     targetSceneTime: number;
     motion?: { key: string; priority?: number; offset: number; sceneTime: number; fadeInSeconds?: number } | null;
     expression?: Live2DSeekExpressionState | null;
     isScrubbing?: boolean;
     preserveMotionForPlayback?: boolean;
     isCurrent?: () => boolean;
-  }): Promise<any>;
+  }): Promise<unknown>;
   playMotion(
     id: string,
     key: string,
@@ -153,7 +154,7 @@ interface Live2DMuscle {
     startTimeSeconds?: number,
     intervalRangeMs?: number,
   ): void;
-  applyProxyTransform(id: string, proxy: any, modelOverride?: any, camera?: any): void;
+  applyProxyTransform: (typeof import('../Live2DManager').live2DManager)['applyProxyTransform'];
   setAutoUpdate(enabled: boolean): void;
   updateAll(dt: number, forceStep: boolean, manualTimeMs?: number): Promise<void>;
   isMotionLoading(): boolean;
@@ -269,7 +270,7 @@ export class CharacterSynchronizer {
         (longest, track) => Math.max(longest, track.fadeInSeconds ?? resolvedMotion.fadeInSeconds),
         resolvedMotion.fadeInSeconds,
       );
-      const startTime = motion.time;
+      const startTime = motion.time!;
       if (fadeInSeconds > 0 && time >= startTime && time - startTime < fadeInSeconds) {
         const startSnap = snapshotStore.findBefore(startTime);
         const candidate = startSnap?.models.get(id);
@@ -285,7 +286,7 @@ export class CharacterSynchronizer {
     for (const [id, state] of desiredChars) {
       const motion = state.motion;
       if (!motion || motion.output.kind !== 'resource') continue;
-      const startSnap = snapshotStore.findBefore(motion.time);
+      const startSnap = snapshotStore.findBefore(motion.time!);
       const candidate = startSnap?.models.get(id);
       const modelSnap = startSnap && snapshotBelongsToLifecycle(
         startSnap.time,
@@ -294,7 +295,7 @@ export class CharacterSynchronizer {
         state.lifecycleStartTime,
       ) && (!candidate?.motion
         || typeof candidate.motion.startTime !== 'number'
-        || candidate.motion.startTime < motion.time - 1e-6)
+        || candidate.motion.startTime < motion.time! - 1e-6)
         ? candidate
         : undefined;
       if (modelSnap) nativeMotionHandoffSnapshots.set(id, modelSnap);
@@ -407,17 +408,17 @@ export class CharacterSynchronizer {
         if (previous?.model === current.model
           && previous?.lifecycleStartTime === current.lifecycleStartTime
           && previousMotion?.output.kind === 'resource'
-          && previousMotion.time < motionStartTime - 1e-6) {
-          const previousStartSnap = snapshotStore.findBefore(previousMotion.time);
+          && previousMotion.time! < motionStartTime - 1e-6) {
+          const previousStartSnap = snapshotStore.findBefore(previousMotion.time!);
           const previousStartCandidate = previousStartSnap?.models.get(id);
           const previousHandoff = previousStartSnap && snapshotBelongsToLifecycle(
             previousStartSnap.time,
             previousStartCandidate,
-            previousMotion.time,
+            previousMotion.time!,
             current.lifecycleStartTime,
           ) && (!previousStartCandidate?.motion
             || typeof previousStartCandidate.motion.startTime !== 'number'
-            || previousStartCandidate.motion.startTime < previousMotion.time - 1e-6)
+            || previousStartCandidate.motion.startTime < previousMotion.time! - 1e-6)
             ? previousStartCandidate
             : null;
           await this.live2D.restoreSeekState?.(id, {
@@ -427,13 +428,13 @@ export class CharacterSynchronizer {
             motion: {
               key: previousMotion.output.key,
               priority: previousMotion.priority ?? 3,
-              offset: motionStartTime - previousMotion.time,
+              offset: motionStartTime - previousMotion.time!,
               sceneTime: motionStartTime,
               ...(previousMotion.output.fadeInSeconds !== undefined
                 ? { fadeInSeconds: previousMotion.output.fadeInSeconds }
                 : {}),
             },
-            expression: resolveSeekExpression(previous.expression, motionStartTime),
+            expression: resolveSeekExpression(previous!.expression, motionStartTime),
             isScrubbing: true,
             isCurrent: () => !shouldCancel() && this.live2D.hasCharacter(id),
           });
@@ -608,8 +609,8 @@ export class CharacterSynchronizer {
         const proxy = transformationProxies.get(id);
         if (proxy) {
           if (state.position !== undefined) {
-            proxy.x = state.position[0] * 1920;
-            proxy.y = state.position[1] * 1080;
+            proxy.x = state.position[0] * STAGE_WIDTH;
+            proxy.y = state.position[1] * STAGE_HEIGHT;
           }
           if (state.scale !== undefined) proxy.scale = state.scale;
           if (state.rotation !== undefined) proxy.rotation = state.rotation;
@@ -654,7 +655,7 @@ export class CharacterSynchronizer {
     // v3 motions are single-shot: seek offsets are not wrapped by any loop or
     // runtime duration (ADR-0029). The SDK motion holds its tail pose instead
     // of auto-replaying.
-    return Math.max(0, time - motion.time);
+    return Math.max(0, time - motion.time!);
   }
 
   private playDesiredMotion(

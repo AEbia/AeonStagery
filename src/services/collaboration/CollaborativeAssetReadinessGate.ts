@@ -3,7 +3,6 @@ import type {
   ContentHash,
 } from '../../api/types/collaboration';
 import type {
-  HistoricalSceneDocumentV4,
   SceneDocumentV5,
 } from '../../api/types/semantic-scene';
 import type { ProjectResourceService } from '../io/ProjectResourceService';
@@ -37,23 +36,17 @@ export interface CollaborativeAssetReadinessDownloadAdapter {
 
 export interface CollaborativeAssetReadinessSceneProjectizer {
   prepareCollaborativeAssetReferences(scene: LegacyCollaborativeScene): Promise<LegacyCollaborativeScene>;
-  prepareCollaborativeV2SceneDocumentAssetReferences?(document: HistoricalSceneDocumentV4): Promise<HistoricalSceneDocumentV4>;
   prepareCollaborativeV5SceneDocumentAssetReferences?(document: SceneDocumentV5): Promise<SceneDocumentV5>;
 }
 
 export interface CollaborativeAssetReadinessManifestBuilder {
   buildForScene(scene: LegacyCollaborativeScene): Promise<CollaborativeAssetManifest>;
-  buildForSceneDocumentV4?(document: HistoricalSceneDocumentV4): Promise<CollaborativeAssetManifest>;
   buildForSceneDocumentV5?(document: SceneDocumentV5): Promise<CollaborativeAssetManifest>;
 }
 
 export interface CollaborativeAssetReadinessManifestReuseChecker {
   hasUnchangedReferences(
     scene: LegacyCollaborativeScene,
-    previousManifest: CollaborativeAssetManifest,
-  ): Promise<boolean> | boolean;
-  hasUnchangedSceneDocumentV4References?(
-    document: HistoricalSceneDocumentV4,
     previousManifest: CollaborativeAssetManifest,
   ): Promise<boolean> | boolean;
   hasUnchangedSceneDocumentV5References?(
@@ -94,12 +87,6 @@ export interface CollaborativeAssetReadinessResult {
 
 export interface CollaborativeAssetLocalPublishResult extends CollaborativeAssetReadinessResult {
   scene: LegacyCollaborativeScene;
-  assets: CollaborativeAssetManifest;
-  reusedPreviousManifest: boolean;
-}
-
-export interface CollaborativeAssetLocalPublishResultV3 extends CollaborativeAssetReadinessResult {
-  document: HistoricalSceneDocumentV4;
   assets: CollaborativeAssetManifest;
   reusedPreviousManifest: boolean;
 }
@@ -268,51 +255,6 @@ export class CollaborativeAssetReadinessGate {
     return {
       ...result,
       scene,
-      assets,
-      reusedPreviousManifest: false,
-    };
-  }
-
-  async prepareLocalPublishV3(input: {
-    document: HistoricalSceneDocumentV4;
-    previousManifest?: CollaborativeAssetManifest;
-    reason: CollaborationAssetAgreementReason;
-    forceAgreement?: boolean;
-    title: string;
-    message: string;
-  }): Promise<CollaborativeAssetLocalPublishResultV3> {
-    const document = await this.prepareDocumentV3(input.document);
-    if (
-      !input.forceAgreement &&
-      input.previousManifest &&
-      this.manifestReuseChecker?.hasUnchangedSceneDocumentV4References &&
-      await this.manifestReuseChecker.hasUnchangedSceneDocumentV4References(document, input.previousManifest)
-    ) {
-      const signature = getCollaborativeAssetManifestAgreementSignature(input.previousManifest);
-      return {
-        document,
-        assets: input.previousManifest,
-        signature,
-        proposal: null,
-        reusedPreviousManifest: true,
-        reusedVerifiedSignature: this.verifiedLocalSignature === signature,
-      };
-    }
-
-    const manifestBuilder = this.requireManifestBuilderV3();
-    this.emit(undefined, 'checking', 'local');
-    const assets = await manifestBuilder.buildForSceneDocumentV4(document);
-    this.emit(assets, 'checking', 'local');
-    const result = await this.ensureLocalPublishReadiness(assets, {
-      reason: input.reason,
-      title: input.title,
-      message: input.message,
-      baseSignature: this.verifiedLocalSignature ?? undefined,
-    });
-    this.verifiedLocalSignature = result.signature;
-    return {
-      ...result,
-      document,
       assets,
       reusedPreviousManifest: false,
     };
@@ -643,10 +585,6 @@ export class CollaborativeAssetReadinessGate {
     return this.sceneProjectizer?.prepareCollaborativeAssetReferences(scene) ?? scene;
   }
 
-  private async prepareDocumentV3(document: HistoricalSceneDocumentV4): Promise<HistoricalSceneDocumentV4> {
-    return this.sceneProjectizer?.prepareCollaborativeV2SceneDocumentAssetReferences?.(document) ?? document;
-  }
-
   private async prepareDocumentV5(document: SceneDocumentV5): Promise<SceneDocumentV5> {
     if (!this.sceneProjectizer) return document;
     if (!this.sceneProjectizer.prepareCollaborativeV5SceneDocumentAssetReferences) {
@@ -661,13 +599,6 @@ export class CollaborativeAssetReadinessGate {
       throw new Error('Collaborative asset manifest builder is not configured');
     }
     return this.manifestBuilder;
-  }
-
-  private requireManifestBuilderV3(): Required<Pick<CollaborativeAssetReadinessManifestBuilder, 'buildForSceneDocumentV4'>> {
-    if (!this.manifestBuilder?.buildForSceneDocumentV4) {
-      throw new Error('Collaborative SceneDocumentV4 asset manifest builder is not configured');
-    }
-    return this.manifestBuilder as Required<Pick<CollaborativeAssetReadinessManifestBuilder, 'buildForSceneDocumentV4'>>;
   }
 
   private requireManifestBuilderV5(): Required<Pick<CollaborativeAssetReadinessManifestBuilder, 'buildForSceneDocumentV5'>> {

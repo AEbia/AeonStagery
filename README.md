@@ -93,6 +93,8 @@ npm run build
 npm run dist:win
 ```
 
+Tests that load a real Cubism 3+ model share `AEON_CUBISM_TEST_MODEL` for the local `model3.json` fixture and `LIVE2D_CUBISM_CORE` for `live2dcubismcore.min.js`. The real-runtime unit test also accepts `AEON_CUBISM_TEST_MOTION` to select a motion group. The rim-light E2E test skips when its model or Core fixture is unavailable.
+
 ---
 
 ## Collaboration Server
@@ -126,6 +128,12 @@ npm run agent:bridge -- serve --endpoint ... --model ...
 ```
 
 ---
+
+## Video Format
+
+创建项目时设置分辨率和默认帧率，创建后可在更多操作 → **画布设置** 中调整，支持横屏、竖屏、方形及自定义尺寸。播放条的预览清晰度独立于导出；导出默认跟随项目，也可覆盖宽高与 fps，并选择留边或居中裁切。高分辨率导出会重新渲染场景，素材本身的细节仍受原始图像与 Live2D 贴图限制。旧项目默认保持 1920×1080、60 fps。
+
+画布设置保存在本地项目文件，当前协作房间不共享此配置。参见 [ADR-0037](docs/adr/0037-project-video-format-and-native-resolution-export.md)。
 
 ## Scope & Known Limits
 

@@ -510,7 +510,7 @@ const DetachedScriptPanel: React.FC<{
 }> = ({ snapshot, draft, onDraftChange }) => {
   const [monacoRuntime, setMonacoRuntime] = useState<MonacoRuntime | null>(null);
   const rawScriptRef = useRef(draft.rawScript);
-  const editorRef = useRef<any>(null);
+  const editorRef = useRef<import('monaco-editor').editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<MonacoApi | null>(null);
   const applyRawScriptRef = useRef<() => void>(() => {});
   const conflict = !areWorkspaceToolsSceneIdentitiesEqual(
@@ -584,7 +584,7 @@ const DetachedScriptPanel: React.FC<{
     applyRawScriptRef.current = applyRawScript;
   }, [applyRawScript]);
 
-  const handleEditorMount = useCallback((editor: any, monacoApi: MonacoApi) => {
+  const handleEditorMount = useCallback((editor: import('monaco-editor').editor.IStandaloneCodeEditor, monacoApi: MonacoApi) => {
     editorRef.current = editor;
     monacoRef.current = monacoApi;
     applyAeonStageryMonacoTheme(monacoApi, snapshot.theme);

@@ -1,3 +1,4 @@
+import type { NumericInputGesture, NumericInputGestureRegistrar } from '../../FormComponents';
 // Shared context + resolver contract for the inspector param-control dispatch chain.
 // The chain that used to live inline in ActionInspector.renderParam is split into
 // ordered resolvers; each returns:
@@ -22,6 +23,7 @@ export type InspectorSemanticDocument = ReturnType<typeof useSemanticDocument>['
 
 /** Per-key facts computed once by renderParam before the control resolvers run. */
 export interface ParamControlBase {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   val: any;
   label: string;
   fieldId: string;
@@ -55,7 +57,9 @@ export interface InspectorParamContext {
   action: TimelineAction;
   actionId: string;
   actionType: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   sourceParams: Record<string, any>;
   sceneData: TimelineScene;
   allKeys: string[];
@@ -71,7 +75,7 @@ export interface InspectorParamContext {
   isLensFilterSourceAction: boolean;
   isEnvironmentLayerAuthoringAction: boolean;
   visualSlot: string;
-  displayAction: any;
+  displayAction: TimelineAction;
   performanceTargetSpeakerId: string | undefined;
   customMotionValue: Extract<CharacterMotionOutput, { kind: 'custom' }> | null;
   environmentLayers: ReturnType<typeof import('../../environmentAuthoring').listAuthorFacingEnvironmentLayers>;
@@ -83,10 +87,11 @@ export interface InspectorParamContext {
   currentDialogueTemplateValue: string;
   customDialogueTemplateOptions: Array<{ value: string; label: string; disabled?: boolean }>;
   updateParam: ActionInspectorProps['updateParam'];
+  registerNumericGesture?: NumericInputGestureRegistrar;
   replaceSourceParams: ActionInspectorProps['replaceSourceParams'];
   updateResourceParam: (key: string, value: string) => void;
-  updateSemanticSourceParam: (key: string, value: unknown, isTransient?: boolean) => void;
-  updateAuthoringParam: (key: string, value: unknown, isTransient?: boolean) => void;
+  updateSemanticSourceParam: (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
+  updateAuthoringParam: (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => void;
   updateDialogueSpeaker: (value: string) => void;
   updateDialogueTemplate: (value: string) => Promise<void>;
   updateVisualSemanticOverride: (key: string, value: unknown, isTransient?: boolean) => void;

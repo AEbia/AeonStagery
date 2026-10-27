@@ -643,6 +643,7 @@ function migrateLighting(
   return statementResult(statement('lighting', id, time, clean(params) as LightingParams));
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical scene payloads predate the current schemas and may contain extension fields; keep dynamic access confined to the migration boundary.
 function migrateLegacyCameraMove(params: Record<string, any>): CameraParams {
   const zoom = readZoomIntent(params.zoom, 'absolute');
   if (readString(params.targetCharacter)) {
@@ -667,6 +668,7 @@ function migrateLegacyCameraMove(params: Record<string, any>): CameraParams {
   }) as CameraParams;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical scene payloads predate the current schemas and may contain extension fields; keep dynamic access confined to the migration boundary.
 function migrateCameraMotion(params: Record<string, any>): CameraParams {
   const move = readString(params.move);
   if (move === 'follow') {
@@ -715,6 +717,7 @@ function migrateCameraMotion(params: Record<string, any>): CameraParams {
   }) as CameraParams;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical scene payloads predate the current schemas and may contain extension fields; keep dynamic access confined to the migration boundary.
 function migrateImageLayer(actionType: LegacyActionType, params: Record<string, any>, fallbackId: string): GraphicLayerParams {
   return clean({
     kind: 'image',
@@ -732,6 +735,7 @@ function migrateImageLayer(actionType: LegacyActionType, params: Record<string, 
   }) as GraphicLayerParams;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Historical scene payloads predate the current schemas and may contain extension fields; keep dynamic access confined to the migration boundary.
 function migrateTextLayer(actionType: LegacyActionType, params: Record<string, any>, fallbackId: string): GraphicLayerParams {
   return clean({
     kind: 'text',

@@ -22,6 +22,7 @@ import {
   type SceneStatementIdGenerator,
 } from '../semantic-scene';
 import { createSemanticAuthorReceipt } from '../timeline-authoring/SemanticAuthoringReceipt';
+import { applyDialogueDefaultsToCreatedStatements, type DialogueDefaultsReader } from '../timeline-authoring/dialogueDefaults';
 import { applyDraft } from './AiProseDraftSession';
 import { materializePerformancePlaceholders, stableCharacterId } from './CharacterBindingPlan';
 import {
@@ -89,6 +90,7 @@ export type AiProseCompositeCommit = (
 
 export interface AiProseSceneApplicatorOptions {
   readonly commitApplied: AiProseCompositeCommit;
+  readonly dialogueDefaults?: DialogueDefaultsReader;
   readonly now?: () => string;
   readonly characterIdGenerator?: AiProseCharacterIdGenerator;
   readonly statementIdGenerator?: SceneStatementIdGenerator;
@@ -110,6 +112,7 @@ const sharedApplyGuards = new WeakMap<object, Map<string, 'in-flight' | 'applied
 
 export class AiProseSceneApplicator {
   private readonly commitApplied: AiProseCompositeCommit;
+  private readonly dialogueDefaults?: DialogueDefaultsReader;
   private readonly now: () => string;
   private readonly characterIdGenerator: AiProseCharacterIdGenerator;
   private readonly factory: SceneStatementFactory;
@@ -124,6 +127,7 @@ export class AiProseSceneApplicator {
       throw new Error('An AI prose commitApplied composite seam is required');
     }
     this.commitApplied = options.commitApplied;
+    this.dialogueDefaults = options.dialogueDefaults;
     this.now = options.now ?? (() => new Date().toISOString());
     this.characterIdGenerator = options.characterIdGenerator ?? stableCharacterId;
     this.factory = options.factory ?? (options.statementIdGenerator
@@ -273,7 +277,12 @@ export class AiProseSceneApplicator {
         }, { materializePlaceholders: false }).candidate;
       }
     }
-    const parsed = this.codec.parseAndValidate(withPlaceholders);
+    const withDialogueDefaults = applyDialogueDefaultsToCreatedStatements(
+      withPlaceholders,
+      createdStatementIds,
+      () => this.dialogueDefaults?.getDialogueDefaults(),
+    );
+    const parsed = this.codec.parseAndValidate(withDialogueDefaults);
     const canonicalOrder = getSceneDocumentCanonicalOrder(document);
     const validated = canonicalOrder
       ? withSceneDocumentCanonicalOrder(parsed, canonicalOrder)

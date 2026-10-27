@@ -3,7 +3,7 @@
 | ADR | Status | Decision |
 |---|---|---|
 | [KSM-0001](./ksm-0001-unified-template-system.md) | accepted | Versioned template packages and semantic preset payloads |
-| [KSM-0003](./ksm-0003-semantic-scene-statements.md) | accepted | Semantic scene source, one-way compilation, source-backed timeline authoring and resource Motion duration materialization |
+| [KSM-0003](./ksm-0003-semantic-scene-statements.md) | accepted | Semantic scene source, one-way compilation, source-backed timeline authoring, structured lighting target references and resource Motion duration materialization |
 | [KSM-0004](./ksm-0004-contextual-short-resource-names.md) | draft | Contextual resource discovery, picker identity, and authoring-time materialization |
 | [KSM-0005](./ksm-0005-live2d-performance-resources-and-parameter-curves.md) | draft | External Live2D performance resources and deterministic parameter curves |
 

@@ -19,11 +19,19 @@ describe('Cubism engine availability and initialization', () => {
     const pending = [sdk.initCubismPixiSdk(), sdk.initCubismPixiSdk()];
     await Promise.resolve();
     expect(mocks.load).not.toHaveBeenCalled();
-    fakeWindow.Live2DCubismCore = { Version: { csmGetVersion: () => 1 } };
+    class Version {
+      static csmGetVersion() { return 1; }
+    }
+    fakeWindow.Live2DCubismCore = { Version };
     complete();
     await Promise.all(pending);
     await sdk.initCubismPixiSdk();
     expect(mocks.ready).toHaveBeenCalledOnce();
     expect(sdk.getCubismPixiSdkStatus()).toEqual({ available: true, initialized: true, message: null });
+  });
+  it('rejects a Core Version container without a callable version method', async () => {
+    vi.stubGlobal('window', { Live2DCubismCore: { Version: {} } });
+    const sdk = await import('../engine/CubismPixiSdk');
+    expect(sdk.getCubismPixiSdkStatus().available).toBe(false);
   });
 });

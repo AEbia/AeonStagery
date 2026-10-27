@@ -3,13 +3,16 @@
  *
  * ExportAdapter tests
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ExportAdapter } from '../api/adapters/ExportAdapter';
+import type { ExportConfig } from '../api/types/export';
+import { installMockExportEncoder, MockExportEncoder } from './helpers/MockExportEncoder';
 import { SCENE_SCHEMA_VERSION, type PreparedCompiledScene } from '../api/types/semantic-scene';
 
 function createMockStageAdapter() {
   return {
     getApp: vi.fn().mockReturnValue({
+      canvas: document.createElement('canvas'),
       renderer: {
         width: 1280,
         height: 720,
@@ -34,6 +37,7 @@ function createMockPlaybackAdapter() {
     seek: vi.fn().mockResolvedValue(undefined),
     pause: vi.fn(),
     getDuration: vi.fn().mockReturnValue(10),
+    getCurrentTime: vi.fn().mockReturnValue(4),
     setSilentMode: vi.fn(),
     getMasterTimeline: vi.fn().mockReturnValue({
       seek: vi.fn(),
@@ -51,6 +55,8 @@ function createMockLightingSystem() {
 
 function createMockLive2DManager() {
   return {
+    setLipSyncParameter: vi.fn(),
+    clearLipSyncParameters: vi.fn(),
     setExportMode: vi.fn(),
     waitForAllLoaded: vi.fn().mockResolvedValue(undefined),
     updateAll: vi.fn().mockResolvedValue(undefined),
@@ -95,11 +101,13 @@ function createMockElectronAPI() {
       startStreamExport: vi.fn().mockResolvedValue({ success: true }),
       pushEncodedChunk: vi.fn().mockResolvedValue({ success: true }),
       pushFrame: vi.fn().mockResolvedValue({ success: true }),
-      endStreamExport: vi.fn().mockResolvedValue({ success: true }),
+      endStreamExport: vi.fn().mockResolvedValue({ success: true, sizeBytes: 50_000 }),
       convert: vi.fn().mockResolvedValue({ success: true }),
       getTempDir: vi.fn().mockResolvedValue('/tmp'),
+      getEncodingCapabilities: vi.fn().mockResolvedValue({ success: false, encoders: [] }),
     },
     fs: {
+      stat: vi.fn().mockResolvedValue({ success: true, data: { isFile: true, sizeBytes: 50_000 } }),
       removeFile: vi.fn().mockResolvedValue({ success: true }),
       exists: vi.fn().mockResolvedValue(false),
       readFile: vi.fn().mockResolvedValue({ success: false }),
@@ -116,6 +124,7 @@ function createMockElectronAPI() {
 }
 
 describe('ExportAdapter', () => {
+  afterEach(() => vi.unstubAllGlobals());
   let adapter: ExportAdapter;
   let stageAdapter: ReturnType<typeof createMockStageAdapter>;
   let playbackAdapter: ReturnType<typeof createMockPlaybackAdapter>;
@@ -149,6 +158,266 @@ describe('ExportAdapter', () => {
     expect(adapter).toBeDefined();
   });
 
+  function nativeConfig(overrides: Partial<ExportConfig> = {}): ExportConfig {
+    return {
+      format: 'mp4', codec: 'libx265', bitrateMbps: 8, fps: 30, width: 16, height: 16,
+      rangeStart: 0, rangeEnd: 2 / 30, includeAudio: false, backend: 'webcodecs', outputPath: '/output/native.mp4',
+      encoding: { videoCodec: 'hevc', implementation: 'auto', quality: 'balanced' }, ...overrides,
+    };
+  }
+
+  it('samples through the real export pipeline without changing the dialog layout, and restores the playhead', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    const addClass = vi.spyOn(document.body.classList, 'add');
+    try {
+      const sampling = adapter.estimateSize(nativeConfig({ encoding: { videoCodec: 'hevc', implementation: 'ffmpeg', quality: 'balanced' } }));
+      const overlapping = await adapter.export(nativeConfig(), vi.fn());
+      expect(overlapping).toMatchObject({ success: false });
+      const result = await sampling;
+      expect(result.bytes).toBe(50_000);
+      expect(result.sampledFrames).toBe(2);
+      expect(result.encoding?.implementation).toBe('ffmpeg');
+      expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith(
+        expect.stringMatching(/size-sample-.+\.mp4$/), expect.objectContaining({ measureOnly: true }),
+      );
+      expect(electronAPI.fs.stat).not.toHaveBeenCalled();
+      expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
+      expect(playbackAdapter.seek).toHaveBeenLastCalledWith(4, true);
+      expect(addClass).not.toHaveBeenCalledWith('is-exporting');
+    } finally { addClass.mockRestore(); }
+  });
+
+  it('estimates supported WebCodecs VBR from target bitrate without sampling or applying CRF', async () => {
+    installMockExportEncoder();
+    const settings = nativeConfig({ rangeEnd: 10, encoding: {
+      videoCodec: 'hevc', implementation: 'auto', quality: 'custom', rateControl: { mode: 'crf', crf: 10 },
+    } });
+    const estimate = await adapter.estimateSize(settings);
+    expect(estimate).toMatchObject({ basis: 'bitrate', sampleCount: 0, bytes: 10_100_000 });
+    expect(estimate.encoding?.implementation).toBe('webcodecs');
+    const changed = await adapter.estimateSize({ ...settings, encoding: { ...settings.encoding!, rateControl: { mode: 'crf', crf: 40 } } });
+    expect(changed.bytes).toBe(estimate.bytes);
+    expect(electronAPI.export.startStreamExport).not.toHaveBeenCalled();
+    expect(electronAPI.export.getTempDir).not.toHaveBeenCalled();
+    expect(playbackAdapter.seek).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['hevc', 'webcodecs'], ['av1', 'webcodecs'], ['hevc', 'auto'], ['av1', 'auto'],
+  ] as const)('does not sample a speculative FFmpeg fallback for %s in %s mode', async (videoCodec, implementation) => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = candidate => candidate.codec.startsWith('avc1.');
+    documentStore.setPreparedScene(createPreparedScene());
+    const estimate = await adapter.estimateSize(nativeConfig({
+      codec: videoCodec === 'hevc' ? 'libx265' : 'libaom-av1', rangeEnd: 10,
+      encoding: { videoCodec, implementation, quality: 'balanced' },
+    }));
+    expect(estimate).toMatchObject({ basis: 'bitrate', sampleCount: 0, bytes: 10_100_000 });
+    expect(estimate.encoding?.implementation).toBe('webcodecs');
+    expect(electronAPI.export.getTempDir).not.toHaveBeenCalled();
+    expect(electronAPI.export.startStreamExport).not.toHaveBeenCalled();
+    expect(playbackAdapter.seek).not.toHaveBeenCalled();
+    expect(MockExportEncoder.isConfigSupported).not.toHaveBeenCalled();
+  });
+
+  it('encodes the selected standard natively without a second video encode', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(MockExportEncoder.configurations[0].codec).toMatch(/^hvc1\./);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({ inputFormat: 'hevc' }));
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it.each(['ffmpeg', 'auto', 'webcodecs'] as const)('applies the dialog target bitrate to FFmpeg output in %s mode', async implementation => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = () => false;
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({
+      bitrateMbps: 12.5,
+      encoding: { videoCodec: 'hevc', implementation, quality: 'custom', rateControl: { mode: 'bitrate', bitrateMbps: 12.5 } },
+    }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({
+      isEncoded: false, codec: 'libx265', bitrate: 12.5,
+    }));
+    expect(electronAPI.export.startStreamExport.mock.calls[0][1]).not.toHaveProperty('crf');
+  });
+
+  it.each([
+    ['h264', 'libx264', 'h264'], ['hevc', 'libx265', 'hevc'],
+    ['vp9', 'libvpx-vp9', 'ivf'], ['av1', 'libaom-av1', 'ivf'],
+  ] as const)('accepts MKV with native %s encoding', async (videoCodec, codec, inputFormat) => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({
+      format: 'mkv', outputPath: '/output/native.mkv', codec,
+      encoding: { videoCodec, implementation: 'auto', quality: 'balanced' },
+    }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mkv', expect.objectContaining({ inputFormat, audioCodec: 'aac' }));
+    expect(result.encoding?.implementation).toBe('webcodecs');
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it('streams high-bitrate H.264 directly into a CRF-controlled VP9 transcode', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = config => config.codec.startsWith('avc1.');
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({ format: 'webm', outputPath: '/output/final.webm', codec: 'libvpx-vp9', bitrateMbps: 2,
+      encoding: { videoCodec: 'vp9', implementation: 'auto', quality: 'balanced', intermediateBitrateMbps: 40, rateControl: { mode: 'crf', crf: 29 } } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/final.webm', expect.objectContaining({ inputFormat: 'h264', bitrate: 40, transcode: { codec: 'libvpx-vp9', crf: 29, speed: 'balanced' } }));
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+    expect(result.encoding?.implementation).toBe('webcodecs-transcode');
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
+  });
+
+  it.each(['auto', 'webcodecs', 'ffmpeg'] as const)('selects hardware automatically when WebCodecs is unavailable in %s mode', async implementation => {
+    vi.stubGlobal('VideoEncoder', undefined);
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.getEncodingCapabilities.mockResolvedValue({ success: true, encoders: ['libx265', 'hevc_qsv'] });
+    const result = await adapter.export(nativeConfig({ encoding: {
+      videoCodec: 'hevc', implementation, quality: 'balanced', rateControl: { mode: 'bitrate', bitrateMbps: 8 },
+    } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding).toMatchObject({ implementation: 'ffmpeg', encoder: 'hevc_qsv', attempt: 1 });
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({
+      isEncoded: false, codec: 'hevc_qsv', bitrate: 8,
+    }));
+  });
+
+  it('tries remaining available hardware before software after runtime initialization failures', async () => {
+    vi.stubGlobal('VideoEncoder', undefined);
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.getEncodingCapabilities.mockResolvedValue({ success: true, encoders: ['hevc_nvenc', 'hevc_qsv', 'libx265'] });
+    electronAPI.export.pushFrame
+      .mockResolvedValueOnce({ success: false, error: 'Cannot load nvcuda.dll' })
+      .mockResolvedValueOnce({ success: false, error: 'hevc_qsv: No capable devices found' });
+    const result = await adapter.export(nativeConfig({ encoding: {
+      videoCodec: 'hevc', implementation: 'auto', quality: 'balanced', ffmpegEncoder: 'auto',
+      rateControl: { mode: 'bitrate', bitrateMbps: 8 },
+    } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport.mock.calls.map(([, options]) => options.codec))
+      .toEqual(['hevc_nvenc', 'hevc_qsv', 'libx265']);
+    expect(result.encoding).toMatchObject({ encoder: 'libx265', attempt: 3 });
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses automatic hardware encoding for the H.264 intermediate transcode', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = config => config.codec.startsWith('avc1.');
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.getEncodingCapabilities.mockResolvedValue({ success: true, encoders: ['hevc_qsv', 'libx265'] });
+    const result = await adapter.export(nativeConfig({ encoding: {
+      videoCodec: 'hevc', implementation: 'auto', quality: 'balanced', rateControl: { mode: 'bitrate', bitrateMbps: 8 },
+    } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding).toMatchObject({ implementation: 'webcodecs-transcode', encoder: 'hevc_qsv' });
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({
+      inputFormat: 'h264', transcode: { codec: 'hevc_qsv', bitrate: 8, speed: 'balanced' },
+    }));
+  });
+
+  it('uses software when the capability query rejects', async () => {
+    vi.stubGlobal('VideoEncoder', undefined);
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.getEncodingCapabilities.mockRejectedValue(new Error('IPC unavailable'));
+    const result = await adapter.export(nativeConfig({ encoding: {
+      videoCodec: 'hevc', implementation: 'ffmpeg', quality: 'balanced', rateControl: { mode: 'bitrate', bitrateMbps: 8 },
+    } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding?.encoder).toBe('libx265');
+  });
+
+  it('skips the H.264 intermediate for high quality and passes CRF to raw-pixel encoding', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = () => false;
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig({ encoding: { videoCodec: 'hevc', implementation: 'auto', quality: 'high' } }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({ isEncoded: false, codec: 'libx265', crf: 20 }));
+    expect(MockExportEncoder.configurations).toHaveLength(0);
+  });
+
+  it('restarts capture with H.264 after a target encoder fails at runtime', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.failCodec = 'hvc1.';
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(MockExportEncoder.configurations.map(config => config.codec.split('.')[0])).toEqual(['hvc1', 'avc1']);
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(playbackAdapter.seek.mock.calls.filter(([time]) => time === 0).length).toBeGreaterThanOrEqual(2);
+    expect(result.encoding?.attempt).toBe(2);
+  });
+
+  it('does not retry an output write failure as an encoder compatibility failure', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.pushEncodedChunk.mockResolvedValue({ success: false, error: 'disk full' });
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('disk full');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('recaptures H.264 with software transcoding after a streaming hardware encoder failure', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = config => config.codec.startsWith('avc1.');
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.pushEncodedChunk.mockRejectedValueOnce(new Error('hevc_nvenc: No capable devices found'));
+    const result = await adapter.export(nativeConfig({
+      encoding: { videoCodec: 'hevc', implementation: 'auto', quality: 'balanced',
+        ffmpegEncoder: 'hevc_nvenc', rateControl: { mode: 'bitrate', bitrateMbps: 8 } },
+    }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding?.encoder).toBe('libx265');
+    expect(electronAPI.export.startStreamExport.mock.calls.map(([, options]) => options.transcode?.codec)).toEqual(['hevc_nvenc', 'libx265']);
+    expect(playbackAdapter.seek.mock.calls.filter(([time]) => time === 0).length).toBeGreaterThanOrEqual(2);
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it('cancels the failed task without deleting the destination when encoder configuration fails', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.failConfigureCodec = 'hvc1.';
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
+    expect(result.encoding?.implementation).toBe('webcodecs-transcode');
+  });
+
+  it('falls back to raw pixels once when neither native standard is supported', async () => {
+    installMockExportEncoder();
+    MockExportEncoder.supports = () => false;
+    documentStore.setPreparedScene(createPreparedScene());
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(true);
+    expect(result.encoding?.implementation).toBe('ffmpeg');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
+  it('mixes audio during native target capture without a second file pass', async () => {
+    installMockExportEncoder();
+    documentStore.setPreparedScene(createPreparedScene({ actions: [{
+      id: 'voice', action: 'dialogue', time: 0, params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
+      source: { statementId: 'voice', outputKey: 'primary' },
+    }] }));
+    electronAPI.fs.exists.mockResolvedValue(true);
+    const result = await adapter.export(nativeConfig({ includeAudio: true }), vi.fn());
+    expect(result.success).toBe(true);
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/native.mp4', expect.objectContaining({ inputFormat: 'hevc', audioSources: [expect.objectContaining({ path: '/test/project/voice.wav' })], totalFrames: 2 }));
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
+  });
+
   it('does not start an export when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -163,7 +432,7 @@ describe('ExportAdapter', () => {
     const controller = new AbortController();
     const config = {
       format: 'mp4' as const, codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1,
       includeAudio: true, backend: 'rawpixels' as const, outputPath: '/output/test.mp4',
     };
     electronAPI.export.pushFrame.mockImplementationOnce(async () => {
@@ -176,7 +445,7 @@ describe('ExportAdapter', () => {
     expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
     expect(electronAPI.export.pushFrame).toHaveBeenCalledTimes(1);
     expect(electronAPI.export.convert).not.toHaveBeenCalled();
-    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith('/output/test.mp4');
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
     expect(stageAdapter.resumeTicker).toHaveBeenCalled();
     expect(playbackAdapter.setSilentMode).toHaveBeenLastCalledWith(false);
     expect(live2DManager.setExportMode).toHaveBeenLastCalledWith(false);
@@ -186,7 +455,7 @@ describe('ExportAdapter', () => {
     expect(retry.success).toBe(true);
   });
 
-  it('removes a direct output when cancellation arrives as stream finalization completes', async () => {
+  it('reports completion when cancellation races with successful finalization', async () => {
     documentStore.setPreparedScene(createPreparedScene());
     const controller = new AbortController();
     electronAPI.export.endStreamExport.mockImplementation(async () => {
@@ -198,16 +467,16 @@ describe('ExportAdapter', () => {
 
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: false, backend: 'rawpixels', outputPath: '/output/direct.mp4',
     }, vi.fn(), controller.signal);
 
-    expect(result).toEqual({ success: false, cancelled: true });
+    expect(result).toMatchObject({ success: true, outputPath: '/output/direct.mp4' });
     expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
-    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith('/output/direct.mp4');
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
   });
 
-  it('cancels a running conversion and does not report completion', async () => {
+  it('cancels stream finalization with audio and does not report completion', async () => {
     documentStore.setPreparedScene(createPreparedScene({ actions: [{
       id: 'voice', action: 'dialogue', time: 0,
       params: { text: 'Hello', speakerId: 'char1', voice: 'voice.wav', duration: 1, lipSync: 'none' },
@@ -215,24 +484,25 @@ describe('ExportAdapter', () => {
     } as any] }));
     electronAPI.fs.exists.mockResolvedValue(true);
     const controller = new AbortController();
-    let settleConversion!: (result: { success: boolean }) => void;
-    electronAPI.export.convert.mockImplementation(() => {
-      const result = new Promise<{ success: boolean }>((resolve) => { settleConversion = resolve; });
+    let settleFinalization!: (result: { success: boolean }) => void;
+    electronAPI.export.endStreamExport.mockImplementation(() => {
+      const result = new Promise<{ success: boolean }>((resolve) => { settleFinalization = resolve; });
       controller.abort();
       return result;
     });
     electronAPI.export.cancelExport.mockImplementation(async () => {
-      settleConversion({ success: false });
+      settleFinalization({ success: false });
       return { success: true };
     });
     const progress = vi.fn();
     const result = await adapter.export({
       format: 'mp4', codec: 'libx265', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'webcodecs', outputPath: '/output/test.mp4',
     }, progress, controller.signal);
     expect(result).toEqual({ success: false, cancelled: true });
-    expect(electronAPI.export.convert).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.endStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.convert).not.toHaveBeenCalled();
     expect(electronAPI.export.cancelExport).toHaveBeenCalledTimes(1);
     expect(progress.mock.calls.some(([p]) => p.phase === 'done')).toBe(false);
   });
@@ -260,7 +530,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 1,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 1,
         includeAudio: false, backend: 'rawpixels', outputPath: '/output/voice.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -294,7 +564,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 0.5,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 0.5,
         includeAudio: true, backend: 'rawpixels', outputPath: '/output/missing-voice.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -326,7 +596,7 @@ describe('ExportAdapter', () => {
     try {
       const result = await adapter.export({
         format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 4,
-        width: 1, height: 1, rangeStart: 0.25, rangeEnd: 0.75,
+        width: 16, height: 16, rangeStart: 0.25, rangeEnd: 0.75,
         includeAudio: false, backend: 'rawpixels', outputPath: '/output/handoff.mp4',
       }, vi.fn());
       expect(result.success).toBe(true);
@@ -425,8 +695,7 @@ describe('ExportAdapter', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(electronAPI.export.convert).toHaveBeenCalledWith(
-      expect.stringContaining('/tmp/video_'),
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith(
       '/output/with-voice.mp4',
       expect.objectContaining({
         audioSources: [{
@@ -533,7 +802,7 @@ describe('ExportAdapter', () => {
     documentStore.setPreparedScene(createPreparedScene());
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/direct.mp4',
     }, vi.fn());
     expect(result).toEqual({ success: true, outputPath: '/output/direct.mp4' });
@@ -544,45 +813,40 @@ describe('ExportAdapter', () => {
     expect(electronAPI.fs.copyFile).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])('cleans temporary video after conversion success=%s', async (success) => {
+  it.each([true, false])('returns stream finalization success=%s without creating a video intermediate', async (success) => {
     documentStore.setPreparedScene(createPreparedScene({ actions: [{
       id: 'voice', action: 'dialogue', time: 0,
       params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
       source: { statementId: 'voice', outputKey: 'primary' },
     }] }));
     electronAPI.fs.exists.mockResolvedValue(true);
-    electronAPI.export.convert.mockResolvedValue({ success });
+    electronAPI.export.endStreamExport.mockResolvedValue({ success });
     const result = await adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
     }, vi.fn());
     expect(result.success).toBe(success);
-    const temporaryPath = electronAPI.export.startStreamExport.mock.calls[0][0];
-    expect(temporaryPath).toMatch(/^\/tmp\/video_/);
-    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(temporaryPath);
-    expect(electronAPI.fs.removeFile).not.toHaveBeenCalledWith('/output/mixed.mp4');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledWith('/output/mixed.mp4', expect.objectContaining({ audioSources: expect.any(Array) }));
+    expect(electronAPI.export.getTempDir).not.toHaveBeenCalled();
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
     expect(electronAPI.fs.readFile).not.toHaveBeenCalled();
     expect(electronAPI.fs.exists).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves the export result if temporary-file cleanup fails', async () => {
-    documentStore.setPreparedScene(createPreparedScene({ actions: [{
-      id: 'voice', action: 'dialogue', time: 0,
-      params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
-      source: { statementId: 'voice', outputKey: 'primary' },
-    }] }));
-    electronAPI.fs.exists.mockResolvedValue(true);
-    electronAPI.fs.removeFile.mockRejectedValue(new Error('cleanup failed'));
-    const result = await adapter.export({
-      format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
-      includeAudio: true, backend: 'rawpixels', outputPath: '/output/mixed.mp4',
-    }, vi.fn());
-    expect(result.success).toBe(true);
+  it('stops before capturing frames when output space is insufficient', async () => {
+    documentStore.setPreparedScene(createPreparedScene());
+    electronAPI.export.startStreamExport.mockResolvedValue({ success: false, error: 'ENOSPC: 导出磁盘空间不足', failureKind: 'output' });
+    const result = await adapter.export(nativeConfig(), vi.fn());
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ENOSPC');
+    expect(electronAPI.export.startStreamExport).toHaveBeenCalledTimes(1);
+    expect(electronAPI.export.pushFrame).not.toHaveBeenCalled();
+    expect(electronAPI.export.pushEncodedChunk).not.toHaveBeenCalled();
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
   });
 
-  it.each(['cancel', 'failure'])('waits for process cleanup before removing temporary video on %s', async (mode) => {
+  it.each(['cancel', 'failure'])('waits for main-process task cleanup before returning on %s', async (mode) => {
     documentStore.setPreparedScene(createPreparedScene({ actions: [{
       id: 'voice', action: 'dialogue', time: 0,
       params: { voice: 'voice.wav', duration: 1, lipSync: 'none' },
@@ -605,7 +869,7 @@ describe('ExportAdapter', () => {
     });
     const exporting = adapter.export({
       format: 'mp4', codec: 'libx264', bitrateMbps: 12, fps: 60,
-      width: 1, height: 1, rangeStart: 0, rangeEnd: 1 / 60,
+      width: 16, height: 16, rangeStart: 0, rangeEnd: 1 / 60,
       includeAudio: true, backend: 'rawpixels', outputPath: '/output/test.mp4',
     }, vi.fn(), controller.signal);
     await cleanupStarted;
@@ -615,7 +879,7 @@ describe('ExportAdapter', () => {
     expect(result).toMatchObject(mode === 'cancel'
       ? { success: false, cancelled: true }
       : { success: false, error: 'write failed' });
-    expect(electronAPI.fs.removeFile).toHaveBeenCalledWith(electronAPI.export.startStreamExport.mock.calls[0][0]);
+    expect(electronAPI.fs.removeFile).not.toHaveBeenCalled();
   });
 
   it('accepts MOV + Apple ProRes 4444 for subtitle-only exports', async () => {

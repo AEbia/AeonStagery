@@ -25,10 +25,12 @@ function buffer(file: string): ArrayBuffer {
 async function createModel(eyeBlinkParameters?: string[], motionKey?: string) {
   const root = path.dirname(entry!);
   const json = JSON.parse(fs.readFileSync(entry!, 'utf8'));
-  if (motionKey) {
-    json.FileReferences.Motions = { [motionKey]: json.FileReferences.Motions[motionKey] };
-    json.FileReferences.Expressions = [];
-  }
+  // Local catalogs can contain thousands of unrelated or malformed resources.
+  // Load only the real motion under test; generic runtime cases use probes.
+  json.FileReferences.Motions = motionKey
+    ? { [motionKey]: json.FileReferences.Motions[motionKey] }
+    : {};
+  json.FileReferences.Expressions = [];
   json.url = 'file://' + entry;
   if (eyeBlinkParameters) {
     json.Groups = (json.Groups ?? []).filter((group: any) => group.Name !== 'EyeBlink');
@@ -52,13 +54,14 @@ async function createModel(eyeBlinkParameters?: string[], motionKey?: string) {
   model.internalModel = internal;
   internal.physics = json.FileReferences.Physics ? runtime.createPhysics(core, buffer(path.join(root, json.FileReferences.Physics))) : undefined;
   installCubismPixiModelRuntime(model);
+  addProbeExpression(model, 'F01');
   models.push(model);
   return model;
 }
 
-function addProbeExpression(model: any) {
+function addProbeExpression(model: any, name = 'probe') {
   const manager = model.internalModel.motionManager.expressionManager;
-  const definition = { Name: 'probe', File: 'probe.exp3.json' };
+  const definition = { Name: name, File: `${name}.exp3.json` };
   const data = new TextEncoder().encode(JSON.stringify({
     FadeInTime: 1, FadeOutTime: 1,
     Parameters: [{ Id: 'ParamAngleX', Value: 20, Blend: 'Overwrite' }],
@@ -131,13 +134,49 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
       handle.dispose({ mode: 'destroy' });
     }
   });
-  it('loads a moc3 model with only the modern Core and exposes real parameter names and expressions', async () => {
+  it('loads a moc3 model with only the modern Core and exposes real parameter names and a probe expression', async () => {
     const model = await createModel();
     model.update(16);
     expect(model.internalModel.coreModel.getParameterIds()).toContain('ParamAngleX');
     expect(model.internalModel.motionManager.expressionManager.definitions.length).toBeGreaterThan(0);
     expect(Array.from(model.internalModel.parameterValues).every(Number.isFinite)).toBe(true);
     expect(model.deltaTime).toBe(0);
+  });
+  it('returns posed local anchors after a real Core update without rendering', async () => {
+    const model = await createModel();
+    model.update(0);
+    const runtime = { runtimeFamily: 'cubism3-plus', adapterId: 'untitled-pixi-live2d-engine-cubism', supported: true } as const;
+    const handle = new CubismPixiLive2DAdapter().createModelHandle('anchor-probe', model, runtime);
+    const character: CharacterEntry = {
+      id: 'anchor-probe', model, modelPath: entry!, modelUrl: entry!, runtime,
+      adapterId: runtime.adapterId, runtimeHandle: handle, config: {}, injectedParams: {},
+      baseHeight: model.height, lipSyncParameterIds: new Set(), motionEpoch: 0,
+    };
+    const manager = new Live2DManager();
+    live2DStageState(manager).characters.set(character.id, character);
+    const proxy = { x: 960, y: 900, scale: 1, rotation: 0, opacity: 1, z: 0 };
+    const proxies = new ProxyRegistry();
+    proxies.set(character.id, proxy);
+    manager.setScriptEngine({ transformationProxies: proxies });
+
+    try {
+      const before = manager.getPoint(character.id, 'head')!;
+      const core = model.internalModel.coreModel;
+      const ids = core.getParameterIds();
+      for (const [id, value] of Object.entries({ ParamAngleX: 30, ParamAngleY: -20, ParamBodyAngleX: 10, ParamBodyAngleY: 12 })) {
+        const index = ids.indexOf(id);
+        if (index >= 0) core.setParameterValueByIndex(index, value);
+      }
+      core.update();
+      const after = manager.getPoint(character.id, 'head')!;
+      expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(1e-6);
+
+      manager.currentCamera = { position: [0.7, 0.3], zoom: 2 };
+      expect(manager.getPoint(character.id, 'head')).toEqual(after);
+    } finally {
+      live2DStageState(manager).characters.clear();
+      handle.dispose({ mode: 'destroy' });
+    }
   });
   it('commits a batch of injected parameters with one Core geometry update', async () => {
     const model = await createModel();
@@ -204,13 +243,15 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
   });
   it('seeks native motion curves and fade weights to the same pose as sequential playback', async () => {
     const model = await createModel();
+    addProbeMotion(model);
     const snapshot = model.captureRuntimeSnapshot('haru');
-    await model.startMotion('TapBody', 0, 3, 0, 0.5);
+    await model.startMotion('probe', 0, 3, 0, 0.5);
     for (let i = 0; i < 30; i++) model.update(1000 / 60);
     const playback = new Float32Array(model.internalModel.parameterValues);
-    await model.restoreAtSceneTime({ id: 'haru', targetSceneTime: 0.5, idleSnapshot: snapshot, motion: { key: 'TapBody', offset: 0.5, sceneTime: 0.5, fadeInSeconds: 0.5 } });
+    await model.restoreAtSceneTime({ id: 'haru', targetSceneTime: 0.5, idleSnapshot: snapshot, motion: { key: 'probe', offset: 0.5, sceneTime: 0.5, fadeInSeconds: 0.5 } });
     // Physics needs frame replay; authored motion parameters must match.
     const ids = model.internalModel.coreModel.getParameterIds();
+    expect(playback[ids.indexOf('ParamAngleY')]).toBeGreaterThan(0);
     for (const id of ['ParamAngleX', 'ParamAngleY', 'ParamMouthOpenY']) {
       const index = ids.indexOf(id);
       expect(model.internalModel.parameterValues[index]).toBeCloseTo(playback[index], 3);

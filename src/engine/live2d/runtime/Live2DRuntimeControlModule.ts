@@ -1,4 +1,5 @@
 import type { Live2DRuntimeControlPort } from '../../runtime/Live2DRuntimeControlPort';
+import type { Live2DAnchorName } from '../../Live2DAnchorGeometry';
 import type { Live2DClockTransaction } from './Live2DRuntimeClockCoordinator';
 import type * as PIXI from 'pixi.js';
 import { createBoundModelInitialization } from './BoundModelInitialization';
@@ -243,6 +244,8 @@ export interface Live2DBlinkInterface {
 
 export interface Live2DCharacterBehaviorInterface {
   getHeadAnchor(target?: 'head' | 'main'): { x: number; y: number } | null;
+  /** Posed anatomy override; null retains the existing hit-area/bounds policy. */
+  getAnchor(anchor: Live2DAnchorName, target?: 'head' | 'main'): { x: number; y: number } | null;
 }
 
 export interface Live2DModelHandle {
@@ -452,6 +455,7 @@ export function createLive2DModelHandle({
     },
     character: {
       getHeadAnchor: target => controls.getHeadAnchor(model, target),
+      getAnchor: anchor => controls.getAnchor?.(model, anchor) ?? null,
     },
     externalPerformances: {
       register: resource => resource.kind === 'motion'

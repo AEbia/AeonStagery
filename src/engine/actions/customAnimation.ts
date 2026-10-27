@@ -2,6 +2,7 @@ import { customAnimHost } from '../CustomAnimHost';
 import { eventBus } from '../../api/events';
 import { getLogger } from '../Logger';
 import type { SchedulerContext } from './types';
+import type { RuntimeActionContract } from './contracts';
 
 const logger = getLogger('CustomAnimationAction');
 let customAnimationErrorCounter = 0;
@@ -18,7 +19,7 @@ function reportCustomAnimationError(file: unknown, error: unknown): void {
   });
 }
 
-export function schedulePlayCustomAnimation(ctx: SchedulerContext, action: { time?: number; params: Record<string, any> }): void {
+export function schedulePlayCustomAnimation(ctx: SchedulerContext, action: RuntimeActionContract<'playCustomAnimation'>): void {
   const { tl, isReconstructing, resolvePath, resolvePathAsync } = ctx;
   const { time, params } = action;
   const t = time || 0;

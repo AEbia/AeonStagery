@@ -1,6 +1,6 @@
 import type {
   CollaborationConnectionStatus,
-  CollaborationPresencePatchV2,
+  CollaborationPresencePatchV3,
   CollaborationPresenceServerMessageV3,
   CollaborativeAssetManifest,
 } from '../../api/types/collaboration';
@@ -26,7 +26,7 @@ export interface CollaborativeDocumentLayerV3Options {
   documentStore?: DocumentStore;
   getSceneDocument?: () => SceneDocumentV5 | null;
   subscribeLocal?: (listener: () => void) => () => void;
-  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: any, path?: string) => Promise<unknown> };
+  coordinator?: SemanticDocumentCoordinator | { applyDocument: (document: SceneDocumentV5, path?: string, options?: { coalesce?: boolean }) => Promise<unknown> };
   applyDocument?: (document: SceneDocumentV5, path?: string) => Promise<unknown> | unknown;
   client: CollaborativeClientPortV3;
   collaborationProjectId: string;
@@ -172,7 +172,7 @@ export class CollaborativeDocumentLayerV3 {
 
   getStatus(): CollaborationConnectionStatus { return this.status; }
 
-  updatePresence(patch: CollaborationPresencePatchV2): void {
+  updatePresence(patch: CollaborationPresencePatchV3): void {
     this.options.client.updatePresence?.(patch);
   }
 

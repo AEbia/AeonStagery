@@ -72,6 +72,26 @@ describe('Live2DRuntimeAdapter', () => {
     expect(adapter.isReady()).toBe(false);
   });
 
+  it('prepares Cubism 2 geometry before ancestor filters with the GL guard active', async () => {
+    const model = Object.assign(new PIXI.Container(), {
+      internalModel: {},
+      prepareForRender: vi.fn(),
+    });
+    const adapter = new Cubism2PixiLive2DAdapter(async () => ({
+      Live2DModel: { from: async () => model },
+    }));
+    await adapter.createModel('hero.model.json', { autoUpdate: false });
+    const resetGeometry = vi.fn();
+    const resetShader = vi.fn();
+    const renderer = {
+      geometry: { resetState: resetGeometry }, shader: { resetState: resetShader },
+    } as unknown as PIXI.Renderer;
+    model.onRender?.(renderer);
+    expect(model.prepareForRender).toHaveBeenCalledOnce();
+    expect(resetGeometry.mock.invocationCallOrder[0]).toBeLessThan(model.prepareForRender.mock.invocationCallOrder[0]);
+    expect(resetShader.mock.invocationCallOrder[0]).toBeGreaterThan(model.prepareForRender.mock.invocationCallOrder[0]);
+  });
+
   it('reports the missing Cubism 2 runtime through the preload error path', () => {
     setLive2DCubism2RuntimeAvailable(false);
     const adapter = new Cubism2PixiLive2DAdapter();

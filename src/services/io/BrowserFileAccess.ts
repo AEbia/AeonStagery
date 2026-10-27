@@ -29,16 +29,16 @@ export class BrowserFileAccess implements IFileAccess {
       input.accept = '.json';
 
       let isChanged = false;
-      input.onchange = (e: any) => {
+      input.onchange = () => {
         isChanged = true;
-        const file = e.target.files?.[0];
+        const file = input.files?.[0];
         if (!file) {
           resolve(null);
           return;
         }
         const reader = new FileReader();
-        reader.onload = (evt: any) => {
-          resolve({ data: evt.target.result as string, path: file.name });
+        reader.onload = () => {
+          resolve({ data: reader.result as string, path: file.name });
         };
         reader.onerror = () => {
           resolve(null);

@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import * as Y from 'yjs';
 import type { CollaborativeAssetManifest } from '../../src/api/types/collaboration';
-import type { HistoricalSceneDocumentV4, SceneDocumentV5 } from '../../src/api/types/semantic-scene';
+import type { SceneDocumentV5 } from '../../src/api/types/semantic-scene';
 
 const STATE_FILE = 'room-state.bin';
 const MANIFEST_FILE = 'asset-manifest.json';
@@ -66,20 +66,6 @@ export class CollaborationPersistence {
   async saveManifest(manifest: CollaborativeAssetManifest): Promise<void> {
     await this.ensure();
     await fs.writeFile(this.paths.manifestFile, JSON.stringify(manifest, null, 2));
-  }
-
-  async loadSnapshotV2(): Promise<HistoricalSceneDocumentV4 | null> {
-    try {
-      const raw = await fs.readFile(this.paths.snapshotFile, 'utf8');
-      return JSON.parse(raw) as HistoricalSceneDocumentV4;
-    } catch {
-      return null;
-    }
-  }
-
-  async saveSnapshotV2(document: HistoricalSceneDocumentV4): Promise<void> {
-    await this.ensure();
-    await fs.writeFile(this.paths.snapshotFile, JSON.stringify(document, null, 2));
   }
 
   async loadSnapshotV3(): Promise<SceneDocumentV5 | null> {

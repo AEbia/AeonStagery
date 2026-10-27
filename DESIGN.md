@@ -24,10 +24,17 @@ colors:
   warm-coral: "#d88c7a"
   cool-stage-slate: "#8fa7c7"
   warm-coral-hover: "#efac98"
-  on-accent: "#ffffff"
+  light-on-accent: "#ffffff"
+  dark-on-accent: "#13151a"
   semantic-success: "#34d399"
   semantic-warning: "#f59e0b"
   semantic-error: "#ef4444"
+  light-success-text: "#34d399"
+  light-warning-text: "#f59e0b"
+  light-error-text: "#ef4444"
+  dark-success-text: "#34d399"
+  dark-warning-text: "#f59e0b"
+  dark-error-text: "#ef4444"
   track-dialogue: "#10b981"
   track-character: "#60a5fa"
   track-camera: "#f472b6"
@@ -99,13 +106,13 @@ components:
     padding: "6px 14px"
   button-primary-light:
     backgroundColor: "{colors.director-indigo}"
-    textColor: "{colors.on-accent}"
+    textColor: "{colors.light-on-accent}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "6px 14px"
   button-primary-dark:
     backgroundColor: "{colors.warm-coral}"
-    textColor: "{colors.on-accent}"
+    textColor: "{colors.dark-on-accent}"
     typography: "{typography.body}"
     rounded: "{rounded.md}"
     padding: "6px 14px"
@@ -134,7 +141,7 @@ components:
     height: "44px"
   validation-pill:
     backgroundColor: "color-mix(in srgb, #f59e0b 10%, #ffffff)"
-    textColor: "{colors.semantic-warning}"
+    textColor: "{colors.light-warning-text}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: "0 10px"
@@ -257,7 +264,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 | `--radius-md` | `8px` | 标准控件 | 标准按钮 (`.btn`)、输入框 (`input`)、下拉框、菜单面板 (`menu`)、选项卡 (`tab`) |
 | `--radius-lg` | `12px` | 表面/面板 | 内容卡片 (`card`)、检查器面板、悬浮容器 (`popover`)、媒体缩略图 |
 | `--radius-xl` | `16px` | 模态/对话框 | 设置弹窗 (`settings-dialog`)、模态遮罩面板、主要工具悬浮窗 |
-| `--radius-2xl` | `24px` | 英雄/向导 | 首次运行向导 (`SetupWizard`)、全屏居中引导大卡片 |
+| `--radius-2xl` | `24px` | 英雄/向导 | 项目主页欢迎区、全屏居中引导大卡片 |
 | `--radius-full` | `9999px` | 药丸/胶囊 | 状态胶囊 (`pill`)、Toggle 开关槽体、搜索栏外框 |
 | `--radius-circle`| `50%` | 正圆 | 播放/录制单点按钮、头像、未读指示点、状态指示球 |
 
@@ -276,7 +283,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 5. **Modal & Dialog Windows (`--radius-dialog`, `--radius-modal`, `--radius-window`: `16px`)**:
    高层级桌面浮动窗口与模态对话框，具备独立的关闭行为和深层阴影。
 6. **Hero & Onboarding (`--radius-hero`: `24px`)**:
-   非日常紧凑编辑流的引导页面与新用户向导，提供更柔和、更具沉浸感的欢迎视效。
+   非日常紧凑编辑流的项目欢迎页与引导界面，提供更柔和、更具沉浸感的欢迎视效。
 7. **Pill & Circular Affordances (`--radius-pill`, `--radius-switch`: `9999px`, `--radius-circle`: `50%`)**:
    用于表示状态切换、完全自包围的胶囊指示器，以及纯几何正圆按钮。
 
@@ -288,7 +295,7 @@ AeonStagery 的界面像一张为个人创作者准备的电影制作控制台�
 $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 - 例：外层卡片 $R = 12\text{px}$ (`--radius-lg`)，内边距 $\text{Padding} = 8\text{px}$ 时，内层项目圆角为 $\max(12 - 8, 0) = 4\text{px}$ (`--radius-sm`)，严禁内层元素半径大于外层产生视觉外凸畸变。
 - 例：外层对话框 $R = 16\text{px}$ (`--radius-xl`)，内边距 $\text{Padding} = 12\text{px}$ 时，内层卡片使用 $4\text{px}$ 或 $8\text{px}$ (`--radius-sm` / `--radius-md`)。
-- TypeScript 提供辅助函数 `getNestedRadius(outerPx, paddingPx)` 进行精确计算。
+- 实现时按上述公式计算内层圆角，并优先对齐下级 Token。
 
 ## Components
 
@@ -296,7 +303,7 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 按钮紧凑、清晰并略带触感，默认高度约 32px，内部间距为 6px 14px，圆角为 8px。
 
-- **Primary:** 使用当前主题的主强调色、白色文字和较高字重；小型工具栏版本降为 4px 10px 与 4px 圆角。
+- **Primary:** 使用当前主题的主强调色、`--on-accent` 前景色和较高字重；Light 使用白色，Dark 复用现有深墨色 `#13151a`。默认及悬停状态的文字对比度均须达到 4.5:1（§5.6），播放按钮与实心主题色工具按钮沿用该配对。小型工具栏版本降为 4px 10px 与 4px 圆角。
 - **Hover / Focus:** 悬停上移 1px，并增加轻阴影；主按钮出现主题辉光，键盘焦点使用 2px 主题色轮廓并外移 2px。
 - **Secondary:** 使用抬升中性色表面、细边框和次级文字色。
 - **Icon:** 固定 32px 方形、透明背景，熟悉操作只显示图标并通过 tooltip 或可访问名称说明。
@@ -306,6 +313,8 @@ $$R_{\text{inner}} = \max(R_{\text{outer}} - \text{Padding}, 0)$$
 
 - **Style:** 验证、协作与状态徽章高度约 18–28px，使用细边框、轻语义底色和 4–8px 圆角；计数类徽章可用胶囊形。
 - **State:** 错误、警告、成功严格使用语义色；主题主色只表示选中、焦点或协作编辑状态。
+- **Validation Text:** 校验提示分别使用 `--warning-text`、`--error-text`，底色与边框沿用 `--warning`、`--error`。按项目偏好，警告和错误文字分别保留原始琥珀色 `#f59e0b` 与红色 `#ef4444`，明暗主题的文字令牌均为对应语义色的别名。
+- **Status Text:** 保存、烘焙与协作状态使用 `--success-text`、`--warning-text`、`--error-text`，文字令牌分别沿用原始绿色 `#34d399`、琥珀色 `#f59e0b` 与红色 `#ef4444`。保存成功文字保留原有 0.7 透明度。播放控制标签、总时长、状态栏元数据与检查器空态指引使用 `--text-secondary`，确保说明文字仍然可读。
 
 ### Cards / Containers
 

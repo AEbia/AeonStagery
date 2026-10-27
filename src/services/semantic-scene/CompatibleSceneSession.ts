@@ -318,7 +318,7 @@ export class CompatibleSceneSession {
     if (source.schemaVersion === SCENE_SCHEMA_VERSION_V5) {
       try {
         const currentShape = cloneJson(source);
-        (currentShape as any).schemaVersion = SCENE_SCHEMA_VERSION;
+        currentShape.schemaVersion = SCENE_SCHEMA_VERSION;
         const result = codec.parseKnownProjectionWithDiagnostics(currentShape);
         return result.hasUnknownFields;
       } catch {

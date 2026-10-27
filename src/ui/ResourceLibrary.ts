@@ -7,6 +7,7 @@
 import { settingsManager } from './SettingsStore';
 import { getTemplateResourceFileService } from './TemplateResourceFiles';
 import type { TemplateResourceFileReference } from '../services/template-package/TemplateResourceFileService';
+import type { ProjectState } from '../api/types/project';
 
 export interface DirEntry {
   name: string;
@@ -16,10 +17,17 @@ export interface DirEntry {
   templateResource?: TemplateResourceFileReference;
 }
 
+function getProjectRoot(): string | undefined {
+  const services = window.AeonStagery?.services as {
+    projectWorkspace?: { getCurrentProject(): ProjectState | null };
+  } | undefined;
+  return services?.projectWorkspace?.getCurrentProject()?.rootPath;
+}
+
 /** Get all library root paths: [projectRoot, ...externalLibraryMounts] */
 export function getLibraryRoots(): string[] {
   const roots: string[] = [];
-  const projectRoot = (window as any).AeonStagery?.services?.projectWorkspace?.getCurrentProject?.()?.rootPath;
+  const projectRoot = getProjectRoot();
   if (projectRoot) roots.push(projectRoot);
   const externals = settingsManager.get('externalLibraryMounts') || [];
   for (const { path: p } of externals) {
@@ -34,17 +42,46 @@ export function getLibraryLabel(rootPath: string): string {
   return parts.slice(-2).join('/') || rootPath;
 }
 
+export interface ResourceDirectoryLocation {
+  path: string;
+  source: string;
+}
+
+/** Keep the UNC prefix intact when combining a registered root and a logical directory. */
+function joinLibraryDirectory(root: string, subDir: string): string {
+  return `${root.replace(/\\/g, '/').replace(/\/+$/, '')}/${subDir.replace(/^\/+/, '')}`;
+}
+
+/** Offer project and external-library folders; template packages are source assets, not drop targets. */
+export async function getResourceDirectoryLocations(subDir: string): Promise<ResourceDirectoryLocation[]> {
+  const api = window.aeonStageryAPI;
+  const projectRoot = getProjectRoot();
+  const local = await Promise.all(getLibraryRoots().map(async (root) => {
+    const path = joinLibraryDirectory(root, subDir);
+    try {
+      const result = await api?.fs?.readDir(path);
+      const source = root === projectRoot ? '项目目录' : `外部库目录 · ${getLibraryLabel(root)}`;
+      return result?.success ? { path, source } : null;
+    } catch { return null; }
+  }));
+  const locations = new Map<string, ResourceDirectoryLocation>();
+  for (const location of local) {
+    if (location) locations.set(location.path, location);
+  }
+  return [...locations.values()];
+}
+
 /**
  * List a directory by merging results from all library roots that contain it.
  * @param subDir - subdirectory name relative to library roots (e.g. "background", "figure/tomori")
  */
 export async function readMergedDirectory(subDir: string): Promise<DirEntry[]> {
   const roots = getLibraryRoots();
-  const api = (window as any).aeonStageryAPI;
+  const api = window.aeonStageryAPI;
 
   const allEntries: DirEntry[] = await getTemplateResourceFileService()?.readDirectory(subDir) ?? [];
-  for (const root of api?.fs?.readDir ? roots : []) {
-    const fullPath = `${root.replace(/\\/g, '/')}/${subDir}`.replace(/\/+/g, '/');
+  for (const root of typeof api?.fs?.readDir === 'function' ? roots : []) {
+    const fullPath = joinLibraryDirectory(root, subDir);
     try {
       const result = await api.fs.readDir(fullPath);
       if (result.success && result.data) {
@@ -108,10 +145,10 @@ export async function readMergedDirectory(subDir: string): Promise<DirEntry[]> {
 export async function readRootDirectories(): Promise<DirEntry[]> {
   const stdDirs = ['animation', 'background', 'bgm', 'figure', 'images', 'project', 'sfx', 'template', 'vocal'];
   const roots = getLibraryRoots();
-  const api = (window as any).aeonStageryAPI;
+  const api = window.aeonStageryAPI;
   const templates = getTemplateResourceFileService();
   const directories = await Promise.all(stdDirs.map(async (dir) => {
-    for (const root of api?.fs?.exists ? roots : []) {
+    for (const root of typeof api?.fs?.exists === 'function' ? roots : []) {
       const path = `${root.replace(/\\/g, '/')}/${dir}`;
       try {
         if (await api.fs.exists(path)) return { name: dir, isDirectory: true, path };

@@ -1011,6 +1011,7 @@ function applyLightingTimelineParam(params: Record<string, unknown>, key: string
     'bloomThreshold',
     'bloomBloomScale',
     'bloomBrightness',
+    'bloomBlur',
     'rgbSplitX',
     'rgbSplitY',
     'godrayGain',
@@ -1153,6 +1154,12 @@ function retargetParams(
       return {
         ...cloneJson(item.params),
         target: charId,
+      };
+    case 'lighting':
+      if (item.params.effect !== 'blur' && item.params.effect !== 'post') return null;
+      return {
+        ...cloneJson(item.params),
+        target: { kind: 'character', id: charId },
       };
     case 'filterAdd':
     case 'filterChange':

@@ -1,3 +1,4 @@
+import type { NumericInputGesture } from '../FormComponents';
 // All param-mutating callbacks + dialogue-template presentation derivations
 // the inspector passes down through InspectorParamContext and the panels.
 // Move-only extraction from ActionInspector's component body.
@@ -15,7 +16,9 @@ export interface InspectorMutationsDeps {
   appContext: ReturnType<typeof useApp>;
   action: TimelineAction;
   actionId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   actionParams: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Inspector controls dispatch heterogeneous semantic parameter schemas by runtime field key; the authoring service validates writes instead of imposing one false common payload.
   sourceParams: Record<string, any>;
   usesSourceParamForm: boolean;
   sceneData: TimelineScene;
@@ -56,9 +59,11 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     updateParam(actionId, key, value);
   };
 
-  const updateSemanticSourceParam = (key: string, value: unknown, isTransient?: boolean) => {
+  const updateSemanticSourceParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
+    if (gesture?.signal.aborted) return;
     if (isTransient) {
-      updateParam(actionId, key, value, true);
+      if (gesture) updateParam(actionId, key, value, true, gesture);
+      else updateParam(actionId, key, value, true);
       return;
     }
     const nextParams = { ...sourceParams };
@@ -70,12 +75,15 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
     replaceSourceParams(actionId, nextParams);
   };
 
-  const updateAuthoringParam = (key: string, value: unknown, isTransient?: boolean) => {
+  const updateAuthoringParam = (key: string, value: unknown, isTransient?: boolean, gesture?: NumericInputGesture) => {
+    if (gesture?.signal.aborted) return;
     if (usesSourceParamForm && action.semanticType) {
-      updateSemanticSourceParam(key, value, isTransient);
+      if (gesture) updateSemanticSourceParam(key, value, isTransient, gesture);
+      else updateSemanticSourceParam(key, value, isTransient);
       return;
     }
-    updateParam(actionId, key, value, isTransient);
+    if (gesture) updateParam(actionId, key, value, isTransient, gesture);
+    else updateParam(actionId, key, value, isTransient);
   };
 
   const canRemoveCharacterPerformanceField = (field: 'lookAt' | 'blink'): boolean => {
@@ -160,8 +168,8 @@ export function createInspectorMutations(deps: InspectorMutationsDeps) {
         throw new Error(`Dialogue style is unavailable: ${value}`);
       }
       replaceSourceParams(actionId, nextParams);
-    } catch (error: any) {
-      showToast(`对话框样式应用失败：${error?.message || String(error)}`, 'error');
+    } catch (error: unknown) {
+      showToast(`对话框样式应用失败：${(error instanceof Error ? error.message : String(error))}`, 'error');
     }
   };
 

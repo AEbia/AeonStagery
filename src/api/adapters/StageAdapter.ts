@@ -10,10 +10,11 @@ export class StageAdapter implements IStageAdapter {
   }
 
   async setBackground(path: string, options?: { transition?: string }): Promise<void> {
-    await stageManager.setBackground(path, { transition: 'none' as any, ...options } as any);
+    // Keep legacy transition spellings (such as `fade`) passing through unchanged.
+    await stageManager.setBackground(path, { transition: 'none', ...options } as Parameters<typeof stageManager.setBackground>[1]);
   }
 
-  getLayer(name: LayerName): any {
+  getLayer(name: LayerName): import('pixi.js').Container {
     return stageManager.getLayer(name);
   }
 
@@ -29,7 +30,7 @@ export class StageAdapter implements IStageAdapter {
     return stageManager.getCanvas();
   }
 
-  getApp(): any {
+  getApp(): import('pixi.js').Application {
     return stageManager.getApp();
   }
 
@@ -39,6 +40,10 @@ export class StageAdapter implements IStageAdapter {
 
   setPreviewResolution(resolution: StagePreviewResolution): void {
     stageManager.setPreviewResolution(resolution);
+  }
+
+  setProjectVideoFormat(format: import('../types/video-format').ProjectVideoFormat): void {
+    stageManager.setProjectVideoFormat(format);
   }
 
   pauseTicker(): void {

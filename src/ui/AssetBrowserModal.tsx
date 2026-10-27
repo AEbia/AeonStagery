@@ -6,6 +6,8 @@ import { useSceneAssetService } from './context/AppContext';
 import type { ResourceImportKind } from '../api/types/project';
 import { useModalDialog } from './hooks/useModalDialog';
 import { getTemplateResourceFileService, useTemplateResourceDirectoryRefresh } from './TemplateResourceFiles';
+import { FileRevealContext } from './FileRevealActions';
+import { ResourceFolderButton } from './ResourceFolderButton';
 
 interface AssetBrowserModalProps {
   value: string;
@@ -26,6 +28,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
   const [search, setSearch] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const loadSequence = useRef(0);
   useEffect(() => () => { loadSequence.current += 1; }, []);
   const loadMergedDir = useCallback(async (subDir: string) => {
@@ -34,6 +37,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
     setLoading(true);
     setLoadError(null);
     setSelectionError(null);
+    setRevealError(null);
     try {
       const merged = await readMergedDirectory(subDir);
       if (sequence !== loadSequence.current) return;
@@ -187,14 +191,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-          <div style={{ minWidth: 0 }}>
-            <div id="asset-browser-title" style={{ fontWeight: 600, fontSize: 14 }}>资源浏览器</div>
-            {value && (
-              <div title={value} style={{ marginTop: 3, maxWidth: 'min(70vw, 720px)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, opacity: 0.62 }}>
-                当前引用：{value} · 路径状态待确认
-              </div>
-            )}
-          </div>
+          <div id="asset-browser-title" style={{ minWidth: 0, fontWeight: 600, fontSize: 14 }}>资源浏览器</div>
           <button type="button" className="btn btn--icon" onClick={onClose} aria-label="关闭资源浏览器"><IconX width={16} height={16} /></button>
         </div>
 
@@ -249,6 +246,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
                   inputStyle={{ padding: '6px 12px 6px 32px', borderRadius: 'var(--radius-full)' }}
                 />
               </div>
+              <ResourceFolderButton key={currentSubDir} directory={currentSubDir} disabled={loading} onError={setRevealError} />
               <button type="button" className="btn btn--icon" title="刷新文件资源" aria-label="刷新文件资源" onClick={() => {
                   const templates = getTemplateResourceFileService();
                   if (templates) templates.invalidate();
@@ -256,6 +254,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
               }}><IconRefresh width={14} height={14} /></button>
             </div>
 
+            {revealError && <div role="alert" style={{ padding: '8px 16px', color: 'var(--error)', overflowWrap: 'anywhere' }}>{revealError}</div>}
             <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: 16, willChange: 'transform', transform: 'translateZ(0)' }}>
               {loading ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>加载中…</div>
@@ -272,21 +271,22 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
               ) : filteredEntries.length === 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', gap: 6 }}>
                   <div>当前目录下没有匹配资源</div>
-                  {!(window as any).aeonStageryAPI?.fs?.readDir && (
+                  {!window.aeonStageryAPI?.fs?.readDir && (
                     <div style={{ fontSize: 11, opacity: 0.7 }}>当前环境缺少本地目录读取 API，请手动输入路径。</div>
                   )}
                 </div>
               ) : (
                 <div role="list" aria-label={`${currentSubDir || '根目录'}中的资源`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(120px, 100%), 1fr))', gap: 16 }}>
                   {filteredEntries.map((entry, i) => (
-                    <div role="listitem" key={entry.path || `${entry.name}-${i}`} style={{ minWidth: 0 }}>
+                    <FileRevealContext key={entry.path || `${entry.name}-${i}`} path={entry.path} name={entry.name} templateResource={!!entry.templateResource} enabled={!entry.isDirectory} onRevealError={setRevealError}>
+                    <div role="listitem" style={{ minWidth: 0 }}>
                       <button
                         type="button"
                         onClick={() => { void handleSelect(entry); }}
                         aria-label={`${entry.name}，${entry.path}，${entry.isDirectory ? '目录，可打开' : '已发现，待校验'}`}
                         title={entry.path}
                         style={{
-                          width: '100%', height: '100%', color: 'inherit', background: 'transparent',
+                          width: '100%', color: 'inherit', background: 'transparent',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
@@ -336,6 +336,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
                         )}
                       </button>
                     </div>
+                    </FileRevealContext>
                   ))}
                 </div>
               )}
@@ -348,7 +349,7 @@ export const AssetBrowserModal: React.FC<AssetBrowserModalProps> = ({ value, onS
   );
 };
 
-const TextInput = ({ value, onChange, placeholder, style, inputStyle, icon }: any) => {
+const TextInput = ({ value, onChange, placeholder, style, inputStyle, icon }: { value: string; onChange: (value: string) => void; placeholder?: string; style?: React.CSSProperties; inputStyle?: React.CSSProperties; icon?: React.ReactNode }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 

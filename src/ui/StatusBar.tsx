@@ -1,3 +1,4 @@
+import { useProjectVideoFormat } from './hooks/useProjectVideoFormat';
 import React from 'react';
 import { useCollaborationPresence, useCollaborationStatus, usePlaybackAdapter } from './context/AppContext';
 import { IconClock, IconLayers, IconActivity, IconUsers, IconError, IconWarning } from './icons';
@@ -23,6 +24,7 @@ const formatTime = (t: number) => {
 };
 
 export const StatusBar = () => {
+  const videoFormat = useProjectVideoFormat();
   const playbackAdapter = usePlaybackAdapter();
   const timeRef = React.useRef<HTMLSpanElement>(null);
   const initialTime = playbackAdapter.getCurrentTime();
@@ -71,14 +73,15 @@ export const StatusBar = () => {
       }
     });
 
-    let timer: any = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     const unsubStart = eventBus.on('pb-daemon:start', () => {
       if (timer) clearTimeout(timer);
       setBakeStatus('baking');
       setBakeProgress(1);
     });
-    const unsubProgress = eventBus.on('pb-daemon:progress', (payload: any) => {
+    const unsubProgress = eventBus.on('pb-daemon:progress', (event) => {
+      const payload = event as { progress: number };
       if (timer) clearTimeout(timer);
       setBakeStatus('baking');
       setBakeProgress(Math.round(payload.progress * 100));
@@ -209,7 +212,7 @@ export const StatusBar = () => {
           </div>
         )}
         <Tooltip title="场景画布规格" content="标准演出渲染分辨率与帧率">
-          <span className="status-bar__spec tabular-nums">1920×1080 · 60fps</span>
+          <span className="status-bar__spec tabular-nums">{videoFormat.width}×{videoFormat.height} · {videoFormat.fps}fps</span>
         </Tooltip>
       </div>
     </div>

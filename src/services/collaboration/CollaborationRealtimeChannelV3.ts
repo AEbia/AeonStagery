@@ -5,8 +5,8 @@ import {
   type CollaborationIdentity,
   type CollaborationLeaseClientMessageV3,
   type CollaborationLeaseServerMessageV3,
-  type CollaborationLeaseTargetV2,
-  type CollaborationPresencePatchV2,
+  type CollaborationLeaseTargetV3,
+  type CollaborationPresencePatchV3,
   type CollaborationPresenceServerMessageV3,
 } from '../../api/types/collaboration';
 import { SCENE_SCHEMA_VERSION_V5 } from '../../api/types/semantic-scene';
@@ -98,7 +98,7 @@ export class CollaborationRealtimeChannelV3 {
     return this.realtimeWritable && this.socket?.readyState === WEBSOCKET_OPEN;
   }
 
-  updatePresence(patch: CollaborationPresencePatchV2): void {
+  updatePresence(patch: CollaborationPresencePatchV3): void {
     if (this.socket?.readyState !== WEBSOCKET_OPEN) return;
     this.socket.send(encodeCollaborationPresenceClientMessageV3(patch));
   }
@@ -109,15 +109,15 @@ export class CollaborationRealtimeChannelV3 {
     this.socket.send(encodeCollaborationLeaseClientMessageV3(message));
   }
 
-  acquireLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  acquireLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.sendLeaseRequest({ type: 'lease:acquire', requestId, target });
   }
 
-  renewLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  renewLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.sendLeaseRequest({ type: 'lease:renew', requestId, target });
   }
 
-  releaseLease(requestId: string, target: CollaborationLeaseTargetV2): void {
+  releaseLease(requestId: string, target: CollaborationLeaseTargetV3): void {
     this.sendLeaseRequest({ type: 'lease:release', requestId, target });
   }
 

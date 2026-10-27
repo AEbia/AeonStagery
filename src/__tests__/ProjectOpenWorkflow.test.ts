@@ -45,6 +45,7 @@ describe('ProjectOpenWorkflow', () => {
       subscribe: vi.fn(),
       createProjectAt: vi.fn(),
       openProjectAt: vi.fn(),
+      updateVideoFormat: vi.fn(),
       renameProjectAt: vi.fn(),
       prepareCollaborationProjectAt: vi.fn(),
       updateTemplateConfiguration: vi.fn(),
@@ -79,14 +80,15 @@ describe('ProjectOpenWorkflow', () => {
       issues: [],
     });
 
-    const result = await workflow.createProjectAndLoadDefaultScene({ name: 'Demo', rootPath: 'D:/demo' });
+    const videoFormat = { width: 1080, height: 1920, fps: 30 };
+    const result = await workflow.createProjectAndLoadDefaultScene({ name: 'Demo', rootPath: 'D:/demo', videoFormat });
 
     expect(result.success).toBe(true);
     expect(result.outcome).toBe('project_ready');
     expect(projectWorkspace.createProjectAt).toHaveBeenCalledWith(
       'D:/demo',
       'Demo',
-      { templates: undefined },
+      { templates: undefined, videoFormat },
     );
     expect(recents.upsertRecentProject).toHaveBeenCalled();
     expect(settings.setAssetsPath).toHaveBeenCalledWith('D:/demo');

@@ -1,3 +1,4 @@
+import type { LightingTarget } from '../../api/types/lighting-target';
 import type { SceneMeta } from '../../api/types/scene-common';
 import type { LightingParams, SceneStatementDraft, StatementFamily } from '../../api/types/semantic-scene';
 import {
@@ -47,6 +48,7 @@ export interface SemanticStatementBlockDraftInput {
   readonly sceneMeta?: SceneMeta | null;
   readonly charId?: string | null;
   readonly stateTarget?: string;
+  readonly lightingTarget?: LightingTarget;
   readonly currentFilterId?: string;
   readonly filePath?: string;
   readonly sourceKind?: string;
@@ -73,12 +75,12 @@ function createLightingStatement(params: LightingParams): SceneStatementDraft {
   return { type: 'lighting', params };
 }
 
-function createLightingSetDraft(effect: 'blur' | 'post', stateTarget?: string): SceneStatementDraft {
+function createLightingSetDraft(effect: 'blur' | 'post', stateTarget?: LightingTarget): SceneStatementDraft {
   if (effect === 'blur') {
     return createLightingStatement({
       effect,
       mode: 'set',
-      target: 'global',
+      target: stateTarget || 'global',
       intensity: 0.5,
       durationSeconds: DEFAULT_LIGHTING_SET_DURATION_SECONDS,
     });
@@ -87,9 +89,10 @@ function createLightingSetDraft(effect: 'blur' | 'post', stateTarget?: string): 
     effect,
     mode: 'set',
     target: stateTarget || 'panorama',
-    bloomThreshold: 0.5,
+    bloomThreshold: 0,
     bloomBloomScale: 0,
     bloomBrightness: 1,
+    bloomBlur: 0,
     rgbSplitX: 0,
     rgbSplitY: 0,
     godrayGain: 0,
@@ -111,16 +114,13 @@ function createLightingSetDraft(effect: 'blur' | 'post', stateTarget?: string): 
 
 function createLightingChangeDraft(
   effect: 'blur' | 'post',
-  stateTarget?: string,
+  stateTarget?: LightingTarget,
 ): SceneStatementDraft {
   if (effect === 'blur') {
-    const target = stateTarget === 'background' || stateTarget === 'characters' || stateTarget === 'global'
-      ? stateTarget
-      : 'global';
     return createLightingStatement({
       effect,
       mode: 'modulate',
-      target,
+      target: stateTarget || 'global',
       intensity: 1,
       durationSeconds: DEFAULT_LIGHTING_CHANGE_DURATION_SECONDS,
     });
@@ -151,11 +151,11 @@ function createLightingChangeDraft(
   });
 }
 
-function createLightingResetDraft(effect: 'blur' | 'post', stateTarget?: string): SceneStatementDraft {
+function createLightingResetDraft(effect: 'blur' | 'post', stateTarget?: LightingTarget): SceneStatementDraft {
   return createLightingStatement({
     effect,
     mode: 'reset',
-    ...(effect === 'post' ? { target: stateTarget || 'panorama' } : {}),
+    ...(effect === 'post' ? { target: stateTarget || 'panorama' } : stateTarget ? { target: stateTarget } : {}),
     durationSeconds: DEFAULT_LIGHTING_RESET_DURATION_SECONDS,
   } as LightingParams);
 }
@@ -410,7 +410,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
   },
   {
     id: 'camera.shake',
-    label: '镜头震动',
+    label: '镜头晃动',
     icon: 'cameraShake',
     category: 'camera',
     createDraft: () => ({
@@ -540,7 +540,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
         mode: 'set',
         intensity: 1,
         color: '#ffffff',
-        thickness: 10,
+        thickness: 6,
         angle: 45,
         softness: 2,
         durationSeconds: 0,
@@ -701,8 +701,8 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
     icon: 'setBlur',
     category: 'visual',
     visualTier: 'advanced',
-    description: '背景虚化突出主体，或全屏虚化景深。',
-    createDraft: () => createLightingSetDraft('blur'),
+    description: '选择角色、环境图层或全景进行虚化。',
+    createDraft: ({ stateTarget, lightingTarget }) => createLightingSetDraft('blur', lightingTarget ?? stateTarget),
   },
   {
     id: 'lighting.modulate-overlay',
@@ -736,7 +736,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
       statementType: 'lighting',
       paramsTemplate: { intensity: 1, durationSeconds: 1 },
     },
-    createDraft: ({ stateTarget }: SemanticStatementBlockDraftInput) => createLightingChangeDraft('blur', stateTarget),
+    createDraft: ({ stateTarget, lightingTarget }: SemanticStatementBlockDraftInput) => createLightingChangeDraft('blur', lightingTarget ?? stateTarget),
   },
   {
     id: 'lighting.remove-overlay',
@@ -770,8 +770,8 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
     icon: 'resetBlur',
     category: 'visual',
     visualTier: 'advanced',
-    lifecycleEndCommand: { presentationTypeKey: 'lighting:blur', match: 'unique-active' },
-    createDraft: () => createLightingResetDraft('blur'),
+    lifecycleEndCommand: { presentationTypeKey: 'lighting:blur', match: 'draft-state-key' },
+    createDraft: ({ stateTarget, lightingTarget }) => createLightingResetDraft('blur', lightingTarget ?? stateTarget),
   },
 
   // -------------------------------------------------------------
@@ -803,7 +803,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
     category: 'visual',
     visualTier: 'custom',
     description: '泛光 Bloom、RGB 色差与底层调色着色器深度控制。',
-    createDraft: ({ stateTarget }) => createLightingSetDraft('post', stateTarget),
+    createDraft: ({ stateTarget, lightingTarget }) => createLightingSetDraft('post', lightingTarget ?? stateTarget),
   },
   {
     id: 'visual.modulate-character-accent',
@@ -865,7 +865,7 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
       statementType: 'lighting',
       paramsTemplate: { bloomBloomScale: 1, durationSeconds: 1 },
     },
-    createDraft: ({ stateTarget }: SemanticStatementBlockDraftInput) => createLightingChangeDraft('post', stateTarget),
+    createDraft: ({ stateTarget, lightingTarget }: SemanticStatementBlockDraftInput) => createLightingChangeDraft('post', lightingTarget ?? stateTarget),
   },
   {
     id: 'lighting.modulate-point-light',
@@ -922,8 +922,8 @@ export const SEMANTIC_STATEMENT_BLOCKS: readonly SemanticStatementBlockEntry[] =
     icon: 'resetPostProcessing',
     category: 'visual',
     visualTier: 'custom',
-    lifecycleEndCommand: { presentationTypeKey: 'lighting:post', match: 'unique-active' },
-    createDraft: ({ stateTarget }) => createLightingResetDraft('post', stateTarget),
+    lifecycleEndCommand: { presentationTypeKey: 'lighting:post', match: 'draft-state-key' },
+    createDraft: ({ stateTarget, lightingTarget }) => createLightingResetDraft('post', lightingTarget ?? stateTarget),
   },
 
   {

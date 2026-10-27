@@ -1,6 +1,6 @@
 # ADR Status
 
-本文件是 ADR 新鲜度索引，也是 ADR 编号的唯一权威目录。最后翻新：2026-10-17。
+本文件是 ADR 新鲜度索引，也是 ADR 编号的唯一权威目录。最后翻新：2026-10-19。
 
 历史 ADR 保留原始决策语境，但不再默认代表当前实现。查当前架构时，先读下面的 freshness anchors；只有需要理解迁移背景时再读 archived / historical 文档。
 
@@ -9,7 +9,7 @@
 | ADR | Status | Current Reading |
 | --- | --- | --- |
 | [KSM-0003 Semantic Scene Statements](ksm-adr/ksm-0003-semantic-scene-statements.md) | current freshness anchor | 当前 semantic statement authoring、prepared runtime、template payload 与 legacy deletion gates 的权威入口；SceneDocumentV5 现作为当前 schema epoch（由 ADR-0031 演进，支持自 v3 与 v4 自动迁移），协作协议升级为 v3 wire。 |
-| [0031 Evolution Compatibility Policy](adr/0031-evolution-compatibility-policy.md) | current freshness anchor | 持久化创作资产演进兼容政策；SceneDocumentV5 为当前激活的 schema epoch（支持自 v3 与 v4 自动迁移），project metadata v2（包含 Project Compatibility Envelope），collaboration wire v3（要求 sceneSchemaVersion = 5），以及兼容性协调器 (Compatibility Coordinator) 与未知字段保真契约的权威入口。 |
+| [0031 Evolution Compatibility Policy](adr/0031-evolution-compatibility-policy.md) | current freshness anchor | 持久化创作资产演进兼容政策；SceneDocumentV5 为当前激活的 schema epoch（支持自 v3 与 v4 自动迁移），project metadata v2（包含 Project Compatibility Envelope），仅支持 collaboration wire v3（要求 sceneSchemaVersion = 5；V2 运行链已移除，旧房间需用旧版导出），以及兼容性协调器 (Compatibility Coordinator) 与未知字段保真契约的权威入口。 |
 | [0018 Timeline Authoring, Collaboration Transactions, and Resource Seams](adr/0018-timeline-authoring-collaboration-resource-seams.md) | current for collaboration/resource seams; timeline edit section superseded by KSM-0003 | Collaboration transaction planner、publish executor、asset readiness gate、Live2D bundle rules 与 asset scope policy 仍以本文为入口；legacy action-edit Interface 已由 semantic statement authoring 接管。 |
 | [0019 Live2D Cubism Multi-Version Runtime Compatibility](adr/0019-live2d-cubism-multiversion-runtime.md) | current freshness anchor | Cubism 2 与 Cubism 3/4/5 runtime Adapter seam、Live2D entry 识别、模型资源所有权与 bundle 兼容承诺以本文为准。 |
 | [0021 Stable External Library Mount References](adr/0021-stable-external-library-mount-references.md) | current freshness anchor | 本地 scene 使用稳定 `@mount/<id>/...` 引用，用户设置映射本机根目录，协作发布前 projectize 为项目相对引用。 |
@@ -45,6 +45,8 @@
 | [0034 Live2D 运行时状态清理与淡入来源权威](adr/0034-live2d-runtime-state-purge-and-fade-source.md) | current, implemented | `purgeCharacterRuntimeState` 是 Seek/编辑/角色回收的唯一清脏入口；动作/表情淡入来源必须由场景裁定，不读模型存活状态。 |
 | [0035 开源许可与 Live2D 运行时分发边界](adr/0035-open-source-licensing-and-live2d-runtime-distribution.md) | current, accepted | Apache-2.0 发布下的三方许可声明、运行时 staging（auto/none/verify）、`none`/`verify` 两套打包闸门与"更新不删除已有运行时"不变量的权威入口。 |
 | [0036 更新渠道与差分下载基线](adr/0036-update-channels-and-differential-baselines.md) | current, accepted | OSS / GitHub 渠道、差分更新基线与块图补取、安装缓存 SHA256/签名校验及禁止静默整包回退的权威入口。 |
+| [0037 项目画布与原生分辨率导出](adr/0037-project-video-format-and-native-resolution-export.md) | current, implemented | 项目输出像素、逻辑画布、独立预览质量、导出覆盖、帧率步进及流式转码混音、磁盘空间与输出生命周期契约的权威入口。 |
+| [0038 统一摄像机求值](adr/0038-unified-camera-evaluation.md) | current, partially implemented | 正式时间线按场景时间求值；运镜黑边按可见环境层的实际几何覆盖并集诊断，高频编辑复用覆盖输入未变的任务与结果，并限制图片加载并发和采样批次耗时。临时预览保留独立 `CameraController` 状态，角色跟随使用活动舞台锚点，seek 和导出不重建历史角色姿态。 |
 
 ## Historical / Superseded
 

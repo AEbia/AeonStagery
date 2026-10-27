@@ -9,7 +9,9 @@ import { settingsManager } from '../ui/SettingsStore';
 import { AiProseGlobalConfiguration } from '../services/ai-authoring/AiProseGlobalConfiguration';
 import { AiProseDraftPersistence } from '../services/ai-authoring/AiProseDraftPersistence';
 import type { ProjectState } from '../api/types/project';
-import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument } from '../api/types/semantic-scene';
+import { DEFAULT_PROJECT_ASSET_ROOTS } from '../api/types/project';
+import { SCENE_SCHEMA_VERSION, type CurrentSceneDocument, type PreparedCompiledScene } from '../api/types/semantic-scene';
+import { stageManager } from '../engine/StageManager';
 
 // Mock engine singletons to avoid real Live2D/GSAP initialization
 vi.mock('../engine/CameraController', () => ({
@@ -19,7 +21,7 @@ vi.mock('../engine/Live2DManager', () => ({
   live2DManager: { init: vi.fn(), addCharacter: vi.fn(), removeCharacter: vi.fn(), playMotion: vi.fn(), setExpression: vi.fn(), lookAt: vi.fn(), transform: vi.fn(), listCharacters: vi.fn().mockReturnValue([]), hasCharacter: vi.fn().mockReturnValue(false), setBasePath: vi.fn(), setScriptEngine: vi.fn(), setEngine: vi.fn(), setWmdlConfigRegistry: vi.fn() },
 }));
 vi.mock('../engine/StageManager', () => ({
-  stageManager: { init: vi.fn(), getApp: vi.fn(), getWidth: vi.fn().mockReturnValue(1920), getHeight: vi.fn().mockReturnValue(1080), setBackground: vi.fn(), getLayer: vi.fn() },
+  stageManager: { init: vi.fn(), getApp: vi.fn(), getWidth: vi.fn().mockReturnValue(1920), getHeight: vi.fn().mockReturnValue(1080), setBackground: vi.fn(), getLayer: vi.fn(), setProjectVideoFormat: vi.fn() },
 }));
 vi.mock('../engine/LipSyncEngine', () => ({
   lipSyncEngine: { clear: vi.fn() },
@@ -85,10 +87,11 @@ function createScriptEngineMock() {
     }),
     previewTransform: vi.fn(), previewCustomMotion: vi.fn(), clearCustomMotionPreview: vi.fn().mockResolvedValue(undefined),
     setBasePath: vi.fn(), getDuration: vi.fn().mockReturnValue(10),
+    setWmdlConfigRegistry: vi.fn(),
     setSilentMode: vi.fn(), getBasePath: vi.fn().mockReturnValue('.'),
     getMasterTimeline: vi.fn().mockReturnValue(null),
     loadScene: vi.fn().mockResolvedValue(undefined),
-    loadPreparedScene: vi.fn().mockResolvedValue(undefined),
+    loadPreparedScene: vi.fn(async (_scene: PreparedCompiledScene) => {}),
     onPause: vi.fn().mockReturnValue(() => undefined),
     onSeekComplete: vi.fn().mockReturnValue(() => undefined),
   };
@@ -112,12 +115,72 @@ function bootstrapCtxWithEngine() {
 }
 
 describe('Bootstrapper', () => {
-  it('refreshes the active dialogue when the font size setting changes', () => {
+  it.each(['success', 'reload-failure', 'save-failure'] as const)('queues format changes and handles %s before reporting completion', async (outcome) => {
+    const { ctx, engine } = bootstrapCtxWithEngine();
+    const project: ProjectState = {
+      rootPath: '/project', projectFilePath: '/project/project.json',
+      metadata: { projectVersion: 2, projectId: 'video-project', name: 'Video', createdAt: '', updatedAt: '', defaultSceneId: 'main', scenes: [{ id: 'main', name: 'Main', path: 'main.json' }], assetRoots: DEFAULT_PROJECT_ASSET_ROOTS },
+    };
+    vi.spyOn(ctx.services.projectResources, 'loadProject').mockResolvedValue(project);
+    const persist = vi.spyOn(ctx.services.projectResources, 'saveProjectMetadata').mockImplementation(async (current, metadata) => {
+      if (outcome === 'save-failure') throw new Error('save failed');
+      return { ...current, metadata };
+    });
+    await ctx.services.projectWorkspace.openProjectAt(project.projectFilePath);
+    const scene = (sceneId: string): CurrentSceneDocument => ({ schemaVersion: SCENE_SCHEMA_VERSION, sceneId, meta: { title: sceneId }, statements: [] });
+    await ctx.services.semanticDocument.applyDocument(scene('old'));
+    let releaseLoad!: () => void;
+    const loading = new Promise<void>(resolve => { releaseLoad = resolve; });
+    let enteredLoad!: () => void;
+    const entered = new Promise<void>(resolve => { enteredLoad = resolve; });
+    engine.loadPreparedScene.mockImplementationOnce(async () => { enteredLoad(); await loading; });
+    const applying = ctx.services.semanticDocument.applyDocument(scene('new'));
+    await entered;
+    let releaseReload!: () => void;
+    const reloading = new Promise<void>(resolve => { releaseReload = resolve; });
+    let enteredReload!: () => void;
+    const reloadEntered = new Promise<void>(resolve => { enteredReload = resolve; });
+    engine.loadPreparedScene.mockImplementationOnce(async () => {
+      enteredReload(); await reloading;
+      if (outcome === 'reload-failure') throw new Error('reload failed');
+    });
+    vi.mocked(stageManager.setProjectVideoFormat).mockClear();
+    let completed = false;
+    const saving = ctx.services.projectWorkspace.updateVideoFormat({ width: 1080, height: 1920, fps: 30 }).then(result => { completed = true; return result; });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(stageManager.setProjectVideoFormat).not.toHaveBeenCalled();
+    expect(completed).toBe(false);
+    releaseLoad();
+    await applying;
+    const documentVersion = ctx.stores.document.version;
+    await reloadEntered;
+    expect(completed).toBe(false);
+    expect(persist).not.toHaveBeenCalled();
+    releaseReload();
+    const result = await saving;
+    if (outcome === 'success') {
+      expect(result.success).toBe(true);
+      expect(ctx.services.projectWorkspace.getCurrentProject()?.metadata.videoFormat).toEqual({ width: 1080, height: 1920, fps: 30 });
+    } else {
+      expect(result).toEqual({ success: false, error: outcome === 'reload-failure' ? 'reload failed' : 'save failed' });
+      expect(ctx.services.projectWorkspace.getCurrentProject()).toBe(project);
+      expect(stageManager.setProjectVideoFormat).toHaveBeenLastCalledWith({ width: 1920, height: 1080, fps: 60 });
+      if (outcome === 'reload-failure') expect(persist).not.toHaveBeenCalled();
+    }
+    expect(engine.loadPreparedScene.mock.calls.at(-1)?.[0]).toMatchObject({ sceneId: 'new' });
+    expect(ctx.stores.document.getCurrentSceneDocumentView()?.sceneId).toBe('new');
+    expect(ctx.stores.document.version).toBe(documentVersion);
+    await ctx.services.semanticDocument.applyDocument(scene('after-settings'));
+    expect(ctx.stores.document.getCurrentSceneDocumentView()?.sceneId).toBe('after-settings');
+    await ctx.dispose();
+  });
+
+  it.each(['dialogueFontSize', 'dialogueFontSizeSource'] as const)('refreshes the active dialogue when %s changes', (setting) => {
     vi.mocked(settingsManager.subscribeKey).mockClear();
     vi.mocked(subtitleRenderer.forceUpdate).mockClear();
     const ctx = bootstrapCtx();
     const fontSizeSubscription = vi.mocked(settingsManager.subscribeKey).mock.calls
-      .find(([key]) => key === 'dialogueFontSize');
+      .find(([key]) => key === setting);
 
     expect(fontSizeSubscription).toBeDefined();
     fontSizeSubscription?.[1]();

@@ -672,7 +672,7 @@ export const getGuidePresentation = (
       return {
         selector: '[aria-label="对焦部位"]',
         title: '把对焦部位改成头部',
-        description: '在右侧找到“对焦部位”，把默认的“胸部”改成“头部”，让镜头对准角色的脸。修改完成后会自动进入下一步。',
+        description: '在右侧找到“对焦部位”，把“胸口”改成“头部”，让镜头对准角色的脸。修改完成后会自动进入下一步。',
         step: 12,
         padding: 5,
       };

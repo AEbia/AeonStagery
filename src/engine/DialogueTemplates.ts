@@ -31,8 +31,7 @@ export interface DialogueTemplate {
   };
 }
 
-const STAGE_WIDTH = 1920;
-const STAGE_HEIGHT = 1080;
+import { STAGE_WIDTH, STAGE_HEIGHT } from './StageDimensions';
 
 /**
  * Helper to draw rounded rectangle with specific corner radii
