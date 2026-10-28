@@ -6,6 +6,7 @@ import type { Live2DPerformanceMetadata, PerformanceCompatibility, PreparedAsset
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
 import { manageRuntimeFocusAnimations } from './live2d/runtime/RuntimeFocus';
 import { installLive2DRenderPreparation } from './live2d/runtime/Live2DRenderPreparation';
+import { loadCubismModelDisplayInfo } from './runtime/CubismModelAnchors';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 function parameterId(id: any): string {
@@ -696,5 +697,6 @@ export async function createCubismPixiModel(modelUrl: string, options: Live2DMod
       // Some SDK builds expose a sealed settings object; native fallback stays available.
     }
   }
+  await loadCubismModelDisplayInfo(model);
   return installCubismPixiModelRuntime(model, engine);
 }
