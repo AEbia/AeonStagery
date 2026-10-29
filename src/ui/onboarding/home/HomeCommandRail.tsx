@@ -9,7 +9,7 @@ export function HomeCommandRail({ activeTarget, onGoHome, onCreate, onOpen, onCo
   onStartTutorial: () => void;
 }) {
   const commands = [
-    { title: '新建项目', description: '创建可迁移的项目目录', icon: IconPlus, action: onCreate, target: 'create', style: 'primary' },
+    { title: '新建项目', description: '创建项目目录', icon: IconPlus, action: onCreate, target: 'create', style: 'primary' },
     { title: '打开项目', description: '选择项目目录或 project.json', icon: IconFolder, action: onOpen },
     { title: '协作', description: '主持或加入实时协作房间', icon: IconUsers, action: onCollaborate, target: 'collaboration' },
     { title: '开始教程', description: '跟着第一课完成一个镜头', icon: IconTarget, action: onStartTutorial, style: 'tutorial' },

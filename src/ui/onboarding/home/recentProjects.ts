@@ -1,5 +1,7 @@
 import type { RecentProjectEntry } from '../../SettingsStore';
 
+export const RECENT_PROJECT_PREVIEW_LIMIT = 6;
+
 /** Calendar dates use the user's local timezone, including across DST changes. */
 export function formatRelativeTime(iso: string, now: number): string {
   const date = new Date(iso);

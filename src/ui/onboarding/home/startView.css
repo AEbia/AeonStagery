@@ -26,6 +26,7 @@
 .ph-recents__item:is(:hover, :focus-within) .ph-recents__actions { opacity: 1; }
 .ph-recents__actions .btn--icon { width: 26px; height: 28px; padding: 4px; }
 .ph-recents__empty { display: grid; justify-items: start; gap: 12px; padding: 24px 0; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.ph-recents__toggle { margin-top: 12px; }
 .ph-recents__delete-dialog { width: min(420px, calc(100vw - 32px)); }
 .ph-recents__delete-project { padding: 16px 20px; color: var(--text-primary); overflow-wrap: anywhere; }
 .ph-templates { padding-left: 28px; border-left: 1px solid var(--border-subtle); }

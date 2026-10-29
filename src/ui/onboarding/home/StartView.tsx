@@ -1,8 +1,8 @@
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
-import { MAX_RECENT_PROJECTS } from '../../SettingsStore';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectHomeProps } from '../ProjectHome';
 import { ProjectStoryboard } from './ProjectStoryboard';
 import { RecentProjectList } from './RecentProjectList';
+import { RECENT_PROJECT_PREVIEW_LIMIT } from './recentProjects';
 import { TemplateLibraryPanel } from './TemplateLibraryPanel';
 import './startView.css';
 
@@ -18,7 +18,7 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
   const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
   const openingRef = useRef(false);
   const primaryRef = useRef<HTMLButtonElement>(null);
-  const projects = recentProjects.slice(0, MAX_RECENT_PROJECTS);
+  const projects = useMemo(() => recentProjects.slice(0, RECENT_PROJECT_PREVIEW_LIMIT), [recentProjects]);
   const [selection, setSelection] = useState<{ path: string | null } | null>(() => selectionMemory?.current ?? null);
   const selectProject = useCallback((path: string | null) => {
     const next = { path };
@@ -31,11 +31,11 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
   const handleOpen = useCallback(async (path: string) => {
     if (openingRef.current || primaryRef.current?.closest('[inert]')) return;
     openingRef.current = true;
-    selectProject(path);
+    if (projects.some((project) => project.projectFilePath === path)) selectProject(path);
     setOpeningRecentPath(path);
     try { await onOpenRecentProject(path); }
     finally { openingRef.current = false; setOpeningRecentPath(null); }
-  }, [onOpenRecentProject, selectProject]);
+  }, [onOpenRecentProject, projects, selectProject]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -60,7 +60,7 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
     <ProjectStoryboard projects={projects} project={selectedProject} now={now} opening={openingRecentPath !== null} primaryRef={primaryRef} onSelect={selectProject}
       onOpen={(path) => { void handleOpen(path); }} onCreate={onCreate} onStartTutorial={onStartTutorial} />
     <div className="ph-start__library">
-      <RecentProjectList recentProjects={projects} now={now} openingRecentPath={openingRecentPath}
+      <RecentProjectList recentProjects={recentProjects} now={now} openingRecentPath={openingRecentPath}
         onOpen={(path) => { void handleOpen(path); }} onRenameRecentProject={onRenameRecentProject} onRemoveRecentProject={onRemoveRecentProject} />
       <TemplateLibraryPanel templatePackages={templatePackages} onImportTemplatePackage={onImportTemplatePackage}
         onDeleteTemplatePackage={onDeleteTemplatePackage} />

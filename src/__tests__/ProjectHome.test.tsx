@@ -134,7 +134,15 @@ describe('ProjectHome collaboration entry', () => {
     expect(props.onRemoveRecentProject).not.toHaveBeenCalled();
   });
 
-  it('caps recent projects and confirms removal before updating recents', () => {
+  it.each([0, 6])('keeps a history of %i projects compact without search or expansion controls', (count) => {
+    renderHome({ recentProjects: makeRecentProjects(count) });
+    const recents = within(screen.getByRole('region', { name: '最近项目' }));
+    expect(recents.queryByRole('searchbox')).toBeNull();
+    expect(recents.queryByRole('button', { name: /查看全部/ })).toBeNull();
+    expect(recents.queryAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(count);
+  });
+
+  it('expands history without adding storyboard cards, restores expansion after search and confirms removal', () => {
     const onRemoveRecentProject = vi.fn();
     renderHome({
       recentProjects: makeRecentProjects(7),
@@ -143,6 +151,18 @@ describe('ProjectHome collaboration entry', () => {
 
     expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(6);
     expect(screen.queryByText('Project 7')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看全部（7）' }));
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(7);
+    expect(screen.getAllByRole('tab', { name: /选择项目：/ })).toHaveLength(6);
+    expect(screen.queryByRole('tab', { name: '选择项目：Project 7' })).toBeNull();
+    const input = screen.getByRole('searchbox', { name: '搜索历史项目' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'project-7' } });
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(1);
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(7);
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(6);
 
     fireEvent.click(screen.getByRole('button', { name: '移除最近项目：Project 1' }));
     expect(onRemoveRecentProject).not.toHaveBeenCalled();
@@ -621,25 +641,38 @@ describe('ProjectHome stage entrance', () => {
     expect(props.onOpenRecentProject).not.toHaveBeenCalled();
   });
 
-  it('filters immediately, opens the first match with Enter and clears with Escape', async () => {
-    const props = renderHome({ recentProjects: makeRecentProjects(3) });
-    const input = screen.getByRole('searchbox', { name: '搜索最近项目' });
+  it('searches the full history without opening on input Enter and restores the collapsed list on clear', async () => {
+    const props = renderHome({ recentProjects: makeRecentProjects(9) });
+    const selectedCard = screen.getByRole('tab', { name: '选择项目：Project 2' });
+    fireEvent.click(selectedCard);
+    const input = screen.getByRole('searchbox', { name: '搜索历史项目' });
     input.focus();
-    fireEvent.change(input, { target: { value: 'PROJECT project-2' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'PROJECT project-9' } });
     expect(screen.queryByRole('button', { name: '打开最近项目：Project 1' })).toBeNull();
-    expect(screen.getByRole('button', { name: '打开最近项目：Project 2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '打开最近项目：Project 9' })).toBeTruthy();
+    expect(screen.getByLabelText('匹配 1 项，共 9 项').textContent).toBe('1 / 9');
+    expect(selectedCard.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
     expect(props.onOpenRecentProject).not.toHaveBeenCalled();
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledExactlyOnceWith('D:/projects/project-2/project.json'));
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+    fireEvent.click(screen.getByRole('button', { name: '打开最近项目：Project 9' }));
+    await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledExactlyOnceWith('D:/projects/project-9/project.json'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '打开最近项目：Project 9' }).hasAttribute('disabled')).toBe(false));
+    expect(selectedCard.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(input, { key: 'Escape' });
-    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(6);
+    fireEvent.change(input, { target: { value: 'PROJECT' } });
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(9);
     fireEvent.change(input, { target: { value: 'missing' } });
     expect(screen.getByRole('status').textContent).toContain('没有匹配“missing”的项目');
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(props.onOpenRecentProject).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
-    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(6);
   });
 
   it('keeps the create draft, shared canvas settings and source targets across command navigation', () => {
