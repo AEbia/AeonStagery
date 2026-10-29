@@ -9,6 +9,7 @@ import { IconChevronDown, IconChevronUp, IconTrash } from '../icons';
 import { FormSelect } from '../FormSelect';
 import { InfoTip } from '../Tooltip';
 import './template-package-selector.css';
+import './template-capability-config.css';
 
 export type CharacterPresetListItem = NonNullable<TemplatePackageSummary['characterPresets']>[number] & {
   templateScope: TemplatePackageSummary['scope'];
@@ -167,22 +168,21 @@ export const TemplatePackageSelector = ({
     }
   };
   return (
-    <div className={compact ? 'template-package-selector--compact' : undefined} style={templateSelectorStyle}>
-      <div className="template-package-selector-header" style={templateSelectorHeaderStyle}>
+    <div className={`template-package-selector${compact ? ' template-package-selector--compact' : ''}`}>
+      <div className="template-package-selector-header">
         <div className="template-package-selector-heading">
-          <div style={fieldLabelStyle}>
+          <div className="template-control-label">
             {onToggle ? '项目模板' : '已发现模板包'}
-            <InfoTip content={onToggle ? '后加载模板会覆盖同名资产和组合母板。取消勾选全部模板可停用所有模板能力，保存配置后生效。' : '可删除外部模板包，包括随包导入的 WebGAL 字幕样式。内置模板可在项目中取消勾选。'} />
+            <InfoTip content={onToggle ? '后加载模板覆盖同名资产和组合母板，全部取消勾选并保存可停用模板能力。' : '可删除外部模板包及其 WebGAL 字幕样式，内置模板需在项目中取消勾选。'} />
           </div>
-          {compact && <div style={hintTextStyle}>{onToggle ? `${selectedIds.length} 个已勾选 / ${packages.length} 个模板包` : `${packages.length} 个模板包`}</div>}
+          {compact && <div className="template-hint">{onToggle ? `${selectedIds.length} 个已勾选 / ${packages.length} 个模板包` : `${packages.length} 个模板包`}</div>}
         </div>
-        {!compact && <div style={hintTextStyle}>{onToggle ? `${selectedIds.length} 个已勾选` : `${packages.length} 个模板包`}</div>}
+        {!compact && <div className="template-hint">{onToggle ? `${selectedIds.length} 个已勾选` : `${packages.length} 个模板包`}</div>}
         {headerActions}
       </div>
 
       <div
         className="template-package-selector-list"
-        style={templatePackageListStyle}
         role={compact && packages.length > 0 ? 'region' : undefined}
         aria-label={compact && packages.length > 0 ? (onToggle ? '项目模板列表' : '模板包列表') : undefined}
         tabIndex={compact && packages.length > 0 ? 0 : undefined}
@@ -193,8 +193,9 @@ export const TemplatePackageSelector = ({
           const scopeLabel = ({ builtin: '内置', project: '项目', user: '用户', community: '社区' })[templatePackage.scope];
           const metadata = `${templatePackage.id} · ${templatePackage.version} · ${scopeLabel}`;
           return (
-            <div className="template-package-selector-row" key={templatePackage.id} style={{ ...templatePackageRowStyle, gridTemplateColumns: onToggle ? 'auto minmax(0, 1fr) auto' : 'minmax(0, 1fr) auto' }}>
-              {onToggle && <label style={templatePackageCheckStyle}>
+            <div className="template-package-selector-row template-preset-row" key={templatePackage.id}
+              data-selectable={Boolean(onToggle)} data-selected={checked}>
+              {onToggle && <label className="template-package-check">
                 <input
                   type="checkbox"
                   aria-label={`启用模板 ${templatePackage.name}`}
@@ -203,18 +204,18 @@ export const TemplatePackageSelector = ({
                   onChange={() => onToggle(templatePackage.id)}
                 />
               </label>}
-              <span style={templatePackageTextStyle}>
-                <span className="template-package-selector-name" title={templatePackage.name} style={compact ? { ...templatePackageNameStyle, display: 'block' } : templatePackageNameStyle}>
+              <span className="template-preset-text">
+                <span className="template-package-selector-name template-preset-name" title={templatePackage.name}>
                   {templatePackage.name}
                 </span>
-                <span title={metadata} style={templatePackageMetaStyle}>
+                <span title={metadata} className="template-preset-meta">
                   {metadata}
                 </span>
               </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="template-package-actions">
                 {checked && onMove && (
-                  <span style={templatePackageOrderStyle}>
-                    <span style={templatePackageOrderIndexStyle}>{selectedIndex + 1}</span>
+                  <span className="template-package-order">
+                    <span className="template-package-order__index">{selectedIndex + 1}</span>
                     <button
                       type="button"
                       className="btn btn--icon"
@@ -222,7 +223,6 @@ export const TemplatePackageSelector = ({
                       aria-label={`${templatePackage.name} 上移`}
                       disabled={deletingId !== null || selectedIndex <= 0}
                       onClick={() => onMove(templatePackage.id, -1)}
-                      style={templatePackageOrderButtonStyle}
                     >
                       <IconChevronUp width={13} height={13} />
                     </button>
@@ -233,7 +233,6 @@ export const TemplatePackageSelector = ({
                       aria-label={`${templatePackage.name} 下移`}
                       disabled={deletingId !== null || selectedIndex === selectedIds.length - 1}
                       onClick={() => onMove(templatePackage.id, 1)}
-                      style={templatePackageOrderButtonStyle}
                     >
                       <IconChevronDown width={13} height={13} />
                     </button>
@@ -256,9 +255,9 @@ export const TemplatePackageSelector = ({
           );
         })}
       </div>
-      {compact && packages.length === 0 && <div style={hintTextStyle}>暂无模板包</div>}
-      {deletingId && <div role="status" style={hintTextStyle}>正在删除模板包…</div>}
-      {deleteError && <div role="alert" style={{ ...hintTextStyle, color: 'var(--error)' }}>{deleteError}</div>}
+      {compact && packages.length === 0 && <div className="template-hint">暂无模板包</div>}
+      {deletingId && <div role="status" className="template-hint">正在删除模板包…</div>}
+      {deleteError && <div role="alert" className="template-hint template-hint--error">{deleteError}</div>}
     </div>
   );
 };
@@ -282,7 +281,7 @@ export const TemplateCapabilityConfig = ({
   characterVariantImportMode: CharacterVariantImportMode;
   onChangeCharacterVariantImportMode: (mode: CharacterVariantImportMode) => void;
 }) => (
-  <div style={capabilityConfigStyle}>
+  <div className="template-capability-config">
     {dialogueStyles && resolvedDialogueStyle && onChangeDialogueStyleOverride && (
       <DefaultPresetSelector
         title="默认对白样式"
@@ -294,45 +293,46 @@ export const TemplateCapabilityConfig = ({
       />
     )}
 
-    <section style={capabilityPanelStyle}>
-      <div style={sectionHeaderStyle}>
+    <section className="template-capability-panel">
+      <div className="template-capability-panel__header">
         <div>
-          <div style={sectionTitleStyle}>
+          <h2 className="template-capability-panel__title">
             初始角色
-            <InfoTip content="创建项目时写入默认场景；项目进行中也可以复用这一入口导入模板角色。" />
-          </div>
+            <InfoTip content="所选角色会写入默认场景并保留副模型，也可在项目中通过此入口追加导入。" />
+          </h2>
         </div>
-        <div style={hintTextStyle}>{selectedCharacterPresetIds.length} 个已选择</div>
+        <div className="template-hint">{selectedCharacterPresetIds.length} 个已选择</div>
       </div>
       <CharacterPresetSelector
         presets={characterPresets}
         selectedIds={selectedCharacterPresetIds}
         onToggle={onToggleCharacterPreset}
       />
-      <div style={defaultControlRowStyle}>
+      <div className="template-capability-panel__controls">
         <div>
-          <div style={fieldLabelStyle}>
+          <div className="template-control-label">
             服装模型导入方式
             <InfoTip content="快速导入能显著减少首次复制的 Live2D 文件数量。" />
           </div>
         </div>
         <FormSelect
+          aria-label="服装模型导入方式"
           value={characterVariantImportMode}
           options={[
             { value: 'primary-only', label: '快速导入（仅默认服装）' },
             { value: 'all', label: '完整导入（全部服装）' },
           ]}
           onChange={(value) => onChangeCharacterVariantImportMode(value === 'all' ? 'all' : 'primary-only')}
-          style={variantImportSelectStyle}
+          className="template-capability-panel__select template-capability-panel__variant"
         />
       </div>
     </section>
 
-    <section style={capabilityPanelMutedStyle}>
-      <div style={sectionTitleStyle}>
+    <section className="template-capability-panel template-capability-panel--muted">
+      <h2 className="template-capability-panel__title">
         后续能力
         <InfoTip content="Scene blueprint、模板资产、环境、文字、音频和导出 preset 会在后续决策后逐项接入。" />
-      </div>
+      </h2>
     </section>
   </div>
 );
@@ -352,49 +352,27 @@ const CharacterPresetSelector = ({
   selectedIds: string[];
   onToggle: (presetId: string) => void;
 }) => (
-  <div style={templateSelectorStyle}>
-    <div style={templateSelectorHeaderStyle}>
-      <div>
-        <div style={fieldLabelStyle}>
-          初始角色
-          <InfoTip content="选中的角色会写入默认场景角色目录，复数模型会保留为同一角色的副模型。" />
-        </div>
-      </div>
-      <div style={hintTextStyle}>{selectedIds.length} 个已选择</div>
-    </div>
-
+  <div className="template-character-presets">
     {presets.length > 0 ? (
-      <div style={templatePackageListStyle}>
-        {presets.map((preset) => {
-          const checked = selectedIds.includes(preset.id);
-          return (
-            <div key={`${preset.templateId}:${preset.id}`} style={templatePackageRowStyle}>
-              <label style={templatePackageCheckStyle}>
-                <input
-                  type="checkbox"
-                  aria-label={`选择初始角色 ${preset.name}`}
-                  checked={checked}
-                  onChange={() => onToggle(preset.id)}
-                />
-              </label>
-              <span style={templatePackageTextStyle}>
-                <span style={templatePackageNameStyle}>
-                  {preset.name}
-                  <span style={templatePackageScopeStyle}>{preset.variantCount} 模型</span>
-                  {preset.speakerColor && (
-                    <span style={{ ...characterColorSwatchStyle, background: preset.speakerColor }} />
-                  )}
-                </span>
-                <span style={templatePackageMetaStyle}>
-                  {preset.id} · {preset.templateName}
-                </span>
+      <div className="template-preset-list">
+        {presets.map((preset) => (
+          <label key={`${preset.templateId}:${preset.id}`} className="template-preset-row template-preset-row--character"
+            data-selected={selectedIds.includes(preset.id)}>
+            <input type="checkbox" aria-label={`选择初始角色 ${preset.name}`}
+              checked={selectedIds.includes(preset.id)} onChange={() => onToggle(preset.id)} />
+            <span className="template-preset-text">
+              <span className="template-preset-name">
+                {preset.name}
+                <span className="template-preset-scope">{preset.variantCount} 模型</span>
+                {preset.speakerColor && <span className="template-character-color" style={{ background: preset.speakerColor }} />}
               </span>
-            </div>
-          );
-        })}
+              <span className="template-preset-meta">{preset.id} · {preset.templateName}</span>
+            </span>
+          </label>
+        ))}
       </div>
     ) : (
-      <div style={emptyTemplateStateStyle}>当前启用模板没有角色预设</div>
+      <div className="template-empty-state">当前启用模板没有角色预设</div>
     )}
   </div>
 );
@@ -414,222 +392,39 @@ const DefaultPresetSelector = ({
   resolved: ResolvedTemplateDefaultValue;
   onChange: (presetId: string | undefined) => void;
 }) => (
-  <section style={capabilityPanelStyle}>
-    <div style={sectionHeaderStyle}>
+  <section className="template-capability-panel">
+    <div className="template-capability-panel__header">
       <div>
-        <div style={sectionTitleStyle}>
+        <h2 className="template-capability-panel__title">
           {title}
           <InfoTip content={description} />
-        </div>
+        </h2>
       </div>
-      <div style={hintTextStyle}>{formatDefaultSource(resolved)}</div>
+      <div className="template-hint">{formatDefaultSource(resolved)}</div>
     </div>
     {presets.length > 0 ? (
-      <div style={defaultControlRowStyle}>
+      <div className="template-capability-panel__controls">
         <FormSelect
+          aria-label={title}
           value={resolved.value ?? ''}
           options={presets.map((preset) => ({
             value: preset.id,
             label: `${preset.name} · ${preset.templateName}`,
           }))}
           onChange={(value) => onChange(value || undefined)}
-          style={selectStyle}
+          className="template-capability-panel__select"
         />
         <button
           className="btn"
           type="button"
           onClick={() => onChange(undefined)}
           disabled={resolved.source !== 'user'}
-          style={resetButtonStyle}
         >
           使用模板默认
         </button>
       </div>
     ) : (
-      <div style={emptyTemplateStateStyle}>{emptyText}</div>
+      <div className="template-empty-state">{emptyText}</div>
     )}
   </section>
 );
-
-const templateSelectorStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 9,
-  paddingTop: 2,
-};
-
-const capabilityConfigStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 12,
-};
-
-const capabilityPanelStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 12,
-  padding: 14,
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--bg-tertiary)',
-};
-
-const capabilityPanelMutedStyle: React.CSSProperties = {
-  ...capabilityPanelStyle,
-  borderStyle: 'dashed',
-  background: 'var(--bg-primary)',
-};
-
-const templateSelectorHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 12,
-};
-
-const sectionHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 12,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  color: 'var(--text-primary)',
-  fontSize: 15,
-  fontWeight: 850,
-};
-
-const fieldLabelStyle: React.CSSProperties = {
-  color: 'var(--text-secondary)',
-  fontSize: 11,
-  fontWeight: 800,
-};
-
-const hintTextStyle: React.CSSProperties = {
-  color: 'var(--text-muted)',
-  fontSize: 12,
-  lineHeight: 1.5,
-};
-
-const defaultControlRowStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) auto',
-  gap: 8,
-  alignItems: 'center',
-};
-
-const selectStyle: React.CSSProperties = {
-  width: '100%',
-  minWidth: 0,
-  minHeight: 38,
-  border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--bg-tertiary)',
-  color: 'var(--text-primary)',
-  padding: '8px 10px',
-};
-
-const resetButtonStyle: React.CSSProperties = {
-  minHeight: 38,
-  padding: '8px 12px',
-};
-
-const variantImportSelectStyle: React.CSSProperties = {
-  ...selectStyle,
-  width: 230,
-};
-
-const templatePackageListStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 7,
-};
-
-const templatePackageRowStyle: React.CSSProperties = {
-  minHeight: 44,
-  display: 'grid',
-  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-  alignItems: 'center',
-  gap: 9,
-  padding: '8px 10px',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg-tertiary)',
-};
-
-const templatePackageCheckStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  cursor: 'pointer',
-};
-
-const templatePackageTextStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflowWrap: 'anywhere',
-  display: 'grid',
-  gap: 3,
-};
-
-const templatePackageNameStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 7,
-  color: 'var(--text-primary)',
-  fontSize: 12,
-  fontWeight: 760,
-};
-
-const templatePackageScopeStyle: React.CSSProperties = {
-  flexShrink: 0,
-  padding: '1px 5px',
-  borderRadius: 'var(--radius-sm)',
-  border: '1px solid var(--border-subtle)',
-  color: 'var(--text-secondary)',
-  fontSize: 10,
-  fontWeight: 700,
-};
-
-const templatePackageMetaStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  color: 'var(--text-muted)',
-  fontSize: 11,
-  fontFamily: 'var(--font-mono)',
-};
-
-const templatePackageOrderStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '22px 28px 28px',
-  alignItems: 'center',
-  gap: 4,
-};
-
-const templatePackageOrderIndexStyle: React.CSSProperties = {
-  color: 'var(--text-muted)',
-  fontSize: 11,
-  fontFamily: 'var(--font-mono)',
-  textAlign: 'center',
-};
-
-const templatePackageOrderButtonStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  minHeight: 28,
-};
-
-const characterColorSwatchStyle: React.CSSProperties = {
-  width: 9,
-  height: 9,
-  borderRadius: 'var(--radius-full)',
-  border: '1px solid var(--border-highlight)',
-  boxShadow: 'var(--shadow-sm)',
-};
-
-const emptyTemplateStateStyle: React.CSSProperties = {
-  minHeight: 48,
-  display: 'flex',
-  alignItems: 'center',
-  color: 'var(--text-muted)',
-  fontSize: 12,
-};

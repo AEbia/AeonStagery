@@ -1,4 +1,5 @@
 import { IconFolder, IconPlus, IconTarget, IconUsers } from '../../icons';
+import { Tooltip } from '../../Tooltip';
 
 export function HomeCommandRail({ activeTarget, onGoHome, onCreate, onOpen, onCollaborate, onStartTutorial }: {
   activeTarget?: 'create' | 'collaboration';
@@ -21,12 +22,13 @@ export function HomeCommandRail({ activeTarget, onGoHome, onCreate, onOpen, onCo
     </button>
     <nav className="ph-commands" aria-label="主命令">
       {commands.map(({ title, description, icon: Icon, action, target, style }) =>
-        <button key={title} type="button" aria-label={title} aria-current={target && activeTarget === target ? 'page' : undefined}
-          className={`ph-command${style ? ` ph-command--${style}` : ''}`} onClick={() => { void action(); }}>
-          <span className="ph-command__icon"><Icon width={20} height={20} /></span>
-          <span className="ph-command__copy"><span className="ph-command__title">{title}</span>
-            <span className="ph-command__description">{description}</span></span>
-        </button>)}
+        <Tooltip key={title} content={description} placement="right">
+          <button type="button" aria-label={title} aria-current={target && activeTarget === target ? 'page' : undefined}
+            className={`ph-command${style ? ` ph-command--${style}` : ''}`} onClick={() => { void action(); }}>
+            <span className="ph-command__icon"><Icon width={20} height={20} /></span>
+            <span className="ph-command__title">{title}</span>
+          </button>
+        </Tooltip>)}
     </nav>
   </aside>;
 }

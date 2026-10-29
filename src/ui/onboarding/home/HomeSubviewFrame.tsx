@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { IconArrowLeft } from '../../icons';
 import { InfoTip } from '../../Tooltip';
 
@@ -11,8 +11,8 @@ export function HomeSubviewFrame({ title, currentLabel = title, info, parent, on
   onBack: () => void;
   children: ReactNode;
 }) {
-  return <section className="ph-surface ph-subview">
-    <div className="ph-section-header ph-stagger-1">
+  return <section className="ph-subview">
+    <header className="ph-section-header">
       <div className="ph-subview-titles">
         <nav className="ph-breadcrumbs" aria-label="页面导航">
           <button type="button" className="ph-breadcrumb-btn" onClick={onGoHome}>开始制作</button>
@@ -23,16 +23,33 @@ export function HomeSubviewFrame({ title, currentLabel = title, info, parent, on
           </>}
           <span className="ph-breadcrumb-current" aria-current="page">{currentLabel}</span>
         </nav>
-        <h1 className="ph-section-title">{title}{info && <InfoTip content={info} />}</h1>
+        <div className="ph-section-heading">
+          <h1 className="ph-section-title">{title}</h1>
+          {info && <InfoTip content={info} ariaLabel={`${title}说明`} />}
+        </div>
       </div>
       <button type="button" className="btn ph-btn-compact ph-back-btn" onClick={onBack}>
         <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
       </button>
-    </div>
-    {children}
+    </header>
+    <div className="ph-subview__body">{children}</div>
   </section>;
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="ph-field"><span className="ph-field-label">{label}</span>{children}</label>;
+export function HomeFormSection({ title, info, children }: {
+  title: string;
+  info?: string;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+  return <section className="ph-form-section" aria-labelledby={headingId}>
+    <div className="ph-form-section__intro">
+      <h2 id={headingId} className="ph-form-section__title">{title}{info && <InfoTip content={info} ariaLabel={`${title}说明`} />}</h2>
+    </div>
+    <div className="ph-form-section__fields">{children}</div>
+  </section>;
+}
+
+export function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return <label className={`ph-field${className ? ` ${className}` : ''}`}><span className="ph-field-label">{label}</span>{children}</label>;
 }

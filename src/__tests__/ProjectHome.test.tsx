@@ -330,11 +330,13 @@ describe('ProjectHome collaboration entry', () => {
     expect(screen.getByRole('button', { name: /加入房间/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /加入房间/ }));
+    expect(screen.getByRole('heading', { level: 1, name: '加入房间' })).toBe(document.activeElement);
     expect(screen.getByText('服务器')).toBeTruthy();
     expect(screen.getByText('本地协作工作区')).toBeTruthy();
 
-    fireEvent.click(screen.getAllByRole('button', { name: '返回' })[1]);
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
     fireEvent.click(screen.getByRole('button', { name: /主持新剧本/ }));
+    expect(screen.getByRole('heading', { level: 1, name: '主持新剧本' })).toBe(document.activeElement);
     expect(screen.getByText('项目名称')).toBeTruthy();
     expect(screen.getByText('端口')).toBeTruthy();
   });
@@ -491,6 +493,28 @@ describe('ProjectHome collaboration entry', () => {
     // Create form -> Start via breadcrumb
     fireEvent.click(screen.getByRole('button', { name: '开始制作' }));
     expect(screen.getByRole('button', { name: /开始教程/ })).toBeTruthy();
+  });
+
+  it('keeps cast and import choices when completing template configuration and creating the project', async () => {
+    const props = renderHome({ templatePackages: [{
+      id: 'template.cast', name: 'Cast', version: '1.0.0', scope: 'user',
+      characterPresets: [{ id: 'hero', name: 'Hero', variantCount: 2 }],
+    }] });
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    fireEvent.change(screen.getByPlaceholderText('例如：第 1 话演出稿'), { target: { value: 'Opening scene' } });
+    fireEvent.click(screen.getByRole('button', { name: '配置模板能力' }));
+    fireEvent.click(screen.getByText('Hero'));
+    fireEvent.click(screen.getByRole('combobox', { name: '服装模型导入方式' }));
+    fireEvent.click(screen.getByRole('option', { name: '完整导入（全部服装）' }));
+    fireEvent.click(screen.getByRole('button', { name: '完成配置' }));
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }));
+
+    await waitFor(() => expect(props.onCreateProject).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      name: 'Opening scene',
+      templates: expect.objectContaining({
+        enabledTemplateIds: ['template.cast'], selectedCharacterPresetIds: ['hero'], characterVariantImportMode: 'all',
+      }),
+    })));
   });
 
   it('supports direct ancestor navigation via breadcrumbs in collaboration mode', () => {

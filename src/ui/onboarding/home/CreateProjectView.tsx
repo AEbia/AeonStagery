@@ -1,9 +1,10 @@
-import { InfoTip } from '../../Tooltip';
+import { InfoTip, Tooltip } from '../../Tooltip';
+import { IconCheck, IconChevronDown, IconChevronUp, IconFileText, IconFolder } from '../../icons';
 import { VideoFormatFields } from '../../VideoFormatFields';
 import { TemplateCapabilityConfig, TemplatePackageSelector } from '../../templates/TemplateCapabilityConfig';
 import type { ProjectHomeProps, NavigationTarget, CreateView } from '../ProjectHome';
 import type { CreateProjectDraft } from './useCreateProjectDraft';
-import { Field, HomeSubviewFrame } from './HomeSubviewFrame';
+import { Field, HomeFormSection, HomeSubviewFrame } from './HomeSubviewFrame';
 
 type Props = Required<Pick<ProjectHomeProps, 'templatePackages'>> & Pick<ProjectHomeProps, 'onDeleteTemplatePackage'> & {
   draft: CreateProjectDraft;
@@ -52,12 +53,12 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
   } = draft;
   const capabilities = createView === 'template-capabilities';
   return <HomeSubviewFrame title={capabilities ? '模板能力配置' : '新建项目'}
-    info={capabilities ? '配置会应用到项目初始化的模板能力。' : '选择模板包和优先级；角色等细项进入模板能力配置。'}
+    info={capabilities ? '配置项目的初始角色和默认对白样式。' : '选择模板包并调整加载顺序，角色和对白样式可在模板能力中配置。'}
     onGoHome={() => navigateTo('start')} onBack={() => navigateTo(capabilities ? 'create-form' : 'start')}
     parent={capabilities ? { label: '新建项目', onClick: () => navigateTo('create-form') } : undefined}>
     {createView === 'form' ? (
       <>
-        <div className="ph-form-grid ph-stagger-2">
+        <HomeFormSection title="项目信息">
           <Field label="项目名称">
             <input
               className="ph-input"
@@ -83,16 +84,16 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
               </button>
             </div>
           </Field>
-        </div>
+        </HomeFormSection>
 
-        <section className="ph-stagger-3" aria-labelledby="create-video-title">
-          <h3 id="create-video-title" className="ph-field-label">画布与帧率</h3>
-          <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="create-video" disabled={isSubmitting} />
-          <p className="video-format__message">分辨率和帧率将保存在此项目中，创建后可在画布设置中调整。</p>
-          {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
-        </section>
+        <HomeFormSection title="画布与帧率" info="分辨率和帧率保存在项目中，创建后可在画布设置中调整。">
+          <div className="ph-video-section">
+            <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="create-video" disabled={isSubmitting} />
+            {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
+          </div>
+        </HomeFormSection>
 
-        <div className="ph-stagger-3">
+        <HomeFormSection title="模板与角色">
           <TemplatePackageSelector
             compact
             packages={templatePackages}
@@ -101,35 +102,28 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
             onMove={moveTemplate}
             onDeletePackage={onDeleteTemplatePackage}
           />
-        </div>
-
-        <div className="ph-capability-card ph-stagger-4">
-          <div>
-            <div className="ph-field-label">
-              模板能力
-              <InfoTip content="已选择初始角色。角色、对白样式和后续模板能力会在这里集中配置。" />
+          <div className="ph-capability-card">
+            <div>
+              <div className="ph-field-label">
+                模板能力
+                <InfoTip content="配置项目的初始角色和默认对白样式。" />
+              </div>
+              <div className="ph-capability-count">
+                已选择 {selectedCharacterPresetIds.length} 个初始角色
+              </div>
             </div>
-            <div className="ph-capability-count">
-              已选择 {selectedCharacterPresetIds.length} 个初始角色
-            </div>
+            <button
+              type="button"
+              className="btn ph-btn-compact"
+              onClick={() => navigateTo('create-capabilities')}
+            >
+              配置模板能力
+            </button>
           </div>
-          <button
-            type="button"
-            className="btn ph-btn-compact"
-            onClick={() => navigateTo('create-capabilities')}
-          >
-            配置模板能力
-          </button>
-        </div>
+        </HomeFormSection>
 
-        <div className="ph-webgal-card ph-stagger-4">
-          <div>
-            <div className="ph-field-label">
-              导入 WebGAL 剧本（可选）
-              <InfoTip content="可以一次选择多个 WebGAL 剧本文件（例如按章节拆分的多个 .txt）。创建项目时会按选择顺序合并成一条连续时间线：对白、旁白、背景、立绘登场/退场与移动，中间不会中断。" />
-            </div>
-          </div>
-
+        <HomeFormSection title="导入 WebGAL 剧本（可选）"
+          info="多个 WebGAL .txt 剧本会按列表顺序合并为连续时间线，支持对白、旁白、背景及立绘进出场与移动。">
           {webgalScriptFiles.length > 0 ? (
             <div className="ph-webgal-scripts">
               {webgalScriptFiles.map((file, index) => (
@@ -143,8 +137,9 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
                       onClick={() => handleMoveWebGalScript(index, -1)}
                       disabled={index === 0 || isReadingWebgalScript}
                       title="上移"
+                      aria-label={`${file.name} 上移`}
                     >
-                      ↑
+                      <IconChevronUp width={14} height={14} />
                     </button>
                     <button
                       type="button"
@@ -152,8 +147,9 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
                       onClick={() => handleMoveWebGalScript(index, 1)}
                       disabled={index === webgalScriptFiles.length - 1 || isReadingWebgalScript}
                       title="下移"
+                      aria-label={`${file.name} 下移`}
                     >
-                      ↓
+                      <IconChevronDown width={14} height={14} />
                     </button>
                     <button
                       type="button"
@@ -186,8 +182,9 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
               </div>
             </div>
           ) : (
-            <div className="ph-browse-row">
-              <div className="ph-webgal-file-name">
+            <div className="ph-file-picker">
+              <IconFileText width={22} height={22} />
+              <div className="ph-file-picker__name">
                 {isReadingWebgalScript ? '正在读取...' : '未选择剧本文件'}
               </div>
               <button
@@ -201,53 +198,57 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
             </div>
           )}
 
-          <div>
-            <div className="ph-field-label">
-              阅读速度
-              <InfoTip content="决定没有配音的台词停留多久；有配音的台词以音频实际时长为准。" />
+          <div className="ph-webgal-options">
+            <div className="ph-option-group" role="group" aria-label="阅读速度">
+              <div className="ph-field-label">
+                阅读速度
+                <InfoTip content="无配音台词按所选速度计算停留时间，有配音时以音频时长为准。" />
+              </div>
+              <div className="ph-speed-row">
+                {[1.125, 1.5, 2.25].map((speed) => (
+                  <button
+                    key={speed}
+                    type="button"
+                    className={`btn ph-speed-btn ${webgalSpeed === speed ? 'ph-speed-btn--active' : ''}`}
+                    aria-pressed={webgalSpeed === speed}
+                    onClick={() => handleWebgalSpeedChange(speed)}
+                  >
+                    {speed === 1.125 ? '慢速' : speed === 1.5 ? '标准' : '快速'}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="ph-speed-row">
-            {[1.125, 1.5, 2.25].map((speed) => (
-              <button
-                key={speed}
-                type="button"
-                className={`btn ph-speed-btn ${webgalSpeed === speed ? 'ph-speed-btn--active' : ''}`}
-                onClick={() => handleWebgalSpeedChange(speed)}
-              >
-                {speed === 1.125 ? '慢速' : speed === 1.5 ? '标准' : '快速'}
-              </button>
-            ))}
-          </div>
 
-          <div>
-            <div className="ph-field-label">
-              衔接处处理（多个剧本时生效）
-              <InfoTip content="每个衔接处都会先让前一个剧本中仍登场的角色全部退场（固定行为）。背景的处理方式可以三选一。" />
+            <div className="ph-option-group" role="group" aria-label="衔接处处理">
+              <div className="ph-field-label">
+                衔接处处理
+                <InfoTip content="多个剧本衔接时角色会全部退场，背景按所选方式处理。" />
+              </div>
+              <div className="ph-speed-row">
+                {[
+                  { value: 'black' as const, label: '黑场', hint: '背景淡出为黑并停留片刻，下一剧本再淡入' },
+                  { value: 'fade' as const, label: '淡入再淡出', hint: '背景快速淡出，下一剧本的背景淡入' },
+                  { value: 'none' as const, label: '不做任何改动', hint: '背景无缝衔接（只执行角色退场）' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`btn ph-speed-btn ${webgalChapterTransition === option.value ? 'ph-speed-btn--active' : ''}`}
+                    aria-pressed={webgalChapterTransition === option.value}
+                    onClick={() => handleWebgalChapterTransitionChange(option.value)}
+                    title={option.hint}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="ph-speed-row">
-            {[
-              { value: 'black' as const, label: '黑场', hint: '背景淡出为黑并停留片刻，下一剧本再淡入' },
-              { value: 'fade' as const, label: '淡入再淡出', hint: '背景快速淡出，下一剧本的背景淡入' },
-              { value: 'none' as const, label: '不做任何改动', hint: '背景无缝衔接（只执行角色退场）' },
-            ].map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`btn ph-speed-btn ${webgalChapterTransition === option.value ? 'ph-speed-btn--active' : ''}`}
-                onClick={() => handleWebgalChapterTransitionChange(option.value)}
-                title={option.hint}
-              >
-                {option.label}
-              </button>
-            ))}
           </div>
 
           {webgalScriptReport && (
             <div className="ph-webgal-summary">
               <div className="ph-webgal-stats">
-                {webgalScriptFiles.length > 1 && `已合并 ${webgalScriptFiles.length} 个剧本，按选择顺序连续演出 · `}
+                {webgalScriptFiles.length > 1 && `已合并 ${webgalScriptFiles.length} 个剧本 · `}
                 {(() => {
                   const { stats, characters } = webgalScriptReport;
                   const parts = [
@@ -271,52 +272,47 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
             </div>
           )}
 
-          <div>
+          <div className="ph-option-group">
             <div className="ph-field-label">
               素材目录（可选）
-              <InfoTip content="选择 WebGAL 工程里直接包含 figure、background 等素材子目录的目录，剧本里的立绘和背景就会引用该素材库；不选则引用会暂时保留为项目相对路径。" />
+              <InfoTip content="选择含 figure、background 等子目录的 WebGAL 素材目录以解析立绘和背景，未选时保留项目相对路径。" />
             </div>
-            {webgalAssetSource && (
-              <div className="ph-webgal-source-info">
-                已连接：{webgalAssetSource.path}（@mount/{webgalAssetSource.mountId}）
+            <div className="ph-file-picker">
+              <IconFolder width={20} height={20} />
+              <div className="ph-file-picker__name" title={webgalAssetSource?.path}>
+                {webgalAssetSource ? webgalAssetSource.path : '未选择素材目录'}
               </div>
-            )}
-          </div>
-
-          <div className="ph-browse-row">
-            <div className="ph-webgal-file-name">
-              {webgalAssetSource ? webgalAssetSource.path : '未选择素材目录'}
+              {webgalAssetSource ? (
+                <button className="btn ph-btn-compact" onClick={handleClearWebGalAssetSource}>
+                  移除
+                </button>
+              ) : (
+                <button
+                  className="btn ph-btn-compact"
+                  onClick={() => { void handleChooseWebGalAssetSource(); }}
+                >
+                  选择素材目录
+                </button>
+              )}
             </div>
-            {webgalAssetSource ? (
-              <button className="btn ph-btn-compact" onClick={handleClearWebGalAssetSource}>
-                移除
-              </button>
-            ) : (
-              <button
-                className="btn ph-btn-compact"
-                onClick={() => { void handleChooseWebGalAssetSource(); }}
-              >
-                选择素材目录
-              </button>
-            )}
           </div>
-        </div>
+        </HomeFormSection>
 
-        <div className="ph-footer-row ph-stagger-5">
-          <div className="ph-hint-text">
-            <InfoTip content="会生成 project.json、默认场景入口和资源目录。" ariaLabel="创建项目说明" />
-          </div>
-          <button
-            className="btn btn--primary ph-btn-primary-compact"
-            onClick={() => { void handleCreate(); }}
-            disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting || !!videoFormatError}
-          >
-            {isSubmitting ? '正在创建...' : '创建项目'}
-          </button>
+        <div className="ph-footer-row">
+          <div />
+          <Tooltip content="创建 project.json、默认场景和资源目录。">
+            <button
+              className="btn btn--primary ph-btn-primary-compact"
+              onClick={() => { void handleCreate(); }}
+              disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting || !!videoFormatError}
+            >
+              {isSubmitting ? '正在创建...' : '创建项目'}
+            </button>
+          </Tooltip>
         </div>
       </>
     ) : (
-      <div className="ph-stagger-2">
+      <>
         <TemplateCapabilityConfig
           dialogueStyles={availableDialogueStyles}
           resolvedDialogueStyle={resolvedDialogueStyle}
@@ -327,7 +323,12 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
           characterVariantImportMode={characterVariantImportMode}
           onChangeCharacterVariantImportMode={setCharacterVariantImportMode}
         />
-      </div>
+        <div className="ph-footer-row ph-footer-row--end">
+          <button type="button" className="btn btn--primary ph-btn-primary-compact" onClick={() => navigateTo('create-form')}>
+            <IconCheck width={16} height={16} /> 完成配置
+          </button>
+        </div>
+      </>
     )}
   </HomeSubviewFrame>;
 }

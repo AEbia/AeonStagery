@@ -1,0 +1,62 @@
+.template-capability-config {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.template-capability-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+}
+
+.template-capability-panel--muted {
+  border-style: dashed;
+  background: var(--bg-primary);
+}
+
+.template-capability-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.template-capability-panel__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 850;
+  line-height: 1.5;
+}
+
+.template-capability-panel__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.template-capability-panel__variant {
+  max-width: 100%;
+}
+
+.template-capability-panel .template-capability-panel__select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.template-capability-panel__select.template-capability-panel__variant { width: 230px; }
+.template-capability-panel__controls > .btn { min-height: 38px; padding: 8px 12px; }

@@ -1,9 +1,10 @@
-import { IconArrowLeft, IconCheck, IconCopy, IconEye, IconEyeOff, IconFolder, IconPlus, IconUsers } from '../../icons';
+import { IconCheck, IconChevronRight, IconCopy, IconEye, IconEyeOff, IconFolder, IconPlus, IconUsers } from '../../icons';
 import { CollaborationAssetHandshakePanel } from '../../CollaborationAssetHandshakePanel';
 import { VideoFormatFields } from '../../VideoFormatFields';
+import { InfoTip, Tooltip } from '../../Tooltip';
 import type { ProjectHomeProps, NavigationTarget, CollaborationMode } from '../ProjectHome';
 import type { CollaborationDraft } from './useCollaborationDraft';
-import { Field, HomeSubviewFrame } from './HomeSubviewFrame';
+import { Field, HomeFormSection, HomeSubviewFrame } from './HomeSubviewFrame';
 
 type Props = Pick<ProjectHomeProps, 'collaborationStatus' | 'collaborationEndpoint' | 'collaborationServerStatus' | 'assetHandshake' | 'onCancelResourceTransfer' | 'onStopCollaborationServer'> & {
   draft: CollaborationDraft;
@@ -64,8 +65,12 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
     || '未设置';
 
   const title = collaborationMode === 'host-new' ? '主持新剧本' : collaborationMode === 'host-existing' ? '主持已有剧本' : collaborationMode === 'join' ? '加入房间' : '协作';
-  return <HomeSubviewFrame title="协作" currentLabel={title} onGoHome={() => navigateTo('start')}
-    onBack={() => navigateTo('start')} parent={collaborationMode === 'menu' ? undefined : { label: '协作', onClick: () => navigateTo('collab-menu') }}>
+  const description = collaborationMode === 'host-new' ? '新建项目并开启协作'
+    : collaborationMode === 'host-existing' ? '选择已有项目开启协作'
+    : collaborationMode === 'join' ? '输入链接或地址加入房间' : '主持或加入实时协作房间';
+  return <HomeSubviewFrame title={title} info={description} onGoHome={() => navigateTo('start')}
+    onBack={() => navigateTo(collaborationMode === 'menu' ? 'start' : 'collab-menu')}
+    parent={collaborationMode === 'menu' ? undefined : { label: '协作', onClick: () => navigateTo('collab-menu') }}>
     {collaborationServerStatus && (
       <div className="ph-server-credentials-card ph-server-capsule ph-stagger-2">
         <div className="ph-server-capsule-bar">
@@ -244,59 +249,42 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
     />
 
     {collaborationMode === 'menu' && (
-      <div className="ph-collab-choice-grid ph-stagger-3">
-          <button className="ph-command" onClick={() => navigateTo('collab-host-new')}>
-            <span className="ph-command__icon"><IconPlus width={21} height={21} /></span>
-            <span className="ph-command__copy">
-              <span className="ph-command__title">主持新剧本</span>
-              <span className="ph-command__description">新建项目并开启协作</span>
-            </span>
+      <div className="ph-collab-choices">
+        <Tooltip content="新建项目并开启协作。" placement="right">
+          <button className="ph-collab-choice" onClick={() => navigateTo('collab-host-new')}>
+            <span className="ph-collab-choice__icon"><IconPlus width={22} height={22} /></span>
+            <span className="ph-command__title">主持新剧本</span>
+            <IconChevronRight className="ph-collab-choice__arrow" width={18} height={18} />
           </button>
-          <button className="ph-command" onClick={() => navigateTo('collab-host-existing')}>
-            <span className="ph-command__icon"><IconFolder width={21} height={21} /></span>
-            <span className="ph-command__copy">
-              <span className="ph-command__title">主持已有剧本</span>
-              <span className="ph-command__description">选择已有项目开启协作</span>
-            </span>
+        </Tooltip>
+        <Tooltip content="选择已有项目并开启协作。" placement="right">
+          <button className="ph-collab-choice" onClick={() => navigateTo('collab-host-existing')}>
+            <span className="ph-collab-choice__icon"><IconFolder width={22} height={22} /></span>
+            <span className="ph-command__title">主持已有剧本</span>
+            <IconChevronRight className="ph-collab-choice__arrow" width={18} height={18} />
           </button>
-          <button className="ph-command ph-command--tutorial" onClick={() => navigateTo('collab-join')}>
-            <span className="ph-command__icon"><IconUsers width={21} height={21} /></span>
-            <span className="ph-command__copy">
-              <span className="ph-command__title">加入房间</span>
-              <span className="ph-command__description">输入链接或地址加入房间</span>
-            </span>
+        </Tooltip>
+        <Tooltip content="输入邀请链接或服务器地址加入房间。" placement="right">
+          <button className="ph-collab-choice" onClick={() => navigateTo('collab-join')}>
+            <span className="ph-collab-choice__icon"><IconUsers width={22} height={22} /></span>
+            <span className="ph-command__title">加入房间</span>
+            <IconChevronRight className="ph-collab-choice__arrow" width={18} height={18} />
           </button>
+        </Tooltip>
       </div>
     )}
 
     {collaborationMode === 'host-new' && (
-      <div className="ph-collab-form-stack ph-stagger-3">
-        <div className="ph-section-header">
-          <div className="ph-subview-titles">
-            <div className="ph-section-title">主持新剧本</div>
-          </div>
-          <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
-            <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
-          </button>
-        </div>
-
+      <div className="ph-collab-form-stack">
         <CollabModeTabs currentMode="host-new" onSelectMode={navigateTo} />
 
-        <div className="ph-form-grid">
+        <HomeFormSection title="项目信息">
           <Field label="项目名称">
             <input
               className="ph-input"
               value={hostProjectName}
               onChange={(event) => handleHostNameChange(event.target.value)}
               placeholder="例如：第 1 话协作"
-            />
-          </Field>
-          <Field label="昵称">
-            <input
-              className="ph-input"
-              value={collaborationName}
-              onChange={(event) => setCollaborationName(event.target.value)}
-              placeholder="导演"
             />
           </Field>
           <div className="ph-field-full">
@@ -317,52 +305,59 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
               </div>
             </Field>
           </div>
-          <Field label="端口">
-            <input
-              className="ph-input"
-              value={collaborationPort}
-              onChange={(event) => setCollaborationPort(event.target.value.replace(/[^\d]/g, ''))}
-              placeholder="12345"
-            />
-          </Field>
-          <Field label="协作密码（选填）">
-            <div className="ph-password-input-row">
+        </HomeFormSection>
+        <HomeFormSection title="房间设置">
+          <div className="ph-form-grid">
+            <Field label="昵称">
+              <input className="ph-input" value={collaborationName}
+                onChange={(event) => setCollaborationName(event.target.value)} placeholder="导演" />
+            </Field>
+            <Field label="端口">
               <input
                 className="ph-input"
-                type={showHostPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={hostPassword}
-                onChange={(event) => setHostPassword(event.target.value)}
-                placeholder="留空自动生成随机密码"
+                value={collaborationPort}
+                onChange={(event) => setCollaborationPort(event.target.value.replace(/[^\d]/g, ''))}
+                placeholder="12345"
               />
-              <button
-                type="button"
-                className="ph-input-eye-btn"
-                onClick={() => setShowHostPassword((v) => !v)}
-                title={showHostPassword ? '隐藏密码' : '显示密码'}
-                aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
-              >
-                {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
-              </button>
+            </Field>
+            <Field label="协作密码（选填）" className="ph-field-full">
+              <div className="ph-password-input-row">
+                <input
+                  className="ph-input"
+                  type={showHostPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={hostPassword}
+                  onChange={(event) => setHostPassword(event.target.value)}
+                  placeholder="留空自动生成随机密码"
+                />
+                <button
+                  type="button"
+                  className="ph-input-eye-btn"
+                  onClick={() => setShowHostPassword((v) => !v)}
+                  title={showHostPassword ? '隐藏密码' : '显示密码'}
+                  aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
+                >
+                  {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                </button>
+              </div>
+            </Field>
+            <div className="ph-field-full ph-network-option">
+              <label className="ph-hint-text ph-checkbox-row">
+                <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
+                <span>允许其他设备连接</span>
+              </label>
+              <InfoTip ariaLabel="连接范围说明" content="监听所有网卡，配置公网网卡或端口转发时可能向公网开放，实际连接范围受防火墙和路由规则影响。" />
             </div>
-          </Field>
-          <div className="ph-field-full">
-            <label className="ph-hint-text ph-checkbox-row">
-              <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
-              <span>允许其他设备连接（监听所有网卡；配置公网网卡或端口转发时公网可访问）</span>
-            </label>
           </div>
-        </div>
-        <section aria-labelledby="host-video-title">
-          <h3 id="host-video-title" className="ph-field-label">画布与帧率</h3>
-          <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="host-video" disabled={isSubmitting} />
-          <p className="video-format__message">保存在此项目中；协作成员需使用相同的画布与帧率。</p>
-          {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
-        </section>
+        </HomeFormSection>
+        <HomeFormSection title="画布与帧率" info="画布与帧率保存在项目中，协作成员需保持一致。">
+          <div className="ph-video-section">
+            <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="host-video" disabled={isSubmitting} />
+            {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
+          </div>
+        </HomeFormSection>
         <div className="ph-footer-row">
-          <div className="ph-hint-text">
-            <span>{allowNetwork ? '连接范围还受系统防火墙和路由器端口转发规则影响' : '仅本机连接'}</span>
-          </div>
+          <div />
           <button
             className="btn btn--primary ph-btn-primary-compact"
             onClick={() => { void handleHostNew(); }}
@@ -375,67 +370,59 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
     )}
 
     {collaborationMode === 'host-existing' && (
-      <div className="ph-collab-form-stack ph-stagger-3">
-        <div className="ph-section-header">
-          <div className="ph-subview-titles">
-            <div className="ph-section-title">主持已有剧本</div>
-          </div>
-          <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
-            <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
-          </button>
-        </div>
-
+      <div className="ph-collab-form-stack">
         <CollabModeTabs currentMode="host-existing" onSelectMode={navigateTo} />
 
-        <div className="ph-form-grid">
-          <Field label="昵称">
-            <input
-              className="ph-input"
-              value={collaborationName}
-              onChange={(event) => setCollaborationName(event.target.value)}
-              placeholder="导演"
-            />
-          </Field>
-          <Field label="端口">
-            <input
-              className="ph-input"
-              value={collaborationPort}
-              onChange={(event) => setCollaborationPort(event.target.value.replace(/[^\d]/g, ''))}
-              placeholder="12345"
-            />
-          </Field>
-          <Field label="协作密码（选填）">
-            <div className="ph-password-input-row">
+        <HomeFormSection title="房间设置">
+          <div className="ph-form-grid">
+            <Field label="昵称">
               <input
                 className="ph-input"
-                type={showHostPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={hostPassword}
-                onChange={(event) => setHostPassword(event.target.value)}
-                placeholder="留空自动生成随机密码"
+                value={collaborationName}
+                onChange={(event) => setCollaborationName(event.target.value)}
+                placeholder="导演"
               />
-              <button
-                type="button"
-                className="ph-input-eye-btn"
-                onClick={() => setShowHostPassword((v) => !v)}
-                title={showHostPassword ? '隐藏密码' : '显示密码'}
-                aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
-              >
-                {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
-              </button>
+            </Field>
+            <Field label="端口">
+              <input
+                className="ph-input"
+                value={collaborationPort}
+                onChange={(event) => setCollaborationPort(event.target.value.replace(/[^\d]/g, ''))}
+                placeholder="12345"
+              />
+            </Field>
+            <Field label="协作密码（选填）" className="ph-field-full">
+              <div className="ph-password-input-row">
+                <input
+                  className="ph-input"
+                  type={showHostPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={hostPassword}
+                  onChange={(event) => setHostPassword(event.target.value)}
+                  placeholder="留空自动生成随机密码"
+                />
+                <button
+                  type="button"
+                  className="ph-input-eye-btn"
+                  onClick={() => setShowHostPassword((v) => !v)}
+                  title={showHostPassword ? '隐藏密码' : '显示密码'}
+                  aria-label={showHostPassword ? '隐藏密码' : '显示密码'}
+                >
+                  {showHostPassword ? <IconEyeOff width={13} height={13} /> : <IconEye width={13} height={13} />}
+                </button>
+              </div>
+            </Field>
+            <div className="ph-field-full ph-network-option">
+              <label className="ph-hint-text ph-checkbox-row">
+                <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
+                <span>允许其他设备连接</span>
+              </label>
+              <InfoTip ariaLabel="连接范围说明" content="监听所有网卡，配置公网网卡或端口转发时可能向公网开放，实际连接范围受防火墙和路由规则影响。" />
             </div>
-          </Field>
-          <div className="ph-field-full">
-            <label className="ph-hint-text ph-checkbox-row">
-              <input type="checkbox" checked={allowNetwork} onChange={(event) => setAllowNetwork(event.target.checked)} />
-              <span>允许其他设备连接（监听所有网卡；配置公网网卡或端口转发时公网可访问）</span>
-            </label>
           </div>
-        </div>
+        </HomeFormSection>
         <div className="ph-footer-row">
-          <div className="ph-hint-text">
-            <span>{allowNetwork ? '连接范围还受系统防火墙和路由器端口转发规则影响' : '仅本机连接'}</span>
-          </div>
+          <div />
           <button
             className="btn btn--primary ph-btn-primary-compact"
             onClick={() => { void handleHostExisting(); }}
@@ -448,19 +435,10 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
     )}
 
     {collaborationMode === 'join' && (
-      <div className="ph-collab-form-stack ph-stagger-3">
-        <div className="ph-section-header">
-          <div className="ph-subview-titles">
-            <div className="ph-section-title">加入房间</div>
-          </div>
-          <button className="btn ph-btn-compact ph-back-btn" onClick={() => navigateTo('collab-menu')}>
-            <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
-          </button>
-        </div>
-
+      <div className="ph-collab-form-stack">
         <CollabModeTabs currentMode="join" onSelectMode={navigateTo} />
 
-        <div className="ph-form-grid">
+        <HomeFormSection title="连接信息">
           <Field label="服务器">
             <input
               className="ph-input"
@@ -490,6 +468,8 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
               </button>
             </div>
           </Field>
+        </HomeFormSection>
+        <HomeFormSection title="本地工作区">
           <Field label="昵称">
             <input
               className="ph-input"
@@ -516,7 +496,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
               </div>
             </Field>
           </div>
-        </div>
+        </HomeFormSection>
         <div className="ph-footer-row">
           <div />
           <button

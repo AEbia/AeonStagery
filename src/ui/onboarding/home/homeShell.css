@@ -56,14 +56,12 @@
 }
 .ph-command:hover { background: var(--bg-elevated); }
 .ph-command__icon { display: flex; flex-shrink: 0; color: var(--text-secondary); }
-.ph-command__copy { display: grid; gap: 4px; min-width: 0; }
 .ph-command__title { font-size: 14px; font-weight: 600; }
-.ph-command__description { font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
 .ph-command--primary { margin-bottom: 12px; background: color-mix(in srgb, var(--accent-primary) 9%, var(--bg-primary)); }
 .ph-command--primary .ph-command__icon { color: var(--accent-primary); }
 .ph-command--primary:hover { background: color-mix(in srgb, var(--accent-primary) 15%, var(--bg-primary)); }
 .ph-command--primary[aria-current="page"] { background: var(--accent-primary); color: var(--on-accent); }
-.ph-command--primary[aria-current="page"] :is(.ph-command__description, .ph-command__icon) { color: inherit; }
+.ph-command--primary[aria-current="page"] .ph-command__icon { color: inherit; }
 .ph-command[aria-current="page"]::before {
   content: "";
   position: absolute;

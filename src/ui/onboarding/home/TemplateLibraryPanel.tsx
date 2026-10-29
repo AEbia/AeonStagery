@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { IconPlus } from '../../icons';
+import { Tooltip } from '../../Tooltip';
 import { TemplatePackageSelector } from '../../templates/TemplateCapabilityConfig';
 import type { ProjectHomeProps } from '../ProjectHome';
 
@@ -15,9 +16,9 @@ export function TemplateLibraryPanel({ templatePackages, onImportTemplatePackage
   };
   return <section className="ph-templates" aria-label="模板包">
     <TemplatePackageSelector compact packages={templatePackages ?? []} onDeletePackage={onDeleteTemplatePackage}
-      headerActions={<button type="button" className="btn ph-btn-compact" disabled={isImporting}
-        title="安装 ZIP 到应用专用模板库" onClick={() => { void handleImport(); }}>
+      headerActions={<Tooltip content="将 ZIP 模板包安装到应用模板库。"><button type="button" className="btn ph-btn-compact" disabled={isImporting}
+        onClick={() => { void handleImport(); }}>
         <IconPlus width={13} height={13} /> {isImporting ? '正在导入模板…' : '导入模板包'}
-      </button>} />
+      </button></Tooltip>} />
   </section>;
 }
