@@ -114,7 +114,7 @@ describe('ProjectHome collaboration entry', () => {
     try {
       const projects = makeRecentProjects(1);
       const props = renderHome({ recentProjects: projects });
-      fireEvent.click(screen.getByRole('button', { name: '在文件管理器中显示：Project 1' }));
+      fireEvent.click(within(screen.getByRole('region', { name: '最近项目' })).getByRole('button', { name: '在文件管理器中显示：Project 1' }));
       await waitFor(() => expect(showItemInFolder).toHaveBeenCalledWith(projects[0].projectFilePath));
       fireEvent.contextMenu(screen.getByRole('button', { name: '打开最近项目：Project 1' }));
       fireEvent.click(screen.getByRole('menuitem', { name: '在文件管理器中显示' }));
@@ -175,7 +175,8 @@ describe('ProjectHome collaboration entry', () => {
     expect(screen.getByRole('button', { name: /新建项目/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /打开项目/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /导入模板包/ })).toBeTruthy();
-    expect(screen.getByText('外部库与模板')).toBeTruthy();
+    expect(screen.getByRole('region', { name: '素材来源' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '模板包' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /协作/ })).toBeTruthy();
   });
 
@@ -461,10 +462,10 @@ describe('ProjectHome collaboration entry', () => {
     expect(screen.getByText('默认对白样式')).toBeTruthy();
     expect(screen.queryByText('默认镜头')).toBeNull();
     expect(screen.queryByText('默认光照')).toBeNull();
-    expect(screen.getByRole('button', { name: '新建项目' })).toBeTruthy();
+    expect(within(screen.getByRole('navigation', { name: '页面导航' })).getByRole('button', { name: '新建项目' })).toBeTruthy();
 
     // Template capabilities -> Create form via breadcrumb
-    fireEvent.click(screen.getByRole('button', { name: '新建项目' }));
+    fireEvent.click(within(screen.getByRole('navigation', { name: '页面导航' })).getByRole('button', { name: '新建项目' }));
     expect(screen.getByPlaceholderText('例如：第 1 话演出稿')).toBeTruthy();
 
     // Create form -> Start via breadcrumb
@@ -587,4 +588,107 @@ describe('ProjectHome collaboration entry', () => {
     expect(onStopCollaborationServer).toHaveBeenCalledOnce();
   });
 
+});
+
+
+describe('ProjectHome stage entrance', () => {
+  it('focuses the continue action and opens the latest project from the stage and body Enter', async () => {
+    const projects = makeRecentProjects(2);
+    const props = renderHome({ recentProjects: projects });
+    const stage = screen.getByRole('region', { name: 'Project 1' });
+    const resume = within(stage).getByRole('button', { name: '继续制作：Project 1' });
+    expect(document.activeElement).toBe(resume);
+    fireEvent.click(resume);
+    await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(resume.hasAttribute('disabled')).toBe(false));
+    resume.blur();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(window, { key: 'Enter' });
+    await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledTimes(2));
+    expect(props.onOpenRecentProject).toHaveBeenLastCalledWith(projects[0].projectFilePath);
+  });
+
+  it('ignores body Enter while removal is modal, and ignores composed or modified keys', () => {
+    const props = renderHome({ recentProjects: makeRecentProjects(2) });
+    (document.activeElement as HTMLElement).blur();
+    for (const key of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { isComposing: true }]) {
+      fireEvent.keyDown(window, { key: 'Enter', ...key });
+    }
+    fireEvent.click(screen.getByRole('button', { name: '移除最近项目：Project 2' }));
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+  });
+
+  it('filters immediately, opens the first match with Enter and clears with Escape', async () => {
+    const props = renderHome({ recentProjects: makeRecentProjects(3) });
+    const input = screen.getByRole('searchbox', { name: '搜索最近项目' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'PROJECT project-2' } });
+    expect(screen.queryByRole('button', { name: '打开最近项目：Project 1' })).toBeNull();
+    expect(screen.getByRole('button', { name: '打开最近项目：Project 2' })).toBeTruthy();
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledExactlyOnceWith('D:/projects/project-2/project.json'));
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(3);
+    fireEvent.change(input, { target: { value: 'missing' } });
+    expect(screen.getByRole('status').textContent).toContain('没有匹配“missing”的项目');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(props.onOpenRecentProject).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '清除搜索' }));
+    expect(screen.getAllByRole('button', { name: /打开最近项目：/ })).toHaveLength(3);
+  });
+
+  it('keeps the create draft, shared canvas settings and source targets across command navigation', () => {
+    renderHome({ externalLibraryPaths: ['D:/game'] });
+    const commands = screen.getByRole('navigation', { name: '主命令' });
+    fireEvent.click(within(commands).getByRole('button', { name: '新建项目' }));
+    expect(within(commands).getByRole('button', { name: '新建项目' }).getAttribute('aria-current')).toBe('page');
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'My scene' } });
+    fireEvent.change(screen.getByLabelText('项目位置'), { target: { value: 'D:/custom' } });
+    fireEvent.change(screen.getByLabelText('宽度 (px)'), { target: { value: '1080' } });
+    fireEvent.click(within(commands).getByRole('button', { name: '协作' }));
+    expect(within(commands).getByRole('button', { name: '协作' }).getAttribute('aria-current')).toBe('page');
+    expect(within(commands).getByRole('button', { name: '新建项目' }).hasAttribute('aria-current')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /主持新剧本/ }));
+    expect((screen.getByLabelText('宽度 (px)') as HTMLInputElement).value).toBe('1080');
+    fireEvent.change(screen.getByLabelText('昵称'), { target: { value: 'Alice' } });
+    fireEvent.click(within(commands).getByRole('button', { name: '新建项目' }));
+    expect((screen.getByLabelText('项目名称') as HTMLInputElement).value).toBe('My scene');
+    expect((screen.getByLabelText('项目位置') as HTMLInputElement).value).toBe('D:/custom');
+    fireEvent.click(screen.getByRole('button', { name: '配置模板能力' }));
+    expect(within(commands).getByRole('button', { name: '新建项目' }).getAttribute('aria-current')).toBe('page');
+    fireEvent.click(within(commands).getByRole('button', { name: '协作' }));
+    fireEvent.click(screen.getByRole('button', { name: /主持新剧本/ }));
+    expect((screen.getByLabelText('昵称') as HTMLInputElement).value).toBe('Alice');
+    const sources = screen.getByRole('region', { name: '素材来源' });
+    expect(sources.querySelector('[data-tutorial-target="external-library-add"]')).toBeTruthy();
+    expect(sources.querySelector('[data-tutorial-target="external-library-replace-0"]')).toBeTruthy();
+  });
+
+  it('prevents duplicate opening while a project is pending', async () => {
+    let finish: () => void = () => {};
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const props = renderHome({ recentProjects: makeRecentProjects(2), onOpenRecentProject: vi.fn(() => pending) });
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(window, { key: 'Enter' });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(props.onOpenRecentProject).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: '继续制作：Project 1' }).hasAttribute('disabled')).toBe(false));
+  });
+
+  it('offers empty-stage actions without trying to open a missing project', () => {
+    const props = renderHome();
+    expect(screen.getByRole('heading', { name: '舞台已就绪' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Enter' });
+    expect(props.onOpenRecentProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '跟随教程制作第一幕' }));
+    expect(props.onStartTutorial).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '创建第一个项目' }));
+    expect(screen.getByLabelText('项目名称')).toBeTruthy();
+  });
 });
