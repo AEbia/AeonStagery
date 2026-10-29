@@ -9,14 +9,13 @@ import './startView.css';
 type Props = Pick<ProjectHomeProps, 'recentProjects' | 'onOpenRecentProject' | 'onRenameRecentProject' |
   'onRemoveRecentProject' | 'templatePackages' | 'onImportTemplatePackage' | 'onDeleteTemplatePackage' | 'onStartTutorial'> & {
     onCreate: () => void;
+    openingRecentPath: string | null;
     selectionMemory?: MutableRefObject<{ path: string | null } | null>;
   };
 
 export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentProject, onRemoveRecentProject,
-  templatePackages, onImportTemplatePackage, onDeleteTemplatePackage, onStartTutorial, onCreate, selectionMemory }: Props) {
+  templatePackages, onImportTemplatePackage, onDeleteTemplatePackage, onStartTutorial, onCreate, selectionMemory, openingRecentPath }: Props) {
   const [now, setNow] = useState(Date.now);
-  const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
-  const openingRef = useRef(false);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const projects = useMemo(() => recentProjects.slice(0, RECENT_PROJECT_PREVIEW_LIMIT), [recentProjects]);
   const [selection, setSelection] = useState<{ path: string | null } | null>(() => selectionMemory?.current ?? null);
@@ -29,13 +28,10 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
     : projects.find((project) => project.projectFilePath === selection?.path) ?? projects[0];
   const selectedPath = selectedProject?.projectFilePath;
   const handleOpen = useCallback(async (path: string) => {
-    if (openingRef.current || primaryRef.current?.closest('[inert]')) return;
-    openingRef.current = true;
+    if (openingRecentPath !== null || primaryRef.current?.closest('[inert]')) return;
     if (projects.some((project) => project.projectFilePath === path)) selectProject(path);
-    setOpeningRecentPath(path);
-    try { await onOpenRecentProject(path); }
-    finally { openingRef.current = false; setOpeningRecentPath(null); }
-  }, [onOpenRecentProject, projects, selectProject]);
+    await onOpenRecentProject(path);
+  }, [onOpenRecentProject, openingRecentPath, projects, selectProject]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);

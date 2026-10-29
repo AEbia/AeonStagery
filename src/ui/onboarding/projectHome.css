@@ -151,10 +151,17 @@
 }
 
 .ph-section-heading {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.ph-section-subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 @container home-subview (width < 560px) {

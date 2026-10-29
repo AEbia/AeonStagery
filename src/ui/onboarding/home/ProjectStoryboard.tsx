@@ -71,7 +71,7 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
   return <section ref={stageRef} className="ph-storyboard" aria-labelledby={`${id}-title`}
     data-motion="paused" data-opening={opening || undefined} data-engaged={engaged || opening || undefined} aria-busy={opening}>
     <div className="ph-board__toolbar">
-      <h2>项目分镜</h2>
+      <h2>选择项目</h2>
       <span className="ph-board__position" aria-label={`第 ${selectedIndex + 1} 张，共 ${projects.length + 1} 张`}>
         {String(selectedIndex + 1).padStart(2, '0')}<span> / {String(projects.length + 1).padStart(2, '0')}</span>
       </span>
@@ -89,7 +89,7 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
     <div className="ph-board__viewport">
       <div className="ph-board__table" aria-hidden="true" />
       <div className="ph-board__camera">
-        <div className="ph-board__float" role="tablist" aria-label="选择项目分镜">
+        <div className="ph-board__float" role="tablist" aria-label="选择项目">
           {[...projects, null].map((entry, index) => {
             const offset = index - selectedIndex;
             const active = offset === 0;
@@ -127,7 +127,6 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
                 <span className="ph-board__card-info">
                   <span className="ph-board__card-number" aria-hidden="true">{entry ? String(index + 1).padStart(2, '0') : '+'}</span>
                   <span className="ph-board__card-name">{entry?.name ?? '新建项目'}</span>
-                  <span className="ph-board__card-mark" aria-hidden="true">{active ? opening ? '正在打开' : entry ? '进入' : '创建' : '聚焦'}</span>
                 </span>
               </button>
             </div>;

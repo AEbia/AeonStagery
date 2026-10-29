@@ -25,7 +25,7 @@ export function HomeSubviewFrame({ title, currentLabel = title, info, parent, on
         </nav>
         <div className="ph-section-heading">
           <h1 className="ph-section-title">{title}</h1>
-          {info && <InfoTip content={info} ariaLabel={`${title}说明`} />}
+          {info && <p className="ph-section-subtitle">{info}</p>}
         </div>
       </div>
       <button type="button" className="btn ph-btn-compact ph-back-btn" onClick={onBack}>

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import type { CollaborationConnectionStatus } from '../../api/types/collaboration';
 import type { ProjectTemplateConfiguration } from '../../api/types/project';
 import type { CollaborationAssetHandshakeState } from '../../services/collaboration/CollaborationAssetHandshake';
@@ -117,6 +117,20 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
 }) => {
   const { view: currentViewKey, stageRef, navigateTo } = useHomeNavigation();
   const storyboardSelection = useRef<{ path: string | null } | null>(null);
+  // Keep the open operation's lifetime independent of the routed StartView.
+  const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
+  const openingRecent = useRef(false);
+  const handleOpenRecentProject = useCallback(async (path: string) => {
+    if (openingRecent.current) return;
+    openingRecent.current = true;
+    setOpeningRecentPath(path);
+    try {
+      await onOpenRecentProject(path);
+    } finally {
+      openingRecent.current = false;
+      setOpeningRecentPath(null);
+    }
+  }, [onOpenRecentProject]);
   const mode = currentViewKey === 'start' ? 'start' : currentViewKey.startsWith('create-') ? 'create' : 'collaboration';
   const createView: CreateView = currentViewKey === 'create-capabilities' ? 'template-capabilities' : 'form';
   const collaborationMode: CollaborationMode = currentViewKey === 'collab-host-new' ? 'host-new'
@@ -179,7 +193,8 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
       onRemove={handleRemoveExternalLibrary} onSkip={handleSkipExternalLibrary} />}>
     <div ref={stageRef} className="ph-view-stage">
       <React.Fragment key={currentViewKey}>
-      {mode === 'start' ? <StartView recentProjects={recentProjects} selectionMemory={storyboardSelection} onOpenRecentProject={onOpenRecentProject}
+      {mode === 'start' ? <StartView recentProjects={recentProjects} selectionMemory={storyboardSelection}
+        openingRecentPath={openingRecentPath} onOpenRecentProject={handleOpenRecentProject}
         onRenameRecentProject={onRenameRecentProject} onRemoveRecentProject={onRemoveRecentProject}
         templatePackages={templatePackages} onImportTemplatePackage={onImportTemplatePackage}
         onDeleteTemplatePackage={onDeleteTemplatePackage} onCreate={() => navigateTo('create-form')}

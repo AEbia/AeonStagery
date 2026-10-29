@@ -193,7 +193,7 @@ function AppContent({ contextValue, sessionBindings }: {
     height: contextValue.adapters.stage.getHeight(),
   });
   useAppShortcuts({
-    contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
+    contextValue, collaborationStatus, initialized: initialized && !isClosingProject && !homeTransition.busy, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
   });
   const validationBanner = useMemo(() => {

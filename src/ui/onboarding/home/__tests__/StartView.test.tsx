@@ -1,10 +1,18 @@
 /** @vitest-environment jsdom */
-import type { ComponentProps } from 'react';
+import { type ComponentProps, useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StartView } from '../StartView';
 
 type Props = ComponentProps<typeof StartView>;
+function StartHarness(props: Props) {
+  const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
+  return <StartView {...props} openingRecentPath={openingRecentPath} onOpenRecentProject={async (path) => {
+    setOpeningRecentPath(path);
+    try { await props.onOpenRecentProject(path); }
+    finally { setOpeningRecentPath(null); }
+  }} />;
+}
 const projects = ['First', 'Second', 'Third'].map((name) => ({
   name,
   projectFilePath: `D:/projects/${name}/project.json`,
@@ -15,6 +23,7 @@ const projects = ['First', 'Second', 'Third'].map((name) => ({
 function renderStart(overrides: Partial<Props> = {}) {
   const props: Props = {
     recentProjects: projects,
+    openingRecentPath: null,
     onOpenRecentProject: vi.fn(),
     onRenameRecentProject: vi.fn(),
     onRemoveRecentProject: vi.fn(),
@@ -23,7 +32,7 @@ function renderStart(overrides: Partial<Props> = {}) {
     onCreate: vi.fn(),
     ...overrides,
   };
-  return { props, ...render(<StartView {...props} />) };
+  return { props, ...render(<StartHarness {...props} />) };
 }
 
 describe('project storyboard selection', () => {
@@ -60,10 +69,10 @@ describe('project storyboard selection', () => {
   it('retains selection by project path through rename and reorder, then falls back when removed', async () => {
     const { props, rerender } = renderStart();
     fireEvent.click(screen.getByRole('tab', { name: '选择项目：Second' }));
-    rerender(<StartView {...props} recentProjects={[{ ...projects[1], name: 'Renamed' }, projects[2], projects[0]]} />);
+    rerender(<StartHarness {...props} recentProjects={[{ ...projects[1], name: 'Renamed' }, projects[2], projects[0]]} />);
     expect(screen.getByRole('tab', { name: '选择项目：Renamed' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Renamed');
-    rerender(<StartView {...props} recentProjects={[projects[2], projects[0]]} />);
+    rerender(<StartHarness {...props} recentProjects={[projects[2], projects[0]]} />);
     expect(screen.getByRole('tab', { name: '选择项目：Third' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '继续制作：Third' }));
     await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenCalledExactlyOnceWith(projects[2].projectFilePath));

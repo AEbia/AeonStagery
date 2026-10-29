@@ -151,7 +151,6 @@
 .ph-board__card-info { display: flex; align-items: center; gap: 12px; padding: 14px 16px; min-width: 0; }
 .ph-board__card-number { font: 10px var(--font-mono); color: var(--text-secondary); flex-shrink: 0; }
 .ph-board__card-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.ph-board__card-mark { font-size: 10px; color: var(--text-secondary); flex-shrink: 0; }
 .ph-board__card--new .ph-board__cover { background: var(--bg-elevated); color: var(--accent-primary); }
 .ph-board__card--new .ph-board__cover-plane { background: color-mix(in srgb, var(--accent-primary) 8%, transparent); }
 .ph-board__details {
