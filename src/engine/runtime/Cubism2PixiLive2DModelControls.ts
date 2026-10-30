@@ -1066,6 +1066,13 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
       }
     }
 
+    const concrete = this.getConcreteModels(model);
+    // Native masks belong to each model/context pair, including soft-detached
+    // bake models. Pool returns never enter this final-disposal path.
+    for (const target of concrete) {
+      this.bakeCore?.releaseModelContexts(target);
+    }
+
     if (options.mode === 'soft-detach') {
       // Cubism 2 runtime keeps global mask/framebuffer state inside the shared
       // SDK singleton. Fully destroying a background model can clear that state
@@ -1085,7 +1092,6 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
 
     // destroy
     const keepTextures = options.keepTextures === true;
-    const concrete = this.getConcreteModels(model);
     // Release adapter-owned isolated mask buffers before disposal. They are
     // not covered by the keepTextures policy — they are ours, not the model's
     // sprite sheets — and a dropped maskSprite would leak its render texture.
