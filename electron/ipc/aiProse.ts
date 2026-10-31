@@ -88,28 +88,37 @@ export function registerAiProseHandlers(
     if (aiProseCredentialLoadPromise) return aiProseCredentialLoadPromise;
 
     aiProseCredentialLoadPromise = (async () => {
-      if (!isAiProseCredentialAvailable()) return undefined;
-
+      let serialized: string;
       try {
-        const serialized = await fs.promises.readFile(getAiProseCredentialPath(), 'utf8');
+        serialized = await fs.promises.readFile(getAiProseCredentialPath(), 'utf8');
+      } catch (error: unknown) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+          return undefined;
+        }
+        throw new Error('无法读取已保存的 AI 密钥文件，请检查应用数据目录的访问权限后重试。');
+      }
+      if (!isAiProseCredentialAvailable()) {
+        throw new Error('系统密钥存储暂不可用，无法读取已保存的 AI 密钥。请解锁系统密钥存储后重试，无需重新保存密钥。');
+      }
+      try {
         const parsed = JSON.parse(serialized) as {
           schemaVersion?: unknown;
           ciphertext?: unknown;
         };
         if (parsed.schemaVersion !== aiProseCredentialSchemaVersion || typeof parsed.ciphertext !== 'string') {
-          return undefined;
+          throw new Error('Invalid credential file format.');
         }
         const decrypted = safeStorage.decryptString(Buffer.from(parsed.ciphertext, 'base64'));
-        if (decrypted.trim().length > 0) aiProseCredential = decrypted;
-      } catch (error: unknown) {
-        if (!(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')) {
-          console.warn('[AI prose] Stored credential could not be loaded.');
-        }
+        if (!decrypted.trim()) throw new Error('Empty stored credential.');
+        return decrypted;
+      } catch {
+        throw new Error('已保存的 AI 密钥无法解密或文件格式无效，请检查系统密钥存储和应用数据文件。');
       }
-
-      return aiProseCredential;
-    })().finally(() => {
+    })().then((credential) => {
+      aiProseCredential = credential;
       aiProseCredentialLoaded = true;
+      return credential;
+    }).finally(() => {
       aiProseCredentialLoadPromise = undefined;
     });
 
@@ -123,7 +132,9 @@ export function registerAiProseHandlers(
     if (!isAiProseCredentialAvailable()) {
       return { success: false, error: 'OS credential encryption is unavailable.' };
     }
-    await loadAiProseCredential();
+    // Finish the initial read before replacing the file; a failed read must
+    // not prevent the user from replacing an unreadable saved credential.
+    await loadAiProseCredential().catch(() => undefined);
 
     const credentialPath = getAiProseCredentialPath();
     const temporaryPath = `${credentialPath}.tmp-${process.pid}-${Date.now()}`;
@@ -147,7 +158,7 @@ export function registerAiProseHandlers(
 
   async function clearAiProseCredential(): Promise<AiProseCredentialMutationResult> {
     try {
-      await loadAiProseCredential();
+      await loadAiProseCredential().catch(() => undefined);
       await fs.promises.rm(getAiProseCredentialPath(), { force: true });
       aiProseCredential = undefined;
       aiProseCredentialLoaded = true;
@@ -673,22 +684,36 @@ export function registerAiProseHandlers(
   });
 
   ipcMain.handle('aiProse:getCredentialStatus', async (event): Promise<AiProseCredentialStatus> => {
-    if (!isMainWindowFrameSender(event) && !isAgentWindowFrameSender(event)) return { configured: false };
+    if (!isMainWindowFrameSender(event) && !isAgentWindowFrameSender(event)) {
+      throw new Error('Unauthorized AI prose sender.');
+    }
     return { configured: (await loadAiProseCredential()) !== undefined };
   });
+
+  function broadcastCredentialStatus(configured: boolean): void {
+    for (const window of [windows.mainWindow, windows.agentWindow]) {
+      if (window && !window.isDestroyed()) {
+        window.webContents.send('aiProse:credentialStatusChanged', { configured });
+      }
+    }
+  }
 
   ipcMain.handle('aiProse:setCredential', async (event, value: string) => {
     if (!isMainWindowFrameSender(event)) {
       return { success: false, error: 'Unauthorized AI prose sender.' };
     }
-    return setAiProseCredential(value);
+    const result = await setAiProseCredential(value);
+    if (result.success) broadcastCredentialStatus(true);
+    return result;
   });
 
   ipcMain.handle('aiProse:clearCredential', async (event) => {
     if (!isMainWindowFrameSender(event)) {
       return { success: false, error: 'Unauthorized AI prose sender.' };
     }
-    return clearAiProseCredential();
+    const result = await clearAiProseCredential();
+    if (result.success) broadcastCredentialStatus(false);
+    return result;
   });
 
   return {

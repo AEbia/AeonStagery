@@ -5,6 +5,8 @@ import {
   shouldRequireAiCredentialSetup,
 } from '../../services/ai-authoring/aiErrorPresentation';
 
+const CREDENTIAL_STATUS_ERROR_PREFIX = '读取 AI 密钥状态失败：';
+
 interface AiProseSettingsShape {
   baseUrl?: string;
   defaultModel?: string;
@@ -76,7 +78,24 @@ export function useAgentWindowSettings(setStartError: Dispatch<SetStateAction<st
   useEffect(() => {
     applyTheme(readTheme());
     let active = true;
+    let credentialRevision = 0;
+    const applyCredentialStatus = (status: { configured: boolean }) => {
+      if (!active) return;
+      setCredentialConfigured(status.configured);
+      setCredentialChecked(true);
+      if (status.configured) {
+        setStartError((current) => (
+          current === MISSING_CREDENTIAL_GUIDE_MESSAGE || current?.startsWith(CREDENTIAL_STATUS_ERROR_PREFIX)
+            ? null : current
+        ));
+      }
+    };
+    const unsubscribeCredentialStatus = window.aeonStageryAPI?.aiProse?.onCredentialStatusChanged?.((status) => {
+      credentialRevision += 1;
+      applyCredentialStatus(status);
+    });
     const refreshCredentialStatus = () => {
+      const revision = ++credentialRevision;
       const getCredentialStatus = window.aeonStageryAPI?.aiProse?.getCredentialStatus;
       if (typeof getCredentialStatus !== 'function') {
         setCredentialConfigured(false);
@@ -85,17 +104,14 @@ export function useAgentWindowSettings(setStartError: Dispatch<SetStateAction<st
       }
       void getCredentialStatus()
         .then((status) => {
-          if (!active) return;
-          setCredentialConfigured(status.configured);
-          setCredentialChecked(true);
-          if (status.configured) {
-            setStartError((current) => (current === MISSING_CREDENTIAL_GUIDE_MESSAGE ? null : current));
-          }
+          if (!active || revision !== credentialRevision) return;
+          applyCredentialStatus(status);
         })
-        .catch(() => {
-          if (!active) return;
+        .catch((error: unknown) => {
+          if (!active || revision !== credentialRevision) return;
           setCredentialConfigured(false);
           setCredentialChecked(false);
+          setStartError(`${CREDENTIAL_STATUS_ERROR_PREFIX}${error instanceof Error ? error.message : String(error)}`);
         });
     };
     refreshCredentialStatus();
@@ -122,6 +138,7 @@ export function useAgentWindowSettings(setStartError: Dispatch<SetStateAction<st
     window.matchMedia?.('(prefers-color-scheme: dark)')?.addEventListener?.('change', onSystemTheme);
     return () => {
       active = false;
+      unsubscribeCredentialStatus?.();
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('focus', onFocus);
       window.matchMedia?.('(prefers-color-scheme: dark)')?.removeEventListener?.('change', onSystemTheme);

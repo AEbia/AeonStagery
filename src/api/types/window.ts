@@ -174,6 +174,7 @@ export interface AeonStageryElectronAPI {
     cancel?(requestId: string): void;
     configureProvider(provider: AiProseProviderConfig): Promise<{ success: boolean; error?: string }>;
     getCredentialStatus(): Promise<AiProseCredentialStatus>;
+    onCredentialStatusChanged?(callback: (status: AiProseCredentialStatus) => void): () => void;
     setCredential(value: string): Promise<{ success: boolean; error?: string }>;
     clearCredential(): Promise<{ success: boolean; error?: string }>;
   };

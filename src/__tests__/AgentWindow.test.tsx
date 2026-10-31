@@ -2004,6 +2004,88 @@ describe('AgentWindow markdown replies', () => {
     expect(screen.getAllByRole('button', { name: /继续执行/ })).toHaveLength(1);
   });
 
+  it('refreshes saved credentials across windows without focus or settings changes', async () => {
+    const api = (window as unknown as {
+      aeonStageryAPI: { aiProse: Record<string, unknown> };
+    }).aeonStageryAPI;
+    let notify: ((status: { configured: boolean }) => void) | undefined;
+    const unsubscribe = vi.fn();
+    api.aiProse.getCredentialStatus = vi.fn(async () => ({ configured: false }));
+    api.aiProse.onCredentialStatusChanged = (callback: typeof notify) => {
+      notify = callback;
+      return unsubscribe;
+    };
+    const { unmount } = render(<AgentWindow />);
+    await screen.findByRole('region', { name: 'AI 配置引导' });
+    fireEvent.change(screen.getByRole('textbox', { name: '任务描述' }), {
+      target: { value: '帮我检查当前场景' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    await screen.findByRole('alert');
+
+    // Main process notifies the already-open Agent after a successful key save.
+    act(() => notify?.({ configured: true }));
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'AI 配置引导' })).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(mocks.requestStart).toHaveBeenCalledTimes(1);
+
+    act(() => notify?.({ configured: false }));
+    await screen.findByRole('region', { name: 'AI 配置引导' });
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a stale credential query that finishes after a key save notification', async () => {
+    const api = (window as unknown as {
+      aeonStageryAPI: { aiProse: Record<string, unknown> };
+    }).aeonStageryAPI;
+    let notify: ((status: { configured: boolean }) => void) | undefined;
+    let finishQuery: ((status: { configured: boolean }) => void) | undefined;
+    api.aiProse.getCredentialStatus = vi.fn(() => new Promise<{ configured: boolean }>((resolve) => {
+      finishQuery = resolve;
+    }));
+    api.aiProse.onCredentialStatusChanged = (callback: typeof notify) => {
+      notify = callback;
+      return vi.fn();
+    };
+    render(<AgentWindow />);
+    await act(async () => {
+      notify?.({ configured: true });
+      finishQuery?.({ configured: false });
+    });
+    expect(notify).toBeTypeOf('function');
+    expect(finishQuery).toBeTypeOf('function');
+    expect(screen.queryByRole('region', { name: 'AI 配置引导' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: '任务描述' }), {
+      target: { value: '帮我检查当前场景' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(mocks.requestStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a credential read failure instead of setup guidance and recovers on focus', async () => {
+    const api = (window as unknown as {
+      aeonStageryAPI: { aiProse: Record<string, unknown> };
+    }).aeonStageryAPI;
+    const getCredentialStatus = vi.fn()
+      .mockRejectedValueOnce(new Error('系统密钥存储暂不可用'))
+      .mockResolvedValue({ configured: true });
+    api.aiProse.getCredentialStatus = getCredentialStatus;
+    render(<AgentWindow />);
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('读取 AI 密钥状态失败'));
+    expect(screen.queryByRole('region', { name: 'AI 配置引导' })).toBeNull();
+    fireEvent(window, new Event('focus'));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    fireEvent.change(screen.getByRole('textbox', { name: '任务描述' }), {
+      target: { value: '帮我检查当前场景' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(mocks.requestStart).toHaveBeenCalledTimes(1);
+  });
+
   it('shows setup guidance on the welcome surface and intercepts task start when API key is unconfigured', async () => {
     const api = (window as unknown as {
       aeonStageryAPI: { aiProse: Record<string, unknown> };
