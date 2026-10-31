@@ -36,7 +36,7 @@ export interface RecentProjectEntry {
   lastOpenedAt: string;
 }
 
-export const MAX_RECENT_PROJECTS = 6;
+export const MAX_RECENT_PROJECTS = 50;
 export type AppTheme = 'light' | 'dark' | 'system';
 export type DialogueFontSizeSource = 'global' | 'template';
 

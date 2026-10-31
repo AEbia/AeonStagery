@@ -44,6 +44,7 @@ import { AppProvider, useTimelineAdapter } from './ui/context/AppContext';
 import { LeftSidebarPanel } from './ui/timeline/LeftSidebarPanel';
 import { bootstrap, type BootstrapContext } from './engine/Bootstrapper';
 import { ProjectHome } from './ui/onboarding/ProjectHome';
+import { useWorkspaceTransition } from './ui/onboarding/home/useWorkspaceTransition';
 import { ProjectRenameDialog } from './ui/ProjectRenameDialog';
 import { ProjectSettingsDialog } from './ui/ProjectSettingsDialog';
 import { FirstLessonController } from './ui/onboarding/FirstLessonController';
@@ -143,6 +144,10 @@ function AppContent({ contextValue, sessionBindings }: {
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
+  const projectHomeRequested = initialized && !initError && (!currentProject || isCollaborationJoinHomeLocked);
+  const homeTransition = useWorkspaceTransition(projectHomeRequested, hasLoadedScene);
+  const showProjectHome = homeTransition.showHome;
+  const { returnHome } = homeTransition;
   const [renameTarget, setRenameTarget] = useState<{ name: string; projectFilePath: string } | null>(null);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   useEffect(() => { setShowProjectSettings(false); }, [currentProject?.rootPath, currentProject?.metadata.projectId]);
@@ -158,14 +163,14 @@ function AppContent({ contextValue, sessionBindings }: {
     project.waitForPendingProjectOperations,
   );
   const handleReturnHome = useCallback(async () => {
-    if (!await handleCloseProject()) return;
+    if (!await returnHome(handleCloseProject)) return;
     setIsCollaborationJoinHomeLocked(false);
     setShowAIWorkbench(false);
     setShowVoiceWorkbench(false);
     setShowExport(false);
     setShowWebGalRegenerate(false);
     setRenameTarget(null);
-  }, [handleCloseProject, setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
+  }, [handleCloseProject, returnHome, setIsCollaborationJoinHomeLocked, setShowAIWorkbench, setShowVoiceWorkbench, setShowExport, setShowWebGalRegenerate]);
   const layout = useAppLayout(hasLoadedScene);
   const {
     contextTab, sidePanelView, isTracksMode, leftPanelWidth, sidePanelWidth,
@@ -177,7 +182,6 @@ function AppContent({ contextValue, sessionBindings }: {
   const { handleOpenWorkspaceTools, canDetachWorkspaceTools } = useWorkspaceToolsBridge(
     contextValue, semanticDocument, currentProject, layout,
   );
-  const showProjectHome = initialized && !initError && (!currentProject || isCollaborationJoinHomeLocked);
   const moreMenuRef = useDetailsDismissal();
   const stageRef = useRef<HTMLDivElement>(null);
   const stageAreaRef = useRef<HTMLDivElement>(null);
@@ -189,7 +193,7 @@ function AppContent({ contextValue, sessionBindings }: {
     height: contextValue.adapters.stage.getHeight(),
   });
   useAppShortcuts({
-    contextValue, collaborationStatus, initialized: initialized && !isClosingProject, hasLoadedScene, showProjectHome,
+    contextValue, collaborationStatus, initialized: initialized && !isClosingProject && !homeTransition.busy, hasLoadedScene, showProjectHome,
     handleStageReset, handleSave, handleOpenProject, setShowExport,
   });
   const validationBanner = useMemo(() => {
@@ -217,15 +221,18 @@ function AppContent({ contextValue, sessionBindings }: {
   return (
     <div
       className="app-container"
-      ref={(element) => { element?.toggleAttribute('inert', isClosingProject); }}
-      aria-busy={isClosingProject}
+      ref={(element) => {
+        homeTransition.rootRef.current = element;
+        element?.toggleAttribute('inert', isClosingProject || homeTransition.busy);
+      }}
+      aria-busy={isClosingProject || homeTransition.busy}
       data-timeline-layout={navigatorPriorityActive ? 'list' : 'tracks'}
       style={{
         '--workbench-timeline-extension': `${timelineHeight + 4}px`,
         '--workbench-navigator-width': `${inspectorNavigatorWidth}px`,
       } as React.CSSProperties}
     >
-      <div className="top-bar">
+      {!showProjectHome && <div className="top-bar">
         <div className="top-bar__title">
           <button
             type="button"
@@ -406,7 +413,7 @@ function AppContent({ contextValue, sessionBindings }: {
             </div>
           </details>
         </div>
-      </div>
+      </div>}
 
       <div className="main-content" data-navigator-extended={navigatorPriorityActive}>
         {isTracksMode && (
@@ -517,7 +524,7 @@ function AppContent({ contextValue, sessionBindings }: {
                 </div>
               )}
 
-              {currentProject && !hasLoadedScene && initialized && !initError && (
+              {currentProject && !hasLoadedScene && initialized && !initError && !showProjectHome && (
                 <div className="empty-state" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
                   <h2 style={{ color: 'white', fontSize: 20, marginBottom: 8, fontWeight: 600 }}>未加载场景内容</h2>
                   <p style={{ color: 'rgba(255,255,255,0.7)', marginBottom: 20, maxWidth: 420, textAlign: 'center', fontSize: 13, lineHeight: 1.5 }}>
@@ -635,7 +642,7 @@ function AppContent({ contextValue, sessionBindings }: {
         </div>
       </ErrorBoundary>
 
-      <StatusBar />
+      {!showProjectHome && <StatusBar />}
 
       {showExport && (
         <React.Suspense fallback={null}><LazyExportDialog onClose={() => setShowExport(false)} /></React.Suspense>
@@ -758,7 +765,7 @@ function AppContent({ contextValue, sessionBindings }: {
         playbackStore={contextValue.stores.playback}
         playbackAdapter={contextValue.adapters.playback}
       >
-        {({ startFirstLesson }) => showProjectHome ? (
+        {({ startFirstLesson }) => homeTransition.homeMounted ? (
           <ProjectHome
             defaultProjectName={defaultProjectName}
             defaultProjectLocation={defaultProjectLocation}
