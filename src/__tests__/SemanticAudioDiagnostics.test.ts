@@ -256,6 +256,6 @@ describe('semantic audio diagnostics', () => {
 
     expect(overlapIssue).toBeDefined();
     expect(overlapIssue?.severity).toBe('warning');
-    expect(overlapIssue?.message).toContain('可能发生重叠或截断');
+    expect(overlapIssue?.message).toContain('重叠 0.02s');
   });
 });

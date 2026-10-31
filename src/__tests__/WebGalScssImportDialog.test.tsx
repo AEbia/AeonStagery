@@ -99,7 +99,7 @@ describe('WebGalScssImportDialog', () => {
       />,
     );
 
-    expect(screen.getByText(/检测到该样式可能已导入过/)).toBeTruthy();
+    expect(screen.getByText(/发现 1 个已导入样式匹配项/)).toBeTruthy();
     expect(screen.getByText(/样式表内容与已导入的一致/)).toBeTruthy();
     expect(screen.getByText(/导入于 2026-10-12/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '覆盖已有' })).toBeTruthy();
