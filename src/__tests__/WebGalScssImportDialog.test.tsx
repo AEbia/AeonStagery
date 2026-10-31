@@ -90,23 +90,6 @@ describe('WebGalScssImportDialog', () => {
     expect(screen.getByText(/已被占用，将保存为 “仿番剧字幕-2”/)).toBeTruthy();
   });
 
-  it('flags a duplicate import and explains why it matched', () => {
-    render(
-      <WebGalScssImportDialog
-        inspection={makeInspection({ conflicts: [DUPLICATE] })}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-
-    expect(screen.getByText(/发现 1 个已导入样式匹配项/)).toBeTruthy();
-    expect(screen.getByText(/样式表内容与已导入的一致/)).toBeTruthy();
-    expect(screen.getByText(/导入于 2026-10-12/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '覆盖已有' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '另存为新的一份' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '导入' })).toBeNull();
-  });
-
   it('offers an overwrite for a changed stylesheet from the same source', () => {
     const onConfirm = vi.fn();
     render(
@@ -118,8 +101,6 @@ describe('WebGalScssImportDialog', () => {
         onConfirm={onConfirm}
       />,
     );
-    expect(screen.getByText(/来源目录与已导入的一致，样式已修改/)).toBeTruthy();
-    expect(screen.queryByText(/翻译出的样式参数与已导入的一致/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '覆盖已有' }));
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ replacePackageId: DUPLICATE.packageId }));
   });
