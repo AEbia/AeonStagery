@@ -27,10 +27,9 @@
  *
  *  - swap a dense `renderer.CONTEXT_UID`: v8 has no renderer-level CONTEXT_UID
  *    (it survives only as a protected member of GlContextSystem and the WebGPU
- *    systems). The vendor assigns its own per-model ids through
- *    `generateUID()` (`++currentGlId`, dense by construction) and re-binds on
- *    `this.gl !== renderer.gl`, so the v7 sparse-uid blow-up in `setupClip()`
- *    cannot occur.
+ *    systems). Cubism2BakeRenderCore assigns dense native SDK slots per model
+ *    and GL context. The vendor's `generateUID()` is only instance-local, so
+ *    using it directly would let sibling models overwrite shared mask tables.
  *  - save/restore `GL_SCISSOR_TEST`: PixiJS 8 never enables the GL scissor test
  *    (no SCISSOR_TEST call site anywhere in the v8 renderer; v8 masks go through
  *    render-target viewports and stencils), and the Cubism 2 SDK disables the
