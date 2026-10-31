@@ -48,6 +48,8 @@ import { formatAeonStageryVersionLabel } from '../services/product/ProductInfo';
 import './settingsNavigation.css';
 import { DialogueDefaultsSettings } from './settings/DialogueDefaultsSettings';
 import { FormSelect } from './FormSelect';
+import { eventBus } from '../api/events';
+import { diagnoseAiError, isLocalLoopbackEndpoint } from '../services/ai-authoring/aiErrorPresentation';
 import { UpdateSettingsPanel } from './settings/UpdateSettingsPanel';
 import { getAiProseProviderIdentity } from '../services/ai-authoring/AiProseGlobalConfiguration';
 
@@ -939,6 +941,7 @@ function AiProseSettingsSection({
       setCredentialInput('');
       setCredentialConfigured(true);
       setMessage('API 密钥已保存');
+      void eventBus.emit('ai:credentialStatusChanged', { configured: true });
     } catch (error) {
       setMessage(`API 密钥保存失败：${getErrorMessage(error)}`);
     }
@@ -955,6 +958,7 @@ function AiProseSettingsSection({
       }
       setCredentialConfigured(false);
       setMessage('API 密钥已清除');
+      void eventBus.emit('ai:credentialStatusChanged', { configured: false });
     } catch (error) {
       setMessage(`API 密钥清除失败：${getErrorMessage(error)}`);
     }
@@ -987,7 +991,11 @@ function AiProseSettingsSection({
       });
       setMessage(`已测试 ${capabilities.size} 个模型 · JSON Output ${jsonOutputSupported ? '可用' : '不可用'}`);
     } catch (error) {
-      setMessage(`测试失败：${getErrorMessage(error)}`);
+      const rawMessage = getErrorMessage(error);
+      const diagnosis = diagnoseAiError(rawMessage);
+      setMessage(diagnosis.category !== 'unknown'
+        ? `测试失败：${diagnosis.userMessage}（${diagnosis.suggestion}）`
+        : `测试失败：${rawMessage}`);
     }
   };
 
@@ -1019,7 +1027,11 @@ function AiProseSettingsSection({
       if (requestId !== modelsRequestIdRef.current) return;
       if (!result?.success) {
         setAvailableModels([]);
-        setMessage(result?.error ?? '获取模型列表失败');
+        const rawError = result?.error ?? '获取模型列表失败';
+        const diagnosis = diagnoseAiError(rawError);
+        setMessage(diagnosis.category !== 'unknown'
+          ? `${diagnosis.userMessage}（${diagnosis.suggestion}）`
+          : rawError);
         return;
       }
       const models = [...new Set(result.models)].filter((model) => model.trim().length > 0);
@@ -1029,22 +1041,60 @@ function AiProseSettingsSection({
       }
       setMessage(models.length > 0 ? `已获取 ${models.length} 个模型` : '接口未返回可用模型');
     } catch (error) {
-      if (requestId === modelsRequestIdRef.current) setMessage(`获取模型失败：${getErrorMessage(error)}`);
+      if (requestId === modelsRequestIdRef.current) {
+        const rawMessage = getErrorMessage(error);
+        const diagnosis = diagnoseAiError(rawMessage);
+        setMessage(diagnosis.category !== 'unknown'
+          ? `获取模型失败：${diagnosis.userMessage}（${diagnosis.suggestion}）`
+          : `获取模型失败：${rawMessage}`);
+      }
     } finally {
       if (requestId === modelsRequestIdRef.current) setIsLoadingModels(false);
     }
   };
 
+  const onboardingReady = credentialConfigured || isLocalLoopbackEndpoint(value.baseUrl);
+
   return (
     <Section title="AI" last>
       <div className="settings-ai-panel">
+        <div
+          className={`settings-ai-panel__onboarding${onboardingReady ? ' is-ready' : ''}`}
+          role="region"
+          aria-label="AI 服务新手配置指南"
+        >
+          <div className="settings-ai-panel__onboarding-header">
+            <div className="settings-ai-panel__onboarding-title">
+              <IconSparkles width={15} height={15} />
+              <span>AI 服务快速配置指南</span>
+            </div>
+            <span className={`settings-ai-panel__onboarding-badge${onboardingReady ? ' is-ready' : ''}`}>
+              {credentialConfigured ? '已配置密钥' : isLocalLoopbackEndpoint(value.baseUrl) ? '本地接口模式' : '待配置密钥'}
+            </span>
+          </div>
+          <p className="settings-ai-panel__onboarding-intro">
+            「AI 铺戏」与「项目 Agent」通过 OpenAI 兼容接口调用大语言模型。首次使用只需 3 步完成配置：
+          </p>
+          <ol className="settings-ai-panel__onboarding-steps">
+            <li>
+              <strong>1. 填写 Base URL（接口地址）</strong>：如 DeepSeek 填 <code>https://api.deepseek.com/v1</code>、OpenAI 填 <code>https://api.openai.com/v1</code>、本地 Ollama 填 <code>http://localhost:11434/v1</code>。
+            </li>
+            <li>
+              <strong>2. 保存 API 密钥（API Key）</strong>：前往对应 AI 服务商后台创建密钥，在下方「API 密钥」处粘贴并点击<strong>「保存」</strong>（仅加密保存在本机）。
+            </li>
+            <li>
+              <strong>3. 选择模型并测试连接</strong>：点击<strong>「获取模型」</strong>或手动填写模型名，最后点击底部<strong>「测试连接」</strong>验证。
+            </li>
+          </ol>
+        </div>
+
         <div className="settings-ai-panel__grid">
           <label className="settings-ai-panel__field settings-ai-panel__field--wide">
             <span>
               Base URL
               <InfoTip
                 title="Base URL (接口地址)"
-                content="大语言模型服务商的 API 请求接口地址。OpenAI 通常为 https://api.openai.com/v1。若使用Deepseek,Kimi,GLM,官方开放平台、第三方中转/聚合平台、或本地部署模型（如 Ollama / vLLM / LM Studio），请填入对应的完整接口 URL。暂时只支持Chat Completions格式"
+                content="大语言模型服务商的 API 请求接口地址。暂时只支持Chat Completions格式"
               />
             </span>
             <input

@@ -55,6 +55,11 @@ import { normalizeScriptReadingSpeed, useSettings } from '../SettingsStore';
 import { showToast } from '../Toast';
 import { useModalDialog } from '../hooks/useModalDialog';
 import { useEnhancementCapabilityPorts } from '../hooks/useEnhancementCapabilityPorts';
+import { eventBus } from '../../api/events';
+import {
+  MISSING_CREDENTIAL_GUIDE_MESSAGE,
+  shouldRequireAiCredentialSetup,
+} from '../../services/ai-authoring/aiErrorPresentation';
 
 import { runDraftEnhancement } from './runDraftEnhancement';
 import { useAiProsePipeline } from './useAiProsePipeline';
@@ -62,15 +67,12 @@ import { STAGES, createWorkbenchErrorInfo, getErrorMessage, type WorkbenchStage,
 
 function getCredentialController(
   composition: AiProseAuthoringComposition | undefined,
-): AiProseElectronCredentialController | undefined {
+): Pick<AiProseElectronCredentialController, 'getCredentialStatus'> | undefined {
   const transport = composition?.transport as Partial<AiProseElectronCredentialController> | undefined;
-  if (!transport
-    || typeof transport.getCredentialStatus !== 'function'
-    || typeof transport.setCredential !== 'function'
-    || typeof transport.clearCredential !== 'function') {
+  if (!transport || typeof transport.getCredentialStatus !== 'function') {
     return undefined;
   }
-  return transport as AiProseElectronCredentialController;
+  return transport as Pick<AiProseElectronCredentialController, 'getCredentialStatus'>;
 }
 
 function getProviderController(
@@ -122,6 +124,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
   const [selectedSegment, setSelectedSegment] = useState(0);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'dialogue' | 'narration'>('all');
   const [credentialConfigured, setCredentialConfigured] = useState(false);
+  const [credentialChecked, setCredentialChecked] = useState(false);
   const [showApplyDialog, setShowApplyDialog] = useState(false);
   const [enableActing, setEnableActing] = useState(false);
   const [enableCinematic, setEnableCinematic] = useState(false);
@@ -427,18 +430,55 @@ export function useAiProseWorkbench(onClose?: () => void) {
   }, [configuredScriptReadingSpeed, draft?.scriptReadingSpeed]);
 
   useEffect(() => {
+    let active = true;
     const controller = getCredentialController(composition);
     if (!controller) {
       setCredentialConfigured(false);
-      return;
+      setCredentialChecked(false);
+      return () => {
+        active = false;
+      };
     }
     void controller.getCredentialStatus()
-      .then((status) => setCredentialConfigured(status.configured))
-      .catch(() => setCredentialConfigured(false));
+      .then((status) => {
+        if (!active) return;
+        setCredentialConfigured(status.configured);
+        setCredentialChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCredentialConfigured(false);
+        setCredentialChecked(false);
+      });
+    const unsubscribe = eventBus.on('ai:credentialStatusChanged', (payload) => {
+      if (!active || !payload || typeof payload !== 'object') return;
+      const configured = Boolean((payload as { configured?: boolean }).configured);
+      setCredentialConfigured(configured);
+      setCredentialChecked(true);
+      if (configured) {
+        setErrorInfo((current) => {
+          if (current?.code === 'missing_credential') {
+            setErrorMessage('');
+            return null;
+          }
+          return current;
+        });
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [composition]);
 
+  const needsCredentialSetup = shouldRequireAiCredentialSetup({
+    credentialChecked,
+    credentialConfigured,
+    endpoint: aiSettings.baseUrl,
+  });
+
   const { runPrepare, runNormalization, retryNormalizationSegment, runRhythm } = useAiProsePipeline({
-    composition, project, draftRef, aiTrace, setDraft, commitDraft, reportError,
+    composition, project, draftRef, aiTrace, needsCredentialSetup, setDraft, commitDraft, reportError,
     clearError, setMainCharacters, setBusyStage, setActiveStage,
   });
 
@@ -521,6 +561,11 @@ export function useAiProseWorkbench(onClose?: () => void) {
       setEnhancementMessage('请至少启用表演指导或电影感。');
       return;
     }
+    if (needsCredentialSetup) {
+      setEnhancementMessage(MISSING_CREDENTIAL_GUIDE_MESSAGE);
+      reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'timing');
+      return;
+    }
     setEnhancementBusy(true);
     setEnhancementMessage('可选增强运行中…');
     clearError();
@@ -552,6 +597,8 @@ export function useAiProseWorkbench(onClose?: () => void) {
     documentVersion,
     enableActing,
     enableCinematic,
+    needsCredentialSetup,
+    reportError,
   ]);
 
   const handleApply = useCallback(async () => {
@@ -730,6 +777,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
     canApply,
     activeStageIndex,
     aiStateText,
-    aiStateClass
+    aiStateClass,
+    needsCredentialSetup,
   };
 }

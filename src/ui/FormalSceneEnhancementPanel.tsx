@@ -51,6 +51,13 @@ import type { SceneEnhancementUnitCheckpointSummaryV1 } from '../services/ai-aut
 import { validatePerformanceResourceCapabilities } from '../services/ai-authoring/PerformanceCapabilityGate';
 import { useEnhancementCapabilityPorts } from './hooks/useEnhancementCapabilityPorts';
 import { showToast } from './Toast';
+import { AiSetupGuideBanner } from './ai-prose/WorkbenchFeedback';
+import {
+  diagnoseAiError,
+  MISSING_CREDENTIAL_GUIDE_MESSAGE,
+  shouldRequireAiCredentialSetup,
+} from '../services/ai-authoring/aiErrorPresentation';
+import type { AiProseElectronCredentialController } from '../services/ai-authoring/AiProseElectronTransport';
 
 type EnhancementStep = 'segment' | 'performance' | 'preview';
 
@@ -262,7 +269,51 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
   const [traceOpen, setTraceOpen] = useState(true);
   const [liveStage, setLiveStage] = useState<EnhancementUnitCheckpointV1['stage'] | null>(null);
   const [liveUnits, setLiveUnits] = useState<readonly LiveUnitRow[]>([]);
+  const [credentialConfigured, setCredentialConfigured] = useState(false);
+  const [credentialChecked, setCredentialChecked] = useState(false);
   const runTokenRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    const transport = composition?.transport as Partial<AiProseElectronCredentialController> | undefined;
+    if (!transport || typeof transport.getCredentialStatus !== 'function') {
+      setCredentialConfigured(false);
+      setCredentialChecked(false);
+      return () => {
+        active = false;
+      };
+    }
+    void transport.getCredentialStatus()
+      .then((status) => {
+        if (!active) return;
+        setCredentialConfigured(status.configured);
+        setCredentialChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCredentialConfigured(false);
+        setCredentialChecked(false);
+      });
+    const unsubscribe = eventBus.on('ai:credentialStatusChanged', (payload) => {
+      if (!active || !payload || typeof payload !== 'object') return;
+      const configured = Boolean((payload as { configured?: boolean }).configured);
+      setCredentialConfigured(configured);
+      setCredentialChecked(true);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [composition]);
+
+  const needsCredentialSetup = shouldRequireAiCredentialSetup({
+    credentialChecked,
+    credentialConfigured,
+    endpoint: settings.aiProse?.baseUrl,
+  });
+  const openAiSettings = useCallback(() => {
+    void eventBus.emit('ui:openSettings', { tab: 'ai' });
+  }, []);
 
   const capabilityPorts = useEnhancementCapabilityPorts({
     document,
@@ -394,6 +445,9 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
         } else if (!orchestrator) {
           setMessage('自动语义分段需要 AI 服务。请配置 AI 设置，或改用时间点分段。');
           return;
+        } else if (needsCredentialSetup) {
+          setMessage(MISSING_CREDENTIAL_GUIDE_MESSAGE);
+          return;
         } else {
           setMessage('正在自动语义分段…');
           aiTrace.reset();
@@ -437,6 +491,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
     timepointInput,
     binding,
     commitSnapshot,
+    needsCredentialSetup,
     orchestrator,
     targetBatchSize,
   ]);
@@ -444,6 +499,10 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
   const handleRunPerformance = useCallback(async () => {
     if (!document || !snapshot?.segmentation || !orchestrator) {
       setMessage(!orchestrator ? '需要 AI 服务才能运行表演指导。请打开 AI 设置。' : '请先锁定分段。');
+      return;
+    }
+    if (needsCredentialSetup) {
+      setMessage(MISSING_CREDENTIAL_GUIDE_MESSAGE);
       return;
     }
     if (modelCapabilitiesLoading) {
@@ -492,7 +551,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
     } finally {
       if (token === runTokenRef.current) setBusy('idle');
     }
-  }, [aiTrace, binding, commitSnapshot, document, modelCapabilities, modelCapabilitiesLoading, orchestrator, snapshot]);
+  }, [aiTrace, binding, commitSnapshot, document, modelCapabilities, modelCapabilitiesLoading, needsCredentialSetup, orchestrator, snapshot]);
 
   const handleApply = useCallback(async () => {
     if (!document || !snapshot || !semanticAuthoring) {
@@ -693,14 +752,39 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
         </aside>
 
         <main className="ai-prose-pipeline-space">
-          {(isStaleBanner || message || runnerNotice) && (
-            <div className={`ai-prose-run-banner ${isStaleBanner ? 'is-stale' : ''}`}>
-              <div className="ai-prose-run-title">
-                <span className="ai-prose-run-icon">{isStaleBanner ? '!' : phase === 'no_changes' ? '·' : 'i'}</span>
-                <strong>{isStaleBanner ? '预览已失效' : message || runnerNotice}</strong>
-              </div>
-            </div>
+          {needsCredentialSetup && (
+            <AiSetupGuideBanner onOpenSettings={openAiSettings} contextLabel="正式增强" />
           )}
+          {(isStaleBanner || message || runnerNotice) && (() => {
+            const diagnosis = message ? diagnoseAiError(message) : null;
+            return (
+              <div className={`ai-prose-run-banner ${isStaleBanner ? 'is-stale' : ''}`}>
+                <div className="ai-prose-run-title">
+                  <span className="ai-prose-run-icon">{isStaleBanner ? '!' : phase === 'no_changes' ? '·' : 'i'}</span>
+                  <div>
+                    <strong>{isStaleBanner ? '预览已失效' : message || runnerNotice}</strong>
+                    {diagnosis && diagnosis.category !== 'unknown' && (
+                      <small>
+                        {diagnosis.userTitle}
+                        ：
+                        {diagnosis.userMessage !== message ? `${diagnosis.userMessage} ` : ''}
+                        {diagnosis.suggestion}
+                      </small>
+                    )}
+                  </div>
+                </div>
+                {diagnosis?.suggestOpenSettings && (
+                  <button
+                    className="ai-prose-button ai-prose-button--secondary ai-prose-error-action"
+                    type="button"
+                    onClick={openAiSettings}
+                  >
+                    前往 AI 设置
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="ai-prose-artifact-workspace">
             {activeStep === 'segment' && segmentationPreview && (

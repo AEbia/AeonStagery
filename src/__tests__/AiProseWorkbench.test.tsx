@@ -855,4 +855,37 @@ describe('AiProseWorkbench', () => {
     expect(screen.queryByTestId('ai-prose-trace-card-request-old')).toBeNull();
     expect(within(newCard).getByText('fresh')).toBeTruthy();
   });
+
+  it('guides unconfigured users to AI settings and intercepts run attempts before calling the pipeline', async () => {
+    const { eventBus } = await import('../api/events');
+    const openSettingsSpy = vi.fn();
+    const unsubscribe = eventBus.on('ui:openSettings', openSettingsSpy);
+    try {
+      const { composition, pipeline } = createComposition();
+      (composition as Record<string, unknown>).transport = {
+        getCredentialStatus: vi.fn(async () => ({ configured: false })),
+      };
+      mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+      mocks.composition = composition;
+
+      render(<AiProseWorkbench />);
+
+      const banner = await screen.findByRole('region', { name: 'AI 配置引导' });
+      expect(within(banner).getByText('尚未配置 AI 服务（API Key）')).toBeTruthy();
+
+      fireEvent.click(within(banner).getByRole('button', { name: '前往 AI 设置' }));
+      expect(openSettingsSpy).toHaveBeenCalledWith({ tab: 'ai' });
+
+      const editor = await screen.findByRole('textbox', { name: '完整正文' });
+      fireEvent.change(editor, { target: { value: '林夏走进房间。\n“你好。”' } });
+      fireEvent.click(screen.getByRole('button', { name: /开始分析/ }));
+
+      expect(pipeline.prepare).not.toHaveBeenCalled();
+      const alert = await screen.findByRole('alert');
+      expect(within(alert).getAllByText(/尚未配置 AI 服务（API 密钥）/).length).toBeGreaterThan(0);
+      expect(within(alert).getByRole('button', { name: '前往 AI 设置' })).toBeTruthy();
+    } finally {
+      unsubscribe();
+    }
+  });
 });

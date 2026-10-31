@@ -5,6 +5,7 @@ import type { AiProseAuthoringComposition } from '../../services/ai-authoring/Ai
 import type { AiProseDraftProjectInput } from '../../services/ai-authoring/AiProseDraftPersistence';
 import { confirmMainCharacters, type DraftSession } from '../../services/ai-authoring/AiProseDraftSession';
 import type { AiProseNormalizationRun, AiProsePreparedPipeline } from '../../services/ai-authoring/AiProsePipeline';
+import { MISSING_CREDENTIAL_GUIDE_MESSAGE } from '../../services/ai-authoring/aiErrorPresentation';
 import type { useAiRequestTrace } from '../AiProseTrace';
 import type { WorkbenchStage } from './workbenchPresentation';
 
@@ -13,6 +14,7 @@ interface ProsePipelineInput {
   project: AiProseDraftProjectInput | null;
   draftRef: MutableRefObject<DraftSession | null>;
   aiTrace: ReturnType<typeof useAiRequestTrace>;
+  needsCredentialSetup?: boolean;
   setDraft: (draft: DraftSession | null) => void;
   commitDraft: (draft: DraftSession, immediate: boolean) => void;
   reportError: (error: unknown, stage?: WorkbenchStage) => void;
@@ -45,7 +47,7 @@ function isTaskSettled(status: AiProseTaskStatus): boolean {
 }
 
 export function useAiProsePipeline({
-  composition, project, draftRef, aiTrace, setDraft, commitDraft, reportError,
+  composition, project, draftRef, aiTrace, needsCredentialSetup = false, setDraft, commitDraft, reportError,
   clearError, setMainCharacters, setBusyStage, setActiveStage,
 }: ProsePipelineInput) {
   const { handleLlmProgress, reset: resetAiTrace, setRuntimeState: setAiTraceRuntimeState } = aiTrace;
@@ -91,6 +93,10 @@ export function useAiProsePipeline({
       reportError('请先输入完整正文。AI 铺戏不接受只有梗概或写作要求的输入。', 'source');
       return;
     }
+    if (needsCredentialSetup) {
+      reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'source');
+      return;
+    }
     resetAiTrace();
     setBusyStage('segments');
     setAiTraceRuntimeState('running');
@@ -117,7 +123,7 @@ export function useAiProsePipeline({
     } finally {
       setBusyStage(null);
     }
-  }, [clearError, draftRef, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setMainCharacters]);
+  }, [clearError, draftRef, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setMainCharacters]);
 
   const runNormalization = useCallback(async (names: readonly string[]) => {
     const currentDraft = draftRef.current;
@@ -129,6 +135,10 @@ export function useAiProsePipeline({
     if (currentDraft.segmentation.status !== 'succeeded') {
       reportError('请先完成语义分段。', 'segments');
       setActiveStage('segments');
+      return;
+    }
+    if (needsCredentialSetup) {
+      reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'normalize');
       return;
     }
     resetAiTrace();
@@ -164,11 +174,15 @@ export function useAiProsePipeline({
     } finally {
       setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   const retryNormalizationSegment = useCallback(async (segmentIndex: number) => {
     const currentDraft = draftRef.current;
     if (!currentDraft || !composition) return;
+    if (needsCredentialSetup) {
+      reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'normalize');
+      return;
+    }
     resetAiTrace();
     setBusyStage('normalize');
     setAiTraceRuntimeState('running');
@@ -199,7 +213,7 @@ export function useAiProsePipeline({
     } finally {
       setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, preparePipeline, reportError, resetAiTrace, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   const runRhythm = useCallback(async () => {
     const currentDraft = draftRef.current;
@@ -207,6 +221,10 @@ export function useAiProsePipeline({
     if (!currentDraft.normalization.length || currentDraft.normalization.some((task) => task.status !== 'succeeded')) {
       reportError('所有故事段规范化成功后才能进行时间编排。', 'normalize');
       setActiveStage('normalize');
+      return;
+    }
+    if (needsCredentialSetup) {
+      reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'timing');
       return;
     }
     resetAiTrace();
@@ -240,7 +258,7 @@ export function useAiProsePipeline({
     } finally {
       setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   return { runPrepare, runNormalization, retryNormalizationSegment, runRhythm };
 }

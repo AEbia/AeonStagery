@@ -10,7 +10,7 @@ import { SegmentsStage } from './ai-prose/SegmentsStage';
 import { CharactersStage } from './ai-prose/CharactersStage';
 import { NormalizeStage } from './ai-prose/NormalizeStage';
 import { TimingStage } from './ai-prose/TimingStage';
-import { ApplyDialog, WorkbenchErrorAlert } from './ai-prose/WorkbenchFeedback';
+import { AiSetupGuideBanner, ApplyDialog, WorkbenchErrorAlert } from './ai-prose/WorkbenchFeedback';
 import { STAGES, createWorkbenchErrorInfo, formatCount, getCompletedTaskCount, isStageReady, stageStatus, statusText } from './ai-prose/workbenchPresentation';
 
 export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
@@ -75,7 +75,9 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     activeStageIndex,
     aiStateText,
     aiStateClass,
+    needsCredentialSetup,
   } = useAiProseWorkbench(onClose);
+  const openAiSettings = () => void eventBus.emit('ui:openSettings', { tab: 'ai' });
 
   if (!composition || !project || !document) {
     return (
@@ -203,7 +205,13 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
         </aside>
 
         <main className="ai-prose-pipeline-space" id="ai-prose-workbench-title">
-          {errorMessage && <WorkbenchErrorAlert info={errorInfo ?? createWorkbenchErrorInfo(errorMessage, activeStage)} />}
+          {needsCredentialSetup && <AiSetupGuideBanner onOpenSettings={openAiSettings} contextLabel="AI 铺戏" />}
+          {errorMessage && (
+            <WorkbenchErrorAlert
+              info={errorInfo ?? createWorkbenchErrorInfo(errorMessage, activeStage)}
+              onOpenSettings={openAiSettings}
+            />
+          )}
           {busyStage && (
             <div className="ai-prose-run-banner is-running" role="status">
               <div className="ai-prose-run-title">
