@@ -61,7 +61,7 @@ export function migrateDraft(input: unknown): AiProseDraftSession {
   }
   if (version === LEGACY_SCHEMA_VERSION) return migrateLegacyDraft(root);
   if (version === 1) return migrateV1Draft(root);
-  if (version === PREVIOUS_SCHEMA_VERSION) return migratePreviousDraft(root);
+  if (version === PREVIOUS_SCHEMA_VERSION || version === 3) return migratePreviousDraft(root);
   if (version !== CURRENT_SCHEMA_VERSION) {
     throw new AiProseDraftMigrationError(
       `Draft schema version ${version} is not supported`,
@@ -120,9 +120,8 @@ function migrateV1Draft(root: JsonRecord): AiProseDraftSession {
 }
 
 function migratePreviousDraft(root: JsonRecord): AiProseDraftSession {
-  // v2 → v3 is purely additive: the new plan and enhancement slots are
-  // uninitialized (absent) — no binding conclusions are invented, and an old
-  // active draft entering the binding/enhancement step still generates a plan.
+  // v2/v3 → v4 only adds optional fields. Do not invent character bindings,
+  // enhancement results or unconfirmed edits for old drafts.
   const normalized: JsonRecord = { ...root, schemaVersion: CURRENT_SCHEMA_VERSION };
   return parseCurrentDraft(normalized);
 }
@@ -145,6 +144,7 @@ function parseCurrentDraft(root: JsonRecord): AiProseDraftSession {
     'characterExtraction',
     'confirmedMainCharacters',
     'mainCharactersConfirmed',
+    'mainCharacterEdits',
     'normalization',
     'rhythm',
     'preview',
@@ -153,7 +153,7 @@ function parseCurrentDraft(root: JsonRecord): AiProseDraftSession {
     'receipt',
     'characterBindingPlan',
     'enhancement',
-  ], 'draft', ['appliedAt', 'receipt', 'characterBindingPlan', 'enhancement']);
+  ], 'draft', ['appliedAt', 'receipt', 'characterBindingPlan', 'enhancement', 'mainCharacterEdits']);
 
   if (root.schemaVersion !== CURRENT_SCHEMA_VERSION) {
     throw invalid('draft.schemaVersion', `Expected schemaVersion ${CURRENT_SCHEMA_VERSION}`);
@@ -215,6 +215,11 @@ function parseCurrentDraft(root: JsonRecord): AiProseDraftSession {
     characterExtraction,
     confirmedMainCharacters,
     mainCharactersConfirmed,
+    ...(root.mainCharacterEdits === undefined ? {} : {
+      mainCharacterEdits: expectArray(root.mainCharacterEdits, 'draft.mainCharacterEdits').map((name, index) => (
+        expectString(name, `draft.mainCharacterEdits[${index}]`, true)
+      )),
+    }),
     normalization,
     rhythm,
     preview,

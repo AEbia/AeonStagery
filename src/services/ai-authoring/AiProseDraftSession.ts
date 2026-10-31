@@ -124,6 +124,7 @@ export function updateSourceText(
   next.characterExtraction = createEmptyCharacterExtractionState();
   next.confirmedMainCharacters = [];
   next.mainCharactersConfirmed = false;
+  delete next.mainCharacterEdits;
   next.normalization = [];
   next.rhythm = [];
   next.preview = null;
@@ -168,7 +169,20 @@ export function confirmMainCharacters(
   assertMutable(next);
   next.confirmedMainCharacters = nextNames;
   next.mainCharactersConfirmed = true;
+  delete next.mainCharacterEdits;
   next.updatedAt = resolveNow(options.now);
+  return next;
+}
+
+export function editMainCharacters(draft: DraftSession, names: readonly string[]): DraftSession {
+  assertMutable(draft);
+  const next = cloneDraft(draft);
+  next.mainCharacterEdits = [...names];
+  next.mainCharactersConfirmed = false;
+  next.characterBindings = {};
+  next.characterBindingPlan = undefined;
+  clearNormalizationAndDownstream(next);
+  next.updatedAt = resolveNow(undefined);
   return next;
 }
 

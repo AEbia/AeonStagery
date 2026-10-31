@@ -22,7 +22,7 @@ import { combineStagePatches } from '../services/ai-authoring/FormalEnhancementA
 
 function makeDraft(): AiProseDraftSession {
   return withDeterministicPreview({
-    schemaVersion: 3,
+    schemaVersion: 4,
     sessionId: 'session-1',
     sceneId: 'scene-1',
     sourceText: 'Alice 走进房间。',
@@ -586,7 +586,7 @@ describe('AiProseSceneApplicator', () => {
   it.each([
     ['unconfirmed', { mainCharactersConfirmed: false }],
     ['already applied', { status: 'applied' as const }],
-    ['future schema', { schemaVersion: 99 as 3 }],
+    ['future schema', { schemaVersion: 99 as 4 }],
     ['corrupt preview', { preview: null }],
   ])('rejects %s drafts before commit', async (_label, patch) => {
     const draft = { ...makeDraft(), ...patch };
