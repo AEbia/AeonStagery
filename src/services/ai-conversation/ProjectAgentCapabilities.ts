@@ -21,6 +21,7 @@ import type {
 import {
   createAiProjectAgentCapabilityProbe,
 } from './ProjectAgentCapabilityProbe';
+import { diagnoseAiError } from '../ai-authoring/aiErrorPresentation';
 
 export interface ProjectAgentModelSelection {
   endpoint: string;
@@ -86,14 +87,33 @@ export function evaluateProjectAgentAdmission(
     return {
       status: 'native_tool_calling_unsupported',
       code: 'native_tool_calling_unsupported',
-      message: '当前项目 Agent 模型不支持原生 tool calling，无法启动或继续任务；请更换支持原生 tool calling 的模型。',
+      message: '当前项目 Agent 模型不支持原生 tool calling（工具调用），无法启动或继续任务；请前往「AI 设置」更换支持工具调用的模型（如 gpt-4o、claude-3-5-sonnet、deepseek-chat）。',
       ...(capabilities ? { capabilities } : {}),
     };
+  }
+  const probeError = capabilities?.lastProbeError;
+  if (probeError) {
+    const diagnosis = diagnoseAiError(probeError.message, { code: probeError.code });
+    if (
+      diagnosis.category === 'missing_credential'
+      || diagnosis.category === 'unauthorized'
+      || diagnosis.category === 'quota_exceeded'
+      || diagnosis.category === 'forbidden'
+      || diagnosis.category === 'not_found'
+      || diagnosis.category === 'network'
+    ) {
+      return {
+        status: 'native_tool_calling_unknown',
+        code: 'native_tool_calling_unknown',
+        message: `无法连接或验证当前 AI 模型：${diagnosis.userMessage} ${diagnosis.suggestion}`,
+        ...(capabilities ? { capabilities } : {}),
+      };
+    }
   }
   return {
     status: 'native_tool_calling_unknown',
     code: 'native_tool_calling_unknown',
-    message: '当前项目 Agent 模型的原生 tool calling 能力未知，无法启动或继续任务；请先测试连接或更换模型后重试。',
+    message: '当前项目 Agent 模型的原生 tool calling（工具调用）能力尚未确认，无法启动或继续任务；请先前往「AI 设置」配置 API Key 并点击「测试连接」，或更换支持工具调用的模型后重试。',
     ...(capabilities ? { capabilities } : {}),
   };
 }

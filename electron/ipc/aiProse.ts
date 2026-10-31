@@ -673,7 +673,7 @@ export function registerAiProseHandlers(
   });
 
   ipcMain.handle('aiProse:getCredentialStatus', async (event): Promise<AiProseCredentialStatus> => {
-    if (!isMainWindowFrameSender(event)) return { configured: false };
+    if (!isMainWindowFrameSender(event) && !isAgentWindowFrameSender(event)) return { configured: false };
     return { configured: (await loadAiProseCredential()) !== undefined };
   });
 

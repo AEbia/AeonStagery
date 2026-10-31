@@ -85,6 +85,99 @@
   opacity: 0.65;
 }
 
+/* AI onboarding setup card & error actions in Agent window */
+.agent-welcome__setup-guide {
+  width: min(100%, 560px);
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 35%, var(--border-default));
+  background: color-mix(in srgb, var(--warning, #f59e0b) 8%, var(--bg-surface));
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+}
+
+.agent-welcome__setup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.agent-welcome__setup-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 16%, transparent);
+}
+
+.agent-welcome__setup-desc {
+  margin: 0 0 8px;
+}
+
+.agent-welcome__setup-steps {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-welcome__setup-steps strong {
+  color: var(--text-primary);
+}
+
+.agent-welcome__setup-steps code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+}
+
+.agent-welcome__setup-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-welcome__error {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.agent-welcome__error-main,
+.agent-window__notice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-welcome__error-detail,
+.agent-window__notice-detail,
+.agent-window__paused-guidance {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-welcome__error-action,
+.agent-window__notice-action {
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
 /* Responsive (window min 420px wide) */
 @media (max-width: 760px) {
   .agent-sidebar { width: 232px; }

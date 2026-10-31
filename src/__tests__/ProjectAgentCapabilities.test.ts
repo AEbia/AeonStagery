@@ -369,6 +369,26 @@ describe('project agent admission gate', () => {
     expect(service.admissionFor(ENDPOINT, 'never-resolved').status).toBe('native_tool_calling_unknown');
   });
 
+  it('surfaces beginner-friendly diagnostics when capability probe failed due to missing or invalid API key', async () => {
+    const service = new ProjectAgentCapabilityService();
+    await service.probe(
+      resolveProjectAgentModelSelection({ endpoint: ENDPOINT, defaultModel: 'model' }),
+      {
+        probe: vi.fn(async () => ({
+          status: 'failed' as const,
+          kind: 'configuration' as const,
+          code: 'capability_probe_http_401',
+          message: 'HTTP 401: Incorrect API key provided',
+        })),
+      },
+    );
+
+    const admission = service.admissionFor(ENDPOINT, 'model');
+    expect(admission.status).toBe('native_tool_calling_unknown');
+    expect(admission.message).toContain('API 密钥');
+    expect(admission.message).toContain('AI 设置');
+  });
+
   it('gates readImage eligibility on the exact endpoint + model record only', () => {
     const service = new ProjectAgentCapabilityService();
     service.resolve(ENDPOINT, 'agent-model', { providerMetadata: { imageInput: true } });

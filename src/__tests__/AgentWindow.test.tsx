@@ -2003,4 +2003,28 @@ describe('AgentWindow markdown replies', () => {
     expect(screen.queryByRole('button', { name: '继续' })).toBeNull();
     expect(screen.getAllByRole('button', { name: /继续执行/ })).toHaveLength(1);
   });
+
+  it('shows setup guidance on the welcome surface and intercepts task start when API key is unconfigured', async () => {
+    const api = (window as unknown as {
+      aeonStageryAPI: { aiProse: Record<string, unknown> };
+    }).aeonStageryAPI;
+    api.aiProse.getCredentialStatus = vi.fn(async () => ({ configured: false }));
+
+    render(<AgentWindow />);
+
+    const guide = await screen.findByRole('region', { name: 'AI 配置引导' });
+    expect(within(guide).getByText('尚未配置 AI 服务（API Key）')).toBeTruthy();
+
+    fireEvent.click(within(guide).getByRole('button', { name: '前往 AI 设置' }));
+    expect(mocks.requestOpenSettings).toHaveBeenCalledTimes(1);
+
+    const input = screen.getByRole('textbox', { name: '任务描述' });
+    fireEvent.change(input, { target: { value: '帮我检查当前场景' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expect(mocks.requestStart).not.toHaveBeenCalled();
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText(/尚未配置 AI 服务（API 密钥）/)).toBeTruthy();
+    expect(within(alert).getByRole('button', { name: '前往 AI 设置' })).toBeTruthy();
+  });
 });
