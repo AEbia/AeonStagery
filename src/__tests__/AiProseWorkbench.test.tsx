@@ -312,6 +312,7 @@ async function renderTraceWorkbench() {
   fireEvent.change(source, { target: { value: '林夏走进房间。\n“你好。”' } });
   fireEvent.click(screen.getAllByRole('button', { name: /开始分析/ })[0]);
   await waitFor(() => expect(created.pipeline.prepare).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: '显示轨迹' }));
   return created;
 }
 
@@ -485,6 +486,37 @@ describe('AiProseWorkbench', () => {
     fireEvent.change(characterInput, { target: { value: '林夏A' } });
 
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '主要人物 1' }));
+  });
+
+  it('navigates available stages by keyboard without losing the source draft', async () => {
+    const readyDraft = createReadyDraft();
+    localStorage.setItem('aeonstagery.ai-prose.scene-1.session', readyDraft.sessionId);
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const { composition } = createComposition({ draft: readyDraft });
+    mocks.composition = composition;
+
+    render(<AiProseWorkbench />);
+
+    await screen.findByRole('textbox', { name: '完整正文' });
+    const sourceTab = screen.getByRole('tab', { name: /原文输入/ });
+    sourceTab.focus();
+    fireEvent.keyDown(sourceTab, { key: 'End' });
+
+    const timingTab = screen.getByRole('tab', { name: /时间编排/ });
+    expect(document.activeElement).toBe(timingTab);
+    expect(timingTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(timingTab.id);
+    expect(sourceTab.tabIndex).toBe(-1);
+
+    fireEvent.keyDown(timingTab, { key: 'Home' });
+    expect(document.activeElement).toBe(sourceTab);
+    expect(screen.getByRole('textbox', { name: '完整正文' })).toHaveProperty('value', readyDraft.sourceText);
+
+    fireEvent.keyDown(sourceTab, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /语义分段/ }));
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }));
+    expect(sourceTab.getAttribute('aria-selected')).toBe('true');
+    expect(composition.applicator.apply).not.toHaveBeenCalled();
   });
 
   it('applies a draft enhancement bound to the current document version', async () => {
