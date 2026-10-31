@@ -1,4 +1,6 @@
-import type { AiProseTaskStatus } from '../../api/types/ai-prose-authoring';
+import type { SceneMeta } from '../../api/types/scene-common';
+import { splitAiProseNormalizationTasks, type AiProseStatementBlock } from '../../services/ai-authoring/AiProseDeterministicCompiler';
+import type { AiProsePreview, AiProseTaskError, AiProseTaskStatus } from '../../api/types/ai-prose-authoring';
 import type { DraftSession } from '../../services/ai-authoring/AiProseDraftSession';
 import { toRecord } from '../AiProseTrace';
 
@@ -51,7 +53,7 @@ export function formatCount(value: number): string {
 
 export function formatTime(value: number, decimals = 1): string {
   if (!Number.isFinite(value)) return '00:00.0';
-  const safe = Math.max(0, value);
+  const safe = Number(Math.max(0, value).toFixed(decimals));
   const minutes = Math.floor(safe / 60).toString().padStart(2, '0');
   const seconds = (safe % 60).toFixed(decimals).padStart(decimals === 0 ? 2 : 4, '0');
   return `${minutes}:${seconds}`;
@@ -68,7 +70,10 @@ export function stageStatus(draft: DraftSession | null, stage: WorkbenchStage): 
   if (stage === 'characters') return draft.characterExtraction.status;
   if (stage === 'normalize') {
     if (draft.normalization.length === 0) return 'idle';
-    return draft.normalization.every((task) => task.status === 'succeeded') ? 'succeeded' : 'failed';
+    if (draft.normalization.some((task) => task.status === 'failed')) return 'failed';
+    if (draft.normalization.some((task) => task.status === 'running')) return 'running';
+    return draft.normalization.length === draft.segmentation.segments.length
+      && draft.normalization.every((task) => task.status === 'succeeded') ? 'succeeded' : 'idle';
   }
   return draft.preview ? 'succeeded' : 'idle';
 }
@@ -79,7 +84,17 @@ export function isStageReady(draft: DraftSession | null, stage: WorkbenchStage):
   if (stage === 'segments') return draft.segmentation.status !== 'idle';
   if (stage === 'characters') return draft.segmentation.status === 'succeeded';
   if (stage === 'normalize') return draft.mainCharactersConfirmed && draft.segmentation.status === 'succeeded';
-  return draft.normalization.length > 0 && draft.normalization.every((task) => task.status === 'succeeded');
+  return draft.normalization.length > 0
+    && draft.normalization.length === draft.segmentation.segments.length
+    && draft.normalization.every((task) => task.status === 'succeeded');
+}
+
+export function getResumeStage(draft: DraftSession): WorkbenchStage {
+  if (draft.status === 'applied' || isStageReady(draft, 'timing')) return 'timing';
+  if (draft.mainCharactersConfirmed) return 'normalize';
+  if (draft.segmentation.status === 'succeeded') return draft.characterExtraction.status === 'idle' ? 'segments' : 'characters';
+  if (draft.segmentation.status !== 'idle') return 'segments';
+  return 'source';
 }
 
 export function statusText(status: AiProseTaskStatus): string {
@@ -97,3 +112,70 @@ export function getCompletedTaskCount(tasks: readonly { status: AiProseTaskStatu
   return tasks.filter((task) => task.status === 'succeeded').length;
 }
 
+
+export type NormalizationGroup = {
+  segmentIndex: number;
+  status: AiProseTaskStatus;
+  error?: AiProseTaskError;
+  lineRange: [number, number] | null;
+  blocks: AiProseStatementBlock[];
+};
+
+export function groupNormalizationBlocks(draft: DraftSession): NormalizationGroup[] {
+  return [...draft.normalization].sort((a, b) => a.segmentIndex - b.segmentIndex).map((task) => {
+    const segment = draft.segmentation.segments.find((item) => item.index === task.segmentIndex);
+    let blocks: AiProseStatementBlock[] = [];
+    if (task.status === 'succeeded' && task.statements.some((statement) => statement.text.trim())) {
+      blocks = splitAiProseNormalizationTasks([task]);
+    }
+    return {
+      segmentIndex: task.segmentIndex,
+      status: task.status,
+      error: task.error,
+      lineRange: segment ? [
+        getLineNumberAtOffset(draft.sourceText, segment.startOffset),
+        getLineNumberAtOffset(draft.sourceText, Math.max(segment.startOffset, segment.endOffset - 1)),
+      ] : null,
+      blocks,
+    };
+  });
+}
+
+export function countBlocksByKind(blocks: readonly { speaker: string }[]): { all: number; dialogue: number; narration: number } {
+  const dialogue = blocks.filter((block) => block.speaker !== '').length;
+  return { all: blocks.length, dialogue, narration: blocks.length - dialogue };
+}
+
+export function resolveSpeakerColors(speakers: readonly string[], sceneCharacters: SceneMeta['characters']): Map<string, string> {
+  const palette = ['character', 'camera', 'environment', 'audio', 'dialogue'];
+  const colors = new Map<string, string>();
+  for (const speaker of speakers) {
+    if (!speaker || colors.has(speaker)) continue;
+    const color = sceneCharacters?.find((character) => character.name === speaker && character.color)?.color;
+    colors.set(speaker, color || `var(--color-${palette[colors.size % palette.length]})`);
+  }
+  return colors;
+}
+
+export function summarizeTiming(preview: AiProsePreview): {
+  dialogueCount: number; narrationCount: number; averageDuration: number; longestDuration: number;
+} {
+  const counts = countBlocksByKind(preview.statements);
+  let total = 0;
+  let longest = 0;
+  for (const statement of preview.statements) {
+    total += statement.durationSeconds;
+    longest = Math.max(longest, statement.durationSeconds);
+  }
+  return {
+    dialogueCount: counts.dialogue,
+    narrationCount: counts.narration,
+    averageDuration: counts.all ? total / counts.all : 0,
+    longestDuration: longest,
+  };
+}
+
+export function estimateReadingSeconds(spokenCount: number, speed: number): number {
+  return Number.isFinite(spokenCount) && Number.isFinite(speed) && speed > 0
+    ? Math.max(0, spokenCount) / speed : 0;
+}

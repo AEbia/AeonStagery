@@ -20,6 +20,7 @@ import type { EnhancementStagePlanV1 } from '../../services/ai-authoring/FormalE
 import {
   createDraft,
   duplicateAppliedDraft,
+  editMainCharacters,
   replacePreview,
   setCharacterBinding,
   updateScriptReadingSpeed,
@@ -63,7 +64,7 @@ import {
 
 import { runDraftEnhancement } from './runDraftEnhancement';
 import { useAiProsePipeline } from './useAiProsePipeline';
-import { STAGES, createWorkbenchErrorInfo, getErrorMessage, type WorkbenchStage, type WorkbenchErrorInfo } from './workbenchPresentation';
+import { STAGES, createWorkbenchErrorInfo, getErrorMessage, getResumeStage, type WorkbenchStage, type WorkbenchErrorInfo } from './workbenchPresentation';
 
 function getCredentialController(
   composition: AiProseAuthoringComposition | undefined,
@@ -118,6 +119,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
   const [errorMessage, setErrorMessage] = useState('');
   const [errorInfo, setErrorInfo] = useState<WorkbenchErrorInfo | null>(null);
   const [persistenceMessage, setPersistenceMessage] = useState('');
+  const [saving, setSaving] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [initializationMessage, setInitializationMessage] = useState('');
   const [traceOpen, setTraceOpen] = useState(false);
@@ -135,7 +137,11 @@ export function useAiProseWorkbench(onClose?: () => void) {
   const initializationKeyRef = useRef<string | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const dialogRef = useModalDialog(onClose ?? (() => {}), !!onClose);
+  const pendingSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const failedSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const saveErrorRef = useRef<unknown>(null);
+  const pendingSaveCountRef = useRef(0);
+  const runControllerRef = useRef<AbortController | null>(null);
 
   const getProject = useCallback(
     () => projectWorkspace?.getCurrentProject() ?? null,
@@ -221,13 +227,20 @@ export function useAiProseWorkbench(onClose?: () => void) {
 
   const queueSave = useCallback((next: DraftSession): Promise<void> => {
     if (!composition || !project) return Promise.resolve();
-    const operation = saveQueueRef.current.then(async () => {
-      try {
-        await composition.draftPersistence.saveCheckpoint(project, next);
-        setPersistenceMessage('');
-      } catch (error) {
-        setPersistenceMessage(`草稿保存失败：${getErrorMessage(error)}`);
-      }
+    pendingSaveCountRef.current += 1;
+    setSaving(true);
+    // Persistence serializes all writers, including pipeline checkpoints and reads.
+    const operation = composition.draftPersistence.save(project, next).then(() => {
+      saveErrorRef.current = null;
+      failedSaveRef.current = null;
+      setPersistenceMessage('');
+    }).catch((error: unknown) => {
+      saveErrorRef.current = error;
+      failedSaveRef.current = () => queueSave(next);
+      setPersistenceMessage(`草稿保存失败：${getErrorMessage(error)}`);
+    }).finally(() => {
+      pendingSaveCountRef.current -= 1;
+      if (pendingSaveCountRef.current === 0 && !pendingSaveRef.current) setSaving(false);
     });
     saveQueueRef.current = operation.then(() => undefined, () => undefined);
     return operation;
@@ -238,23 +251,58 @@ export function useAiProseWorkbench(onClose?: () => void) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+    pendingSaveRef.current = null;
     if (immediate) return queueSave(next);
+    setSaving(true);
+    pendingSaveRef.current = () => queueSave(next);
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
-      void queueSave(next);
+      const save = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      void save?.();
     }, 260);
   }, [queueSave]);
+
+  const flushPendingSave = useCallback(async () => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    const save = pendingSaveRef.current ?? failedSaveRef.current;
+    pendingSaveRef.current = null;
+    if (save) await save();
+    await saveQueueRef.current;
+    if (saveErrorRef.current) throw saveErrorRef.current;
+  }, []);
+
+  const beginRun = useCallback(() => {
+    runControllerRef.current?.abort();
+    const controller = new AbortController();
+    runControllerRef.current = controller;
+    return controller.signal;
+  }, []);
+
+  const handleClose = useCallback(async () => {
+    runControllerRef.current?.abort();
+    setBusyStage(null);
+    setEnhancementBusy(false);
+    try {
+      await flushPendingSave();
+    } catch {
+      return;
+    }
+    onClose?.();
+  }, [flushPendingSave, onClose]);
+  const dialogRef = useModalDialog(() => void handleClose(), !!onClose);
 
   const commitDraft = useCallback((next: DraftSession, immediate = false) => {
     setDraft(next);
     setSourceText(next.sourceText);
     setTargetBatchSize(next.targetBatchSize);
     setScriptReadingSpeed(next.scriptReadingSpeed);
-    setMainCharacters(next.mainCharactersConfirmed
+    setMainCharacters(next.mainCharacterEdits ?? (next.mainCharactersConfirmed
       ? [...next.confirmedMainCharacters]
       : next.characterExtraction.suggestedNames.length > 0
         ? [...next.characterExtraction.suggestedNames]
-        : [...next.confirmedMainCharacters]);
+        : [...next.confirmedMainCharacters]));
     persistDraft(next, immediate);
   }, [persistDraft, setDraft]);
 
@@ -280,16 +328,17 @@ export function useAiProseWorkbench(onClose?: () => void) {
     const restore = async () => {
       const storage = getStorage();
       const pointerKey = `aeonstagery.ai-prose.${currentDocument.sceneId}.session`;
-      const savedSessionId = storage?.getItem(pointerKey);
+      let savedSessionId: string | undefined;
+      try {
+        savedSessionId = storage?.getItem(pointerKey) ?? undefined;
+      } catch {
+        // The fixed project file remains readable when browser storage is unavailable.
+      }
       let restored: DraftSession | null = null;
-      if (savedSessionId) {
+      {
         const result = await currentComposition.draftPersistence.loadResult(currentProject, currentDocument.sceneId, savedSessionId);
         if (result.status === 'loaded') {
-          if (result.draft.status === 'active') {
-            restored = result.draft;
-          } else {
-            setInitializationMessage('上一次草稿已经应用，当前展示为新草稿入口。');
-          }
+          restored = result.draft;
         } else if (result.status !== 'missing') {
           throw result.error;
         }
@@ -304,22 +353,28 @@ export function useAiProseWorkbench(onClose?: () => void) {
           targetBatchSize: restoreDefaults.targetBatchSize,
           scriptReadingSpeed: restoreDefaults.scriptReadingSpeed,
         });
-        storage?.setItem(pointerKey, restored.sessionId);
       }
+      try { storage?.removeItem(pointerKey); } catch { /* Legacy pointer is no longer required. */ }
       if (cancelled) return;
       setDraftRef.current(restored);
       setSourceText(restored.sourceText);
       setTargetBatchSize(restored.targetBatchSize);
       setScriptReadingSpeed(restored.scriptReadingSpeed);
       setAnchorMode(restored.anchorMode);
-      setMainCharacters(restored.mainCharactersConfirmed
+      setMainCharacters(restored.mainCharacterEdits ?? (restored.mainCharactersConfirmed
         ? [...restored.confirmedMainCharacters]
         : restored.characterExtraction.suggestedNames.length > 0
           ? [...restored.characterExtraction.suggestedNames]
-          : [...restored.confirmedMainCharacters]);
+          : [...restored.confirmedMainCharacters]));
+      setActiveStage(getResumeStage(restored));
       setInitializing(false);
       if (!restored.sourceText) setInitializationMessage('输入完整正文后即可开始分段。');
-      else setInitializationMessage('已恢复上次草稿；成功的故事段会被保留。');
+      else setInitializationMessage(restored.status === 'applied' ? '已恢复上次草稿，该内容已写入正式时间线。' : '已恢复上次草稿；成功的故事段会被保留。');
+      if (restored.status === 'active') {
+        const failed = [restored.segmentation, restored.characterExtraction, ...restored.normalization]
+          .find((task) => task.status === 'failed' && task.error);
+        if (failed?.error) reportErrorRef.current(failed.error, getResumeStage(restored));
+      }
 
       if (restored.status === 'active'
         && restored.enhancement
@@ -381,17 +436,28 @@ export function useAiProseWorkbench(onClose?: () => void) {
       if (cancelled) return;
       setInitializing(false);
       setDraftRef.current(null);
-      setInitializationMessage('草稿未能恢复');
+      setInitializationMessage(`草稿未能恢复：${getErrorMessage(error)}`);
       reportErrorRef.current(error);
     });
     return () => {
       cancelled = true;
+      runControllerRef.current?.abort();
+      void flushPendingSave().catch(() => {});
     };
-  }, [initializationIdentity]);
+  }, [flushPendingSave, initializationIdentity]);
 
-  useEffect(() => () => {
-    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-  }, []);
+  useEffect(() => {
+    const interrupt = () => {
+      runControllerRef.current?.abort();
+      void flushPendingSave().catch(() => {});
+    };
+    window.addEventListener('beforeunload', interrupt);
+    window.addEventListener('pagehide', interrupt);
+    return () => {
+      window.removeEventListener('beforeunload', interrupt);
+      window.removeEventListener('pagehide', interrupt);
+    };
+  }, [flushPendingSave]);
 
   useEffect(() => {
     if (!composition) return;
@@ -480,7 +546,15 @@ export function useAiProseWorkbench(onClose?: () => void) {
   const { runPrepare, runNormalization, retryNormalizationSegment, runRhythm } = useAiProsePipeline({
     composition, project, draftRef, aiTrace, needsCredentialSetup, setDraft, commitDraft, reportError,
     clearError, setMainCharacters, setBusyStage, setActiveStage,
+    beginRun, flushPendingSave,
   });
+
+  const handleMainCharactersChange = useCallback<React.Dispatch<React.SetStateAction<string[]>>>((value) => {
+    const current = draftRef.current;
+    if (!current || current.status !== 'active' || busyStage || enhancementBusy) return;
+    const nextNames = typeof value === 'function' ? value(mainCharacters) : value;
+    commitDraft(editMainCharacters(current, nextNames), false);
+  }, [busyStage, commitDraft, enhancementBusy, mainCharacters]);
 
   const handleSourceChange = useCallback((value: string) => {
     setSourceText(value);
@@ -537,6 +611,8 @@ export function useAiProseWorkbench(onClose?: () => void) {
 
   const startNewDraft = useCallback(() => {
     if (!document) return;
+    if (busyStage || enhancementBusy) return;
+    runControllerRef.current?.abort();
     resetAiTrace();
     const next = createDraft({
       sceneId: document.sceneId,
@@ -546,13 +622,12 @@ export function useAiProseWorkbench(onClose?: () => void) {
       targetBatchSize: aiSettings.targetBatchSize,
       scriptReadingSpeed: configuredScriptReadingSpeed,
     });
-    getStorage()?.setItem(`aeonstagery.ai-prose.${document.sceneId}.session`, next.sessionId);
     commitDraft(next, true);
     setActiveStage('source');
     setAiTraceRuntimeState('idle');
     setInitializationMessage('新草稿已创建；可以输入完整正文。');
     clearError();
-  }, [aiSettings.targetBatchSize, anchorMode, clearError, commitDraft, configuredScriptReadingSpeed, currentTime, document, resetAiTrace, setAiTraceRuntimeState]);
+  }, [aiSettings.targetBatchSize, anchorMode, busyStage, clearError, commitDraft, configuredScriptReadingSpeed, currentTime, document, enhancementBusy, resetAiTrace, setAiTraceRuntimeState]);
 
   const handleRunDraftEnhancement = useCallback(async () => {
     const currentDraft = draftRef.current;
@@ -567,9 +642,12 @@ export function useAiProseWorkbench(onClose?: () => void) {
       return;
     }
     setEnhancementBusy(true);
+    const signal = beginRun();
     setEnhancementMessage('可选增强运行中…');
     clearError();
     try {
+      await flushPendingSave();
+      signal.throwIfAborted();
       const stagePlan = await runDraftEnhancement({
         currentDraft,
         document,
@@ -581,14 +659,18 @@ export function useAiProseWorkbench(onClose?: () => void) {
         getCurrentDraft: () => draftRef.current,
         commitDraft,
         onMessage: setEnhancementMessage,
+        signal,
       });
+      signal.throwIfAborted();
       if (stagePlan !== undefined) setEnhancementStagePlan(stagePlan);
     } catch (error) {
+      if (signal.aborted) return;
       setEnhancementMessage(error instanceof Error ? error.message : String(error));
     } finally {
-      setEnhancementBusy(false);
+      if (!signal.aborted) setEnhancementBusy(false);
     }
   }, [
+    beginRun,
     capabilityPorts,
     clearError,
     commitDraft,
@@ -597,6 +679,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
     documentVersion,
     enableActing,
     enableCinematic,
+    flushPendingSave,
     needsCredentialSetup,
     reportError,
   ]);
@@ -614,6 +697,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
     setBusyStage('timing');
     clearError();
     try {
+      await flushPendingSave();
       const result = await composition.applicator.apply(currentDraft, document, {
         ...(enhancementStagePlan ? { enhancementStagePlan } : {}),
       });
@@ -628,7 +712,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
     } finally {
       setBusyStage(null);
     }
-  }, [clearError, composition, document, documentVersion, enhancementBusy, enhancementStagePlan, reportError, setDraft]);
+  }, [clearError, composition, document, documentVersion, enhancementBusy, enhancementStagePlan, flushPendingSave, reportError, setDraft]);
 
   // Ticket 06: applied archives can be copied into a new active session and
   // explicitly deleted (including the archive file).
@@ -638,7 +722,6 @@ export function useAiProseWorkbench(onClose?: () => void) {
     try {
       const copy = duplicateAppliedDraft(currentDraft);
       commitDraft(copy, true);
-      getStorage()?.setItem(`aeonstagery.ai-prose.${currentDraft.sceneId}.session`, copy.sessionId);
       setActiveStage('source');
       showToast('已复制归档为新会话，可重新生成或再次应用。', 'success');
     } catch (error) {
@@ -656,7 +739,6 @@ export function useAiProseWorkbench(onClose?: () => void) {
         currentDraft.sceneId,
         currentDraft.sessionId,
       );
-      getStorage()?.removeItem(`aeonstagery.ai-prose.${currentDraft.sceneId}.session`);
       startNewDraft();
       showToast('已删除归档草稿。', 'success');
     } catch (error) {
@@ -734,6 +816,7 @@ export function useAiProseWorkbench(onClose?: () => void) {
     errorMessage,
     errorInfo,
     persistenceMessage,
+    saving,
     initializing,
     initializationMessage,
     traceOpen,
@@ -751,6 +834,8 @@ export function useAiProseWorkbench(onClose?: () => void) {
     dialogRef,
     aiTrace,
     startNewDraft,
+    handleClose,
+    handleMainCharactersChange,
     handleSourceChange,
     handleImportFile,
     runPrepare,

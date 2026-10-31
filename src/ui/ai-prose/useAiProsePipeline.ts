@@ -22,11 +22,14 @@ interface ProsePipelineInput {
   setMainCharacters: (names: string[]) => void;
   setBusyStage: (stage: WorkbenchStage | null) => void;
   setActiveStage: (stage: WorkbenchStage) => void;
+  beginRun: () => AbortSignal;
+  flushPendingSave: () => Promise<void>;
 }
 
 function toNormalizationRun(draft: DraftSession): AiProseNormalizationRun {
   return {
     status: draft.normalization.length > 0
+      && draft.normalization.length === draft.segmentation.segments.length
       && draft.normalization.every((task) => task.status === 'succeeded')
       ? 'succeeded'
       : 'failed',
@@ -49,22 +52,26 @@ function isTaskSettled(status: AiProseTaskStatus): boolean {
 export function useAiProsePipeline({
   composition, project, draftRef, aiTrace, needsCredentialSetup = false, setDraft, commitDraft, reportError,
   clearError, setMainCharacters, setBusyStage, setActiveStage,
+  beginRun, flushPendingSave,
 }: ProsePipelineInput) {
   const { handleLlmProgress, reset: resetAiTrace, setRuntimeState: setAiTraceRuntimeState } = aiTrace;
 
-  const createCheckpoint = useCallback((baseDraft: DraftSession) => {
+  const createCheckpoint = useCallback((baseDraft: DraftSession, signal: AbortSignal) => {
     if (!composition || !project) throw new Error('当前没有可用的项目草稿服务');
-    return composition.createDraftCheckpoint(project, baseDraft);
+    return composition.createDraftCheckpoint(project, baseDraft, signal);
   }, [composition, project]);
 
   const preparePipeline = useCallback(async (
     baseDraft: DraftSession,
+    signal: AbortSignal,
     onLlmProgress: (progress: AiProseLlmProgress) => void = handleLlmProgress,
   ): Promise<{
     prepared: AiProsePreparedPipeline;
     draft: DraftSession;
   }> => {
-    const checkpoint = createCheckpoint(baseDraft);
+    await flushPendingSave();
+    signal.throwIfAborted();
+    const checkpoint = createCheckpoint(baseDraft, signal);
     let prepared: AiProsePreparedPipeline;
     try {
       prepared = await composition!.pipeline.prepare(baseDraft.sourceText, {
@@ -75,17 +82,19 @@ export function useAiProsePipeline({
         existingDraft: baseDraft,
         checkpoint,
         onLlmProgress,
+        signal,
       });
     } catch (error) {
       // The checkpoint mutates its in-memory draft before persistence. Keep
       // the AI task failure visible even when the save itself also fails.
-      setDraft(checkpoint.getDraft());
+      if (!signal.aborted) setDraft(checkpoint.getDraft());
       throw error;
     }
     const checkpointDraft = checkpoint.getDraft();
+    signal.throwIfAborted();
     setDraft(checkpointDraft);
     return { prepared, draft: checkpointDraft };
-  }, [composition, createCheckpoint, handleLlmProgress, setDraft]);
+  }, [composition, createCheckpoint, flushPendingSave, handleLlmProgress, setDraft]);
 
   const runPrepare = useCallback(async () => {
     const currentDraft = draftRef.current;
@@ -97,12 +106,13 @@ export function useAiProsePipeline({
       reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'source');
       return;
     }
+    const signal = beginRun();
     resetAiTrace();
     setBusyStage('segments');
     setAiTraceRuntimeState('running');
     clearError();
     try {
-      const { prepared, draft: next } = await preparePipeline(currentDraft);
+      const { prepared, draft: next } = await preparePipeline(currentDraft, signal);
       setMainCharacters(prepared.suggestedMainCharacters);
       // prepare() waits for both parallel AI tasks and the persistence
       // checkpoint. Use the checkpoint's final draft as the source of truth
@@ -119,11 +129,12 @@ export function useAiProsePipeline({
         setAiTraceRuntimeState('succeeded');
       }
     } catch (error) {
+      if (signal.aborted) return;
       reportError(error, 'segments');
     } finally {
-      setBusyStage(null);
+      if (!signal.aborted) setBusyStage(null);
     }
-  }, [clearError, draftRef, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setMainCharacters]);
+  }, [beginRun, clearError, draftRef, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setMainCharacters]);
 
   const runNormalization = useCallback(async (names: readonly string[]) => {
     const currentDraft = draftRef.current;
@@ -141,6 +152,7 @@ export function useAiProsePipeline({
       reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'normalize');
       return;
     }
+    const signal = beginRun();
     resetAiTrace();
     setBusyStage('normalize');
     setAiTraceRuntimeState('running');
@@ -148,18 +160,19 @@ export function useAiProsePipeline({
     try {
       const confirmed = confirmMainCharacters(currentDraft, names.map((name) => name.trim()));
       commitDraft(confirmed, true);
-      const { prepared, draft: preparedDraft } = await preparePipeline(confirmed);
-      const checkpoint = createCheckpoint(preparedDraft);
+      const { prepared, draft: preparedDraft } = await preparePipeline(confirmed, signal);
+      const checkpoint = createCheckpoint(preparedDraft, signal);
       try {
         await composition!.pipeline.normalize(
           prepared,
           { confirmedMainCharacters: preparedDraft.confirmedMainCharacters, mainCharactersConfirmed: true },
-          { existingDraft: preparedDraft, checkpoint, onLlmProgress: handleLlmProgress },
+          { existingDraft: preparedDraft, checkpoint, onLlmProgress: handleLlmProgress, signal },
         );
       } catch (error) {
-        setDraft(checkpoint.getDraft());
+        if (!signal.aborted) setDraft(checkpoint.getDraft());
         throw error;
       }
+      signal.throwIfAborted();
       const next = checkpoint.getDraft();
       commitDraft(next, false);
       setActiveStage('normalize');
@@ -170,11 +183,12 @@ export function useAiProsePipeline({
         setAiTraceRuntimeState('succeeded');
       }
     } catch (error) {
+      if (signal.aborted) return;
       reportError(error, 'normalize');
     } finally {
-      setBusyStage(null);
+      if (!signal.aborted) setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [beginRun, clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   const retryNormalizationSegment = useCallback(async (segmentIndex: number) => {
     const currentDraft = draftRef.current;
@@ -183,24 +197,26 @@ export function useAiProsePipeline({
       reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'normalize');
       return;
     }
+    const signal = beginRun();
     resetAiTrace();
     setBusyStage('normalize');
     setAiTraceRuntimeState('running');
     clearError();
     try {
-      const { prepared, draft: preparedDraft } = await preparePipeline(currentDraft);
-      const checkpoint = createCheckpoint(preparedDraft);
+      const { prepared, draft: preparedDraft } = await preparePipeline(currentDraft, signal);
+      const checkpoint = createCheckpoint(preparedDraft, signal);
       try {
         await composition.pipeline.retrySegment(
           prepared,
           toNormalizationRun(preparedDraft),
           segmentIndex,
-          { checkpoint, onLlmProgress: handleLlmProgress },
+          { checkpoint, onLlmProgress: handleLlmProgress, signal },
         );
       } catch (error) {
-        setDraft(checkpoint.getDraft());
+        if (!signal.aborted) setDraft(checkpoint.getDraft());
         throw error;
       }
+      signal.throwIfAborted();
       const next = checkpoint.getDraft();
       commitDraft(next, false);
       if (next.normalization.every((task) => task.status === 'succeeded')) setAiTraceRuntimeState('succeeded');
@@ -209,16 +225,19 @@ export function useAiProsePipeline({
         reportError(failedTask?.error ?? '故事段规范化失败，可以单独重试失败段。', 'normalize');
       }
     } catch (error) {
+      if (signal.aborted) return;
       reportError(error, 'normalize');
     } finally {
-      setBusyStage(null);
+      if (!signal.aborted) setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [beginRun, clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   const runRhythm = useCallback(async () => {
     const currentDraft = draftRef.current;
     if (!currentDraft || !composition) return;
-    if (!currentDraft.normalization.length || currentDraft.normalization.some((task) => task.status !== 'succeeded')) {
+    if (!currentDraft.normalization.length
+      || currentDraft.normalization.length !== currentDraft.segmentation.segments.length
+      || currentDraft.normalization.some((task) => task.status !== 'succeeded')) {
       reportError('所有故事段规范化成功后才能进行时间编排。', 'normalize');
       setActiveStage('normalize');
       return;
@@ -227,23 +246,25 @@ export function useAiProsePipeline({
       reportError({ code: 'missing_credential', message: MISSING_CREDENTIAL_GUIDE_MESSAGE }, 'timing');
       return;
     }
+    const signal = beginRun();
     resetAiTrace();
     setBusyStage('timing');
     setAiTraceRuntimeState('running');
     clearError();
     try {
-      const { prepared, draft: preparedDraft } = await preparePipeline(currentDraft);
-      const checkpoint = createCheckpoint(preparedDraft);
+      const { prepared, draft: preparedDraft } = await preparePipeline(currentDraft, signal);
+      const checkpoint = createCheckpoint(preparedDraft, signal);
       try {
         await composition.pipeline.rhythm(
           prepared,
           toNormalizationRun(preparedDraft),
-          { existingDraft: preparedDraft, checkpoint, onLlmProgress: handleLlmProgress },
+          { existingDraft: preparedDraft, checkpoint, onLlmProgress: handleLlmProgress, signal },
         );
       } catch (error) {
-        setDraft(checkpoint.getDraft());
+        if (!signal.aborted) setDraft(checkpoint.getDraft());
         throw error;
       }
+      signal.throwIfAborted();
       const next = checkpoint.getDraft();
       commitDraft(next, false);
       setActiveStage('timing');
@@ -254,11 +275,12 @@ export function useAiProsePipeline({
       }, 'timing');
       else setAiTraceRuntimeState('succeeded');
     } catch (error) {
+      if (signal.aborted) return;
       reportError(error, 'timing');
     } finally {
-      setBusyStage(null);
+      if (!signal.aborted) setBusyStage(null);
     }
-  }, [clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
+  }, [beginRun, clearError, commitDraft, composition, createCheckpoint, draftRef, handleLlmProgress, needsCredentialSetup, preparePipeline, reportError, resetAiTrace, setActiveStage, setAiTraceRuntimeState, setBusyStage, setDraft]);
 
   return { runPrepare, runNormalization, retryNormalizationSegment, runRhythm };
 }

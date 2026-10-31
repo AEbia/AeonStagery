@@ -113,6 +113,7 @@ type TestAiProseProgress = AiProseLlmProgress & {
 
 type TestDraftLoadResult =
   | { status: 'loaded'; draft: DraftSession }
+  | { status: 'corrupt-json'; error: Error }
   | { status: 'missing' };
 
 vi.mock('../ui/context/AppContext', () => ({
@@ -176,13 +177,16 @@ function createComposition(options: {
   loadResult?: () => Promise<TestDraftLoadResult>;
 } = {}) {
   let checkpointDraft: DraftSession | null = null;
+  let savedDraft = options.draft;
   let progressHandler: ((progress: TestAiProseProgress) => void) | undefined;
   const persistence = {
-    loadResult: vi.fn(options.loadResult ?? (async () => options.draft
-      ? { status: 'loaded' as const, draft: options.draft }
+    loadResult: vi.fn(options.loadResult ?? (async () => savedDraft
+      ? { status: 'loaded' as const, draft: savedDraft }
       : { status: 'missing' as const })),
-    saveCheckpoint: vi.fn(async () => undefined),
+    saveCheckpoint: vi.fn(async (_project: unknown, draft: DraftSession) => { savedDraft = draft; }),
+    save: vi.fn(async (_project: unknown, draft: DraftSession) => { savedDraft = draft; }),
   };
+  persistence.save = persistence.saveCheckpoint;
   const segmentation = {
     status: 'succeeded' as const,
     planFingerprint: 'plan-1',
@@ -328,6 +332,134 @@ describe('AiProseWorkbench', () => {
     mocks.composition = undefined;
   });
 
+  it('flushes the last source edit on unmount and restores it without a localStorage pointer', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const view = render(<AiProseWorkbench />);
+    const source = await screen.findByRole('textbox', { name: '完整正文' });
+    fireEvent.change(source, { target: { value: '关闭前的最后一次修改' } });
+    expect(screen.getByText('正在保存…')).toBeTruthy();
+    view.unmount();
+    await waitFor(() => expect(created.persistence.save).toHaveBeenCalledWith(
+      mocks.project, expect.objectContaining({ sourceText: '关闭前的最后一次修改' }),
+    ));
+    localStorage.clear();
+    render(<AiProseWorkbench />);
+    expect((await screen.findByRole('textbox', { name: '完整正文' }) as HTMLTextAreaElement).value)
+      .toBe('关闭前的最后一次修改');
+  });
+
+  it('keeps the panel open after a failed close save and retries it before closing', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const close = vi.fn();
+    render(<AiProseWorkbench onClose={close} />);
+    fireEvent.change(await screen.findByRole('textbox', { name: '完整正文' }), { target: { value: '必须保存的正文' } });
+    created.persistence.save.mockRejectedValueOnce(new Error('disk full'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭 AI 铺戏' }));
+    await screen.findByText('保存异常');
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '关闭 AI 铺戏' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(created.persistence.save).toHaveBeenLastCalledWith(mocks.project, expect.objectContaining({ sourceText: '必须保存的正文' }));
+  });
+
+  it('restores an applied result as read-only rather than creating another draft', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const applied = { ...createReadyDraft(), status: 'applied' as const };
+    const created = createComposition({ draft: applied });
+    mocks.composition = created.composition;
+    render(<AiProseWorkbench />);
+    const button = await screen.findByRole('button', { name: '已应用到正式时间线' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('你好。')).toBeTruthy();
+    expect(created.persistence.save).not.toHaveBeenCalled();
+    expect(created.composition.applicator.apply).not.toHaveBeenCalled();
+  });
+
+  it('shows a corrupt draft error without offering to overwrite the file', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition({ loadResult: async () => ({ status: 'corrupt-json', error: new Error('草稿文件包含无效 JSON') }) });
+    mocks.composition = created.composition;
+    render(<AiProseWorkbench />);
+    await screen.findByText('草稿未能恢复：草稿文件包含无效 JSON');
+    expect(screen.queryByRole('button', { name: '新建草稿' })).toBeNull();
+    expect(created.persistence.save).not.toHaveBeenCalled();
+  });
+
+  it('restores unconfirmed character edits including empty rows after closing', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition({ draft: createReadyDraft() });
+    mocks.composition = created.composition;
+    const view = render(<AiProseWorkbench />);
+    const charactersTab = await screen.findByRole('tab', { name: /人物确认/ });
+    fireEvent.click(charactersTab);
+    fireEvent.change(screen.getByRole('textbox', { name: '主要人物 1' }), { target: { value: '更正的人名' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加人物' }));
+    view.unmount();
+    await waitFor(() => expect(created.persistence.save).toHaveBeenCalledWith(
+      mocks.project, expect.objectContaining({ mainCharacterEdits: ['更正的人名', ''], mainCharactersConfirmed: false, preview: null }),
+    ));
+    render(<AiProseWorkbench />);
+    const first = await screen.findByRole('textbox', { name: '主要人物 1' });
+    expect((first as HTMLInputElement).value).toBe('更正的人名');
+    expect((screen.getByRole('textbox', { name: '主要人物 2' }) as HTMLInputElement).value).toBe('');
+  });
+
+  it('aborts a closed workbench run and ignores its late completion after reopening', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const originalPrepare = created.pipeline.prepare.getMockImplementation()!;
+    let finishRequest: () => void = () => {};
+    let runSignal: AbortSignal | undefined;
+    const gate = new Promise<void>((resolve) => { finishRequest = resolve; });
+    created.pipeline.prepare.mockImplementationOnce(async (...args) => {
+      runSignal = (args[1] as { signal?: AbortSignal }).signal;
+      await gate;
+      return originalPrepare(...args);
+    });
+    const view = render(<AiProseWorkbench />);
+    fireEvent.change(await screen.findByRole('textbox', { name: '完整正文' }), { target: { value: '林夏走进房间。' } });
+    fireEvent.click(screen.getByRole('button', { name: /开始分析/ }));
+    await waitFor(() => expect(created.pipeline.prepare).toHaveBeenCalledOnce());
+    expect((screen.getByRole('button', { name: '新建 AI 草稿' }) as HTMLButtonElement).disabled).toBe(true);
+    view.unmount();
+    expect(runSignal?.aborted).toBe(true);
+    render(<AiProseWorkbench />);
+    await screen.findByRole('textbox', { name: '完整正文' });
+    await act(async () => { finishRequest(); await gate; });
+    expect(screen.getByRole('tab', { name: /原文输入/ }).getAttribute('aria-selected')).toBe('true');
+    expect(created.pipeline.prepare).toHaveBeenCalledOnce();
+  });
+
+  it('shows successful statements beside a failed segment and retries within its group', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const ready = createReadyDraft();
+    const secondOffset = ready.sourceText.length;
+    ready.sourceText += '第二段。';
+    ready.segmentation.segments[0].endOffset = secondOffset;
+    ready.segmentation.segments.push({ index: 1, startOffset: secondOffset, endOffset: ready.sourceText.length, sourceText: '第二段。' });
+    localStorage.setItem('aeonstagery.ai-prose.scene-1.session', ready.sessionId);
+    const draft = replaceNormalization(ready, [
+      { segmentIndex: 0, status: 'succeeded', statements: [{ speaker: '林夏', text: '你好。' }] },
+      { segmentIndex: 1, status: 'failed', statements: [], error: { code: 'timeout', message: '请求超时' } },
+    ]);
+    const { composition, pipeline } = createComposition({ draft });
+    mocks.composition = composition;
+    render(<AiProseWorkbench />);
+    fireEvent.click(await screen.findByRole('tab', { name: /语句规范化/ }));
+    expect(await screen.findByText('你好。')).toBeTruthy();
+    const failedGroup = screen.getByRole('region', { name: '故事段 2' });
+    expect(within(failedGroup).getByRole('alert').textContent).toContain('请求超时');
+    fireEvent.click(within(failedGroup).getByRole('button', { name: '重试此段' }));
+    await waitFor(() => expect(pipeline.retrySegment).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), 1, expect.anything(),
+    ));
+  });
+
   it('starts at 9 chars/sec and carries slider changes into settings and the draft', async () => {
     mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
     const { composition, persistence } = createComposition();
@@ -382,7 +514,7 @@ describe('AiProseWorkbench', () => {
     rendered.rerender(<AiProseWorkbench />);
     resolveLoad({ status: 'loaded', draft: readyDraft });
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     expect(screen.queryByRole('heading', { name: '正在恢复 AI 草稿' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强。')).toBeTruthy());
@@ -424,15 +556,15 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     expect(screen.getByText('你好。')).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: /语句/ })).toBeNull();
 
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    expect(screen.getByRole('dialog').textContent).toContain('确认原子应用');
+    expect(screen.getByRole('dialog').textContent).toContain('确认应用');
 
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       readyDraft,
       mocks.document,
@@ -449,7 +581,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
     fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
@@ -459,7 +591,7 @@ describe('AiProseWorkbench', () => {
       target: { value: '10' },
     });
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       expect.objectContaining({ scriptReadingSpeed: 10 }),
@@ -477,7 +609,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /人物确认/ }));
 
     const characterInput = screen.getByRole('textbox', { name: '主要人物 1' });
@@ -497,7 +629,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     const sourceTab = screen.getByRole('tab', { name: /原文输入/ });
     sourceTab.focus();
     fireEvent.keyDown(sourceTab, { key: 'End' });
@@ -529,14 +661,14 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
     fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledTimes(1));
     expect(composition.applicator.apply).toHaveBeenCalledWith(
@@ -558,7 +690,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
     fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
@@ -566,7 +698,7 @@ describe('AiProseWorkbench', () => {
 
     mocks.documentVersion = 6;
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
 
     await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强')).toBeTruthy());
     expect(composition.applicator.apply).not.toHaveBeenCalled();
@@ -582,10 +714,10 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       readyDraft,
@@ -643,7 +775,7 @@ describe('AiProseWorkbench', () => {
     expect(replayCall.ports!.profileProvider).not.toBeNull();
 
     // Run path passes the identical port objects to the processor runner.
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
     fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
@@ -692,7 +824,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
     fireEvent.click(screen.getByRole('button', { name: '电影感' }));
@@ -734,7 +866,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
 
     await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强。')).toBeTruthy());

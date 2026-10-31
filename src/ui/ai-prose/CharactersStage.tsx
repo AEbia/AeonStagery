@@ -67,6 +67,7 @@ export function CharactersStage({
                 <select
                   aria-label={`${name} 的角色绑定`}
                   value={draft.characterBindings[name] ?? ''}
+                  disabled={busy}
                   onChange={(event) => onBindingChange(name, event.target.value)}
                 >
                   <option value="">选择绑定角色</option>

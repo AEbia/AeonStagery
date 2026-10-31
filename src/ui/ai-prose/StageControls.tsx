@@ -7,10 +7,12 @@ export function ReadingSpeedControl({
   value,
   onChange,
   compact = false,
+  disabled = false,
 }: {
   value: number;
   onChange: (value: number) => void;
   compact?: boolean;
+  disabled?: boolean;
 }) {
   const progress = ((value - SCRIPT_READING_SPEED_RANGE.min)
     / (SCRIPT_READING_SPEED_RANGE.max - SCRIPT_READING_SPEED_RANGE.min)) * 100;
@@ -35,6 +37,7 @@ export function ReadingSpeedControl({
         aria-label="scriptReadingSpeed"
         className="ai-prose-reading-speed-range"
         type="range"
+        disabled={disabled}
         min={SCRIPT_READING_SPEED_RANGE.min}
         max={SCRIPT_READING_SPEED_RANGE.max}
         step={SCRIPT_READING_SPEED_RANGE.step}

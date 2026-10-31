@@ -10,7 +10,7 @@ import { FormalEnhancementOrchestrator } from '../../services/ai-authoring/Forma
 import { EnhancementProcessorRunner } from '../../services/ai-authoring/EnhancementProcessorRunner';
 import { beginFormalEnhancementRun, buildFormalStatementGroups, buildSingleSegmentSegmentation } from '../../services/ai-authoring/FormalSceneEnhancementHost';
 import { enhancementStageCheckpointFromSnapshot, createIncrementalStageCheckpointPersister } from '../../services/ai-authoring/AiProseEnhancementRestore';
-import { createEmptyEnhancementState, withEnhancementStageCheckpoint } from '../../services/ai-authoring/AiProseEnhancementState';
+import { createEmptyEnhancementState, createAiProseEnhancementBaseFingerprint, withEnhancementStageCheckpoint } from '../../services/ai-authoring/AiProseEnhancementState';
 import type { EnhancementCapabilityPortsV1 } from '../hooks/useEnhancementCapabilityPorts';
 
 interface DraftEnhancementInput {
@@ -24,18 +24,24 @@ interface DraftEnhancementInput {
   getCurrentDraft: () => DraftSession | null;
   commitDraft: (draft: DraftSession, immediate: boolean) => void;
   onMessage: (message: string) => void;
+  signal?: AbortSignal;
 }
 
 /** Runs optional stages against a projected draft; persistence and UI state stay with the caller. */
 export async function runDraftEnhancement({
   currentDraft, document, documentVersion, composition, capabilityPorts,
   enableActing, enableCinematic, getCurrentDraft, commitDraft, onMessage,
+  signal,
 }: DraftEnhancementInput): Promise<EnhancementStagePlanV1 | null | undefined> {
   const preview = currentDraft.preview;
+  signal?.throwIfAborted();
   if (!preview) return;
   // Bind the run to the exact DocumentStore version it authors line
   // locators against; apply/restore refuse stale results after a scene edit.
   const boundDocumentVersion = documentVersion;
+  const restoredUnits = currentDraft.enhancement?.baseFingerprint === createAiProseEnhancementBaseFingerprint(currentDraft)
+    ? [...(currentDraft.enhancement.performance?.units ?? []), ...(currentDraft.enhancement.cinematic?.units ?? [])]
+    : [];
 
   const plan = buildCharacterBindingPlan({
     document,
@@ -59,13 +65,18 @@ export async function runDraftEnhancement({
     checkpoint: AiProseEnhancementStageCheckpointV1,
   ) => {
     const latest = getCurrentDraft();
-    if (!latest) return;
+    if (signal?.aborted || !latest || latest.sessionId !== currentDraft.sessionId) return;
     const base = latest.enhancement ?? createEmptyEnhancementState(latest);
+    const units = new Map((base[checkpoint.stage]?.units ?? []).map((unit) => [unit.key, unit]));
+    for (const unit of checkpoint.units) units.set(unit.key, unit);
+    const order = unitOrders.get(checkpoint.stage);
+    const accumulated = [...units.values()].filter((unit) => !order || order.has(unit.key))
+      .sort((left, right) => (order?.get(left.key) ?? 0) - (order?.get(right.key) ?? 0));
     commitDraft(replaceEnhancementState(latest, {
       ...base,
       characterBindingPlan: plan,
       boundDocumentVersion,
-      ...withEnhancementStageCheckpoint(base, checkpoint),
+      ...withEnhancementStageCheckpoint(base, { ...checkpoint, units: accumulated }),
     }), true);
   };
 
@@ -84,6 +95,7 @@ export async function runDraftEnhancement({
       void persistEnhancementStageCheckpoint(checkpoint);
     },
   });
+  const unitOrders = new Map<string, Map<string, number>>();
 
   // Same baseline shape as AiProseSceneApplicator: existing formal + draft dialogues.
   const projected = projectDraftSemanticScene({
@@ -114,6 +126,10 @@ export async function runDraftEnhancement({
     modelCapabilities: capabilityPorts.modelCapabilityPort,
     cinematicCapabilities: capabilityPorts.cinematicCapabilityPort,
     profileProvider: capabilityPorts.profileProvider,
+    restoredUnits,
+    onStagePlanned: (stage, units) => {
+      unitOrders.set(stage, new Map(units.map((unit, index) => [unit.key, index])));
+    },
     onUnitComplete: checkpointHooks.onUnitComplete,
     onStageStarted: checkpointHooks.onStageStarted,
   });
@@ -136,7 +152,9 @@ export async function runDraftEnhancement({
       binding,
       ensurePlaceholders: false,
       placeholderTargetStatementIds: createdStatementIds,
+      llmOptions: { signal },
     });
+    signal?.throwIfAborted();
     if (snap.performance?.status !== 'succeeded') {
       onMessage(
         `表演增强失败：${snap.performance?.diagnostics?.map((d) => d.message).join('; ') || '未知错误'}`,
@@ -154,7 +172,9 @@ export async function runDraftEnhancement({
       snapshot: snap,
       document: projected,
       placeholderTargetStatementIds: createdStatementIds,
+      llmOptions: { signal },
     });
+    signal?.throwIfAborted();
     if (snap.cinematic?.status !== 'succeeded' && snap.phase !== 'preview_ready') {
       onMessage(
         `电影感增强失败：${snap.cinematic?.diagnostics?.map((d) => d.message).join('; ') || '未知错误'}`,

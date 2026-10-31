@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { IconChevronRight } from '../icons';
+import { visibleCharacterCount } from '../../services/ai-authoring/AiProseTextMetrics';
 import type { DraftSession } from '../../services/ai-authoring/AiProseDraftSession';
 import { InfoTip } from '../Tooltip';
 import { TabIntro } from './StageControls';
@@ -7,22 +10,22 @@ import { formatCount, getLineNumberAtOffset, statusText } from './workbenchPrese
 export function SegmentsStage({
   draft,
   segments,
-  selectedSegment,
   targetBatchSize,
-  onSelectSegment,
   onTargetBatchSizeChange,
   onPrepare,
   busy,
 }: {
   draft: DraftSession;
   segments: DraftSession['segmentation']['segments'];
-  selectedSegment: number;
   targetBatchSize: number;
-  onSelectSegment: (index: number) => void;
   onTargetBatchSizeChange: (value: number) => void;
   onPrepare: () => void;
   busy: boolean;
 }) {
+  const [expandedSegment, setExpandedSegment] = useState<number | null>(null);
+  const lengths = segments.map((segment) => visibleCharacterCount(segment.sourceText));
+  const average = lengths.length ? Math.round(lengths.reduce((sum, count) => sum + count, 0) / lengths.length) : 0;
+  const longest = lengths.reduce((max, count) => Math.max(max, count), 0);
   return (
     <section className="ai-prose-tab-panel is-active">
       <TabIntro
@@ -71,24 +74,17 @@ export function SegmentsStage({
                 : statusText(draft.segmentation.status)}
             </b>
           </div>
-          <div className="ai-prose-progress-track">
-            <span style={{ width: `${draft.segmentation.status === 'succeeded' ? 100 : 0}%` }} />
-          </div>
-          <small>
-            {draft.segmentation.candidates.length}
-            {' '}
-            个边界
-          </small>
+          <small>平均 {formatCount(average)} 字 · 最长 {formatCount(longest)} 字</small>
         </div>
       </div>
       <div className="ai-prose-segment-list">
         {segments.map((segment, index) => (
           <button
             key={`${segment.index}-${segment.startOffset}`}
-            className={`ai-prose-segment-card ${selectedSegment === index ? 'is-selected' : ''}`}
+            className={`ai-prose-segment-card ${expandedSegment === index ? 'is-expanded' : ''}`}
             type="button"
-            onClick={() => onSelectSegment(index)}
-            aria-pressed={selectedSegment === index}
+            onClick={() => setExpandedSegment(expandedSegment === index ? null : index)}
+            aria-expanded={expandedSegment === index}
           >
             <div className="ai-prose-segment-card-head">
               <span>
@@ -102,14 +98,15 @@ export function SegmentsStage({
                   L
                   {getLineNumberAtOffset(draft.sourceText, segment.startOffset)}
                   –
-                  {getLineNumberAtOffset(draft.sourceText, segment.endOffset)}
+                  {getLineNumberAtOffset(draft.sourceText, Math.max(segment.startOffset, segment.endOffset - 1))}
+                  {' · '}{formatCount(lengths[index])} 字
                 </small>
               </span>
+              <IconChevronRight size={16} />
             </div>
             <div className="ai-prose-segment-body">
               <p>
-                {segment.sourceText.slice(0, 220)}
-                {segment.sourceText.length > 220 ? '…' : ''}
+                {segment.sourceText}
               </p>
             </div>
           </button>

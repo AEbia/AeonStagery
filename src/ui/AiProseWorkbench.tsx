@@ -11,7 +11,7 @@ import { CharactersStage } from './ai-prose/CharactersStage';
 import { NormalizeStage } from './ai-prose/NormalizeStage';
 import { TimingStage } from './ai-prose/TimingStage';
 import { AiSetupGuideBanner, ApplyDialog, WorkbenchErrorAlert } from './ai-prose/WorkbenchFeedback';
-import { STAGES, createWorkbenchErrorInfo, formatCount, getCompletedTaskCount, isStageReady, stageStatus, statusText } from './ai-prose/workbenchPresentation';
+import { STAGES, createWorkbenchErrorInfo, formatCount, formatTime, groupNormalizationBlocks, getCompletedTaskCount, isStageReady, stageStatus, statusText } from './ai-prose/workbenchPresentation';
 
 export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
   const {
@@ -24,13 +24,14 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     sourceText,
     sourceName,
     mainCharacters,
-    setMainCharacters,
+    handleMainCharactersChange,
     targetBatchSize,
     scriptReadingSpeed,
     busyStage,
     errorMessage,
     errorInfo,
     persistenceMessage,
+    saving,
     initializing,
     initializationMessage,
     traceOpen,
@@ -48,6 +49,7 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     dialogRef,
     aiTrace,
     startNewDraft,
+    handleClose,
     handleSourceChange,
     handleImportFile,
     runPrepare,
@@ -66,11 +68,8 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     spokenCount,
     segments,
     normalizationBlocks,
-    filteredBlocks,
     selectedFilter,
     setSelectedFilter,
-    selectedSegment,
-    setSelectedSegment,
     canApply,
     activeStageIndex,
     aiStateText,
@@ -98,17 +97,24 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
           <div className="ai-prose-brand">AI 铺戏</div>
           <AiWorkbenchModeSwitch />
           <div className="ai-prose-topbar__spacer" />
-          {onClose && <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={onClose} title="关闭 AI 铺戏" aria-label="关闭 AI 铺戏"><IconX width={16} height={16} /></button>}
+          {onClose && <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={() => void handleClose()} title="关闭 AI 铺戏" aria-label="关闭 AI 铺戏"><IconX width={16} height={16} /></button>}
         </header>
         <div className="ai-prose-empty-state">
           <span className="ai-prose-empty-state__mark">{initializing ? '…' : '!'}</span>
           <h2>{initializing ? '正在恢复 AI 草稿' : 'AI 草稿不可用'}</h2>
           <p>{initializationMessage || errorMessage || '当前场景还没有可编辑的草稿。'}</p>
-          {!initializing && <button className="ai-prose-button ai-prose-button--primary" type="button" onClick={startNewDraft}>新建草稿</button>}
+          {!initializing && !errorMessage && <button className="ai-prose-button ai-prose-button--primary" type="button" onClick={startNewDraft}>新建草稿</button>}
         </div>
       </div>
     );
   }
+
+  const normalizedCount = groupNormalizationBlocks(draft).reduce((sum, group) => sum + group.blocks.length, 0);
+  const stageSummary = activeStage === 'source' ? `${formatCount(visibleCount)} 字 · ${lineCount} 行`
+    : activeStage === 'segments' ? `${segments.length} 段`
+      : activeStage === 'characters' ? `${mainCharacters.length} 位人物`
+        : activeStage === 'normalize' ? `${normalizedCount} 句`
+          : `${draft.preview?.statements.length ?? normalizedCount} 句 · ${formatTime(draft.preview?.durationSeconds ?? 0, 0)}`;
 
   return (
     <div
@@ -121,12 +127,12 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
         <div className="ai-prose-brand">AI 铺戏</div>
         <AiWorkbenchModeSwitch />
         <div className="ai-prose-topbar__spacer" />
-        <span className="ai-prose-save-state"><i />{persistenceMessage ? '保存异常' : '草稿已保存'}</span>
+        <span className={`ai-prose-save-state ${persistenceMessage ? 'is-error' : ''}`} title={persistenceMessage || undefined} aria-live="polite"><i />{persistenceMessage ? '保存异常' : saving ? '正在保存…' : '草稿已保存'}</span>
         <span className={`ai-prose-ai-state ${aiStateClass}`} aria-live="polite"><i />{aiStateText}</span>
         <button className="ai-prose-button ai-prose-button--ghost" type="button" aria-expanded={traceOpen} onClick={() => setTraceOpen((value) => !value)}>{traceOpen ? '隐藏轨迹' : '显示轨迹'}</button>
         <button className="ai-prose-button ai-prose-button--ghost" type="button" onClick={() => void eventBus.emit('ui:openSettings', { tab: 'ai' })}>AI 设置</button>
-        <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={startNewDraft} title="新建 AI 草稿" aria-label="新建 AI 草稿"><IconPlus size={16} /></button>
-        {onClose && <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={onClose} title="关闭 AI 铺戏" aria-label="关闭 AI 铺戏"><IconX width={16} height={16} /></button>}
+        <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={startNewDraft} disabled={busyStage !== null || enhancementBusy || initializing} title="新建 AI 草稿" aria-label="新建 AI 草稿"><IconPlus size={16} /></button>
+        {onClose && <button className="ai-prose-button ai-prose-button--icon" type="button" onClick={() => void handleClose()} title="关闭 AI 铺戏" aria-label="关闭 AI 铺戏"><IconX width={16} height={16} /></button>}
       </header>
 
       <div className={`ai-prose-body-grid ${traceOpen ? 'has-trace' : ''}`}>
@@ -191,7 +197,7 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
                 <SourceReference
                   sourceText={sourceText}
                   sourceName={sourceName}
-                  busy={busyStage !== null}
+                  busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
                   onEdit={(event) => {
                     setActiveStage('source');
                     event.currentTarget.closest('aside')?.querySelector<HTMLButtonElement>('#ai-prose-tab-source')?.focus();
@@ -227,6 +233,7 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
           <div className="ai-prose-artifact-workspace" id="ai-prose-stage-panel" role="tabpanel" aria-labelledby={`ai-prose-tab-${activeStage}`} tabIndex={0}>
             {activeStage === 'source' && (
               <SourceStage
+                busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
                 anchorMode={draft.anchorMode}
                 scriptReadingSpeed={scriptReadingSpeed}
                 onReadingSpeedChange={handleReadingSpeedChange}
@@ -236,8 +243,9 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
                     sourceName={sourceName}
                     visibleCount={visibleCount}
                     spokenCount={spokenCount}
+                    scriptReadingSpeed={scriptReadingSpeed}
                     fileInputKey={fileInputKey}
-                    busy={busyStage !== null}
+                    busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
                     onSourceChange={handleSourceChange}
                     onImportFile={handleImportFile}
                   />
@@ -248,12 +256,10 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
               <SegmentsStage
                 draft={draft}
                 segments={segments}
-                selectedSegment={selectedSegment}
                 targetBatchSize={targetBatchSize}
-                onSelectSegment={setSelectedSegment}
                 onTargetBatchSizeChange={handleTargetBatchSizeChange}
                 onPrepare={() => void runPrepare()}
-                busy={busyStage !== null}
+                busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
               />
             )}
             {activeStage === 'characters' && (
@@ -261,30 +267,31 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
                 draft={draft}
                 names={mainCharacters}
                 document={document}
-                onNamesChange={setMainCharacters}
+                onNamesChange={handleMainCharactersChange}
                 onBindingChange={handleBindingChange}
-                busy={busyStage !== null}
+                busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
               />
             )}
             {activeStage === 'normalize' && (
               <NormalizeStage
                 draft={draft}
-                blocks={filteredBlocks}
+                document={document}
                 selectedFilter={selectedFilter}
                 onFilterChange={setSelectedFilter}
                 onRetry={retryNormalizationSegment}
                 onNormalize={() => void runNormalization(draft.confirmedMainCharacters)}
-                busy={busyStage !== null}
+                busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
               />
             )}
             {activeStage === 'timing' && (
               <TimingStage
                 draft={draft}
+                document={document}
                 blocks={normalizationBlocks}
                 scriptReadingSpeed={scriptReadingSpeed}
                 onReadingSpeedChange={handleReadingSpeedChange}
                 onRhythm={() => void runRhythm()}
-                busy={busyStage !== null || enhancementBusy}
+                busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
                 enableActing={enableActing}
                 enableCinematic={enableCinematic}
                 onEnableActingChange={setEnableActing}
@@ -319,13 +326,7 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
           <span>
             <strong>{STAGES[activeStageIndex]?.label}</strong>
             <small>
-              {formatCount(visibleCount)}
-              {' '}
-              字 ·
-              {' '}
-              {lineCount}
-              {' '}
-              行
+              {stageSummary}
               {draft.status === 'applied' ? ' · 已应用' : ''}
               {initializationMessage ? ` · ${initializationMessage}` : ''}
             </small>
@@ -374,14 +375,16 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
               else if (activeStage === 'timing') setShowApplyDialog(true);
             }}
             disabled={
-              busyStage !== null
+              draft.status === 'applied'
+              || busyStage !== null
               || enhancementBusy
               || (activeStage === 'source' && !sourceText.trim())
               || (activeStage === 'segments' && draft.segmentation.status !== 'succeeded')
+              || (activeStage === 'normalize' && !isStageReady(draft, 'timing'))
               || (activeStage === 'timing' && !canApply)
             }
           >
-            {activeStage === 'timing'
+            {draft.status === 'applied' ? '已应用到正式时间线' : activeStage === 'timing'
               ? '写入正式时间线'
               : busyStage
                 ? '分析中…'
