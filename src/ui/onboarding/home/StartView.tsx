@@ -10,11 +10,12 @@ type Props = Pick<ProjectHomeProps, 'recentProjects' | 'onOpenRecentProject' | '
   'onRemoveRecentProject' | 'templatePackages' | 'onImportTemplatePackage' | 'onDeleteTemplatePackage' | 'onStartTutorial'> & {
     onCreate: () => void;
     openingRecentPath: string | null;
+    workflowBusy?: boolean;
     selectionMemory?: MutableRefObject<{ path: string | null } | null>;
   };
 
 export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentProject, onRemoveRecentProject,
-  templatePackages, onImportTemplatePackage, onDeleteTemplatePackage, onStartTutorial, onCreate, selectionMemory, openingRecentPath }: Props) {
+  templatePackages, onImportTemplatePackage, onDeleteTemplatePackage, onStartTutorial, onCreate, selectionMemory, openingRecentPath, workflowBusy = false }: Props) {
   const [now, setNow] = useState(Date.now);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const projects = useMemo(() => recentProjects.slice(0, RECENT_PROJECT_PREVIEW_LIMIT), [recentProjects]);
@@ -28,10 +29,10 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
     : projects.find((project) => project.projectFilePath === selection?.path) ?? projects[0];
   const selectedPath = selectedProject?.projectFilePath;
   const handleOpen = useCallback(async (path: string) => {
-    if (openingRecentPath !== null || primaryRef.current?.closest('[inert]')) return;
+    if (workflowBusy || openingRecentPath !== null || primaryRef.current?.closest('[inert]')) return;
     if (projects.some((project) => project.projectFilePath === path)) selectProject(path);
     await onOpenRecentProject(path);
-  }, [onOpenRecentProject, openingRecentPath, projects, selectProject]);
+  }, [onOpenRecentProject, openingRecentPath, projects, selectProject, workflowBusy]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -53,13 +54,13 @@ export function StartView({ recentProjects, onOpenRecentProject, onRenameRecentP
   }, [handleOpen, selectedPath]);
 
   return <div className="ph-start">
-    <ProjectStoryboard projects={projects} project={selectedProject} now={now} opening={openingRecentPath !== null} primaryRef={primaryRef} onSelect={selectProject}
+    <ProjectStoryboard projects={projects} project={selectedProject} now={now} opening={openingRecentPath !== null} disabled={workflowBusy} primaryRef={primaryRef} onSelect={selectProject}
       onOpen={(path) => { void handleOpen(path); }} onCreate={onCreate} onStartTutorial={onStartTutorial} />
     <div className="ph-start__library">
-      <RecentProjectList recentProjects={recentProjects} now={now} openingRecentPath={openingRecentPath}
+      <RecentProjectList recentProjects={recentProjects} now={now} openingRecentPath={openingRecentPath} workflowBusy={workflowBusy}
         onOpen={(path) => { void handleOpen(path); }} onRenameRecentProject={onRenameRecentProject} onRemoveRecentProject={onRemoveRecentProject} />
       <TemplateLibraryPanel templatePackages={templatePackages} onImportTemplatePackage={onImportTemplatePackage}
-        onDeleteTemplatePackage={onDeleteTemplatePackage} />
+        onDeleteTemplatePackage={onDeleteTemplatePackage} disabled={workflowBusy} />
     </div>
   </div>;
 }

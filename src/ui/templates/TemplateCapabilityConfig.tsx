@@ -143,6 +143,7 @@ export const TemplatePackageSelector = ({
   onMove,
   onDeletePackage,
   compact = false,
+  disabled = false,
   headerActions,
 }: {
   packages: TemplatePackageSummary[];
@@ -151,12 +152,13 @@ export const TemplatePackageSelector = ({
   onMove?: (templateId: string, direction: -1 | 1) => void;
   onDeletePackage?: (templatePackage: TemplatePackageSummary) => Promise<void>;
   compact?: boolean;
+  disabled?: boolean;
   headerActions?: React.ReactNode;
 }) => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState('');
   const deletePackage = async (templatePackage: TemplatePackageSummary) => {
-    if (!onDeletePackage || deletingId) return;
+    if (!onDeletePackage || deletingId || disabled) return;
     setDeletingId(templatePackage.id);
     setDeleteError('');
     try {
@@ -200,7 +202,7 @@ export const TemplatePackageSelector = ({
                   type="checkbox"
                   aria-label={`启用模板 ${templatePackage.name}`}
                   checked={checked}
-                  disabled={deletingId !== null}
+                  disabled={disabled || deletingId !== null}
                   onChange={() => onToggle(templatePackage.id)}
                 />
               </label>}
@@ -221,7 +223,7 @@ export const TemplatePackageSelector = ({
                       className="btn btn--icon"
                       title="上移"
                       aria-label={`${templatePackage.name} 上移`}
-                      disabled={deletingId !== null || selectedIndex <= 0}
+                      disabled={disabled || deletingId !== null || selectedIndex <= 0}
                       onClick={() => onMove(templatePackage.id, -1)}
                     >
                       <IconChevronUp width={13} height={13} />
@@ -231,7 +233,7 @@ export const TemplatePackageSelector = ({
                       className="btn btn--icon"
                       title="下移"
                       aria-label={`${templatePackage.name} 下移`}
-                      disabled={deletingId !== null || selectedIndex === selectedIds.length - 1}
+                      disabled={disabled || deletingId !== null || selectedIndex === selectedIds.length - 1}
                       onClick={() => onMove(templatePackage.id, 1)}
                     >
                       <IconChevronDown width={13} height={13} />
@@ -244,7 +246,7 @@ export const TemplatePackageSelector = ({
                     className="btn btn--icon btn--danger"
                     title="删除模板包"
                     aria-label={`删除模板包 ${templatePackage.name}`}
-                    disabled={deletingId !== null}
+                    disabled={disabled || deletingId !== null}
                     onClick={() => { void deletePackage(templatePackage); }}
                   >
                     <IconTrash width={14} height={14} />
@@ -263,6 +265,7 @@ export const TemplatePackageSelector = ({
 };
 
 export const TemplateCapabilityConfig = ({
+  disabled = false,
   dialogueStyles,
   resolvedDialogueStyle,
   onChangeDialogueStyleOverride,
@@ -272,6 +275,7 @@ export const TemplateCapabilityConfig = ({
   characterVariantImportMode,
   onChangeCharacterVariantImportMode,
 }: {
+  disabled?: boolean;
   dialogueStyles?: DialogueStyleListItem[];
   resolvedDialogueStyle?: ResolvedTemplateDefaultValue;
   onChangeDialogueStyleOverride?: (styleId: string | undefined) => void;
@@ -290,6 +294,7 @@ export const TemplateCapabilityConfig = ({
         presets={dialogueStyles}
         resolved={resolvedDialogueStyle}
         onChange={onChangeDialogueStyleOverride}
+        disabled={disabled}
       />
     )}
 
@@ -307,6 +312,7 @@ export const TemplateCapabilityConfig = ({
         presets={characterPresets}
         selectedIds={selectedCharacterPresetIds}
         onToggle={onToggleCharacterPreset}
+        disabled={disabled}
       />
       <div className="template-capability-panel__controls">
         <div>
@@ -323,6 +329,7 @@ export const TemplateCapabilityConfig = ({
             { value: 'all', label: '完整导入（全部服装）' },
           ]}
           onChange={(value) => onChangeCharacterVariantImportMode(value === 'all' ? 'all' : 'primary-only')}
+          disabled={disabled}
           className="template-capability-panel__select template-capability-panel__variant"
         />
       </div>
@@ -347,10 +354,12 @@ const CharacterPresetSelector = ({
   presets,
   selectedIds,
   onToggle,
+  disabled,
 }: {
   presets: CharacterPresetListItem[];
   selectedIds: string[];
   onToggle: (presetId: string) => void;
+  disabled: boolean;
 }) => (
   <div className="template-character-presets">
     {presets.length > 0 ? (
@@ -358,7 +367,7 @@ const CharacterPresetSelector = ({
         {presets.map((preset) => (
           <label key={`${preset.templateId}:${preset.id}`} className="template-preset-row template-preset-row--character"
             data-selected={selectedIds.includes(preset.id)}>
-            <input type="checkbox" aria-label={`选择初始角色 ${preset.name}`}
+            <input type="checkbox" aria-label={`选择初始角色 ${preset.name}`} disabled={disabled}
               checked={selectedIds.includes(preset.id)} onChange={() => onToggle(preset.id)} />
             <span className="template-preset-text">
               <span className="template-preset-name">
@@ -384,6 +393,7 @@ const DefaultPresetSelector = ({
   presets,
   resolved,
   onChange,
+  disabled,
 }: {
   title: string;
   description: string;
@@ -391,6 +401,7 @@ const DefaultPresetSelector = ({
   presets: Array<{ id: string; name: string; templateId: string; templateName: string }>;
   resolved: ResolvedTemplateDefaultValue;
   onChange: (presetId: string | undefined) => void;
+  disabled: boolean;
 }) => (
   <section className="template-capability-panel">
     <div className="template-capability-panel__header">
@@ -412,13 +423,14 @@ const DefaultPresetSelector = ({
             label: `${preset.name} · ${preset.templateName}`,
           }))}
           onChange={(value) => onChange(value || undefined)}
+          disabled={disabled}
           className="template-capability-panel__select"
         />
         <button
           className="btn"
           type="button"
           onClick={() => onChange(undefined)}
-          disabled={resolved.source !== 'user'}
+          disabled={disabled || resolved.source !== 'user'}
         >
           使用模板默认
         </button>

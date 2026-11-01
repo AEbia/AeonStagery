@@ -66,6 +66,8 @@ export interface ProjectHomeProps {
   onReplaceExternalLibrary: (index: number) => void | Promise<void>;
   onRemoveExternalLibrary: (index: number) => void | Promise<void>;
   onSkipExternalLibrary: () => void | Promise<void>;
+  projectWorkflowBusy?: boolean;
+  runProjectWorkflow?: (operation: () => void | Promise<void>) => Promise<void>;
 }
 
 export type CollaborationMode = 'menu' | 'host-new' | 'host-existing' | 'join';
@@ -114,23 +116,74 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   onReplaceExternalLibrary,
   onRemoveExternalLibrary,
   onSkipExternalLibrary,
+  projectWorkflowBusy: externalProjectWorkflowBusy = false,
+  runProjectWorkflow: runExternalProjectWorkflow,
 }) => {
   const { view: currentViewKey, stageRef, navigateTo } = useHomeNavigation();
   const storyboardSelection = useRef<{ path: string | null } | null>(null);
+  const [localProjectWorkflowBusy, setLocalProjectWorkflowBusy] = useState(false);
+  const localProjectWorkflowRunning = useRef(false);
+  const runProjectWorkflow = useCallback(async (operation: () => void | Promise<void>) => {
+    if (runExternalProjectWorkflow) {
+      await runExternalProjectWorkflow(operation);
+      return;
+    }
+    if (localProjectWorkflowRunning.current) return;
+    localProjectWorkflowRunning.current = true;
+    setLocalProjectWorkflowBusy(true);
+    try {
+      await operation();
+    } finally {
+      localProjectWorkflowRunning.current = false;
+      setLocalProjectWorkflowBusy(false);
+    }
+  }, [runExternalProjectWorkflow]);
+  const isProjectWorkflowBusy = externalProjectWorkflowBusy || localProjectWorkflowBusy;
+  const handleOpenProject = useCallback(
+    () => runProjectWorkflow(onOpenProject),
+    [onOpenProject, runProjectWorkflow],
+  );
+  const handleCreateProject = useCallback(
+    (payload: Parameters<ProjectHomeProps['onCreateProject']>[0]) => runProjectWorkflow(() => onCreateProject(payload)),
+    [onCreateProject, runProjectWorkflow],
+  );
+  const handleHostNewCollaboration = useCallback(
+    (payload: Parameters<ProjectHomeProps['onHostNewCollaboration']>[0]) => runProjectWorkflow(() => onHostNewCollaboration(payload)),
+    [onHostNewCollaboration, runProjectWorkflow],
+  );
+  const handleHostExistingCollaboration = useCallback(
+    (payload: Parameters<ProjectHomeProps['onHostExistingCollaboration']>[0]) => runProjectWorkflow(() => onHostExistingCollaboration(payload)),
+    [onHostExistingCollaboration, runProjectWorkflow],
+  );
+  const handleJoinCollaboration = useCallback(
+    (payload: Parameters<ProjectHomeProps['onJoinCollaboration']>[0]) => runProjectWorkflow(() => onJoinCollaboration(payload)),
+    [onJoinCollaboration, runProjectWorkflow],
+  );
+  const handleImportTemplatePackage = useCallback(
+    () => runProjectWorkflow(onImportTemplatePackage),
+    [onImportTemplatePackage, runProjectWorkflow],
+  );
+  const handleDeleteTemplatePackage = useCallback(async (templatePackage: TemplatePackageSummary) => {
+    if (onDeleteTemplatePackage) await runProjectWorkflow(() => onDeleteTemplatePackage(templatePackage));
+  }, [onDeleteTemplatePackage, runProjectWorkflow]);
   // Keep the open operation's lifetime independent of the routed StartView.
   const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
   const openingRecent = useRef(false);
   const handleOpenRecentProject = useCallback(async (path: string) => {
-    if (openingRecent.current) return;
+    if (openingRecent.current || localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
     openingRecent.current = true;
     setOpeningRecentPath(path);
     try {
-      await onOpenRecentProject(path);
+      await runProjectWorkflow(() => onOpenRecentProject(path));
     } finally {
       openingRecent.current = false;
       setOpeningRecentPath(null);
     }
-  }, [onOpenRecentProject]);
+  }, [onOpenRecentProject, runProjectWorkflow]);
+  const navigateHomeTo = (target: NavigationTarget) => {
+    if (localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
+    navigateTo(target);
+  };
   const mode = currentViewKey === 'start' ? 'start' : currentViewKey.startsWith('create-') ? 'create' : 'collaboration';
   const createView: CreateView = currentViewKey === 'create-capabilities' ? 'template-capabilities' : 'form';
   const collaborationMode: CollaborationMode = currentViewKey === 'collab-host-new' ? 'host-new'
@@ -138,73 +191,75 @@ export const ProjectHome: React.FC<ProjectHomeProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isChoosingLibrary, setIsChoosingLibrary] = useState(false);
   const handleChooseExternalLibrary = async () => {
-    if (isChoosingLibrary) return;
+    if (isChoosingLibrary || localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
     setIsChoosingLibrary(true);
     try {
-      await onChooseExternalLibrary();
+      await runProjectWorkflow(onChooseExternalLibrary);
     } finally {
       setIsChoosingLibrary(false);
     }
   };
 
   const handleReplaceExternalLibrary = async (index: number) => {
-    if (isChoosingLibrary) return;
+    if (isChoosingLibrary || localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
     setIsChoosingLibrary(true);
     try {
-      await onReplaceExternalLibrary(index);
+      await runProjectWorkflow(() => onReplaceExternalLibrary(index));
     } finally {
       setIsChoosingLibrary(false);
     }
   };
 
   const handleRemoveExternalLibrary = async (index: number) => {
-    if (isChoosingLibrary) return;
+    if (isChoosingLibrary || localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
     setIsChoosingLibrary(true);
     try {
-      await onRemoveExternalLibrary(index);
+      await runProjectWorkflow(() => onRemoveExternalLibrary(index));
     } finally {
       setIsChoosingLibrary(false);
     }
   };
 
   const handleSkipExternalLibrary = async () => {
-    if (isChoosingLibrary) return;
+    if (isChoosingLibrary || localProjectWorkflowRunning.current || externalProjectWorkflowBusy) return;
     setIsChoosingLibrary(true);
     try {
-      await onSkipExternalLibrary();
+      await runProjectWorkflow(onSkipExternalLibrary);
     } finally {
       setIsChoosingLibrary(false);
     }
   };
 
   const createDraft = useCreateProjectDraft({ defaultProjectName, defaultProjectLocation, templatePackages,
-    onCreateProject, onBrowseCreateLocation, onRegisterWebGalAssetSource, isSubmitting, setIsSubmitting });
+    onCreateProject: handleCreateProject, onBrowseCreateLocation, onRegisterWebGalAssetSource, isSubmitting, setIsSubmitting });
   const collabDraft = useCollaborationDraft({ defaultProjectName, defaultProjectLocation, collaborationEndpoint,
-    collaborationDisplayName, onBrowseCreateLocation, onBrowseCollaborationDirectory, onHostNewCollaboration,
-    onHostExistingCollaboration, onJoinCollaboration, isSubmitting, setIsSubmitting,
+    collaborationDisplayName, onBrowseCreateLocation, onBrowseCollaborationDirectory, onHostNewCollaboration: handleHostNewCollaboration,
+    onHostExistingCollaboration: handleHostExistingCollaboration, onJoinCollaboration: handleJoinCollaboration, isSubmitting, setIsSubmitting,
     videoFormat: createDraft.videoFormat, setVideoFormat: createDraft.setVideoFormat });
 
   return <HomeShell
+    busy={isProjectWorkflowBusy}
     rail={<HomeCommandRail activeTarget={mode === 'create' ? 'create' : mode === 'collaboration' ? 'collaboration' : undefined}
-      onGoHome={() => navigateTo('start')} onCreate={() => navigateTo('create-form')} onOpen={onOpenProject}
-      onCollaborate={() => navigateTo('collab-menu')} onStartTutorial={onStartTutorial} />}
+      busy={isProjectWorkflowBusy} onGoHome={() => navigateHomeTo('start')} onCreate={() => navigateHomeTo('create-form')} onOpen={handleOpenProject}
+      onCollaborate={() => navigateHomeTo('collab-menu')} onStartTutorial={onStartTutorial} />}
     sources={<SourceDock paths={externalLibraryPaths} shouldPrompt={shouldPromptExternalLibrary}
-      isBusy={isChoosingLibrary} onAdd={handleChooseExternalLibrary} onReplace={handleReplaceExternalLibrary}
+      isBusy={isChoosingLibrary} disabled={isProjectWorkflowBusy} onAdd={handleChooseExternalLibrary} onReplace={handleReplaceExternalLibrary}
       onRemove={handleRemoveExternalLibrary} onSkip={handleSkipExternalLibrary} />}>
     <div ref={stageRef} className="ph-view-stage">
       <React.Fragment key={currentViewKey}>
       {mode === 'start' ? <StartView recentProjects={recentProjects} selectionMemory={storyboardSelection}
-        openingRecentPath={openingRecentPath} onOpenRecentProject={handleOpenRecentProject}
+        openingRecentPath={openingRecentPath} workflowBusy={isProjectWorkflowBusy} onOpenRecentProject={handleOpenRecentProject}
         onRenameRecentProject={onRenameRecentProject} onRemoveRecentProject={onRemoveRecentProject}
-        templatePackages={templatePackages} onImportTemplatePackage={onImportTemplatePackage}
-        onDeleteTemplatePackage={onDeleteTemplatePackage} onCreate={() => navigateTo('create-form')}
+        templatePackages={templatePackages} onImportTemplatePackage={handleImportTemplatePackage}
+        onDeleteTemplatePackage={handleDeleteTemplatePackage} onCreate={() => navigateHomeTo('create-form')}
         onStartTutorial={onStartTutorial} />
         : mode === 'create' ? <CreateProjectView draft={createDraft} createView={createView}
-          navigateTo={navigateTo} templatePackages={templatePackages} onDeleteTemplatePackage={onDeleteTemplatePackage} />
-          : <CollaborationView draft={collabDraft} collaborationMode={collaborationMode} navigateTo={navigateTo}
+          workflowBusy={isProjectWorkflowBusy} navigateTo={navigateHomeTo} templatePackages={templatePackages} onDeleteTemplatePackage={handleDeleteTemplatePackage} />
+          : <CollaborationView draft={collabDraft} collaborationMode={collaborationMode} navigateTo={navigateHomeTo}
             collaborationStatus={collaborationStatus} collaborationEndpoint={collaborationEndpoint}
             collaborationServerStatus={collaborationServerStatus} assetHandshake={assetHandshake}
-            onCancelResourceTransfer={onCancelResourceTransfer} onStopCollaborationServer={onStopCollaborationServer} />}
+            onCancelResourceTransfer={onCancelResourceTransfer} onStopCollaborationServer={onStopCollaborationServer}
+            workflowBusy={isProjectWorkflowBusy} />}
       </React.Fragment>
     </div>
   </HomeShell>;

@@ -144,6 +144,19 @@ function AppContent({ contextValue, sessionBindings }: {
     handleChooseExternalLibrary, handleReplaceExternalLibrary, handleRemoveExternalLibrary,
     handleSkipExternalLibrary, shouldPromptExternalLibrary, externalLibraryPaths,
   } = project;
+  const homeProjectWorkflowRunning = useRef(false);
+  const [homeProjectWorkflowBusy, setHomeProjectWorkflowBusy] = useState(false);
+  const runHomeProjectWorkflow = useCallback(async (operation: () => void | Promise<void>) => {
+    if (homeProjectWorkflowRunning.current) return;
+    homeProjectWorkflowRunning.current = true;
+    setHomeProjectWorkflowBusy(true);
+    try {
+      await operation();
+    } finally {
+      homeProjectWorkflowRunning.current = false;
+      setHomeProjectWorkflowBusy(false);
+    }
+  }, []);
   const projectHomeRequested = initialized && !initError && (!currentProject || isCollaborationJoinHomeLocked);
   const homeTransition = useWorkspaceTransition(projectHomeRequested, hasLoadedScene);
   const showProjectHome = homeTransition.showHome;
@@ -163,6 +176,7 @@ function AppContent({ contextValue, sessionBindings }: {
     project.waitForPendingProjectOperations,
   );
   const handleReturnHome = useCallback(async () => {
+    if (homeProjectWorkflowRunning.current) return;
     if (!await returnHome(handleCloseProject)) return;
     setIsCollaborationJoinHomeLocked(false);
     setShowAIWorkbench(false);
@@ -193,8 +207,8 @@ function AppContent({ contextValue, sessionBindings }: {
     height: contextValue.adapters.stage.getHeight(),
   });
   useAppShortcuts({
-    contextValue, collaborationStatus, initialized: initialized && !isClosingProject && !homeTransition.busy, hasLoadedScene, showProjectHome,
-    handleStageReset, handleSave, handleOpenProject, setShowExport,
+    contextValue, collaborationStatus, initialized: initialized && !isClosingProject && !homeTransition.busy && !homeProjectWorkflowBusy, hasLoadedScene, showProjectHome,
+    handleStageReset, handleSave, handleOpenProject: () => runHomeProjectWorkflow(handleOpenProject), setShowExport,
   });
   const validationBanner = useMemo(() => {
     if (globalIssues.length === 0) {
@@ -238,7 +252,7 @@ function AppContent({ contextValue, sessionBindings }: {
             type="button"
             className={`top-bar__brand-control${currentProject && !isCollaborationJoinHomeLocked ? ' top-bar__brand-control--return' : ''}`}
             onClick={() => void handleReturnHome()}
-            disabled={!initialized || !currentProject || isCollaborationJoinHomeLocked || isClosingProject}
+            disabled={!initialized || !currentProject || isCollaborationJoinHomeLocked || isClosingProject || homeProjectWorkflowBusy}
             title={currentProject ? '保存并关闭当前项目，返回项目主页' : 'AeonStagery'}
             aria-label={currentProject ? '关闭项目并返回主页' : 'AeonStagery'}
           >
@@ -537,7 +551,7 @@ function AppContent({ contextValue, sessionBindings }: {
                     <button
                       className="btn"
                       onClick={() => void handleReturnHome()}
-                      disabled={isClosingProject}
+                      disabled={isClosingProject || homeProjectWorkflowBusy}
                       style={{ ...stageLoadButtonStyle, background: 'rgba(255,255,255,0.1)', color: '#e2e8f0' }}
                     >
                       返回项目主页
@@ -798,6 +812,8 @@ function AppContent({ contextValue, sessionBindings }: {
             onReplaceExternalLibrary={handleReplaceExternalLibrary}
             onRemoveExternalLibrary={handleRemoveExternalLibrary}
             onSkipExternalLibrary={handleSkipExternalLibrary}
+            projectWorkflowBusy={homeProjectWorkflowBusy}
+            runProjectWorkflow={runHomeProjectWorkflow}
           />
         ) : null}
       </FirstLessonController>

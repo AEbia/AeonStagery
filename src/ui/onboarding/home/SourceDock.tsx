@@ -1,9 +1,10 @@
 import { IconFolder, IconInfo, IconPlus } from '../../icons';
 
-export function SourceDock({ paths, shouldPrompt, isBusy, onAdd, onReplace, onRemove, onSkip }: {
+export function SourceDock({ paths, shouldPrompt, isBusy, disabled = false, onAdd, onReplace, onRemove, onSkip }: {
   paths: string[];
   shouldPrompt: boolean;
   isBusy: boolean;
+  disabled?: boolean;
   onAdd: () => void | Promise<void>;
   onReplace: (index: number) => void | Promise<void>;
   onRemove: (index: number) => void | Promise<void>;
@@ -13,7 +14,7 @@ export function SourceDock({ paths, shouldPrompt, isBusy, onAdd, onReplace, onRe
     <div className="ph-sources__heading">
       <div><h2>素材来源</h2><span>{paths.length} 个外部库</span></div>
       <button type="button" className="btn btn--icon" aria-label="添加外部库" title="添加外部库"
-        data-tutorial-target="external-library-add" disabled={isBusy} onClick={() => { void onAdd(); }}>
+        data-tutorial-target="external-library-add" disabled={isBusy || disabled} onClick={() => { void onAdd(); }}>
         <IconPlus width={16} height={16} />
       </button>
     </div>
@@ -24,12 +25,12 @@ export function SourceDock({ paths, shouldPrompt, isBusy, onAdd, onReplace, onRe
           <span title={path}>{path}</span></div>
         <div className="ph-source__actions">
           <button type="button" className="btn ph-btn-tiny" data-tutorial-target={`external-library-replace-${index}`}
-            disabled={isBusy} onClick={() => { void onReplace(index); }}>修改</button>
-          <button type="button" className="btn ph-btn-tiny" disabled={isBusy} onClick={() => { void onRemove(index); }}>移除</button>
+            disabled={isBusy || disabled} onClick={() => { void onReplace(index); }}>修改</button>
+          <button type="button" className="btn ph-btn-tiny" disabled={isBusy || disabled} onClick={() => { void onRemove(index); }}>移除</button>
         </div>
       </div>) : <div className="ph-sources__empty"><IconInfo width={16} height={16} />
         <span>{shouldPrompt ? '还没有连接外部素材库。' : '未配置外部素材库。'}</span>
-        {shouldPrompt && <button type="button" className="btn ph-btn-tiny" disabled={isBusy}
+        {shouldPrompt && <button type="button" className="btn ph-btn-tiny" disabled={isBusy || disabled}
           onClick={() => { void onSkip(); }}>暂不配置</button>}
       </div>}
     </div>

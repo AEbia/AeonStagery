@@ -738,13 +738,15 @@ describe('ProjectHome stage entrance', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '继续制作：Project 1' }).hasAttribute('disabled')).toBe(false));
   });
 
-  it('keeps the pending-open lock across navigation away from and back to the start view', async () => {
+  it('blocks navigation and other project opens until the pending open finishes', async () => {
     let finish = () => {};
     const pending = new Promise<void>((resolve) => { finish = resolve; });
     const props = renderHome({ recentProjects: makeRecentProjects(2), onOpenRecentProject: vi.fn(() => pending) });
     fireEvent.click(screen.getByRole('button', { name: '继续制作：Project 1' }));
+    expect(screen.getByRole('button', { name: /^新建项目$/ }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'AeonStagery 首页' }).hasAttribute('disabled')).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
-    expect(screen.getByLabelText('项目名称')).toBeTruthy();
+    expect(screen.queryByLabelText('项目名称')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'AeonStagery 首页' }));
     fireEvent.click(screen.getByRole('button', { name: '打开最近项目：Project 2' }));
     (document.activeElement as HTMLElement).blur();
@@ -753,6 +755,9 @@ describe('ProjectHome stage entrance', () => {
     expect(screen.getByRole('button', { name: '继续制作：Project 1' }).hasAttribute('disabled')).toBe(true);
     finish();
     await waitFor(() => expect(screen.getByRole('button', { name: '打开最近项目：Project 2' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: /^新建项目$/ }));
+    expect(screen.getByLabelText('项目名称')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'AeonStagery 首页' }));
     fireEvent.click(screen.getByRole('button', { name: '打开最近项目：Project 2' }));
     await waitFor(() => expect(props.onOpenRecentProject).toHaveBeenLastCalledWith('D:/projects/project-2/project.json'));
   });

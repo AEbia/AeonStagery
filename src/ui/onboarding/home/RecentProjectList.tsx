@@ -12,15 +12,17 @@ import { filterRecentProjects, formatAbsoluteTime, formatRelativeTime, RECENT_PR
 type Props = Pick<ProjectHomeProps, 'recentProjects' | 'onRenameRecentProject' | 'onRemoveRecentProject'> & {
   now: number;
   openingRecentPath: string | null;
+  workflowBusy?: boolean;
   onOpen: (path: string) => void;
 };
 
-export function RecentProjectList({ recentProjects, now, openingRecentPath, onOpen, onRenameRecentProject, onRemoveRecentProject }: Props) {
+export function RecentProjectList({ recentProjects, now, openingRecentPath, workflowBusy = false, onOpen, onRenameRecentProject, onRemoveRecentProject }: Props) {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(false);
   const [projectToRemove, setProjectToRemove] = useState<RecentProjectEntry | null>(null);
   const listId = useId();
   const isSearching = query.trim().length > 0;
+  const actionsDisabled = workflowBusy || openingRecentPath !== null;
   const hasMoreProjects = recentProjects.length > RECENT_PROJECT_PREVIEW_LIMIT;
   const filteredProjects = useMemo(() => filterRecentProjects(recentProjects, query), [recentProjects, query]);
   const projects = isSearching || expanded ? filteredProjects : filteredProjects.slice(0, RECENT_PROJECT_PREVIEW_LIMIT);
@@ -42,10 +44,10 @@ export function RecentProjectList({ recentProjects, now, openingRecentPath, onOp
       </div>}
     </div>
     <div className="ph-recents__list" id={listId}>
-      {projects.map((project) => <FileRevealContext key={project.projectFilePath} path={project.projectFilePath} name={project.name}>
+      {projects.map((project) => <FileRevealContext key={project.projectFilePath} path={project.projectFilePath} name={project.name} enabled={!workflowBusy}>
         <div className="ph-recents__item">
           <button type="button" className="ph-recents__open" aria-label={`打开最近项目：${project.name}`}
-            disabled={openingRecentPath !== null} title={project.rootPath} onClick={() => onOpen(project.projectFilePath)}>
+            disabled={actionsDisabled} title={project.rootPath} onClick={() => onOpen(project.projectFilePath)}>
             <span className="ph-recents__thumbnail"><StageSignatureRails blocks={buildStageSignature(project.rootPath, 3)} /></span>
             <span className="ph-recents__copy"><strong>{project.name}</strong><span>{project.rootPath}</span></span>
             <time className="ph-recents__time" dateTime={project.lastOpenedAt}
@@ -54,9 +56,9 @@ export function RecentProjectList({ recentProjects, now, openingRecentPath, onOp
           <div className="ph-recents__actions">
             <FileRevealButton path={project.projectFilePath} name={project.name} compact />
             <button type="button" className="btn btn--icon" aria-label={`重命名项目：${project.name}`} title="重命名项目"
-              disabled={openingRecentPath !== null} onClick={() => onRenameRecentProject(project)}><IconPencil width={14} height={14} /></button>
+              disabled={actionsDisabled} onClick={() => onRenameRecentProject(project)}><IconPencil width={14} height={14} /></button>
             <button type="button" className="btn btn--icon btn--danger" aria-label={`移除最近项目：${project.name}`} title="移除最近项目"
-              onClick={() => setProjectToRemove(project)}><IconTrash width={14} height={14} /></button>
+              disabled={actionsDisabled} onClick={() => setProjectToRemove(project)}><IconTrash width={14} height={14} /></button>
           </div>
         </div>
       </FileRevealContext>)}

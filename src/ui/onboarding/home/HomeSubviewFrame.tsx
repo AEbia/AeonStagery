@@ -2,23 +2,24 @@ import { useId, type ReactNode } from 'react';
 import { IconArrowLeft } from '../../icons';
 import { InfoTip } from '../../Tooltip';
 
-export function HomeSubviewFrame({ title, currentLabel = title, info, parent, onGoHome, onBack, children }: {
+export function HomeSubviewFrame({ title, currentLabel = title, info, parent, onGoHome, onBack, navigationDisabled = false, children }: {
   title: string;
   currentLabel?: string;
   info?: string;
   parent?: { label: string; onClick: () => void };
   onGoHome: () => void;
   onBack: () => void;
+  navigationDisabled?: boolean;
   children: ReactNode;
 }) {
   return <section className="ph-subview">
     <header className="ph-section-header">
       <div className="ph-subview-titles">
         <nav className="ph-breadcrumbs" aria-label="页面导航">
-          <button type="button" className="ph-breadcrumb-btn" onClick={onGoHome}>开始制作</button>
+          <button type="button" className="ph-breadcrumb-btn" onClick={onGoHome} disabled={navigationDisabled}>开始制作</button>
           <span className="ph-breadcrumb-sep" aria-hidden="true">›</span>
           {parent && <>
-            <button type="button" className="ph-breadcrumb-btn" onClick={parent.onClick}>{parent.label}</button>
+            <button type="button" className="ph-breadcrumb-btn" onClick={parent.onClick} disabled={navigationDisabled}>{parent.label}</button>
             <span className="ph-breadcrumb-sep" aria-hidden="true">›</span>
           </>}
           <span className="ph-breadcrumb-current" aria-current="page">{currentLabel}</span>
@@ -28,7 +29,7 @@ export function HomeSubviewFrame({ title, currentLabel = title, info, parent, on
           {info && <p className="ph-section-subtitle">{info}</p>}
         </div>
       </div>
-      <button type="button" className="btn ph-btn-compact ph-back-btn" onClick={onBack}>
+      <button type="button" className="btn ph-btn-compact ph-back-btn" onClick={onBack} disabled={navigationDisabled}>
         <IconArrowLeft width={13} height={13} className="ph-back-icon" /> 返回
       </button>
     </header>

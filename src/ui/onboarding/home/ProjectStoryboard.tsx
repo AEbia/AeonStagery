@@ -31,11 +31,12 @@ function ProjectCoverTitle({ project }: { project: RecentProjectEntry }) {
   </span>;
 }
 
-export function ProjectStoryboard({ projects, project, now, opening, primaryRef, onSelect, onOpen, onCreate, onStartTutorial }: {
+export function ProjectStoryboard({ projects, project, now, opening, disabled = false, primaryRef, onSelect, onOpen, onCreate, onStartTutorial }: {
   projects: RecentProjectEntry[];
   project?: RecentProjectEntry;
   now: number;
   opening: boolean;
+  disabled?: boolean;
   primaryRef: RefObject<HTMLButtonElement>;
   onSelect: (path: string | null) => void;
   onOpen: (path: string) => void;
@@ -47,9 +48,10 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
   const stageRef = useStoryboardMotion(paused || opening);
   const tabs = useRef<Array<HTMLButtonElement | null>>([]);
   const id = useId();
+  const actionsDisabled = opening || disabled;
   const selectedIndex = project ? projects.findIndex((entry) => entry.projectFilePath === project.projectFilePath) : projects.length;
   const select = (index: number, focus = false) => {
-    if (opening) return;
+    if (actionsDisabled) return;
     setEngaged(true);
     onSelect(projects[index]?.projectFilePath ?? null);
     if (focus) tabs.current[index]?.focus({ preventScroll: true });
@@ -69,7 +71,7 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
   };
 
   return <section ref={stageRef} className="ph-storyboard" aria-labelledby={`${id}-title`}
-    data-motion="paused" data-opening={opening || undefined} data-engaged={engaged || opening || undefined} aria-busy={opening}>
+    data-motion="paused" data-opening={opening || undefined} data-engaged={engaged || opening || undefined} aria-busy={actionsDisabled || undefined}>
     <div className="ph-board__toolbar">
       <h2>选择项目</h2>
       <span className="ph-board__position" aria-label={`第 ${selectedIndex + 1} 张，共 ${projects.length + 1} 张`}>
@@ -80,9 +82,9 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
           aria-label={paused ? '恢复分镜动效' : '暂停分镜动效'} title={paused ? '恢复分镜动效' : '暂停分镜动效'}>
           {paused ? <IconPlay width={14} height={14} /> : <IconPause width={14} height={14} />}
         </button>
-        <button type="button" className="btn btn--icon" aria-label="上一张分镜" disabled={opening || selectedIndex === 0}
+        <button type="button" className="btn btn--icon" aria-label="上一张分镜" disabled={actionsDisabled || selectedIndex === 0}
           onClick={() => select(selectedIndex - 1)}><IconChevronLeft width={18} height={18} /></button>
-        <button type="button" className="btn btn--icon" aria-label="下一张分镜" disabled={opening || selectedIndex === projects.length}
+        <button type="button" className="btn btn--icon" aria-label="下一张分镜" disabled={actionsDisabled || selectedIndex === projects.length}
           onClick={() => select(selectedIndex + 1)}><IconChevronRight width={18} height={18} /></button>
       </div>
     </div>
@@ -108,7 +110,7 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
               data-selected={active || undefined} data-distant={Math.abs(offset) > 2 || undefined}>
               <button type="button" role="tab" id={`${id}-tab-${index}`} aria-controls={`${id}-details`}
                 aria-selected={active} aria-label={entry ? `选择项目：${entry.name}` : '选择新建项目'}
-                tabIndex={active ? 0 : -1} disabled={opening}
+                tabIndex={active ? 0 : -1} disabled={actionsDisabled}
                 ref={(element) => { tabs.current[index] = element; }}
                 className={`ph-board__card${entry ? '' : ' ph-board__card--new'}`}
                 title={active ? entry ? `打开项目：${entry.name}` : '创建新项目' : undefined}
@@ -144,15 +146,15 @@ export function ProjectStoryboard({ projects, project, now, opening, primaryRef,
       <div className="ph-board__actions">
         {project ? <>
           <button type="button" ref={primaryRef} className="btn btn--primary ph-board__open"
-            aria-label={`继续制作：${project.name}`} disabled={opening} onClick={() => onOpen(project.projectFilePath)}>
+            aria-label={`继续制作：${project.name}`} disabled={actionsDisabled} onClick={() => onOpen(project.projectFilePath)}>
             <IconPlay width={15} height={15} />{opening ? '正在打开…' : '继续制作'}<kbd aria-hidden="true">Enter</kbd>
           </button>
           <FileRevealButton path={project.projectFilePath} name={project.name} />
         </> : <>
-          <button type="button" className="btn btn--primary ph-board__open" onClick={onCreate}>
+          <button type="button" className="btn btn--primary ph-board__open" disabled={disabled} onClick={onCreate}>
             <IconPlus width={16} height={16} />{projects.length ? '创建新项目' : '创建第一个项目'}
           </button>
-          <button type="button" className="btn ph-board__tutorial" onClick={onStartTutorial}>跟随教程制作第一幕</button>
+          <button type="button" className="btn ph-board__tutorial" disabled={disabled} onClick={onStartTutorial}>跟随教程制作第一幕</button>
         </>}
       </div>
       {project && <span className="ph-board__path" title={project.rootPath}>{project.rootPath}</span>}

@@ -1,8 +1,9 @@
 import { IconFolder, IconPlus, IconTarget, IconUsers } from '../../icons';
 import { Tooltip } from '../../Tooltip';
 
-export function HomeCommandRail({ activeTarget, onGoHome, onCreate, onOpen, onCollaborate, onStartTutorial }: {
+export function HomeCommandRail({ activeTarget, busy = false, onGoHome, onCreate, onOpen, onCollaborate, onStartTutorial }: {
   activeTarget?: 'create' | 'collaboration';
+  busy?: boolean;
   onGoHome: () => void;
   onCreate: () => void;
   onOpen: () => void | Promise<void>;
@@ -16,14 +17,14 @@ export function HomeCommandRail({ activeTarget, onGoHome, onCreate, onOpen, onCo
     { title: '开始教程', description: '跟着第一课完成一个镜头', icon: IconTarget, action: onStartTutorial, style: 'tutorial' },
   ];
   return <aside className="ph-command-rail" aria-label="制作命令">
-    <button type="button" className="ph-brand" onClick={onGoHome} aria-label="AeonStagery 首页">
+    <button type="button" className="ph-brand" onClick={onGoHome} disabled={busy} aria-label="AeonStagery 首页">
       <img src={`${import.meta.env.BASE_URL}icon-64.png`} width={36} height={36} alt="" />
       <span><strong>AeonStagery</strong><span>电影化场景工作台</span></span>
     </button>
     <nav className="ph-commands" aria-label="主命令">
       {commands.map(({ title, description, icon: Icon, action, target, style }) =>
         <Tooltip key={title} content={description} placement="right">
-          <button type="button" aria-label={title} aria-current={target && activeTarget === target ? 'page' : undefined}
+          <button type="button" aria-label={title} aria-current={target && activeTarget === target ? 'page' : undefined} disabled={busy}
             className={`ph-command${style ? ` ph-command--${style}` : ''}`} onClick={() => { void action(); }}>
             <span className="ph-command__icon"><Icon width={20} height={20} /></span>
             <span className="ph-command__title">{title}</span>

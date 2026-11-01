@@ -9,11 +9,12 @@ import { Field, HomeFormSection, HomeSubviewFrame } from './HomeSubviewFrame';
 type Props = Pick<ProjectHomeProps, 'collaborationStatus' | 'collaborationEndpoint' | 'collaborationServerStatus' | 'assetHandshake' | 'onCancelResourceTransfer' | 'onStopCollaborationServer'> & {
   draft: CollaborationDraft;
   collaborationMode: CollaborationMode;
+  workflowBusy: boolean;
   navigateTo: (target: NavigationTarget) => void;
 };
 
 export function CollaborationView({ draft, collaborationMode, navigateTo, collaborationStatus, collaborationEndpoint,
-  collaborationServerStatus, assetHandshake, onCancelResourceTransfer, onStopCollaborationServer }: Props) {
+  collaborationServerStatus, assetHandshake, onCancelResourceTransfer, onStopCollaborationServer, workflowBusy }: Props) {
   const {
     hostProjectName,
     hostProjectRootPath,
@@ -70,6 +71,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
     : collaborationMode === 'join' ? '输入链接或地址加入房间' : '主持或加入实时协作房间';
   return <HomeSubviewFrame title={title} info={description} onGoHome={() => navigateTo('start')}
     onBack={() => navigateTo(collaborationMode === 'menu' ? 'start' : 'collab-menu')}
+    navigationDisabled={workflowBusy}
     parent={collaborationMode === 'menu' ? undefined : { label: '协作', onClick: () => navigateTo('collab-menu') }}>
     {collaborationServerStatus && (
       <div className="ph-server-credentials-card ph-server-capsule ph-stagger-2">
@@ -276,7 +278,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
 
     {collaborationMode === 'host-new' && (
       <div className="ph-collab-form-stack">
-        <CollabModeTabs currentMode="host-new" onSelectMode={navigateTo} />
+        <CollabModeTabs currentMode="host-new" onSelectMode={navigateTo} disabled={workflowBusy} />
 
         <HomeFormSection title="项目信息">
           <Field label="项目名称">
@@ -352,7 +354,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
         </HomeFormSection>
         <HomeFormSection title="画布与帧率" info="画布与帧率保存在项目中，协作成员需保持一致。">
           <div className="ph-video-section">
-            <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="host-video" disabled={isSubmitting} />
+            <VideoFormatFields value={videoFormat} onChange={setVideoFormat} idPrefix="host-video" disabled={isSubmitting || workflowBusy} />
             {videoFormatError && <p role="alert" className="video-format__error">{videoFormatError}</p>}
           </div>
         </HomeFormSection>
@@ -361,7 +363,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
           <button
             className="btn btn--primary ph-btn-primary-compact"
             onClick={() => { void handleHostNew(); }}
-            disabled={!hostProjectName.trim() || !hostProjectRootPath.trim() || isSubmitting || !!videoFormatError}
+            disabled={!hostProjectName.trim() || !hostProjectRootPath.trim() || isSubmitting || workflowBusy || !!videoFormatError}
           >
             {isSubmitting ? '正在主持...' : '创建并主持'}
           </button>
@@ -371,7 +373,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
 
     {collaborationMode === 'host-existing' && (
       <div className="ph-collab-form-stack">
-        <CollabModeTabs currentMode="host-existing" onSelectMode={navigateTo} />
+        <CollabModeTabs currentMode="host-existing" onSelectMode={navigateTo} disabled={workflowBusy} />
 
         <HomeFormSection title="房间设置">
           <div className="ph-form-grid">
@@ -426,7 +428,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
           <button
             className="btn btn--primary ph-btn-primary-compact"
             onClick={() => { void handleHostExisting(); }}
-            disabled={isSubmitting}
+            disabled={isSubmitting || workflowBusy}
           >
             {isSubmitting ? '正在主持...' : '选择项目并主持'}
           </button>
@@ -436,7 +438,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
 
     {collaborationMode === 'join' && (
       <div className="ph-collab-form-stack">
-        <CollabModeTabs currentMode="join" onSelectMode={navigateTo} />
+        <CollabModeTabs currentMode="join" onSelectMode={navigateTo} disabled={workflowBusy} />
 
         <HomeFormSection title="连接信息">
           <Field label="服务器">
@@ -502,7 +504,7 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
           <button
             className="btn btn--primary ph-btn-primary-compact"
             onClick={() => { void handleJoinCollaboration(); }}
-            disabled={!joinEndpoint.trim() || !joinRootPath.trim() || isSubmitting || collaborationStatus === 'connecting' || collaborationStatus === 'seeding'}
+            disabled={!joinEndpoint.trim() || !joinRootPath.trim() || isSubmitting || workflowBusy || collaborationStatus === 'connecting' || collaborationStatus === 'seeding'}
           >
             {isSubmitting ? '正在加入...' : '加入房间'}
           </button>
@@ -514,13 +516,15 @@ export function CollaborationView({ draft, collaborationMode, navigateTo, collab
 
 const CollabModeTabs: React.FC<{
   currentMode: CollaborationMode;
+  disabled?: boolean;
   onSelectMode: (target: NavigationTarget) => void;
-}> = ({ currentMode, onSelectMode }) => (
+}> = ({ currentMode, disabled = false, onSelectMode }) => (
   <div className="ph-collab-mode-tabs" role="tablist" aria-label="协作模式选择">
     <button
       type="button"
       role="tab"
       aria-selected={currentMode === 'join'}
+      disabled={disabled}
       aria-label="切换到加入房间"
       className={`ph-collab-mode-tab ${currentMode === 'join' ? 'ph-collab-mode-tab--active' : ''}`}
       onClick={() => onSelectMode('collab-join')}
@@ -532,6 +536,7 @@ const CollabModeTabs: React.FC<{
       type="button"
       role="tab"
       aria-selected={currentMode === 'host-existing'}
+      disabled={disabled}
       aria-label="切换到主持已有剧本"
       className={`ph-collab-mode-tab ${currentMode === 'host-existing' ? 'ph-collab-mode-tab--active' : ''}`}
       onClick={() => onSelectMode('collab-host-existing')}
@@ -543,6 +548,7 @@ const CollabModeTabs: React.FC<{
       type="button"
       role="tab"
       aria-selected={currentMode === 'host-new'}
+      disabled={disabled}
       aria-label="切换到主持新剧本"
       className={`ph-collab-mode-tab ${currentMode === 'host-new' ? 'ph-collab-mode-tab--active' : ''}`}
       onClick={() => onSelectMode('collab-host-new')}

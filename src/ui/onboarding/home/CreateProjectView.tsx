@@ -9,10 +9,11 @@ import { Field, HomeFormSection, HomeSubviewFrame } from './HomeSubviewFrame';
 type Props = Required<Pick<ProjectHomeProps, 'templatePackages'>> & Pick<ProjectHomeProps, 'onDeleteTemplatePackage'> & {
   draft: CreateProjectDraft;
   createView: CreateView;
+  workflowBusy: boolean;
   navigateTo: (target: NavigationTarget) => void;
 };
 
-export function CreateProjectView({ draft, createView, navigateTo, templatePackages, onDeleteTemplatePackage }: Props) {
+export function CreateProjectView({ draft, createView, navigateTo, templatePackages, onDeleteTemplatePackage, workflowBusy }: Props) {
   const {
     projectName,
     videoFormat,
@@ -54,6 +55,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
   const capabilities = createView === 'template-capabilities';
   return <HomeSubviewFrame title={capabilities ? '模板能力配置' : '新建项目'}
     info={capabilities ? '配置项目的初始角色和默认对白样式。' : '选择模板包并调整加载顺序，角色和对白样式可在模板能力中配置。'}
+    navigationDisabled={workflowBusy}
     onGoHome={() => navigateTo('start')} onBack={() => navigateTo(capabilities ? 'create-form' : 'start')}
     parent={capabilities ? { label: '新建项目', onClick: () => navigateTo('create-form') } : undefined}>
     {createView === 'form' ? (
@@ -100,6 +102,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
             selectedIds={selectedTemplateIds}
             onToggle={toggleTemplate}
             onMove={moveTemplate}
+            disabled={workflowBusy}
             onDeletePackage={onDeleteTemplatePackage}
           />
           <div className="ph-capability-card">
@@ -116,6 +119,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
               type="button"
               className="btn ph-btn-compact"
               onClick={() => navigateTo('create-capabilities')}
+              disabled={workflowBusy}
             >
               配置模板能力
             </button>
@@ -304,7 +308,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
             <button
               className="btn btn--primary ph-btn-primary-compact"
               onClick={() => { void handleCreate(); }}
-              disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting || !!videoFormatError}
+              disabled={!projectName.trim() || !projectRootPath.trim() || isSubmitting || workflowBusy || !!videoFormatError}
             >
               {isSubmitting ? '正在创建...' : '创建项目'}
             </button>
@@ -314,6 +318,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
     ) : (
       <>
         <TemplateCapabilityConfig
+          disabled={workflowBusy}
           dialogueStyles={availableDialogueStyles}
           resolvedDialogueStyle={resolvedDialogueStyle}
           onChangeDialogueStyleOverride={handleChangeDialogueStyleOverride}
@@ -324,7 +329,7 @@ export function CreateProjectView({ draft, createView, navigateTo, templatePacka
           onChangeCharacterVariantImportMode={setCharacterVariantImportMode}
         />
         <div className="ph-footer-row ph-footer-row--end">
-          <button type="button" className="btn btn--primary ph-btn-primary-compact" onClick={() => navigateTo('create-form')}>
+          <button type="button" className="btn btn--primary ph-btn-primary-compact" onClick={() => navigateTo('create-form')} disabled={workflowBusy}>
             <IconCheck width={16} height={16} /> 完成配置
           </button>
         </div>
