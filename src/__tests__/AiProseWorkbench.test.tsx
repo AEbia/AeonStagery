@@ -1,9 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiProseWorkbench } from '../ui/AiProseWorkbench';
+import { useAiProseWorkbench } from '../ui/ai-prose/useAiProseWorkbench';
 import type { AiProseLlmProgress } from '../services/ai-authoring/AiProseContracts';
 import {
   confirmMainCharacters,
@@ -559,6 +560,8 @@ describe('AiProseWorkbench', () => {
     await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     expect(screen.getByText('你好。')).toBeTruthy();
+    expect(screen.getAllByRole('slider', { name: 'scriptReadingSpeed' })).toHaveLength(1);
+    expect(screen.queryByRole('group', { name: '可选增强' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: /语句/ })).toBeNull();
 
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
@@ -579,19 +582,15 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('tab', { name: /原文输入/ });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByRole('slider', { name: 'scriptReadingSpeed' }), {
-      target: { value: '10' },
-    });
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
+    await act(() => result.current.handleReadingSpeedChange(10));
+    await act(() => result.current.handleApply());
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       expect.objectContaining({ scriptReadingSpeed: 10 }),
@@ -659,16 +658,14 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('tab', { name: /原文输入/ });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
+    await act(() => result.current.handleApply());
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledTimes(1));
     expect(composition.applicator.apply).toHaveBeenCalledWith(
@@ -688,19 +685,18 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result, rerender } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('tab', { name: /原文输入/ });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
     mocks.documentVersion = 6;
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
+    rerender();
+    await act(() => result.current.handleApply());
 
-    await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强')).toBeTruthy());
+    await waitFor(() => expect(result.current.enhancementMessage).toBe('场景已变化，请重新运行增强'));
     expect(composition.applicator.apply).not.toHaveBeenCalled();
   });
 
@@ -764,7 +760,8 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
     // Restore path replays with the shared capability ports.
     await waitFor(() => expect(restoreMocks.replayEnhancementState).toHaveBeenCalledTimes(1));
@@ -775,10 +772,8 @@ describe('AiProseWorkbench', () => {
     expect(replayCall.ports!.profileProvider).not.toBeNull();
 
     // Run path passes the identical port objects to the processor runner.
-    await screen.findByRole('tab', { name: /原文输入/ });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
     const runnerOptions = runnerMocks.constructorOptions as {
@@ -822,13 +817,12 @@ describe('AiProseWorkbench', () => {
       },
     });
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('tab', { name: /原文输入/ });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '电影感' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    act(() => result.current.setEnableCinematic(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(enhancementMocks.runCinematic).toHaveBeenCalledTimes(1));
 

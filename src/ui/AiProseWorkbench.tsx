@@ -1,6 +1,5 @@
 import './ai-prose-workbench.css';
 import { eventBus } from '../api/events';
-import { collectEnhancementPerformanceMotions } from '../services/ai-authoring/FormalEnhancementApply';
 import { AiWorkbenchModeSwitch } from './AiWorkbenchMode';
 import { AiRequestTracePanel } from './AiProseTrace';
 import { IconCheck, IconChevronLeft, IconChevronRight, IconFileText, IconPlus, IconX } from './icons';
@@ -38,13 +37,8 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     setTraceOpen,
     showApplyDialog,
     setShowApplyDialog,
-    enableActing,
-    setEnableActing,
-    enableCinematic,
-    setEnableCinematic,
     enhancementBusy,
     enhancementMessage,
-    enhancementStagePlan,
     fileInputKey,
     dialogRef,
     aiTrace,
@@ -59,7 +53,6 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
     runNormalization,
     retryNormalizationSegment,
     runRhythm,
-    handleRunDraftEnhancement,
     handleDuplicateArchive,
     handleDeleteArchive,
     handleApply,
@@ -292,19 +285,7 @@ export function AiProseWorkbench({ onClose }: { onClose?: () => void } = {}) {
                 onReadingSpeedChange={handleReadingSpeedChange}
                 onRhythm={() => void runRhythm()}
                 busy={busyStage !== null || enhancementBusy || draft.status === 'applied'}
-                enableActing={enableActing}
-                enableCinematic={enableCinematic}
-                onEnableActingChange={setEnableActing}
-                onEnableCinematicChange={setEnableCinematic}
-                onRunEnhancement={() => void handleRunDraftEnhancement()}
-                enhancementBusy={enhancementBusy}
                 enhancementMessage={enhancementMessage}
-                enhancementOperationCount={enhancementStagePlan
-                  ? enhancementStagePlan.stages.reduce((sum, stage) => sum + stage.patch.operations.length, 0)
-                  : 0}
-                enhancementMotions={enhancementStagePlan
-                  ? collectEnhancementPerformanceMotions(enhancementStagePlan)
-                  : null}
               />
             )}
           </div>

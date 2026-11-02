@@ -521,10 +521,6 @@
 .ai-prose-normalization-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid var(--ai-yellow); border-radius: var(--radius-md); background: var(--ai-bg-secondary); }
 .ai-prose-normalization-error p { margin: 0; color: var(--warning-text); font-size: 12px; overflow-wrap: anywhere; }
 .ai-prose-normalization-error button { flex-shrink: 0; }
-.ai-prose-timing-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: start; gap: 20px; }
-.ai-prose-timing-main { min-width: 0; }
-.ai-prose-timing-side { position: sticky; top: 0; display: grid; gap: 16px; min-width: 0; }
-.ai-prose-timing-side .ai-prose-optional-enhance { margin-top: 0; }
 .ai-prose-timing-stats { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-block: 12px; border-bottom: 1px solid var(--ai-border); color: var(--ai-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ai-prose-timing-stats strong { color: var(--ai-text-primary); font-weight: 600; }
 .ai-prose-timing-axis { position: relative; height: 16px; display: block; }
@@ -537,7 +533,8 @@
 .ai-prose-timing-lane { position: relative; height: 28px; margin-top: 12px; background: var(--ai-bg-deep); border-radius: var(--radius-sm); }
 .ai-prose-timing-block { position: absolute; top: 0; height: 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--radius-xs); cursor: pointer; transition: filter 160ms ease-out; }
 .ai-prose-timing-block:hover, .ai-prose-timing-block.is-highlighted { z-index: 1; outline: 2px solid var(--ai-text-primary); outline-offset: 2px; filter: brightness(1.2); }
-.ai-prose-timing-options { display: grid; gap: 12px; }
+.ai-prose-timing-options { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; width: min(100%, 480px); min-width: 0; }
+.ai-prose-timing-options .ai-prose-reading-speed-control { flex: 1 1 240px; max-width: 320px; }
 .ai-prose-timing-table table { width: 100%; min-width: 560px; border-collapse: collapse; table-layout: fixed; }
 .ai-prose-timing-table th, .ai-prose-timing-table td { padding: 10px 8px; border-bottom: 1px solid var(--ai-border); text-align: left; vertical-align: top; color: var(--ai-text-secondary); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .ai-prose-timing-table th { background: var(--ai-bg-primary); font-weight: 500; }
@@ -549,10 +546,6 @@
 .ai-prose-timing-table tbody tr { transition: background-color 160ms ease-out; }
 .ai-prose-timing-table tbody tr:hover, .ai-prose-timing-table tr.is-selected { background: var(--ai-bg-hover); }
 .ai-prose-timing-table tr.is-selected { outline: 1px solid var(--ai-border-accent); outline-offset: -1px; }
-@media (max-width: 1100px) {
-  .ai-prose-timing-layout { grid-template-columns: minmax(0, 1fr); }
-  .ai-prose-timing-side { position: static; }
-}
 @media (prefers-reduced-motion: reduce) {
   .ai-prose-segment-card-head > svg, .ai-prose-timing-block, .ai-prose-timing-table tbody tr { transition: none; }
 }

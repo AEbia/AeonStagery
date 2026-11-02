@@ -17,7 +17,7 @@ export const STAGES: readonly {
   { id: 'segments', number: '02', label: '语义分段', shortLabel: '分段', description: '检查故事段落；需要调整时，可修改目标处理量后重新分析。' },
   { id: 'characters', number: '03', label: '人物确认', shortLabel: '人物', description: '核对主要人物名单，可修改、补充或删除 AI 建议的人物。' },
   { id: 'normalize', number: '04', label: '语句规范化', shortLabel: '语句', description: '检查拆分后的对白与旁白，确认后计算时间预览。' },
-  { id: 'timing', number: '05', label: '时间编排', shortLabel: '时间', description: '核对语句时长与起点，按需添加增强，再写入正式时间线。' },
+  { id: 'timing', number: '05', label: '时间编排', shortLabel: '时间', description: '核对语句时长与起点，调整朗读速度，再写入正式时间线。' },
 ];
 
 export type WorkbenchErrorInfo = {
