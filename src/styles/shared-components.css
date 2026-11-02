@@ -125,9 +125,14 @@
 .searchable-select-overlay.dual-pane {
   display: flex !important;
   flex-direction: column !important;
-  border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
+  border-radius: var(--radius-md);
   transform-origin: top center;
   animation: dropdownMenuEnter var(--motion-enter-normal) var(--ease-settle) both;
+}
+
+.searchable-select-overlay[data-placement="above"] {
+  transform-origin: bottom center;
+  animation-name: dropdownMenuEnterAbove;
 }
 
 .dual-pane .searchable-option {

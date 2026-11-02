@@ -170,4 +170,3 @@ export interface PendingSupplement {
   /** True when enqueued while the conversation is running, waiting for next turn. */
   queued?: boolean;
 }
-

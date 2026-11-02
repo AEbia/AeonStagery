@@ -10,7 +10,11 @@ export function resolveActiveModelPath(
   let modelPath: string | undefined;
   for (const item of timelineActions) {
     if ((item.time ?? 0) > atTime) break;
-    if (item.action !== 'addCharacter' || item.params.id !== charId) continue;
+    // Authoring can retain only the semantic projection when compilation is
+    // unavailable. Its entrance still supplies the active model for pickers.
+    const isEntrance = item.action === 'addCharacter'
+      || (item.action === 'characterPresence' && item.params.mode === 'enter');
+    if (!isEntrance || item.params.id !== charId) continue;
     if (typeof item.params.model === 'string' && item.params.model) {
       modelPath = item.params.model;
     }

@@ -18,6 +18,7 @@ interface Live2DResourcePreviewProps {
   playbackId: number;
   characterName?: string;
   anchorRef: RefObject<HTMLElement>;
+  overlayRef: RefObject<HTMLElement>;
   panelRef: RefObject<HTMLElement>;
   open: boolean;
   onClose: () => void;
@@ -26,7 +27,7 @@ interface Live2DResourcePreviewProps {
 
 /** The picker knows only the model and resource; no stage character is borrowed. */
 export function Live2DResourcePreview({ modelPath, kind, resourceKey, playbackId, characterName,
-  anchorRef, panelRef, open, onClose, onExited }: Live2DResourcePreviewProps) {
+  anchorRef, overlayRef, panelRef, open, onClose, onExited }: Live2DResourcePreviewProps) {
   const app = useOptionalApp();
   const projectResources = app?.services?.projectResources;
   const fileAccess = app?.services?.fileAccess;
@@ -52,8 +53,8 @@ export function Live2DResourcePreview({ modelPath, kind, resourceKey, playbackId
     if (panelRef.current) panelRef.current.inert = !open;
     if (!open) { dragRef.current = null; return; }
     const anchor = anchorRef.current;
-    if (!anchor) return;
-    const overlay = anchor.querySelector<HTMLElement>('.searchable-select-overlay');
+    const overlay = overlayRef.current;
+    if (!anchor || !overlay) return;
     let tracking = true;
     const update = () => {
       // A removed list reports a zero rect; keep the last placement for its preview's exit.
@@ -97,7 +98,7 @@ export function Live2DResourcePreview({ modelPath, kind, resourceKey, playbackId
       window.removeEventListener('resize', schedule);
       window.removeEventListener('scroll', onScroll, true);
     };
-  }, [anchorRef, panelRef, open]);
+  }, [anchorRef, overlayRef, panelRef, open]);
 
   useResourcePreviewMotion(panelRef, open, layout !== null, onExited);
 

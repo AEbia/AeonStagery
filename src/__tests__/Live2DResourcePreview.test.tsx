@@ -310,7 +310,7 @@ describe('isolated resource preview selection', () => {
     const picker = container.querySelector('.live2d-resource-select')!;
     const anchor = vi.spyOn(picker, 'getBoundingClientRect').mockReturnValue(new DOMRect(1000, 100, 260, 32));
     fireEvent.click(screen.getByRole('combobox'));
-    const overlay = container.querySelector('.searchable-select-overlay')!;
+    const overlay = screen.getByRole('searchbox').closest<HTMLElement>('.searchable-select-overlay')!;
     vi.spyOn(overlay, 'getBoundingClientRect').mockImplementation(() =>
       overlay.isConnected ? new DOMRect(1000, 132, 260, 360) : new DOMRect());
     fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
@@ -346,7 +346,7 @@ describe('isolated resource preview selection', () => {
       const picker = container.querySelector('.live2d-resource-select')!;
       const measure = vi.spyOn(picker, 'getBoundingClientRect').mockReturnValue(new DOMRect(1000, 100, 260, 32));
       fireEvent.click(screen.getByRole('combobox'));
-      const overlay = container.querySelector('.searchable-select-overlay')!;
+      const overlay = screen.getByRole('searchbox').closest<HTMLElement>('.searchable-select-overlay')!;
       vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue(new DOMRect(1000, 132, 260, 360));
       fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
       await screen.findByTitle('动作预览模型');
@@ -373,7 +373,7 @@ describe('isolated resource preview selection', () => {
     const picker = container.querySelector('.live2d-resource-select')!;
     const anchor = vi.spyOn(picker, 'getBoundingClientRect').mockReturnValue(new DOMRect(1000, 100, 260, 32));
     fireEvent.click(screen.getByRole('combobox'));
-    const overlay = container.querySelector('.searchable-select-overlay')!;
+    const overlay = screen.getByRole('searchbox').closest<HTMLElement>('.searchable-select-overlay')!;
     const list = vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue(new DOMRect(1000, 132, 260, 360));
     fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
     await screen.findByTitle('动作预览模型');

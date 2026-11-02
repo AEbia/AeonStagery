@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SearchableSelect, type SearchableSelectProps } from '../../SearchableSelect';
 import { Live2DResourcePreview } from '../../live2d/Live2DResourcePreview';
 import type { Live2DPerformanceKind } from '../../../engine/runtime/Live2DRuntimeContracts';
@@ -39,6 +39,10 @@ export function Live2DResourceSelect({ charId, character, modelPath, kind, ...pr
   const [previewOpen, setPreviewOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const setOverlayElement = useCallback((element: HTMLDivElement | null) => {
+    overlayRef.current = element;
+  }, []);
   const previewModelPath = modelPath || character?.model;
   useEffect(() => { setPreview(null); setPreviewOpen(false); }, [previewModelPath, kind, charId]);
   const closePreview = () => {
@@ -54,6 +58,7 @@ export function Live2DResourceSelect({ charId, character, modelPath, kind, ...pr
         {...props}
         {...hints}
         header={character ? `角色: ${character.name || character.id}` : undefined}
+        onOverlayElementChange={setOverlayElement}
         additionalInsideRefs={[...(props.additionalInsideRefs ?? []), previewRef]}
         onOpenChange={(open) => {
           if (!open) closePreview();
@@ -69,7 +74,7 @@ export function Live2DResourceSelect({ charId, character, modelPath, kind, ...pr
       />
       {preview && preview.modelPath === previewModelPath && <Live2DResourcePreview
         key={preview.modelPath} modelPath={preview.modelPath} kind={kind} resourceKey={preview.key} playbackId={preview.playbackId}
-        anchorRef={pickerRef} panelRef={previewRef} open={previewOpen}
+        anchorRef={pickerRef} overlayRef={overlayRef} panelRef={previewRef} open={previewOpen}
         characterName={character?.name || charId} onClose={closePreview} onExited={() => setPreview(null)}
       />}
     </div>

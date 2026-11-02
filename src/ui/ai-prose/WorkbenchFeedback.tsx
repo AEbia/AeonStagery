@@ -134,4 +134,3 @@ export function ApplyDialog({ draft, onCancel, onConfirm }: { draft: DraftSessio
     </div>
   );
 }
-
