@@ -10,6 +10,7 @@ import type {
 } from '../src/ui/workspace-tools/types';
 import type {
   AiProseCapabilityProbeRequest,
+  AiProseCredentialStatus,
   AiProseProviderConfig,
 } from '../src/api/types/ai-prose-authoring';
 import type {
@@ -133,6 +134,11 @@ const electronAPI = {
     configureProvider: (provider: AiProseProviderConfig) =>
       ipcRenderer.invoke('aiProse:configureProvider', provider),
     getCredentialStatus: () => ipcRenderer.invoke('aiProse:getCredentialStatus'),
+    onCredentialStatusChanged: (callback: (status: AiProseCredentialStatus) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: AiProseCredentialStatus) => callback(status);
+      ipcRenderer.on('aiProse:credentialStatusChanged', listener);
+      return () => ipcRenderer.removeListener('aiProse:credentialStatusChanged', listener);
+    },
     setCredential: (value: string) => ipcRenderer.invoke('aiProse:setCredential', value),
     clearCredential: () => ipcRenderer.invoke('aiProse:clearCredential'),
   },

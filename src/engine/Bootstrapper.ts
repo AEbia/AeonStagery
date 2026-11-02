@@ -851,7 +851,7 @@ export function bootstrap(options?: {
           .catch(() => undefined);
       }
     } else if (command.type === 'open-settings') {
-      eventBus.emit('ui:openSettings', {});
+      eventBus.emit('ui:openSettings', { tab: 'ai' });
     }
   }) ?? (() => undefined);
 

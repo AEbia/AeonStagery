@@ -79,7 +79,7 @@ describe('AiProseDraftMigration', () => {
     const migrated = migrateDraft(legacy);
 
     expect(migrated).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       sourceRevision: 0,
       scriptReadingSpeed: 9,
       confirmedMainCharacters: ['林夏'],
@@ -149,7 +149,7 @@ describe('AiProseDraftMigration', () => {
 
     const migrated = migrateDraft(v2);
 
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.characterBindingPlan).toBeUndefined();
     expect(migrated.enhancement).toBeUndefined();
     expect(migrated.characterBindings).toEqual({ 林夏: 'char_1' });
@@ -191,7 +191,7 @@ describe('AiProseDraftMigration', () => {
 
     const migrated = migrateDraft(v1);
 
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.scriptReadingSpeed).toBe(9);
     expect(migrated.segmentation.planFingerprint).toBeTruthy();
     expect(migrated.normalization[0]?.status).toBe('succeeded');
@@ -328,7 +328,7 @@ describe('AiProseDraftMigration', () => {
     }));
 
     expect(migrated.enhancement).toBeUndefined();
-    expect(migrated.schemaVersion).toBe(3);
+    expect(migrated.schemaVersion).toBe(4);
     expect(migrated.sourceText).toBe('正文');
   });
 
@@ -362,7 +362,7 @@ describe('AiProseDraftMigration', () => {
   });
 
   it('still refuses to load a draft whose root schema version is unknown', () => {
-    expect(() => migrateDraft(baseV3Draft({ schemaVersion: 4 }))).toThrowError(
+    expect(() => migrateDraft(baseV3Draft({ schemaVersion: 99 }))).toThrowError(
       expect.objectContaining({ code: 'future-schema' }),
     );
   });

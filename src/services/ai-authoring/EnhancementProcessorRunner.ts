@@ -119,6 +119,8 @@ export interface EnhancementProcessorRunnerOptions {
   /** Soft visible-char budget for technical splits. Defaults to 6000. */
   readonly maxVisibleCharsPerUnit?: number;
   readonly requestBudget?: AiProseRequestBudget;
+  /** Validated again against the current input and host gates before reuse. */
+  readonly restoredUnits?: readonly EnhancementUnitCheckpointV1[];
   /** Invoked exactly once per finished unit with its final checkpoint. */
   readonly onUnitComplete?: (unit: EnhancementUnitCheckpointV1, unitIndex: number, totalUnits: number) => void;
   /** Invoked once, before the first unit of a stage runs. */
@@ -139,6 +141,7 @@ export class EnhancementProcessorRunner {
   private readonly cinematicCapabilities: CinematicCapabilityPort | null;
   private readonly maxVisibleCharsPerUnit: number;
   private readonly requestBudget: AiProseRequestBudget | null;
+  private readonly restoredUnits: readonly EnhancementUnitCheckpointV1[];
   private readonly onUnitComplete: EnhancementProcessorRunnerOptions['onUnitComplete'];
   private readonly onStageStarted: EnhancementProcessorRunnerOptions['onStageStarted'];
   private readonly onStagePlanned: EnhancementProcessorRunnerOptions['onStagePlanned'];
@@ -149,6 +152,7 @@ export class EnhancementProcessorRunner {
     this.modelCapabilities = options.modelCapabilities ?? DEFAULT_MODEL_CAPABILITIES;    this.cinematicCapabilities = options.cinematicCapabilities ?? null;
     this.maxVisibleCharsPerUnit = options.maxVisibleCharsPerUnit ?? DEFAULT_MAX_VISIBLE_CHARS_PER_UNIT;
     this.requestBudget = options.requestBudget ?? null;
+    this.restoredUnits = options.restoredUnits ?? [];
     this.onUnitComplete = options.onUnitComplete;
     this.onStageStarted = options.onStageStarted;
     this.onStagePlanned = options.onStagePlanned;
@@ -605,6 +609,83 @@ export class EnhancementProcessorRunner {
         originalGroups: input.originalGroups,
         maxLineViewContextChars: this.maxVisibleCharsPerUnit,
       });
+      const validateHostGates = (candidatePatch: SemanticScenePatchV1): {
+        ok: true;
+      } | {
+        ok: false;
+        diagnostics: readonly { readonly code: string; readonly message: string }[];
+      } => {
+        const scopeCheck = assertEnhancementStageScope({
+          patch: candidatePatch,
+          scope,
+          lineView: lineViewHost,
+        });
+        if (!scopeCheck.ok) {
+          return {
+            ok: false,
+            diagnostics: scopeCheck.issues.map((issue) => ({
+              code: issue.code,
+              message: issue.message,
+            })),
+          };
+        }
+        try {
+          const applied = applySemanticScenePatch(input.document, candidatePatch, {
+            policy: input.policy,
+          });
+          if (input.stage === 'performance' && candidatePatch.operations.length > 0) {
+            const mono = assertMonotonicPerformanceCompletion({
+              base: collectPerformanceStatementSnapshots(input.document),
+              candidate: collectPerformanceStatementSnapshots(applied.candidate),
+            });
+            if (mono.length > 0) {
+              return {
+                ok: false,
+                diagnostics: mono.map((item) => ({
+                  code: item.code,
+                  message: item.message,
+                })),
+              };
+            }
+            // Motion/expression keys must come from the model's actual
+            // capability catalog; a model returning out-of-catalog keys is a
+            // resource violation, not an empty legal capability set.
+            const resource = validatePerformanceResourceCapabilities(
+              applied.candidate,
+              this.modelCapabilities,
+            );
+            if (resource.length > 0) {
+              return {
+                ok: false,
+                diagnostics: resource.map((item) => ({
+                  code: item.code,
+                  message: item.message,
+                })),
+              };
+            }
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            diagnostics: [{
+              code: 'unit_patch_invalid',
+              message: error instanceof Error ? error.message : String(error),
+            }],
+          };
+        }
+        return { ok: true };
+      };
+
+      input.llmOptions?.signal?.throwIfAborted();
+      const restored = this.restoredUnits.find((unit) => unit.stage === input.stage && unit.key === input.unit.key);
+      if (restored?.status === 'succeeded'
+        && restored.patch
+        && restored.inputFingerprint === inputFingerprint
+        && restored.processorVersion === input.processorVersion
+        && restored.policyVersion === input.policyVersion
+        && validateHostGates(restored.patch).ok) {
+        return { ...restored };
+      }
       let originalUserPrompt: string;
       let llmResult: AiProseLlmResult<SemanticScenePatchV1>;
       // Structured field-level degrade warnings (e.g. performance_capabilities_unavailable)
@@ -719,73 +800,6 @@ export class EnhancementProcessorRunner {
       let patch = llmResult.value;
       let attemptCount = llmResult.correctionUsed ? 2 : 1;
       let hostGateCorrected = false;
-
-      const validateHostGates = (candidatePatch: SemanticScenePatchV1): {
-        ok: true;
-      } | {
-        ok: false;
-        diagnostics: readonly { readonly code: string; readonly message: string }[];
-      } => {
-        const scopeCheck = assertEnhancementStageScope({
-          patch: candidatePatch,
-          scope,
-          lineView: lineViewHost,
-        });
-        if (!scopeCheck.ok) {
-          return {
-            ok: false,
-            diagnostics: scopeCheck.issues.map((issue) => ({
-              code: issue.code,
-              message: issue.message,
-            })),
-          };
-        }
-        try {
-          const applied = applySemanticScenePatch(input.document, candidatePatch, {
-            policy: input.policy,
-          });
-          if (input.stage === 'performance' && candidatePatch.operations.length > 0) {
-            const mono = assertMonotonicPerformanceCompletion({
-              base: collectPerformanceStatementSnapshots(input.document),
-              candidate: collectPerformanceStatementSnapshots(applied.candidate),
-            });
-            if (mono.length > 0) {
-              return {
-                ok: false,
-                diagnostics: mono.map((item) => ({
-                  code: item.code,
-                  message: item.message,
-                })),
-              };
-            }
-            // Motion/expression keys must come from the model's actual
-            // capability catalog; a model returning out-of-catalog keys is a
-            // resource violation, not an empty legal capability set.
-            const resource = validatePerformanceResourceCapabilities(
-              applied.candidate,
-              this.modelCapabilities,
-            );
-            if (resource.length > 0) {
-              return {
-                ok: false,
-                diagnostics: resource.map((item) => ({
-                  code: item.code,
-                  message: item.message,
-                })),
-              };
-            }
-          }
-        } catch (error) {
-          return {
-            ok: false,
-            diagnostics: [{
-              code: 'unit_patch_invalid',
-              message: error instanceof Error ? error.message : String(error),
-            }],
-          };
-        }
-        return { ok: true };
-      };
 
       let gate = validateHostGates(patch);
       if (!gate.ok && typeof this.llm.correctEnhancementPatch === 'function') {

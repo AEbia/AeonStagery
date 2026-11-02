@@ -72,6 +72,7 @@ export interface AiModelCapabilityRecord {
   imageInput: AiCapabilityFact;
   contextWindow: AiContextWindowFact;
   configurationFingerprint?: string;
+  lastProbeError?: AiModelCapabilityProbeFailure;
 }
 
 export interface AiModelCapabilityResolutionOptions {
@@ -235,6 +236,9 @@ export function resolveAiModelCapabilities(
     contextWindow,
     ...(options.configurationFingerprint
       ? { configurationFingerprint: options.configurationFingerprint }
+      : {}),
+    ...(probe?.status === 'failed'
+      ? { lastProbeError: { ...probe } }
       : {}),
   };
 }
@@ -400,6 +404,7 @@ function cloneRecord(record: AiModelCapabilityRecord): AiModelCapabilityRecord {
     nativeToolCalling: { ...record.nativeToolCalling },
     imageInput: { ...record.imageInput },
     contextWindow: { ...record.contextWindow },
+    ...(record.lastProbeError ? { lastProbeError: { ...record.lastProbeError } } : {}),
   };
 }
 
