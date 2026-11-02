@@ -127,11 +127,13 @@ describe('Inline details resources', () => {
     expect(screen.queryByRole('textbox', { name: '动作名称' })).toBeNull();
     fireEvent.click(motionPicker);
     fireEvent.click(await screen.findByRole('button', { name: '预览 wave' }));
-    expect(state.characterAdapter.playMotion).toHaveBeenCalledWith('alice', 'wave');
+    await screen.findByTitle('动作预览模型');
+    expect(state.characterAdapter.playMotion).not.toHaveBeenCalled();
     fireEvent.keyDown(motionPicker, { key: 'Escape' });
     fireEvent.click(expressionPicker);
     fireEvent.click(await screen.findByRole('button', { name: '预览 smile' }));
-    expect(state.characterAdapter.setExpression).toHaveBeenCalledWith('alice', 'smile');
+    await screen.findByTitle('表情预览模型');
+    expect(state.characterAdapter.setExpression).not.toHaveBeenCalled();
   });
 
   it('retains the custom motion keyframe editor', () => {

@@ -41,7 +41,7 @@ describe('AiProseDraftSession', () => {
     });
 
     expect(draft).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       sceneId: 'scene-1',
       sessionId: 'session-1',
       sourceText: '她走进房间。',

@@ -151,6 +151,16 @@ flowchart TD
 
 行内展开区通过 `getStatementQuickFields` 排除语句行已承载的参数，包括文件选择、模型变体及动作／表情资源选择与预览；动作转换、自定义动作编辑、语音工作台等额外功能仍由详情区提供。轨道优先的独立属性检查器保留完整参数表单。
 
+动作／表情资源选择统一使用 `Live2DResourceSelect`，预览按钮打开
+[`Live2DResourcePreview`](../src/ui/live2d/Live2DResourcePreview.tsx) 小窗口。
+其 iframe 使用独立入口 `live2d-preview.html` 和 `Live2DPerformancePreview`，
+隔离 Cubism 2 / 3+ 模型与 SDK 状态；预览不向舞台发送动作、表情或恢复命令。
+小窗口优先放在选择框及其列表两侧，空间不足时改用上下方，并按窗口可用尺寸收缩。
+拖动后保留位置，窗口缩放时约束在可见范围内；预览画布同步调整尺寸并重新适配模型。
+选择框关闭时，小窗口朝来源方向退场并释放 iframe；操作小窗口不会触发选择框的外部点击关闭。
+入退场由 `useResourcePreviewMotion` 驱动 Web Animations，反向开关从当前姿态接续，
+仅由当次退场完成后释放 iframe；窗口隐藏、减少动态效果或低性能模式会结束动画并完成清理。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |
@@ -170,7 +180,7 @@ flowchart TD
 | 弹窗名称 | 唤起途径 | 核心组件 | 关联子组件 / 样式 |
 | --- | --- | --- | --- |
 | **全局设置 (Settings)** | 顶栏更多菜单 / 快捷键 `Ctrl+,` / 事件 `ui:openSettings` | [`src/ui/SettingsDialog.tsx`](../src/ui/SettingsDialog.tsx) | 包含通用外观、快捷键设置、以及「项目模板」(`templates`) 页签（管理模板包启用、优先级、默认样式覆盖、角色导入、模板 ZIP 包直接导入与 AI 表演画像配置）：[`src/ui/shortcuts/ShortcutSettingsPanel.tsx`](../src/ui/shortcuts/ShortcutSettingsPanel.tsx)、[`src/ui/templates/TemplateProjectConfigDialog.tsx`](../src/ui/templates/TemplateProjectConfigDialog.tsx)、[`src/ui/templates/TemplatePerformanceProfileEditor.tsx`](../src/ui/templates/TemplatePerformanceProfileEditor.tsx)、[`src/ui/settingsNavigation.ts`](../src/ui/settingsNavigation.ts) |
-| **AI 创作工作台 (AI Prose)** | 顶栏「AI 铺戏」按钮 | [`src/ui/AiProseWorkbench.tsx`](../src/ui/AiProseWorkbench.tsx)、[`src/ui/AgentGeneratorPanel.tsx`](../src/ui/AgentGeneratorPanel.tsx) | [`src/ui/FormalSceneEnhancementPanel.tsx`](../src/ui/FormalSceneEnhancementPanel.tsx)、[`src/ui/AiProseTrace.tsx`](../src/ui/AiProseTrace.tsx)、[`src/ui/ai-prose-workbench.css`](../src/ui/ai-prose-workbench.css) |
+| **AI 创作工作台 (AI Prose)** | 顶栏「AI 铺戏」按钮 | [`src/ui/AiProseWorkbench.tsx`](../src/ui/AiProseWorkbench.tsx)、[`src/ui/AgentGeneratorPanel.tsx`](../src/ui/AgentGeneratorPanel.tsx) | [`src/ui/ai-prose/`](../src/ui/ai-prose/)（阶段界面、草稿会话与生成流程）、[`src/ui/FormalSceneEnhancementPanel.tsx`](../src/ui/FormalSceneEnhancementPanel.tsx)、[`src/ui/AiProseTrace.tsx`](../src/ui/AiProseTrace.tsx)、[`src/ui/ai-prose-workbench.css`](../src/ui/ai-prose-workbench.css) |
 | **语音工作台 (Voice Workbench)** | 顶栏「语音」按钮 | [`src/ui/voice/VoiceWorkbench.tsx`](../src/ui/voice/VoiceWorkbench.tsx) | 与 GPT-SoVITS 语音服务对接，管理角色声音预设 |
 | **软件更新 (Software Updates)** | 全局设置 → 关于 | [`src/ui/settings/UpdateSettingsPanel.tsx`](../src/ui/settings/UpdateSettingsPanel.tsx) | OSS / GitHub 增量下载渠道选择、检查、下载与重启安装；GitHub 缺少块图时尝试从 OSS 补取，更新策略见 [ADR-0036](adr/0036-update-channels-and-differential-baselines.md) |
 | **项目主页与新手引导** | 首次启动或关闭项目后全屏呈现 | [`src/ui/onboarding/ProjectHome.tsx`](../src/ui/onboarding/ProjectHome.tsx) | 欢迎页、最近项目、模板 ZIP 导入（`onImportTemplate`）、[`src/ui/onboarding/FirstLessonController.tsx`](../src/ui/onboarding/FirstLessonController.tsx)、[`src/ui/onboarding/SpotlightOverlay.tsx`](../src/ui/onboarding/SpotlightOverlay.tsx) |

@@ -64,6 +64,7 @@ export interface AiProseAuthoringComposition {
   createDraftCheckpoint(
     project: AiProseDraftProjectInput,
     draft: DraftSession,
+    signal?: AbortSignal,
   ): AiProseDraftPersistenceCheckpoint;
 }
 
@@ -102,10 +103,11 @@ export function createAiProseAuthoringComposition(
     pipeline,
     draftPersistence,
     applicator,
-    createDraftCheckpoint: (project, draft) => createAiProseDraftPersistenceCheckpoint({
+    createDraftCheckpoint: (project, draft, signal) => createAiProseDraftPersistenceCheckpoint({
       persistence: draftPersistence,
       project,
       draft,
+      signal,
     }),
   };
 }

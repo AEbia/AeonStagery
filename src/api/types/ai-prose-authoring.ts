@@ -1,7 +1,7 @@
 import type { SemanticAuthorReceipt } from './authoring';
 import type { AiProseEnhancementStateV1 } from './ai-prose-enhancement';
 
-export const AI_PROSE_DRAFT_SCHEMA_VERSION = 3 as const;
+export const AI_PROSE_DRAFT_SCHEMA_VERSION = 4 as const;
 export const DEFAULT_AI_TARGET_BATCH_SIZE = 3000;
 export const DEFAULT_MAX_CONCURRENT_AI_REQUESTS = 2;
 export const DEFAULT_AI_BASE_URL = 'https://api.openai.com/v1';
@@ -140,6 +140,8 @@ export interface AiProseDraftSession {
   characterExtraction: AiProseCharacterExtractionState;
   confirmedMainCharacters: string[];
   mainCharactersConfirmed: boolean;
+  /** Unconfirmed edits, including an empty row while entering a name. */
+  mainCharacterEdits?: string[];
   normalization: AiProseNormalizationTask[];
   rhythm: AiProseRhythmTask[];
   preview: AiProsePreview | null;

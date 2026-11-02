@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useLayoutEffect, useId, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, useId, useCallback, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { IconSearch, IconX, IconChevronDown, IconPlay, IconRefresh } from './icons';
 import { useOutsidePointerDown } from './hooks/useOutsidePointerDown';
@@ -24,6 +24,10 @@ export interface SearchableSelectProps {
   footer?: React.ReactNode;
   /** Explicit preview only: invoked by the per-row play button, never by hover or keyboard browsing. */
   onPreview?: (val: string) => void;
+  onOpenChange?: (open: boolean) => void;
+  onOverlayElementChange?: (element: HTMLDivElement | null) => void;
+  /** Portalled controls that belong to this picker, such as a resource preview. */
+  additionalInsideRefs?: ReadonlyArray<RefObject<HTMLElement | null>>;
   dataTestId?: string;
   clearable?: boolean;
   clearLabel?: string;
@@ -53,20 +57,28 @@ export const SearchableSelect = ({
   header,
   footer,
   onPreview,
+  onOpenChange,
+  onOverlayElementChange,
+  additionalInsideRefs,
   dataTestId,
   clearable,
   clearLabel,
   preferredGroup,
 }: SearchableSelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
+  const previousOpen = useRef(false);
   const [search, setSearch] = useState('');
   const [activePrimaryGroup, setActivePrimaryGroup] = useState<string | null>(null);
   const [activeSecondaryGroup, setActiveSecondaryGroup] = useState<string | null>(null);
   const [activeOptionIndex, setActiveOptionIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const [overlayPosition, setOverlayPosition] = useState<OverlayPosition | null>(null);
+  const handleOverlayElementChange = useCallback((element: HTMLDivElement | null) => {
+    overlayRef.current = element;
+    onOverlayElementChange?.(element);
+  }, [onOverlayElementChange]);
   const inputRef = useRef<HTMLInputElement>(null);
   const controlId = useId();
   const labelId = `${controlId}-label`;
@@ -329,27 +341,16 @@ export const SearchableSelect = ({
     return opts;
   }, [filteredOptions, search, activePrimaryGroup, currentSecondaryGroups.length, activeSecondaryGroup, value, clearable, clearLabel]);
 
-  const previewActiveRef = useRef(false);
-  const restorePreview = useCallback(() => {
-    if (onPreview && previewActiveRef.current) {
-      previewActiveRef.current = false;
-      onPreview(value);
-    }
-  }, [onPreview, value]);
-  const restorePreviewRef = useRef(restorePreview);
-  restorePreviewRef.current = restorePreview;
+  const closeSelect = useCallback(() => {
+    setIsOpen(false);
+  }, []);
+  useOutsidePointerDown(containerRef, closeSelect, [overlayRef, ...(additionalInsideRefs ?? [])]);
 
   useEffect(() => {
-    return () => {
-      restorePreviewRef.current();
-    };
-  }, []);
-
-  const closeSelect = useCallback(() => {
-    restorePreview();
-    setIsOpen(false);
-  }, [restorePreview]);
-  useOutsidePointerDown(containerRef, closeSelect, [overlayRef]);
+    if (previousOpen.current === isOpen) return;
+    previousOpen.current = isOpen;
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -365,14 +366,22 @@ export const SearchableSelect = ({
       const preferredHeight = Math.min(360, viewportHeight * 0.6);
       const above = spaceBelow < preferredHeight && spaceAbove > spaceBelow;
       const width = Math.min(rect.width, Math.max(0, viewportWidth - VIEWPORT_PADDING * 2));
-      setOverlayPosition({
+      const nextPosition: OverlayPosition = {
         left: Math.max(VIEWPORT_PADDING, Math.min(rect.left, viewportWidth - width - VIEWPORT_PADDING)),
         width,
         height: Math.min(preferredHeight, above ? spaceAbove : spaceBelow),
         ...(above
           ? { bottom: viewportHeight - rect.top + OVERLAY_GAP }
           : { top: rect.bottom + OVERLAY_GAP }),
-      });
+      };
+      setOverlayPosition((current) => current
+        && current.left === nextPosition.left
+        && current.width === nextPosition.width
+        && current.height === nextPosition.height
+        && current.top === nextPosition.top
+        && current.bottom === nextPosition.bottom
+        ? current
+        : nextPosition);
     };
 
     updatePosition();
@@ -404,7 +413,6 @@ export const SearchableSelect = ({
   const selectedOption = normalizedOptions.find(opt => opt.value === value);
   const displayValue = triggerLabel ?? (selectedOption ? selectedOption.label : (value || placeholder));
   const selectOption = (nextValue: string) => {
-    previewActiveRef.current = false;
     onChange(nextValue);
     setIsOpen(false);
     setSearch('');
@@ -422,7 +430,6 @@ export const SearchableSelect = ({
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      restorePreview();
       setIsOpen(false);
       triggerRef.current?.focus();
       return;
@@ -472,7 +479,6 @@ export const SearchableSelect = ({
             if (!isOpen) openSelect();
           } else if (event.key === 'Escape' && isOpen) {
             event.preventDefault();
-            restorePreview();
             setIsOpen(false);
           }
         }}
@@ -506,7 +512,6 @@ export const SearchableSelect = ({
               title={`清除${label || '选择'}`}
               onClick={(e) => {
                 e.stopPropagation();
-                restorePreview();
                 onChange('');
                 triggerRef.current?.focus();
               }}
@@ -514,7 +519,6 @@ export const SearchableSelect = ({
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   e.stopPropagation();
-                  restorePreview();
                   onChange('');
                   triggerRef.current?.focus();
                 }
@@ -539,7 +543,7 @@ export const SearchableSelect = ({
       </button>
 
       {isOpen && createPortal(
-        <div ref={overlayRef} className="searchable-select-overlay dual-pane"
+        <div ref={handleOverlayElementChange} className="searchable-select-overlay dual-pane"
           data-placement={overlayPosition?.bottom !== undefined ? 'above' : 'below'} style={{
           position: 'fixed',
           ...overlayPosition,
@@ -732,7 +736,6 @@ export const SearchableSelect = ({
               id={listboxId}
               role="listbox"
               aria-label="可选项"
-              onMouseLeave={restorePreview}
               style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '6px' }}
               className="custom-scrollbar"
             >
@@ -799,7 +802,6 @@ export const SearchableSelect = ({
                       className="btn btn--icon"
                       onClick={(e) => {
                         e.stopPropagation();
-                        previewActiveRef.current = true;
                         onPreview(opt.value);
                       }}
                       title="预览"

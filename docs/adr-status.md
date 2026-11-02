@@ -32,7 +32,7 @@
 | [0017 Collaborative Timeline Order](adr/0017-collaborative-timeline-order.md) | current, translated by KSM-0003 | 同时间顺序事实有效；当前名称是 `statementOrder` / `companionOrder`，不是旧 `timelineOrder` action sequence。 |
 | [0020 GPT-SoVITS Voice Authoring and Local Voice Library](adr/0020-gpt-sovits-voice-authoring.md) | current | GPT-SoVITS 用户语音库、候选生成、项目角色默认、template voice profile 与资源采用事务的权威边界；明确不依赖第三方 preset 插件格式。 |
 | [KSM-0001 Unified Template System](ksm-adr/ksm-0001-unified-template-system.md) | current | Versioned template packages、semantic payload、template source precedence 与 template asset materialization 的权威入口。 |
-| [0022 AI Prose-to-Script Normalization](adr/0022-ai-prose-to-script-normalization.md) | proposed | AI 正文无损规范化、角色表演占位、表演/电影感处理器与正式 scene 增强边界的决策入口。 |
+| [0022 AI Prose-to-Script Normalization](adr/0022-ai-prose-to-script-normalization.md) | proposed | AI 正文无损规范化、角色表演占位、表演/电影感处理器与正式 scene 增强边界的决策入口；2026-10-31 收敛为每场景固定文件单草稿，补齐中断恢复和旧布局清理。 |
 | [0023 Tool-Mediated Persistent Project Agent Conversation](adr/0023-tool-mediated-autonomous-project-agent.md) | partially superseded by ADR-0024 | Conversation 生命周期、持久化、exact-version gate、provider/transport、上下文压缩与项目 Agent 主循环仍有效；旧行号写寻址由 ADR-0024 取代；2026-10-17 补充命名空间统计摘要与支持通配符的按需能力查询、搜索去重/字节上限、局部读取及稳定估算校准。 |
 | [0024 Source-Identity Project Agent Authoring](adr/0024-source-identity-project-agent-authoring.md) | current | Project Agent 以稳定 statement/companion identity 读取与写入正式 scene；写工具、回执、诊断与 benchmark gate 以本文为准。 |
 | [0025 External Agent Bridge](adr/0025-external-agent-bridge.md) | proposed | 复用 Project Agent 业务装配的 headless CLI、stdio JSON-RPC 与 benchmark sample port。 |

@@ -64,8 +64,9 @@ describe('speaker performance quick controls', () => {
     const onChange = renderPerformance(compiled);
     fireEvent.click(screen.getByRole('combobox', { name: '动作名称' }));
     fireEvent.click(await screen.findByRole('button', { name: '预览 wave' }));
+    await screen.findByTitle('动作预览模型');
     expect(adapter.getModelDataFromPath).toHaveBeenCalledWith('figure/alice/winter.model3.json');
-    expect(adapter.playMotion).toHaveBeenCalledWith('alice', 'wave');
+    expect(adapter.playMotion).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('option', { name: 'wave' }));
     const motionPatch = onChange.mock.lastCall?.[0];
@@ -73,7 +74,8 @@ describe('speaker performance quick controls', () => {
     expect(motionPatch({ target: '$speaker', motion: '' })).toEqual({ motion: { kind: 'resource', key: 'wave' } });
     fireEvent.click(screen.getByRole('combobox', { name: '表情名' }));
     fireEvent.click(screen.getByRole('button', { name: '预览 smile' }));
-    expect(adapter.setExpression).toHaveBeenCalledWith('alice', 'smile');
+    await screen.findByTitle('表情预览模型');
+    expect(adapter.setExpression).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('option', { name: 'smile' }));
     const expressionPatch = onChange.mock.lastCall?.[0];
     if (typeof expressionPatch !== 'function') throw new Error('Expected an expression patch');

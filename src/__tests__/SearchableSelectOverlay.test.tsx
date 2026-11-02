@@ -69,11 +69,11 @@ describe('SearchableSelect overlay', () => {
     expect(overlay.style.height).toBe('168px');
   });
 
-  it('restores a preview and closes on an outside pointer event', () => {
+  it('closes on an outside pointer event without issuing another preview', () => {
     const { onPreview } = renderPicker();
     fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('searchbox')).toBeNull();
-    expect(onPreview.mock.calls).toEqual([['wave'], ['idle']]);
+    expect(onPreview.mock.calls).toEqual([['wave']]);
   });
 });

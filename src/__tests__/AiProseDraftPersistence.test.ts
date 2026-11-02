@@ -16,6 +16,120 @@ import type { ElectronCapability } from '../api/interfaces/ElectronCapability';
 import { ElectronFileAccess } from '../services/io/ElectronFileAccess';
 
 describe('AiProseDraftPersistence', () => {
+  it('replaces the single scene draft and restores it without a session pointer', async () => {
+    const files = new Map<string, string>();
+    const fileAccess = memoryDraftFiles(files);
+    const persistence = new AiProseDraftPersistence(fileAccess);
+    const first = createDraft({ sceneId: 'scene-1', sessionId: 'first', sourceText: '第一份', anchorMode: 'zero' });
+    const second = createDraft({ sceneId: 'scene-1', sessionId: 'second', sourceText: '第二份', anchorMode: 'zero' });
+    await persistence.saveCheckpoint(projectContext(), first);
+    await persistence.saveCheckpoint(projectContext(), second);
+
+    expect([...files.keys()]).toEqual(['/projects/demo/project-assets/ai-authoring/scene-1/current.json']);
+    const restored = await persistence.loadResult(projectContext(), 'scene-1');
+    expect(restored.status).toBe('loaded');
+    if (restored.status === 'loaded') expect(restored.draft).toEqual(second);
+  });
+
+  it('migrates the last legacy session and removes superseded drafts after saving it', async () => {
+    const folder = '/projects/demo/project-assets/ai-authoring/scene-1';
+    const first = createDraft({ sceneId: 'scene-1', sessionId: 'first', sourceText: '第一份', anchorMode: 'zero' });
+    const second = createDraft({ sceneId: 'scene-1', sessionId: 'second', sourceText: '第二份', anchorMode: 'zero' });
+    const files = new Map([[`${folder}/first.json`, JSON.stringify(first)], [`${folder}/second.json`, JSON.stringify(second)]]);
+    const persistence = new AiProseDraftPersistence(memoryDraftFiles(files));
+
+    const restored = await persistence.loadResult(projectContext(), 'scene-1', 'second');
+
+    expect(restored.status).toBe('loaded');
+    if (restored.status === 'loaded') expect(restored.draft.sessionId).toBe('second');
+    expect([...files.keys()]).toEqual([`${folder}/current.json`]);
+  });
+
+  it('cleans up temporary files when atomic replacement fails', async () => {
+    const files = new Map<string, string>();
+    const fileAccess = memoryDraftFiles(files);
+    fileAccess.replaceFile = async () => { throw new Error('disk full'); };
+    const persistence = new AiProseDraftPersistence(fileAccess);
+    const draft = createDraft({ sceneId: 'scene-1', sourceText: '正文', anchorMode: 'zero' });
+
+    await expect(persistence.saveCheckpoint(projectContext(), draft)).rejects.toThrow();
+    expect(files.size).toBe(0);
+  });
+
+  it('restores the latest legacy file without a pointer and removes stale temporary files', async () => {
+    const folder = '/projects/demo/project-assets/ai-authoring/scene-1';
+    const first = createDraft({ sceneId: 'scene-1', sessionId: 'first', sourceText: '旧正文', anchorMode: 'zero', now: '2026-01-01T00:00:00Z' });
+    const second = createDraft({ sceneId: 'scene-1', sessionId: 'second', sourceText: '新正文', anchorMode: 'zero', now: '2026-02-01T00:00:00Z' });
+    const files = new Map([[`${folder}/first.json`, JSON.stringify(first)], [`${folder}/second.json`, JSON.stringify(second)], [`${folder}/first.json.tmp-abandoned`, '{']]);
+    const persistence = new AiProseDraftPersistence(memoryDraftFiles(files));
+    const result = await persistence.loadResult(projectContext(), 'scene-1');
+    if (result.status !== 'loaded') throw new Error(result.status);
+    expect(result.draft).toEqual(second);
+    expect([...files.keys()]).toEqual([`${folder}/current.json`]);
+  });
+
+  it('preserves every legacy file when promoting the selected draft fails', async () => {
+    const folder = '/projects/demo/project-assets/ai-authoring/scene-1';
+    const draft = createDraft({ sceneId: 'scene-1', sessionId: 'legacy', sourceText: '正文', anchorMode: 'zero' });
+    const files = new Map([[`${folder}/legacy.json`, JSON.stringify(draft)]]);
+    const fileAccess = memoryDraftFiles(files);
+    fileAccess.replaceFile = async () => { throw new Error('disk full'); };
+    const persistence = new AiProseDraftPersistence(fileAccess);
+    await expect(persistence.loadResult(projectContext(), 'scene-1', 'legacy')).rejects.toThrow();
+    expect([...files.keys()]).toEqual([`${folder}/legacy.json`]);
+  });
+
+  it('waits for a pending write before restoring the scene draft', async () => {
+    const files = new Map<string, string>();
+    const fileAccess = memoryDraftFiles(files);
+    const replace = fileAccess.replaceFile!;
+    let release: () => void = () => {};
+    let markWriting: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const writing = new Promise<void>((resolve) => { markWriting = resolve; });
+    fileAccess.replaceFile = async (...args) => { markWriting(); await gate; await replace(...args); };
+    const persistence = new AiProseDraftPersistence(fileAccess);
+    const draft = createDraft({ sceneId: 'scene-1', sourceText: '关闭时保存的正文', anchorMode: 'zero' });
+    const saving = persistence.saveCheckpoint(projectContext(), draft);
+    await writing;
+    let loaded = false;
+    const loading = persistence.loadResult(projectContext(), 'scene-1').then((result) => { loaded = true; return result; });
+    try {
+      await Promise.resolve();
+      expect(loaded).toBe(false);
+    } finally {
+      release();
+    }
+    await saving;
+    const result = await loading;
+    if (result.status !== 'loaded') throw new Error(result.status);
+    expect(result.draft).toEqual(draft);
+  });
+
+  it('does not delete legacy drafts when one of the files is corrupt', async () => {
+    const folder = '/projects/demo/project-assets/ai-authoring/scene-1';
+    const draft = createDraft({ sceneId: 'scene-1', sessionId: 'legacy', sourceText: '正文', anchorMode: 'zero' });
+    const files = new Map([[`${folder}/legacy.json`, JSON.stringify(draft)], [`${folder}/broken.json`, '{']]);
+    const persistence = new AiProseDraftPersistence(memoryDraftFiles(files));
+    const result = await persistence.loadResult(projectContext(), 'scene-1');
+    expect(result.status).toBe('corrupt-json');
+    expect([...files.keys()]).toEqual([`${folder}/legacy.json`, `${folder}/broken.json`]);
+  });
+
+  it('restores leftover running work as interrupted without changing the saved file', async () => {
+    const draft = createDraft({ sceneId: 'scene-1', sourceText: '正文', anchorMode: 'zero' });
+    draft.segmentation.status = 'running';
+    const path = '/projects/demo/project-assets/ai-authoring/scene-1/current.json';
+    const original = JSON.stringify(draft);
+    const files = new Map([[path, original]]);
+    const persistence = new AiProseDraftPersistence(memoryDraftFiles(files));
+    const result = await persistence.loadResult(projectContext(), 'scene-1');
+    if (result.status !== 'loaded') throw new Error(result.status);
+    expect(result.draft.segmentation.status).toBe('failed');
+    expect(result.draft.segmentation.error?.code).toBe('interrupted');
+    expect(files.get(path)).toBe(original);
+  });
+
   it('saves an explicit checkpoint below the project asset root', async () => {
     const fileAccess: AiProseDraftFileAccess = {
       exists: vi.fn(async () => false),
@@ -45,18 +159,18 @@ describe('AiProseDraftPersistence', () => {
       'project-assets',
       'ai-authoring',
       'scene-1',
-      'session-1.json',
+      'current.json',
     );
     expect(fileAccess.ensureDir).toHaveBeenCalledWith(
       '/projects/demo/project-assets/ai-authoring/scene-1',
     );
     expect(fileAccess.writeFile).toHaveBeenCalledWith(
-      expect.stringMatching(/session-1\.json\.tmp-/),
-      expect.stringContaining('"schemaVersion": 3'),
+      expect.stringMatching(/current\.json\.tmp-/),
+      expect.stringContaining('"schemaVersion": 4'),
     );
     expect(fileAccess.replaceFile).toHaveBeenCalledWith(
-      expect.stringMatching(/session-1\.json\.tmp-/),
-      '/projects/demo/project-assets/ai-authoring/scene-1/session-1.json',
+      expect.stringMatching(/current\.json\.tmp-/),
+      '/projects/demo/project-assets/ai-authoring/scene-1/current.json',
     );
     expect(fileAccess.writeFile).not.toHaveBeenCalledWith(expect.stringContaining('mount'), expect.anything());
   });
@@ -84,8 +198,8 @@ describe('AiProseDraftPersistence', () => {
     await persistence.saveCheckpoint(projectContext(), draft);
 
     expect(capability.fs.replaceFile).toHaveBeenCalledWith(
-      expect.stringMatching(/electron-context\.json\.tmp-/),
-      '/projects/demo/project-assets/ai-authoring/scene-1/electron-context.json',
+      expect.stringMatching(/current\.json\.tmp-/),
+      '/projects/demo/project-assets/ai-authoring/scene-1/current.json',
     );
   });
 
@@ -169,7 +283,7 @@ describe('AiProseDraftPersistence', () => {
     expect(result.status).toBe('loaded');
     if (result.status !== 'loaded') throw new Error('expected a loaded draft');
     expect(result.migratedFrom).toBe(0);
-    expect(result.draft.schemaVersion).toBe(3);
+    expect(result.draft.schemaVersion).toBe(4);
     expect(result.draft.scriptReadingSpeed).toBe(9);
     expect(result.draft.segmentation.status).toBe('succeeded');
     expect(fileAccess.writeFile).not.toHaveBeenCalled();
@@ -228,7 +342,7 @@ describe('AiProseDraftPersistence', () => {
     const serialized = vi.mocked(fileAccess.writeFile).mock.calls[0]?.[1];
     expect(serialized).toContain('"characterBindingPlan"');
     expect(serialized).toContain('"enhancement"');
-    expect(serialized).toContain('"schemaVersion": 3');
+    expect(serialized).toContain('"schemaVersion": 4');
 
     // Reload through the same seam (memory-backed storage).
     const restoredAccess = {
@@ -264,7 +378,7 @@ describe('AiProseDraftPersistence', () => {
     await persistence.deleteDraft(projectContext(), 'scene-1', 'archive-del');
     expect(fileAccess.removeFile).toHaveBeenCalledTimes(1);
     expect(fileAccess.removeFile).toHaveBeenCalledWith(
-      expect.stringContaining('archive-del.json'),
+      expect.stringContaining('current.json'),
     );
   });
 
@@ -324,6 +438,29 @@ describe('AiProseDraftPersistence', () => {
     }, 'scene-1', 'session-1')).rejects.toMatchObject({ code: 'invalid-path' });
   });
 });
+
+function memoryDraftFiles(files: Map<string, string>): AiProseDraftFileAccess {
+  return {
+    exists: async (path) => files.has(path) || [...files.keys()].some((entry) => entry.startsWith(`${path}/`)),
+    readFile: async (path) => {
+      const data = files.get(path);
+      if (data === undefined) throw new Error(`Missing file: ${path}`);
+      return data;
+    },
+    writeFile: async (path, data) => { files.set(path, data); },
+    replaceFile: async (from, to) => {
+      const data = files.get(from);
+      if (data === undefined) throw new Error(`Missing file: ${from}`);
+      files.set(to, data);
+      files.delete(from);
+    },
+    removeFile: async (path) => { files.delete(path); },
+    readDir: async (path) => [...files.keys()].filter((entry) => entry.startsWith(`${path}/`)).map((entry) => ({ name: entry.slice(path.length + 1), path: entry, isDirectory: false })),
+    ensureDir: async () => {},
+    join: (...parts) => parts.join('/'),
+    dirname: (path) => path.slice(0, path.lastIndexOf('/')),
+  };
+}
 
 function projectContext(): AiProseDraftProject {
   return {

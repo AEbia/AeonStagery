@@ -51,6 +51,13 @@ import type { SceneEnhancementUnitCheckpointSummaryV1 } from '../services/ai-aut
 import { validatePerformanceResourceCapabilities } from '../services/ai-authoring/PerformanceCapabilityGate';
 import { useEnhancementCapabilityPorts } from './hooks/useEnhancementCapabilityPorts';
 import { showToast } from './Toast';
+import { AiSetupGuideBanner } from './ai-prose/WorkbenchFeedback';
+import {
+  diagnoseAiError,
+  MISSING_CREDENTIAL_GUIDE_MESSAGE,
+  shouldRequireAiCredentialSetup,
+} from '../services/ai-authoring/aiErrorPresentation';
+import type { AiProseElectronCredentialController } from '../services/ai-authoring/AiProseElectronTransport';
 
 type EnhancementStep = 'segment' | 'performance' | 'preview';
 
@@ -72,26 +79,26 @@ const PHASE_LABELS: Record<SceneEnhancementPhaseV1, string> = {
 
 const FAMILY_LABELS: Record<string, string> = {
   characterPerformance: '角色表演',
-  characterTransform: '角色变换',
+  characterTransform: '角色位置与姿态',
   camera: '镜头',
   lighting: '灯光',
   visualStyle: '视觉风格',
   filterAdd: '滤镜添加',
   filterChange: '滤镜变更',
   filterReset: '滤镜重置',
-  line: '行移动/删除',
-  companions: 'companion 重排',
+  line: '语句调整',
+  companions: '角色表演顺序',
   unknown: '其他',
 };
 
 const OP_LABELS: Record<string, string> = {
   insertStatement: '插入语句',
-  insertCompanion: '插入 companion',
+  insertCompanion: '添加角色表演',
   updateStatement: '更新语句',
-  updateCompanion: '更新 companion',
+  updateCompanion: '更新角色表演',
   deleteLine: '删除',
   moveLine: '移动',
-  reorderCompanions: '重排 companion',
+  reorderCompanions: '调整表演顺序',
 };
 
 const UNIT_STATUS_LABELS: Record<string, string> = {
@@ -262,7 +269,51 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
   const [traceOpen, setTraceOpen] = useState(true);
   const [liveStage, setLiveStage] = useState<EnhancementUnitCheckpointV1['stage'] | null>(null);
   const [liveUnits, setLiveUnits] = useState<readonly LiveUnitRow[]>([]);
+  const [credentialConfigured, setCredentialConfigured] = useState(false);
+  const [credentialChecked, setCredentialChecked] = useState(false);
   const runTokenRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    const transport = composition?.transport as Partial<AiProseElectronCredentialController> | undefined;
+    if (!transport || typeof transport.getCredentialStatus !== 'function') {
+      setCredentialConfigured(false);
+      setCredentialChecked(false);
+      return () => {
+        active = false;
+      };
+    }
+    void transport.getCredentialStatus()
+      .then((status) => {
+        if (!active) return;
+        setCredentialConfigured(status.configured);
+        setCredentialChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCredentialConfigured(false);
+        setCredentialChecked(false);
+      });
+    const unsubscribe = eventBus.on('ai:credentialStatusChanged', (payload) => {
+      if (!active || !payload || typeof payload !== 'object') return;
+      const configured = Boolean((payload as { configured?: boolean }).configured);
+      setCredentialConfigured(configured);
+      setCredentialChecked(true);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [composition]);
+
+  const needsCredentialSetup = shouldRequireAiCredentialSetup({
+    credentialChecked,
+    credentialConfigured,
+    endpoint: settings.aiProse?.baseUrl,
+  });
+  const openAiSettings = useCallback(() => {
+    void eventBus.emit('ui:openSettings', { tab: 'ai' });
+  }, []);
 
   const capabilityPorts = useEnhancementCapabilityPorts({
     document,
@@ -379,7 +430,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
       });
       commitSnapshot(empty);
       setUnitCheckpoints([]);
-      setMessage('空 scene：无需更改，不发起模型请求。');
+      setMessage('当前场景无需更改。');
       setActiveStep('preview');
       return;
     }
@@ -393,6 +444,9 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
           segmentation = buildSingleSegmentSegmentation(segmentationPreview.groups);
         } else if (!orchestrator) {
           setMessage('自动语义分段需要 AI 服务。请配置 AI 设置，或改用时间点分段。');
+          return;
+        } else if (needsCredentialSetup) {
+          setMessage(MISSING_CREDENTIAL_GUIDE_MESSAGE);
           return;
         } else {
           setMessage('正在自动语义分段…');
@@ -423,7 +477,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
       const next = beginFormalEnhancementRun({ binding, document, segmentation });
       commitSnapshot(next);
       setUnitCheckpoints([]);
-      setMessage(`已锁定 ${next.segmentation?.segmentKeys.length ?? 0} 个叙事段（version ${binding.documentVersion}）。`);
+      setMessage(`已锁定 ${next.segmentation?.segmentKeys.length ?? 0} 个叙事段。`);
       setRunnerNotice('分段已锁定。可运行表演指导，或跳过到预览。');
       setActiveStep('performance');
     } finally {
@@ -437,6 +491,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
     timepointInput,
     binding,
     commitSnapshot,
+    needsCredentialSetup,
     orchestrator,
     targetBatchSize,
   ]);
@@ -444,6 +499,10 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
   const handleRunPerformance = useCallback(async () => {
     if (!document || !snapshot?.segmentation || !orchestrator) {
       setMessage(!orchestrator ? '需要 AI 服务才能运行表演指导。请打开 AI 设置。' : '请先锁定分段。');
+      return;
+    }
+    if (needsCredentialSetup) {
+      setMessage(MISSING_CREDENTIAL_GUIDE_MESSAGE);
       return;
     }
     if (modelCapabilitiesLoading) {
@@ -475,7 +534,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
       if (next.performance?.status === 'succeeded') {
         setMessage(
           next.previewPatch && next.previewPatch.operations.length > 0
-            ? `表演完成：${next.previewPatch.operations.length} 项操作，可检查预览并应用。`
+            ? `表演指导已完成：共生成 ${next.previewPatch.operations.length} 项更改，可检查并应用。`
             : '表演完成：无需更改。可检查预览。',
         );
         setRunnerNotice('表演阶段已成功。');
@@ -492,7 +551,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
     } finally {
       if (token === runTokenRef.current) setBusy('idle');
     }
-  }, [aiTrace, binding, commitSnapshot, document, modelCapabilities, modelCapabilitiesLoading, orchestrator, snapshot]);
+  }, [aiTrace, binding, commitSnapshot, document, modelCapabilities, modelCapabilitiesLoading, needsCredentialSetup, orchestrator, snapshot]);
 
   const handleApply = useCallback(async () => {
     if (!document || !snapshot || !semanticAuthoring) {
@@ -524,7 +583,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
       formalSceneEnhancementStore.discard('explicit_discard');
       setSnapshot(null);
       setUnitCheckpoints([]);
-      setMessage(`已应用 ${result.operationCount} 项操作（一条 history）。`);
+      setMessage(`已应用 ${result.operationCount} 项更改。`);
       setRunnerNotice('应用成功。');
       showToast(`正式增强已应用 · ${result.operationCount} 项`, 'success');
       setActiveStep('segment');
@@ -558,7 +617,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
         <div className="ai-prose-empty-state">
           <span className="ai-prose-empty-state__mark">EN</span>
           <h2>正式 scene 增强</h2>
-          <p>打开场景后，可对当前 active scene 运行表演指导并预览结果。</p>
+          <p>打开场景后，即可为当前场景运行表演指导并预览结果。</p>
         </div>
       </div>
     );
@@ -595,8 +654,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
         <div className="ai-prose-topbar__spacer" />
         <span className="ai-prose-save-state">
           <i />
-          预览 · v
-          {documentVersion}
+          预览
         </span>
         <span className={`ai-prose-ai-state ${phase === 'failed' ? 'is-error' : phase === 'preview_ready' ? 'is-ready' : isBusy ? 'is-running' : ''}`}>
           <i />
@@ -635,10 +693,6 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
           <div className="ai-prose-rail-inner">
             <div className="ai-prose-section-title">
               <h2>{document.meta.title || document.sceneId}</h2>
-              <span className="ai-prose-session-id">
-                v
-                {documentVersion}
-              </span>
             </div>
             <div className="ai-prose-field-foot">
               <strong>
@@ -693,20 +747,44 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
         </aside>
 
         <main className="ai-prose-pipeline-space">
-          {(isStaleBanner || message || runnerNotice) && (
-            <div className={`ai-prose-run-banner ${isStaleBanner ? 'is-stale' : ''}`}>
-              <div className="ai-prose-run-title">
-                <span className="ai-prose-run-icon">{isStaleBanner ? '!' : phase === 'no_changes' ? '·' : 'i'}</span>
-                <strong>{isStaleBanner ? '预览已失效' : message || runnerNotice}</strong>
-              </div>
-            </div>
+          {needsCredentialSetup && (
+            <AiSetupGuideBanner onOpenSettings={openAiSettings} contextLabel="正式增强" />
           )}
+          {(isStaleBanner || message || runnerNotice) && (() => {
+            const diagnosis = message ? diagnoseAiError(message) : null;
+            return (
+              <div className={`ai-prose-run-banner ${isStaleBanner ? 'is-stale' : ''}`}>
+                <div className="ai-prose-run-title">
+                  <span className="ai-prose-run-icon">{isStaleBanner ? '!' : phase === 'no_changes' ? '·' : 'i'}</span>
+                  <div>
+                    <strong>{isStaleBanner ? '预览已失效' : message || runnerNotice}</strong>
+                    {diagnosis && diagnosis.category !== 'unknown' && (
+                      <small>
+                        {diagnosis.userTitle}
+                        ：
+                        {diagnosis.userMessage !== message ? `${diagnosis.userMessage} ` : ''}
+                        {diagnosis.suggestion}
+                      </small>
+                    )}
+                  </div>
+                </div>
+                {diagnosis?.suggestOpenSettings && (
+                  <button
+                    className="ai-prose-button ai-prose-button--secondary ai-prose-error-action"
+                    type="button"
+                    onClick={openAiSettings}
+                  >
+                    前往 AI 设置
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="ai-prose-artifact-workspace">
             {activeStep === 'segment' && segmentationPreview && (
               <SegmentStep
                 preview={segmentationPreview}
-                targetBatchSize={targetBatchSize}
                 segmentMode={segmentMode}
                 timepointInput={timepointInput}
                 resolvedTimepoints={resolvedTimepoints}
@@ -723,7 +801,7 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
               <StageRunPanel
                 icon={<IconPerformanceDirector width={18} height={18} />}
                 title="表演指导"
-                body="补全 motion / expression / lookAt / blink 与 characterTransform。空 motion 占位可填；已有非空字段不覆盖。"
+                body="补全角色动作、表情、视线、眨眼和站位，并保留已有设置。"
                 stageResult={snapshot?.performance}
                 segmentCount={snapshot?.segmentation?.segmentKeys.length ?? 0}
                 units={unitCheckpoints.filter((unit) => unit.stage === 'performance')}
@@ -767,12 +845,6 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
           </span>
           <span>
             <strong>{STEPS.find((step) => step.id === activeStep)?.label}</strong>
-            <small>
-              绑定 version {documentVersion}
-              {snapshot?.previewPatch
-                ? ` · ${snapshot.previewPatch.operations.length} 项操作`
-                : ' · 未生成预览 patch'}
-            </small>
           </span>
         </div>
         <div className="ai-prose-bottom-spacer" />
@@ -789,25 +861,15 @@ export function FormalSceneEnhancementPanel({ onClose }: { onClose?: () => void 
             </button>
           )}
           {activeStep === 'performance' && (
-            <>
-              <button
-                className="ai-prose-button ai-prose-button--secondary"
-                type="button"
-                disabled={!snapshot?.segmentation || isBusy}
-                onClick={() => void handleRunPerformance()}
-              >
-                {busy === 'performance' ? '运行中…' : '运行表演'}
-              </button>
-              <button
-                className="ai-prose-button ai-prose-button--primary"
-                type="button"
-                disabled={isBusy}
-                onClick={() => setActiveStep('preview')}
-              >
-                查看预览
-                <span>→</span>
-              </button>
-            </>
+            <button
+              className="ai-prose-button ai-prose-button--primary"
+              type="button"
+              disabled={!snapshot?.segmentation || isBusy}
+              onClick={() => void handleRunPerformance()}
+            >
+              {busy === 'performance' ? '运行中…' : '运行'}
+              <span>→</span>
+            </button>
           )}
           {activeStep === 'preview' && (
             <button
@@ -869,7 +931,6 @@ function stepState(
 
 function SegmentStep({
   preview,
-  targetBatchSize,
   segmentMode,
   timepointInput,
   resolvedTimepoints,
@@ -881,7 +942,6 @@ function SegmentStep({
   hasOrchestrator,
 }: {
   preview: NonNullable<ReturnType<typeof previewFormalSegmentation>>;
-  targetBatchSize: number;
   segmentMode: 'auto' | 'timepoints';
   timepointInput: string;
   resolvedTimepoints: ReturnType<typeof resolveFormalUserTimepoints> | null;
@@ -930,11 +990,9 @@ function SegmentStep({
           {preview.effectiveTarget}
         </strong>
         <span>
-          边界
+          可用分段点
           {' '}
           {preview.candidateBoundaryCount}
-          {' · batch '}
-          {formatCount(targetBatchSize)}
         </span>
       </div>
 
@@ -960,7 +1018,7 @@ function SegmentStep({
                 <span>
                   {resolvedTimepoints.resolvedStarts.length}
                   {' '}
-                  cuts
+                  个分段点
                 </span>
               </div>
               <ul>
@@ -968,10 +1026,9 @@ function SegmentStep({
                   <li key={`${item.groupIndex}-${item.timepoint}`}>
                     <span>{formatFormalTime(item.timepoint)}</span>
                     <b>
-                      → G
-                      {item.groupIndex}
-                      {' · '}
-                      {formatFormalTime(item.groupTime)}
+                      → 第
+                      {item.groupIndex + 1}
+                      组 · {formatFormalTime(item.groupTime)}
                     </b>
                   </li>
                 ))}
@@ -986,24 +1043,25 @@ function SegmentStep({
 
       <div className="ai-enhance-groups">
         <div className="ai-prose-section-title">
-          <h3>Groups</h3>
+          <h3>场景语句组</h3>
           <span>{preview.groups.length}</span>
         </div>
         <div className="ai-enhance-group-list">
           {preview.groups.length === 0 ? (
-            <div className="ai-enhance-note">空 scene → no_changes</div>
+            <div className="ai-enhance-note">当前场景没有可分段的内容。</div>
           ) : (
             preview.groups.map((group) => (
               <div key={group.index} className="ai-enhance-group-row">
                 <span className="ai-enhance-group-row__index">
-                  G
-                  {group.index}
+                  第
+                  {group.index + 1}
+                  组
                 </span>
                 <b>{formatFormalTime(group.time)}</b>
                 <span>
                   {group.rootCount}
                   {' '}
-                  roots
+                  条语句
                 </span>
                 <span>{group.hasSpeakerText ? `${formatCount(group.visibleChars)} 字` : '非文本'}</span>
               </div>
@@ -1197,7 +1255,7 @@ function StageRunPanel({
                 </div>
               )}
               {!preview.storyText && preview.performances.length === 0 && (
-                <div className="ai-enhance-note">该段没有 speaker/text 或表演占位。</div>
+                <div className="ai-enhance-note">该段没有对白、旁白或角色表演。</div>
               )}
             </details>
           ))}
@@ -1215,13 +1273,8 @@ function StageRunPanel({
           <strong>
             {stageResult.patch.operations.length}
             {' '}
-            操作
+            项更改
           </strong>
-          <span>
-            {stageResult.policyVersion ?? 'policy'}
-            {' · '}
-            {stageResult.processorVersion ?? 'processor'}
-          </span>
         </div>
       )}
 
@@ -1273,7 +1326,6 @@ function PreviewStep({
         <div className="ai-prose-tab-intro">
           <div>
             <h2>无需更改</h2>
-            <p>空 scene：不请求模型、不写 history。</p>
           </div>
         </div>
       </div>
@@ -1285,13 +1337,6 @@ function PreviewStep({
       <div className="ai-prose-tab-intro">
         <div>
           <h2>预览摘要</h2>
-          <p>
-            version
-            {' '}
-            {snapshot.binding.documentVersion}
-            {' '}
-            · 一次 transaction 应用
-          </p>
         </div>
       </div>
 
@@ -1309,18 +1354,8 @@ function PreviewStep({
             <strong>
               {summary.operationCount}
               {' '}
-              操作
+              项更改
             </strong>
-            <span>
-              +
-              {summary.counts.inserted}
-              {' · ~'}
-              {summary.counts.updated}
-              {' · −'}
-              {summary.counts.deleted}
-              {' / '}
-              {summary.counts.moved}
-            </span>
           </div>
 
           <div className="ai-enhance-family-list">
@@ -1335,7 +1370,7 @@ function PreviewStep({
           </div>
         </>
       ) : (
-        <div className="ai-enhance-note">尚无 preview patch。请先运行表演指导。</div>
+        <div className="ai-enhance-note">运行表演指导后，增强结果会显示在这里。</div>
       )}
 
       <div className="ai-enhance-actions">

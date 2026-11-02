@@ -82,6 +82,7 @@ function QuickPerformanceResourceSelect({ item, fieldKey, sceneData, timelineAct
       onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}>
       <Live2DResourceSelect
+        kind={fieldKey}
         label={label}
         dataTestId={`action-param-${fieldKey}`}
         value={isMotion ? characterPerformanceMotionKey(source.motion) ?? '' : String(source.expression ?? '')}
@@ -104,12 +105,6 @@ function QuickPerformanceResourceSelect({ item, fieldKey, sceneData, timelineAct
             }));
           }
         }}
-        onPreview={charId ? (key) => {
-          if (disabled) return;
-          if (!isMotion) characterAdapter.setExpression(charId, key || '');
-          else if (key) characterAdapter.playMotion(charId, key);
-          else characterAdapter.stopAllMotions(charId);
-        } : undefined}
       />
     </div>
   );
