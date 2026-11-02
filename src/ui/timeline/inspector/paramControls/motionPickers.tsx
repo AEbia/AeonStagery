@@ -18,6 +18,7 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
     return (
       <Live2DResourceSelect
         key={key}
+        kind="motion"
         label={base.label}
         value={motionValue}
         options={ctx.modelData.motions}
@@ -40,13 +41,6 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
             });
           }
         }}
-        onPreview={charId ? (motionVal) => {
-          if (motionVal) {
-            ctx.characterAdapter.playMotion(charId, motionVal);
-          } else {
-            ctx.characterAdapter.stopAllMotions(charId);
-          }
-        } : undefined}
       />
     );
   }
@@ -58,6 +52,7 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
     return (
       <Live2DResourceSelect
         key={key}
+        kind="expression"
         label={base.label}
         value={val || ''}
         options={ctx.modelData.expressions}
@@ -71,9 +66,6 @@ export function resolveMotionPickerParam(ctx: InspectorParamContext, key: string
         clearable
         clearLabel="（无表情）"
         onChange={(newVal) => ctx.updateAuthoringParam(key, newVal || undefined)}
-        onPreview={charId ? (exprVal) => {
-          ctx.characterAdapter.setExpression(charId, exprVal || '');
-        } : undefined}
       />
     );
   }

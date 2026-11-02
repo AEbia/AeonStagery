@@ -38,6 +38,7 @@ export function CompanionPerformancePickers({
         </div>
       ) : (
         <Live2DResourceSelect
+          kind="motion"
           label="动作"
           value={characterPerformanceMotionKey(companion.params.motion) || ''}
           options={modelData.motions}
@@ -45,13 +46,10 @@ export function CompanionPerformancePickers({
           charId={charId} character={character} modelPath={modelPath}
           placeholder="选择动作..." clearable clearLabel="（无动作）"
           onChange={(key) => onChange('motion', key ? { kind: 'resource', key } : undefined)}
-          onPreview={charId ? (key) => {
-            if (key) characterAdapter.playMotion(charId, key);
-            else characterAdapter.stopAllMotions(charId);
-          } : undefined}
         />
       )}
       <Live2DResourceSelect
+        kind="expression"
         label="表情"
         value={companion.params.expression || ''}
         options={modelData.expressions}
@@ -59,7 +57,6 @@ export function CompanionPerformancePickers({
         charId={charId} character={character} modelPath={modelPath}
         placeholder="选择表情..." clearable clearLabel="（无表情）"
         onChange={(key) => onChange('expression', key || undefined)}
-        onPreview={charId ? (key) => characterAdapter.setExpression(charId, key || '') : undefined}
       />
     </div>
   );

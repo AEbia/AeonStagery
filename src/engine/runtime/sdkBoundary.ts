@@ -85,6 +85,7 @@ export function readExpressionNames(definitions: unknown): string[] {
   }
   return definitions.flatMap((definition: unknown) => {
     const name = readSdkProperty(definition, 'Name');
-    return typeof name === 'string' && name ? [name] : [];
+    const resolvedName = typeof name === 'string' && name ? name : readSdkProperty(definition, 'name');
+    return typeof resolvedName === 'string' && resolvedName ? [resolvedName] : [];
   });
 }

@@ -56,6 +56,7 @@ import type {
   PreparedAssetRef,
 } from './Live2DRuntimeContracts';
 import type { Live2DInternalMotionStartResult } from './Live2DRuntimeControlPort';
+import { readExpressionNames } from './sdkBoundary';
 import {
   finiteOrUndefined,
   getCubism2ModelContext,
@@ -197,9 +198,8 @@ export class Cubism2PixiLive2DModelControls implements Live2DRuntimeControlPort 
     const expressions = new Set<string>();
     for (const target of this.getConcreteModels(model)) {
       const settingsExpressions = target?.internalModel?.settings?.expressions;
-      if (!settingsExpressions) continue;
-      for (const key of Object.keys(settingsExpressions)) {
-        expressions.add(key);
+      for (const name of readExpressionNames(settingsExpressions)) {
+        expressions.add(name);
       }
     }
     return Array.from(expressions);

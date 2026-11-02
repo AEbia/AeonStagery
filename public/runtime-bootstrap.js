@@ -7,7 +7,11 @@
     { file: 'live2dcubismcore.min.js', key: 'cubismCoreLoaded', probe: function () { return !!(window.Live2DCubismCore && window.Live2DCubismCore.Version); } }
   ];
 
-  var runtimePrefix = window.aeonStageryAPI ? 'aeon-runtime://localhost/' : './';
+  // Preview frames receive the host mode explicitly: file:// frames need not
+  // be allowed to read their parent. SDK globals and clocks remain frame-local.
+  var desktopHost = !!window.aeonStageryAPI
+    || new URLSearchParams(window.location.search).get('runtimeHost') === 'desktop';
+  var runtimePrefix = desktopHost ? 'aeon-runtime://localhost/' : './';
   var bootstrap = window.__aeonLive2DRuntimeBootstrap = window.__aeonLive2DRuntimeBootstrap || {};
   var resolveReady;
   bootstrap.ready = new Promise(function (resolve) {
