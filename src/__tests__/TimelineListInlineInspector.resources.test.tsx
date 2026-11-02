@@ -30,10 +30,12 @@ describe('List inline inspector resources', () => {
     expect(screen.queryByRole('textbox', { name: '表情名' })).toBeNull();
     fireEvent.click(screen.getByRole('combobox', { name: '表情名' }));
     fireEvent.click(await screen.findByRole('button', { name: '预览 happy' }));
-    expect(state.characterAdapter.setExpression).toHaveBeenCalledWith('alice', 'happy');
+    await screen.findByTitle('表情预览模型');
+    expect(state.characterAdapter.setExpression).not.toHaveBeenCalled();
     expect(state.authorMock).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Escape' });
-    expect(state.characterAdapter.setExpression).toHaveBeenLastCalledWith('alice', 'smile');
+    await waitFor(() => expect(screen.queryByTitle('表情预览模型')).toBeNull());
+    expect(state.characterAdapter.setExpression).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('combobox', { name: '表情名' }));
     fireEvent.click(screen.getByRole('option', { name: 'happy' }));
     await waitFor(() => expect(state.document.statements[0].params.expression).toBe('happy'));
@@ -63,7 +65,8 @@ describe('List inline inspector resources', () => {
     expect(screen.getByRole('option', { name: 'bow' }).closest('[role="listbox"]'))
       .toBe(screen.getByRole('listbox', { name: '可选项' }));
     fireEvent.click(screen.getByRole('button', { name: '预览 mygo/alice/bow' }));
-    expect(state.characterAdapter.playMotion).toHaveBeenCalledWith('alice', 'mygo/alice/bow');
+    await screen.findByTitle('动作预览模型');
+    expect(state.characterAdapter.playMotion).not.toHaveBeenCalled();
     expect(state.authorMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('option', { name: 'bow' }));
     await waitFor(() => expect(state.document.statements[1].companions[0].params).toEqual({

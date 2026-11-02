@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useId, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useId, useCallback, type RefObject } from 'react';
 import { IconSearch, IconX, IconChevronDown, IconPlay, IconRefresh } from './icons';
 import { useOutsidePointerDown } from './hooks/useOutsidePointerDown';
 
@@ -23,6 +23,9 @@ export interface SearchableSelectProps {
   footer?: React.ReactNode;
   /** Explicit preview only: invoked by the per-row play button, never by hover or keyboard browsing. */
   onPreview?: (val: string) => void;
+  onOpenChange?: (open: boolean) => void;
+  /** Portalled controls that belong to this picker, such as a resource preview. */
+  additionalInsideRefs?: ReadonlyArray<RefObject<HTMLElement | null>>;
   dataTestId?: string;
   clearable?: boolean;
   clearLabel?: string;
@@ -42,12 +45,15 @@ export const SearchableSelect = ({
   header,
   footer,
   onPreview,
+  onOpenChange,
+  additionalInsideRefs,
   dataTestId,
   clearable,
   clearLabel,
   preferredGroup,
 }: SearchableSelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
+  const previousOpen = useRef(false);
   const [search, setSearch] = useState('');
   const [activePrimaryGroup, setActivePrimaryGroup] = useState<string | null>(null);
   const [activeSecondaryGroup, setActiveSecondaryGroup] = useState<string | null>(null);
@@ -316,27 +322,16 @@ export const SearchableSelect = ({
     return opts;
   }, [filteredOptions, search, activePrimaryGroup, currentSecondaryGroups.length, activeSecondaryGroup, value, clearable, clearLabel]);
 
-  const previewActiveRef = useRef(false);
-  const restorePreview = useCallback(() => {
-    if (onPreview && previewActiveRef.current) {
-      previewActiveRef.current = false;
-      onPreview(value);
-    }
-  }, [onPreview, value]);
-  const restorePreviewRef = useRef(restorePreview);
-  restorePreviewRef.current = restorePreview;
+  const closeSelect = useCallback(() => {
+    setIsOpen(false);
+  }, []);
+  useOutsidePointerDown(containerRef, closeSelect, additionalInsideRefs);
 
   useEffect(() => {
-    return () => {
-      restorePreviewRef.current();
-    };
-  }, []);
-
-  const closeSelect = useCallback(() => {
-    restorePreview();
-    setIsOpen(false);
-  }, [restorePreview]);
-  useOutsidePointerDown(containerRef, closeSelect);
+    if (previousOpen.current === isOpen) return;
+    previousOpen.current = isOpen;
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   useEffect(() => {
     setActiveOptionIndex((current) => Math.min(current, Math.max(0, displayedOptions.length - 1)));
@@ -376,7 +371,6 @@ export const SearchableSelect = ({
   const selectedOption = normalizedOptions.find(opt => opt.value === value);
   const displayValue = triggerLabel ?? (selectedOption ? selectedOption.label : (value || placeholder));
   const selectOption = (nextValue: string) => {
-    previewActiveRef.current = false;
     onChange(nextValue);
     setIsOpen(false);
     setSearch('');
@@ -394,7 +388,6 @@ export const SearchableSelect = ({
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      restorePreview();
       setIsOpen(false);
       triggerRef.current?.focus();
       return;
@@ -444,7 +437,6 @@ export const SearchableSelect = ({
             if (!isOpen) openSelect();
           } else if (event.key === 'Escape' && isOpen) {
             event.preventDefault();
-            restorePreview();
             setIsOpen(false);
           }
         }}
@@ -478,7 +470,6 @@ export const SearchableSelect = ({
               title={`清除${label || '选择'}`}
               onClick={(e) => {
                 e.stopPropagation();
-                restorePreview();
                 onChange('');
                 triggerRef.current?.focus();
               }}
@@ -486,7 +477,6 @@ export const SearchableSelect = ({
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   e.stopPropagation();
-                  restorePreview();
                   onChange('');
                   triggerRef.current?.focus();
                 }
@@ -708,7 +698,6 @@ export const SearchableSelect = ({
               id={listboxId}
               role="listbox"
               aria-label="可选项"
-              onMouseLeave={restorePreview}
               style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '6px' }}
               className="custom-scrollbar"
             >
@@ -775,7 +764,6 @@ export const SearchableSelect = ({
                       className="btn btn--icon"
                       onClick={(e) => {
                         e.stopPropagation();
-                        previewActiveRef.current = true;
                         onPreview(opt.value);
                       }}
                       title="预览"

@@ -751,7 +751,7 @@ describe('ActionInspector', () => {
     expect(testState.characterAdapter.playMotion).not.toHaveBeenCalled();
   });
 
-  it('previews a motion from the row play button and restores the committed motion on leave', async () => {
+  it('previews a motion in its own window and keeps it open on list leave', async () => {
     testState.characterAdapter.playMotion.mockClear();
     renderPlayMotionInspector('idle');
 
@@ -759,13 +759,15 @@ describe('ActionInspector', () => {
     fireEvent.click(screen.getByTestId('action-param-motion'));
 
     fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
-    expect(testState.characterAdapter.playMotion).toHaveBeenLastCalledWith('sakiko', 'wave');
+    const frame = await screen.findByTitle('动作预览模型');
+    expect(testState.characterAdapter.playMotion).not.toHaveBeenCalled();
 
     fireEvent.mouseLeave(screen.getByRole('listbox', { name: '可选项' }));
-    expect(testState.characterAdapter.playMotion).toHaveBeenLastCalledWith('sakiko', 'idle');
+    expect(screen.getByTitle('动作预览模型')).toBe(frame);
+    expect(testState.characterAdapter.playMotion).not.toHaveBeenCalled();
   });
 
-  it('stops all motions when restoring an empty committed motion after a row preview', async () => {
+  it('closes the preview of an empty motion selection without stopping stage motions', async () => {
     testState.characterAdapter.playMotion.mockClear();
     testState.characterAdapter.stopAllMotions.mockClear();
     renderPlayMotionInspector('');
@@ -774,11 +776,13 @@ describe('ActionInspector', () => {
     fireEvent.click(screen.getByTestId('action-param-motion'));
 
     fireEvent.click(screen.getByRole('button', { name: '预览 wave' }));
-    expect(testState.characterAdapter.playMotion).toHaveBeenLastCalledWith('sakiko', 'wave');
+    await screen.findByTitle('动作预览模型');
 
     fireEvent.mouseLeave(screen.getByRole('listbox', { name: '可选项' }));
-    expect(testState.characterAdapter.stopAllMotions).toHaveBeenCalledWith('sakiko');
-    expect(testState.characterAdapter.playMotion).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '关闭角色预览' }));
+    await waitFor(() => expect(screen.queryByTitle('动作预览模型')).toBeNull());
+    expect(testState.characterAdapter.stopAllMotions).not.toHaveBeenCalled();
+    expect(testState.characterAdapter.playMotion).not.toHaveBeenCalled();
   });
 
   it('samples and estimates conversion at project FPS when the scene has no FPS', async () => {
@@ -1207,7 +1211,8 @@ describe('ActionInspector', () => {
       expect(screen.getByRole('button', { name: '转为自定义动作…' })).toBeTruthy();
       fireEvent.click(screen.getByRole('combobox', { name: pickerName }));
       fireEvent.click(await screen.findByRole('button', { name: '预览 idle' }));
-      expect(testState.characterAdapter.playMotion).toHaveBeenCalledWith('sakiko', 'idle');
+      await screen.findByTitle('动作预览模型');
+      expect(testState.characterAdapter.playMotion).not.toHaveBeenCalled();
     }
     await act(async () => { row.unmount(); });
   });

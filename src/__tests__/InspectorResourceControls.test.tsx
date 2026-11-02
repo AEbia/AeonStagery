@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../ui/context/AppContext', () => ({
   useCharacterAdapter: () => state.adapter,
   useSceneAssetService: () => state.assets,
+  useOptionalApp: () => null,
 }));
 vi.mock('../ui/AssetBrowserModal', () => ({
   AssetBrowserModal: ({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) => (
@@ -75,7 +76,13 @@ describe('Inspector resource controls', () => {
     expect(screen.getByRole('listbox', { name: '一级分组' })).toBeTruthy();
     expect(screen.getByRole('listbox', { name: '二级分组' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '预览 mygo/hero/nod' }));
-    expect(state.adapter.playMotion).toHaveBeenCalledWith('hero', 'mygo/hero/nod');
+    const frame = await screen.findByTitle('动作预览模型') as HTMLIFrameElement;
+    const preview = vi.spyOn(frame.contentWindow!, 'postMessage');
+    fireEvent.load(frame);
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.objectContaining({
+      modelUrl: 'asset://localhost/figure/hero/summer.model.json', kind: 'motion', key: 'mygo/hero/nod',
+    }), '*'));
+    expect(state.adapter.playMotion).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('option', { name: 'nod' }));
     expect(onChange).toHaveBeenLastCalledWith('motion', { kind: 'resource', key: 'mygo/hero/nod' });

@@ -151,6 +151,16 @@ flowchart TD
 
 行内展开区通过 `getStatementQuickFields` 排除语句行已承载的参数，包括文件选择、模型变体及动作／表情资源选择与预览；动作转换、自定义动作编辑、语音工作台等额外功能仍由详情区提供。轨道优先的独立属性检查器保留完整参数表单。
 
+动作／表情资源选择统一使用 `Live2DResourceSelect`，预览按钮打开
+[`Live2DResourcePreview`](../src/ui/live2d/Live2DResourcePreview.tsx) 小窗口。
+其 iframe 使用独立入口 `live2d-preview.html` 和 `Live2DPerformancePreview`，
+隔离 Cubism 2 / 3+ 模型与 SDK 状态；预览不向舞台发送动作、表情或恢复命令。
+小窗口优先放在选择框及其列表两侧，空间不足时改用上下方，并按窗口可用尺寸收缩。
+拖动后保留位置，窗口缩放时约束在可见范围内；预览画布同步调整尺寸并重新适配模型。
+选择框关闭时，小窗口朝来源方向退场并释放 iframe；操作小窗口不会触发选择框的外部点击关闭。
+入退场由 `useResourcePreviewMotion` 驱动 Web Animations，反向开关从当前姿态接续，
+仅由当次退场完成后释放 iframe；窗口隐藏、减少动态效果或低性能模式会结束动画并完成清理。
+
 
 | 视觉区域 / 视图 | 职责描述 | 对应文件 |
 | --- | --- | --- |

@@ -214,7 +214,10 @@ describe('Live2DRuntimeAdapter', () => {
         partOpacities: new Float32Array([1]),
         settings: {
           motions: { idle: [], wave: [] },
-          expressions: { smile: {}, angry: {} },
+          expressions: [
+            { name: 'smile', file: 'smile.exp.json' },
+            { name: 'angry', file: 'angry.exp.json' },
+          ],
         },
         motionManager: {
           state: { currentGroup: 'idle' },
@@ -918,7 +921,10 @@ describe('Live2DRuntimeAdapter', () => {
           internalModel: {
             settings: {
               motions: { idle: [], wave: [] },
-              expressions: { smile: {}, blush: {} },
+              expressions: [
+                { name: 'smile', file: 'smile.exp.json' },
+                { name: 'blush', file: 'blush.exp.json' },
+              ],
             },
           },
         },

@@ -101,10 +101,26 @@ Cubism 3/4/5 使用 `untitled-pixi-live2d-engine` 的 `cubism` 入口，Cubism 2
 
 当前锁定的上游引擎不支持离屏部件合成及扩展颜色/透明度混合；含这些效果的模型仍可加载，但相应效果可能缺失。普通 drawable 遮罩及兼容的正常、加算、乘算混合继续由原渲染器支持。
 
+### Isolated resource-selection preview
+
+动作／表情选择器通过 `Live2DResourceSelect` 打开非模态的小窗口。资源选择仍通过
+`onChange` 提交；预览不调用舞台的角色播放、表情或恢复操作。鼠标离开列表及关闭
+下拉不重置预览，窗口提供重播、重试和关闭。
+
+`live2d-preview.html` 是独立构建入口，由 iframe 加载自己的 runtime bootstrap、
+Pixi 和 `Live2DPerformancePreview`。Cubism 2 的 SDK 全局单例、`UtSystem` 时钟、
+GL／遮罩表和纹理缓存因此与编辑器处于不同 JavaScript realm；不能把父窗口的
+SDK 对象传入预览。Cubism 3+ 复用同一隔离方式和既有 runtime Adapter Interface。
+
+父窗口只传递解析后的模型 URL、资源种类、资源键和请求代次。预览拥有独立的
+`Live2DModelResources`、模型和 renderer，并在资源切换时重置中立姿态、使旧请求
+失效；窗口关闭销毁整个 iframe。消息校验来源窗口，旧请求响应不覆盖新请求。
+
 ## Implementation References
 
 - Runtime boundary: `src/engine/runtime/Live2DRuntimeContracts.ts`, `src/engine/Live2DRuntimeAdapter.ts`, `src/engine/live2d/runtime/`.
 - Resource ownership: `src/engine/Live2DModelResources.ts`, `src/engine/BakeEngine.ts`.
+- Resource preview: `src/engine/Live2DPerformancePreview.ts`, `src/ui/live2d/`, `live2d-preview.html`.
 - Stage orchestration: `src/engine/Live2DStageRuntime.ts`, `src/engine/Live2DManager.ts`, `src/engine/live2d/Live2DCustomMotionRuntime.ts`, `src/engine/Live2DCharacterGeometry.ts`, `src/engine/Live2DRimLightController.ts`.
 - Cubism 2 expression lifecycle: `src/engine/live2d/runtime/Cubism2ExpressionLifecycle.ts`, `src/engine/runtime/Cubism2PixiLive2DModelControls.ts`.
 - Verification: `npm run check`; focused coverage in `src/__tests__/Live2DRuntimeAdapter.test.ts`, `src/__tests__/Live2DModelResourceLifecycle.test.ts`, `src/__tests__/Live2DStageRuntime.test.ts`, `src/__tests__/Cubism2ExpressionLifecycle.test.ts` and related runtime integration tests.
