@@ -8,7 +8,7 @@ import { getStatementQuickFields, quickCoordinateKeys } from './statementQuickFi
 import { FormSelect } from '../FormSelect';
 import { InlineFilePicker } from '../InlineFilePicker';
 import { buildCharacterEntranceModelOptions, resolveActiveModelPath } from './inspector/entranceModelOptions';
-import { resolveCharacterPerformanceTargetCharId } from './characterPerformancePresentation';
+import { buildCharacterPerformanceTargetSelect, resolveCharacterPerformanceTargetCharId } from './characterPerformancePresentation';
 import { Live2DResourceSelect } from './inspector/Live2DResourceSelect';
 import { useCharacterModelData } from './inspector/useModelData';
 import { characterPerformanceMotionKey } from './inspector/dialogueCompanionModel';
@@ -177,15 +177,22 @@ export const StatementQuickControls = memo(function StatementQuickControls({ ite
           || (field.key === 'target' && ['characterPerformance', 'camera'].includes(item.source.type));
         if (characterField) {
           const current = typeof value === 'string' ? value : '';
+          const performanceTarget = item.source.type === 'characterPerformance' && field.key === 'target'
+            ? buildCharacterPerformanceTargetSelect({
+                rawTarget: value,
+                resolvedSpeakerId: item.displayAction.resolvedSpeakerId,
+                characters,
+              })
+            : undefined;
           const isCameraFocus = item.source.type === 'camera' && source.mode === 'focus';
           const label = isDialogue ? '选择说话角色' : item.source.type === 'camera' ? '跟随目标' : '选择角色';
           return (
             <label key={field.key} className="timeline-item__inline-field">
               {!isDialogue && <span className="timeline-item__inline-label">{field.label}</span>}
-              <FormSelect className="timeline-item__inline-select" value={current} aria-label={label}
+              <FormSelect className="timeline-item__inline-select" value={performanceTarget?.value ?? current} aria-label={label}
                 disabled={disabled}
                 placeholder={isDialogue ? '(旁白)' : isCameraFocus ? '固定坐标' : '未绑定角色'}
-                options={[
+                options={performanceTarget?.options ?? [
                   ...(isDialogue ? [{ value: '', label: '(旁白)' }] : []),
                   ...(isCameraFocus ? [{ value: '', label: '固定坐标' }] : []),
                   ...(current && !characters.some((character) => character.id === current)
