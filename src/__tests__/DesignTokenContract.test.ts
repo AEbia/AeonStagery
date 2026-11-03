@@ -24,7 +24,8 @@ describe('design token contract', () => {
       for (const match of source.matchAll(/var\(--([a-z0-9-]+)\)/g)) {
         references.add(match[1]);
       }
-      for (const match of source.matchAll(/--([a-z0-9-]+)\s*:/g)) {
+      // String-keyed inline style properties also define CSS variables.
+      for (const match of source.matchAll(/['"]?--([a-z0-9-]+)['"]?\s*:/g)) {
         definitions.add(match[1]);
       }
     }

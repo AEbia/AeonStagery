@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AiProseGlobalConfiguration } from '../services/ai-authoring/AiProseGlobalConfiguration';
 import type { AiProseLlmRequest, AiProseLlmTransport } from '../services/ai-authoring/AiProseContracts';
 import { AiProseLlmService } from '../services/ai-authoring/AiProseLlmService';
@@ -6,7 +6,7 @@ import {
   AiProsePipeline,
   createAiProseDraftPersistenceCheckpoint,
 } from '../services/ai-authoring/AiProsePipeline';
-import { createDraft } from '../services/ai-authoring/AiProseDraftSession';
+import { createDraft, updateSourceText } from '../services/ai-authoring/AiProseDraftSession';
 
 function createConfiguration(maxConcurrentAiRequests = 2): AiProseGlobalConfiguration {
   return new AiProseGlobalConfiguration({
@@ -23,6 +23,123 @@ function createConfiguration(maxConcurrentAiRequests = 2): AiProseGlobalConfigur
 }
 
 describe('AiProsePipeline', () => {
+  it.each(['prepare', 'normalize', 'rhythm'] as const)(
+    'waits for late %s checkpoint writes before reporting a save failure', async (stage) => {
+      const draft = createDraft({ sceneId: 'scene-1', sourceText: '甲。甲。\n乙。乙。', targetBatchSize: 4, anchorMode: 'zero' });
+      let releaseLateTask = () => {};
+      const lateTask = new Promise<void>((resolve) => { releaseLateTask = resolve; });
+      let delayEnabled = false;
+      let stageRequests = 0;
+      const pipeline = new AiProsePipeline(new AiProseLlmService(createConfiguration(), {
+        complete: async (request) => {
+          if (delayEnabled && (stage === 'prepare' || request.stage === (stage === 'normalize' ? 'normalization' : 'rhythm'))) {
+            stageRequests += 1;
+            if (stageRequests === 2) await lateTask;
+          }
+          if (request.stage === 'segmentation') return { content: '{"boundaryIds":["L0001"]}' };
+          if (request.stage === 'characterExtraction') return { content: '{"mainCharacters":[]}' };
+          if (request.stage === 'normalization') return { content: JSON.stringify({ statements: [0, 1].map(() => ({ speaker: '', text: request.userPrompt.includes('甲。') ? '甲。' : '乙。' })) }) };
+          return { content: '{"gapSeconds":[0.2]}' };
+        },
+      }));
+      const prepared = await pipeline.prepare(draft.sourceText, { targetBatchSize: 4 });
+      const normalized = await pipeline.normalize(prepared, []);
+      const saveError = new Error('disk full');
+      let saveAttempts = 0;
+      let storedDraft = draft;
+      const checkpoint = createAiProseDraftPersistenceCheckpoint({
+        project: { projectRoot: '/project', assetRoots: { project: 'assets' } },
+        draft: stage === 'prepare' ? draft : { ...draft, segmentation: prepared.segmentation },
+        persistence: { saveCheckpoint: async (_project, current) => {
+          saveAttempts += 1;
+          if (saveAttempts === 1) throw saveError;
+          storedDraft = structuredClone(current);
+          return 'current.json';
+        } },
+      });
+      delayEnabled = true;
+      let settled = false;
+      const running = (stage === 'prepare'
+        ? pipeline.prepare(draft.sourceText, { targetBatchSize: 4, checkpoint })
+        : stage === 'normalize'
+          ? pipeline.normalize(prepared, [], { checkpoint })
+          : pipeline.rhythm(prepared, normalized, { checkpoint }))
+        .catch((error: unknown) => error).finally(() => { settled = true; });
+      await vi.waitFor(() => expect(saveAttempts).toBe(1));
+      const settledBeforeSibling = settled;
+      releaseLateTask();
+      expect(await running).toBe(saveError);
+      expect(settledBeforeSibling).toBe(false);
+      storedDraft = updateSourceText(storedDraft, '用户新正文。');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(storedDraft.sourceText).toBe('用户新正文。');
+      expect(saveAttempts).toBe(2);
+    },
+  );
+
+  it('checkpoints a completed prepare task before its sibling finishes and reuses it after interruption', async () => {
+    const controller = new AbortController();
+    const draft = createDraft({ sceneId: 'scene-1', sourceText: '第一行。\n第二行。', targetBatchSize: 4, anchorMode: 'zero' });
+    const saved: typeof draft[] = [];
+    const checkpoint = createAiProseDraftPersistenceCheckpoint({
+      project: { projectRoot: '/project', assetRoots: { project: 'assets' } },
+      draft,
+      signal: controller.signal,
+      persistence: { saveCheckpoint: async (_project, current) => { saved.push(structuredClone(current)); return 'current.json'; } },
+    });
+    const interrupted = new AiProsePipeline(new AiProseLlmService(createConfiguration(), {
+      complete: async (request, options) => {
+        if (request.stage === 'segmentation') return { content: JSON.stringify({ boundaryIds: ['L0001'] }) };
+        return new Promise((_, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('interrupted')), { once: true });
+        });
+      },
+    }));
+    const preparing = interrupted.prepare(draft.sourceText, { checkpoint, signal: controller.signal }).catch((error: unknown) => error);
+    try {
+      await vi.waitFor(() => expect(saved.at(-1)?.segmentation.status).toBe('succeeded'));
+      expect(saved.at(-1)?.characterExtraction.status).toBe('idle');
+    } finally {
+      controller.abort();
+    }
+    expect(await preparing).toBeInstanceOf(Error);
+
+    const requests: string[] = [];
+    const resumed = new AiProsePipeline(new AiProseLlmService(createConfiguration(), {
+      complete: async (request) => {
+        requests.push(request.stage);
+        return { content: JSON.stringify({ mainCharacters: ['林夏'] }) };
+      },
+    }));
+    const result = await resumed.prepare(draft.sourceText, { existing: checkpoint.getDraft(), sourceRevision: draft.sourceRevision });
+    expect(result.segmentation.status).toBe('succeeded');
+    expect(requests).toEqual(['characterExtraction']);
+  });
+
+  it('retries fallback rhythm after configuration is repaired while preserving normalization', async () => {
+    let repaired = false;
+    let rhythmRequests = 0;
+    const pipeline = new AiProsePipeline(new AiProseLlmService(createConfiguration(), {
+      complete: async (request) => {
+        if (request.stage === 'segmentation') return { content: '{"boundaryIds":[]}' };
+        if (request.stage === 'characterExtraction') return { content: '{"mainCharacters":[]}' };
+        if (request.stage === 'normalization') return { content: '{"statements":[{"speaker":"","text":"甲。"},{"speaker":"","text":"乙。"}]}' };
+        rhythmRequests += 1;
+        if (!repaired) throw new Error('Invalid API key');
+        return { content: '{"gapSeconds":[0.6]}' };
+      },
+    }));
+    const prepared = await pipeline.prepare('甲。乙。', { targetBatchSize: 4000 });
+    const normalized = await pipeline.normalize(prepared, []);
+    const failed = await pipeline.rhythm(prepared, normalized);
+    expect(failed.tasks[0].usedFallback).toBe(true);
+    repaired = true;
+    const retried = await pipeline.rhythm(prepared, normalized, { existing: failed });
+    expect(rhythmRequests).toBe(2);
+    expect(retried.tasks[0].usedFallback).toBeUndefined();
+    expect(retried.tasks[0].gapSeconds).toEqual([0.6]);
+  });
+
   it('starts segmentation and character extraction in parallel and slices locally', async () => {
     const requests: AiProseLlmRequest[] = [];
     const pending: Array<(response: { content: string }) => void> = [];
@@ -558,7 +675,7 @@ describe('AiProsePipeline', () => {
     expect(saved.length).toBeGreaterThan(beforeRestore);
   });
 
-  it('preserves normalized statements when prepare rehydrates an unchanged draft', async () => {
+  it.each([false, true])('preserves normalized statements when prepare rehydrates unchanged extraction (failed: %s)', async (extractionFailed) => {
     const draft = createDraft({
       sceneId: 'scene-1',
       sessionId: 'prepare-rehydrate',
@@ -579,7 +696,7 @@ describe('AiProsePipeline', () => {
     const transport: AiProseLlmTransport = {
       complete: async (request) => {
         if (request.stage === 'segmentation') return { content: JSON.stringify({ boundaryIds: [] }) };
-        if (request.stage === 'characterExtraction') return { content: JSON.stringify({ mainCharacters: [] }) };
+        if (request.stage === 'characterExtraction') return { content: extractionFailed ? '{\"mainCharacters\":42}' : '{\"mainCharacters\":[]}' };
         if (request.stage === 'normalization') {
           return { content: JSON.stringify({ statements: [{ speaker: '', text: '第一段。' }] }) };
         }
@@ -594,14 +711,15 @@ describe('AiProsePipeline', () => {
       targetBatchSize: 100,
       checkpoint,
     });
+    expect(prepared.characterExtraction.status).toBe(extractionFailed ? 'failed' : 'succeeded');
     const normalization = await pipeline.normalize(prepared, {
-      confirmedMainCharacters: [],
+      confirmedMainCharacters: ['林夏'],
       mainCharactersConfirmed: true,
     }, { checkpoint });
     await pipeline.rhythm(prepared, normalization, { checkpoint });
 
     const completed = checkpoint.getDraft();
-    await pipeline.prepare(completed.sourceText, {
+    const rehydrated = await pipeline.prepare(completed.sourceText, {
       sourceRevision: completed.sourceRevision,
       targetBatchSize: completed.targetBatchSize,
       anchorTime: completed.anchorTime,
@@ -612,6 +730,11 @@ describe('AiProsePipeline', () => {
 
     expect(checkpoint.getDraft().normalization).toEqual(completed.normalization);
     expect(checkpoint.getDraft().preview).toEqual(completed.preview);
+    expect(checkpoint.getDraft().confirmedMainCharacters).toEqual(['林夏']);
+    const resumedRhythm = await pipeline.rhythm(rehydrated, normalization, {
+      existingDraft: checkpoint.getDraft(), checkpoint,
+    });
+    expect(resumedRhythm.status).toBe('succeeded');
   });
 
   it('invalidates the timing preview when rehydration changes the reading speed', async () => {

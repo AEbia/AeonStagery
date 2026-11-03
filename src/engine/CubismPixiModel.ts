@@ -6,6 +6,7 @@ import type { Live2DPerformanceMetadata, PerformanceCompatibility, PreparedAsset
 import { createBlinkControlState, evaluateBlinkMultiplier } from './live2d/blinkController';
 import { manageRuntimeFocusAnimations } from './live2d/runtime/RuntimeFocus';
 import { installLive2DRenderPreparation } from './live2d/runtime/Live2DRenderPreparation';
+import { loadCubismModelDisplayInfo } from './runtime/CubismModelAnchors';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 function parameterId(id: any): string {
@@ -670,7 +671,13 @@ export function installCubismPixiModelRuntime(model: any, suppliedEngine?: Cubis
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism SDK internals are versioned dynamic objects; keeping this boundary opaque preserves Cubism 2/3 fallback compatibility.
 export async function createCubismPixiModel(modelUrl: string, options: Live2DModelCreateOptions): Promise<any> {
   const engine = await loadCubismEngineModule();
-  const model = await engine.Live2DModel.from(modelUrl, { ...options, autoUpdate: false, autoFocus: false, autoHitTest: false, idleMotionGroup: '__aeon_manual_idle__', eyeBlink: false });
+  const modelOptions = { ...options, autoUpdate: false, autoFocus: false, autoHitTest: false, idleMotionGroup: '__aeon_manual_idle__', eyeBlink: false };
+  const model = new engine.Live2DModel(modelOptions);
+  // The vendor preserves an embedded `url`, which can be a stale export path
+  // or just a filename. Set the actual entry URL before settings resolve any
+  // moc, texture, physics, motion or expression references.
+  model.once('settingsJSONLoaded', (json: { url?: string }) => { json.url = modelUrl; });
+  await engine.Live2DFactory.setupLive2DModel(model, modelUrl, modelOptions);
   // pixi-live2d-display normally installs this resolver while loading a
   // resource, but adapter-created instances can expose raw settings without
   // it. Motion3 cache conversion must resolve relative `File` entries against
@@ -696,5 +703,6 @@ export async function createCubismPixiModel(modelUrl: string, options: Live2DMod
       // Some SDK builds expose a sealed settings object; native fallback stays available.
     }
   }
+  await loadCubismModelDisplayInfo(model);
   return installCubismPixiModelRuntime(model, engine);
 }

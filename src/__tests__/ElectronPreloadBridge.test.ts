@@ -22,6 +22,18 @@ beforeAll(async () => {
 });
 
 describe('Electron preload bridge contracts', () => {
+  it('forwards credential status notifications and unsubscribes without exposing IPC events', () => {
+    const callback = vi.fn<(status: { configured: boolean }) => void>();
+    const unsubscribe = bridge.aiProse.onCredentialStatusChanged?.(callback);
+    const [channel, listener] = ipc.on.mock.calls.at(-1)!;
+    expect(channel).toBe('aiProse:credentialStatusChanged');
+    listener({ sender: 'private' }, { configured: true });
+    expect(callback).toHaveBeenCalledExactlyOnceWith({ configured: true });
+    expect(unsubscribe).toBeTypeOf('function');
+    unsubscribe?.();
+    expect(ipc.removeListener).toHaveBeenCalledWith(channel, listener);
+  });
+
   it('exposes only a file reveal request with the selected local path', async () => {
     await bridge.fs.showItemInFolder?.('/project/scene.json');
     expect(ipc.invoke).toHaveBeenLastCalledWith('fs:showItemInFolder', '/project/scene.json');

@@ -368,7 +368,7 @@ export function validateEnvironmentTimeline(script: RuntimeTimelineScene): Envir
           kind: 'overlapping-transition',
           actionIds: [previous.actionId, current.actionId],
           timeRange: [overlapStart, overlapEnd],
-          message: `Environment Layer "${layerId}" 在 ${overlapStart.toFixed(2)}s ~ ${overlapEnd.toFixed(2)}s 存在重叠 transition，seek/scrub 时可能出现非预期中间态。`,
+          message: `环境图层 "${layerId}" 的转场在 ${overlapStart.toFixed(2)}s ~ ${overlapEnd.toFixed(2)}s 重叠。请调整转场时长或开始时间。`,
         });
       }
     }

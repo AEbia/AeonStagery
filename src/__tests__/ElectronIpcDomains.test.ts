@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserWindow, IpcMainInvokeEvent, WebContents } from 'electron';
@@ -13,6 +13,7 @@ const electron = vi.hoisted(() => ({
   listeners: new Map<string, (...args: any[]) => void>(),
   protocols: new Map<string, (...args: any[]) => any>(),
   userData: '',
+  encryptionAvailable: vi.fn(() => false),
   quit: vi.fn(),
   relaunch: vi.fn(),
 }));
@@ -35,7 +36,11 @@ vi.mock('electron', () => ({
       electron.listeners.set(channel, handler);
     },
   },
-  safeStorage: { isEncryptionAvailable: () => false },
+  safeStorage: {
+    isEncryptionAvailable: electron.encryptionAvailable,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString(),
+  },
   protocol: {
     handle: (scheme: string, handler: (...args: any[]) => any) => electron.protocols.set(scheme, handler),
   },
@@ -107,6 +112,7 @@ let ipc: ReturnType<typeof registerIpcHandlers>;
 let loadRenderer: Mock<(window: BrowserWindow) => Promise<void>>;
 
 beforeEach(async () => {
+  electron.encryptionAvailable.mockReturnValue(false);
   electron.handlers.clear();
   electron.listeners.clear();
   electron.protocols.clear();
@@ -185,6 +191,77 @@ describe('Electron IPC domain composition', () => {
     expect(await invoke('betaState:save', eventFor(editor.window), 'first-lesson', value)).toEqual({ success: true });
     expect(await invoke('betaState:load', eventFor(editor.window), 'first-lesson')).toEqual(value);
     expect(JSON.parse(await readFile(join(electron.userData, 'beta/first-lesson.json'), 'utf8'))).toEqual(value);
+  });
+
+  it('reads an existing saved key for a newly opened Agent without saving again', async () => {
+    electron.encryptionAvailable.mockReturnValue(true);
+    await writeFile(join(electron.userData, 'ai-prose-credential.json'), JSON.stringify({
+      schemaVersion: 1, ciphertext: Buffer.from('previously-saved-fixture-key').toString('base64'),
+    }));
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: true });
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(editor.window)))
+      .toEqual({ configured: true });
+  });
+
+  it('recovers an existing saved key after the OS credential store becomes available', async () => {
+    await writeFile(join(electron.userData, 'ai-prose-credential.json'), JSON.stringify({
+      schemaVersion: 1, ciphertext: Buffer.from('previously-saved-fixture-key').toString('base64'),
+    }));
+    // An early status check must not permanently cache a saved key as absent.
+    await expect(invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .rejects.toThrow('系统密钥存储暂不可用');
+    electron.encryptionAvailable.mockReturnValue(true);
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: true });
+  });
+
+  it('reports unreadable stored credentials as read failures and permits replacement', async () => {
+    electron.encryptionAvailable.mockReturnValue(true);
+    await writeFile(join(electron.userData, 'ai-prose-credential.json'), '{broken');
+    await expect(invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .rejects.toThrow('已保存的 AI 密钥无法解密或文件格式无效');
+    expect(await invoke('aiProse:setCredential', eventFor(editor.window), 'replacement-fixture-key'))
+      .toEqual({ success: true });
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: true });
+  });
+
+  it('rejects unauthorized status queries instead of reporting a missing key', async () => {
+    await expect(invoke('aiProse:getCredentialStatus', eventFor(tools.window)))
+      .rejects.toThrow('Unauthorized AI prose sender.');
+    const subframe = eventFor(agent.window, { frameTreeNodeId: 999 } as Electron.WebFrameMain);
+    await expect(invoke('aiProse:getCredentialStatus', subframe))
+      .rejects.toThrow('Unauthorized AI prose sender.');
+  });
+
+  it('notifies the open Agent only after successful credential mutations', async () => {
+    electron.encryptionAvailable.mockReturnValue(true);
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: false });
+    expect(await invoke('aiProse:setCredential', eventFor(agent.window), 'fixture-key'))
+      .toMatchObject({ success: false });
+    expect(await invoke('aiProse:setCredential', eventFor(editor.window), ''))
+      .toMatchObject({ success: false });
+    expect(agent.webContents.send).not.toHaveBeenCalled();
+
+    expect(await invoke('aiProse:setCredential', eventFor(editor.window), 'fixture-key'))
+      .toEqual({ success: true });
+    expect(agent.webContents.send).toHaveBeenLastCalledWith(
+      'aiProse:credentialStatusChanged', { configured: true },
+    );
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: true });
+    expect(await invoke('aiProse:clearCredential', eventFor(editor.window)))
+      .toEqual({ success: true });
+    expect(agent.webContents.send).toHaveBeenLastCalledWith(
+      'aiProse:credentialStatusChanged', { configured: false },
+    );
+    expect(agent.webContents.send).toHaveBeenCalledTimes(2);
+    expect(await invoke('aiProse:getCredentialStatus', eventFor(agent.window)))
+      .toEqual({ configured: false });
+    expect(editor.webContents.send).toHaveBeenCalledTimes(2);
+    expect(tools.webContents.send).not.toHaveBeenCalled();
   });
 
   it('rejects subframes and keeps prose provider updates visible to conversation', async () => {

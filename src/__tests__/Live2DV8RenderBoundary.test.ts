@@ -263,7 +263,7 @@ describe.skipIf(!cubism2CorePath)('Cubism 2 external-GL boundary (out-of-render 
     bakeCore.ensureBakeContextBound(model, renderer);
 
     expect(calls).toEqual(['geometryReset', 'updateWebGLContext', 'textureBind:flipY=true']);
-    expect(model.internalModel.updateWebGLContext).toHaveBeenCalledWith(renderer.gl, 0);
+    expect(model.internalModel.updateWebGLContext).toHaveBeenCalledWith(renderer.gl, expect.any(Number));
     expect(model.gl).toBe(renderer.gl);
     expect(model.internalModel.bindTexture).toHaveBeenCalledWith(0, { name: 'glTexA' });
     // After the step, Pixi's viewport is what it was and the leaked flip is gone.

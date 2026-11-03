@@ -178,7 +178,7 @@ export function collectCameraDiagnostics(
   }
   if (estimateRotationEdgeExposure(state, input.logicalReferenceSize)) {
     diagnostics.push({ code: 'rotation-edge-exposure', severity: 'warning',
-      message: 'Camera rotation and zoom may expose uncovered frame edges.' });
+      message: 'Camera rotation and zoom leave frame edges uncovered.' });
   }
   return diagnostics;
 }

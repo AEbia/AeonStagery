@@ -720,8 +720,12 @@ describe('BakeEngine runtime routing', () => {
     }
 
     expect(setGL).toHaveBeenCalledWith(gl);
-    expect(internalModel.coreModel.drawParamWebGL.glno).toBe(2);
-    expect(clipManager.curFrameNo).toBe(2);
+    const slot = internalModel.coreModel.drawParamWebGL.glno;
+    expect(slot).toBeGreaterThanOrEqual(0);
+    expect(clipManager.curFrameNo).toBe(slot);
+    internalModel.updateWebGLContext(gl, 3);
+    expect(internalModel.coreModel.drawParamWebGL.glno).toBe(slot);
+    expect(clipManager.curFrameNo).toBe(slot);
     expect(getMaskRenderTexture).toHaveBeenCalled();
     expect(bindFramebuffer).toHaveBeenCalledWith('FRAMEBUFFER', 'fb');
   });

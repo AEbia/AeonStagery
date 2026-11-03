@@ -133,7 +133,7 @@ export function useAppDialogs() {
   }, [isPerformanceProfileEditorDirty, isSettingsClosing, isSettingsOpen]);
 
   const handleRestartApp = useCallback(async () => {
-    const confirmed = window.confirm('确认重新启动应用？未保存的更改可能会丢失。');
+    const confirmed = window.confirm('确认重新启动应用吗？');
     if (!confirmed) {
       return;
     }

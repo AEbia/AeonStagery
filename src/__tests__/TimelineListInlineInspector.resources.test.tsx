@@ -30,10 +30,12 @@ describe('List inline inspector resources', () => {
     expect(screen.queryByRole('textbox', { name: '表情名' })).toBeNull();
     fireEvent.click(screen.getByRole('combobox', { name: '表情名' }));
     fireEvent.click(await screen.findByRole('button', { name: '预览 happy' }));
-    expect(state.characterAdapter.setExpression).toHaveBeenCalledWith('alice', 'happy');
+    await screen.findByTitle('表情预览模型');
+    expect(state.characterAdapter.setExpression).not.toHaveBeenCalled();
     expect(state.authorMock).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Escape' });
-    expect(state.characterAdapter.setExpression).toHaveBeenLastCalledWith('alice', 'smile');
+    await waitFor(() => expect(screen.queryByTitle('表情预览模型')).toBeNull());
+    expect(state.characterAdapter.setExpression).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('combobox', { name: '表情名' }));
     fireEvent.click(screen.getByRole('option', { name: 'happy' }));
     await waitFor(() => expect(state.document.statements[0].params.expression).toBe('happy'));
@@ -56,15 +58,22 @@ describe('List inline inspector resources', () => {
     const { container } = renderList();
     fireEvent.click(screen.getByRole('combobox', { name: '动作名称' }));
     await screen.findByRole('option', { name: 'bow' });
+    const overlay = screen.getByRole('searchbox', { name: '搜索选项' }).closest<HTMLElement>('.searchable-select-overlay');
+    expect(overlay?.parentElement).toBe(document.body);
+    expect(overlay?.closest('.timeline-list-scroll')).toBeNull();
+    expect(overlay?.style.position).toBe('fixed');
     expect(state.characterAdapter.getModelDataFromPath).toHaveBeenCalledWith('figure/mygo/alice/winter.model3.json');
     expect(state.characterAdapter.getModelDataFromPath).not.toHaveBeenCalledWith('figure/mygo/alice/summer.model3.json');
     expect(screen.getByRole('listbox', { name: '一级分组' })).toBeTruthy();
     expect(screen.getByRole('listbox', { name: '二级分组' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'bow' }).closest('[role="listbox"]'))
       .toBe(screen.getByRole('listbox', { name: '可选项' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '预览 mygo/alice/bow' }));
     fireEvent.click(screen.getByRole('button', { name: '预览 mygo/alice/bow' }));
-    expect(state.characterAdapter.playMotion).toHaveBeenCalledWith('alice', 'mygo/alice/bow');
+    await screen.findByTitle('动作预览模型');
+    expect(state.characterAdapter.playMotion).not.toHaveBeenCalled();
     expect(state.authorMock).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByRole('option', { name: 'bow' }));
     fireEvent.click(screen.getByRole('option', { name: 'bow' }));
     await waitFor(() => expect(state.document.statements[1].companions[0].params).toEqual({
       target: '$speaker', motion: { kind: 'resource', key: 'mygo/alice/bow' },

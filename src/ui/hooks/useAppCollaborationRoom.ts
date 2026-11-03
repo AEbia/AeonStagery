@@ -27,11 +27,12 @@ export function useAppCollaborationRoom(
   sessionBindings: ReturnType<typeof useAppCollaborationState>['sessionBindings'],
   project: {
     currentProject: ProjectState | null;
+    isCollaborationJoinHomeLocked?: boolean;
     showProjectWorkflowResult: (result: ProjectWorkflowResult, mode: 'create' | 'open' | 'recent', notifySuccess?: boolean) => void;
     setIsCollaborationJoinHomeLocked: (locked: boolean) => void;
   },
 ) {
-  const { currentProject, showProjectWorkflowResult, setIsCollaborationJoinHomeLocked } = project;
+  const { currentProject, isCollaborationJoinHomeLocked = false, showProjectWorkflowResult, setIsCollaborationJoinHomeLocked } = project;
   const collaborationStatus = sessionBindings.status;
   const [collaborationServerStatus, setCollaborationServerStatus] = useState<CollaborationServerStatus | null>(null);
   const collaborationController = useSemanticCollaborationSession({
@@ -136,11 +137,12 @@ export function useAppCollaborationRoom(
     allowNetwork?: boolean;
     password?: string;
   }) => {
+    const wasHomeLocked = isCollaborationJoinHomeLocked;
     setIsCollaborationJoinHomeLocked(true);
     const workflowResult = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({ name, rootPath, videoFormat });
     showProjectWorkflowResult(workflowResult, 'create', false);
     if (!workflowResult.success || !workflowResult.project) {
-      setIsCollaborationJoinHomeLocked(false);
+      setIsCollaborationJoinHomeLocked(wasHomeLocked);
       return;
     }
 
@@ -185,6 +187,7 @@ export function useAppCollaborationRoom(
   }, [
     collaborationController,
     contextValue.services.projectOpenWorkflow,
+    isCollaborationJoinHomeLocked,
     resolveReachableInternalCollaborationEndpoint,
     setIsCollaborationJoinHomeLocked,
     showProjectWorkflowResult,
@@ -203,6 +206,7 @@ export function useAppCollaborationRoom(
     allowNetwork?: boolean;
     password?: string;
   }) => {
+    const wasHomeLocked = isCollaborationJoinHomeLocked;
     setIsCollaborationJoinHomeLocked(true);
     const result = await window.aeonStageryAPI.dialog.showOpen({
       title: '选择要主持的 AeonStagery 项目',
@@ -210,14 +214,14 @@ export function useAppCollaborationRoom(
       filters: [{ name: 'AeonStagery Project', extensions: ['json'] }],
     });
     if (result.canceled || !result.filePaths?.[0]) {
-      setIsCollaborationJoinHomeLocked(false);
+      setIsCollaborationJoinHomeLocked(wasHomeLocked);
       return;
     }
 
     const workflowResult = await contextValue.services.projectOpenWorkflow.openProjectAndLoadDefaultScene(result.filePaths[0]);
     showProjectWorkflowResult(workflowResult, 'open', false);
     if (!workflowResult.success || !workflowResult.project) {
-      setIsCollaborationJoinHomeLocked(false);
+      setIsCollaborationJoinHomeLocked(wasHomeLocked);
       return;
     }
 
@@ -262,6 +266,7 @@ export function useAppCollaborationRoom(
   }, [
     collaborationController,
     contextValue.services.projectOpenWorkflow,
+    isCollaborationJoinHomeLocked,
     resolveReachableInternalCollaborationEndpoint,
     setIsCollaborationJoinHomeLocked,
     showProjectWorkflowResult,

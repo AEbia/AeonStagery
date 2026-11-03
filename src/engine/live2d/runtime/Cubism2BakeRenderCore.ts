@@ -19,17 +19,86 @@
  */
 
 import * as PIXI from 'pixi.js';
+import { readSdkProperty } from '../../runtime/sdkBoundary';
 import {
   guardExternalGl,
   resetPixiShaderState,
   wrapRenderBoundary,
 } from './Cubism2RenderGuardSeam';
 
+// The native SDK indexes process-wide frameBuffers/fTexture tables by glno.
+// A renderer slot (or the vendor's per-instance generateUID) is shared by
+// multiple models and lets their early mask preparations overwrite each other.
+// Share this allocator across adapters, including stage and bake adapters.
+const cubism2ContextSlots = new WeakMap<object, Map<WebGLRenderingContext, number>>();
+const freeCubism2ContextSlots: number[] = [];
+let nextCubism2ContextSlot = 0;
+
+interface Cubism2MaskTables {
+  frameBuffers: Array<{
+    framebuffer: WebGLFramebuffer;
+    renderbuffer: WebGLRenderbuffer;
+    texture: WebGLTexture;
+  } | undefined>;
+  fTexture: Array<WebGLTexture | undefined>;
+}
+
+function getCubism2MaskTables(): Cubism2MaskTables | null {
+  const sdk = readSdkProperty(globalThis, 'Live2D')
+    ?? (typeof window !== 'undefined' ? readSdkProperty(window, 'Live2D') : undefined);
+  const frameBuffers = readSdkProperty(sdk, 'frameBuffers');
+  const fTexture = readSdkProperty(sdk, 'fTexture');
+  if (!Array.isArray(frameBuffers) || !Array.isArray(fTexture)) return null;
+  return {
+    frameBuffers: frameBuffers as Cubism2MaskTables['frameBuffers'],
+    fTexture: fTexture as Cubism2MaskTables['fTexture'],
+  };
+}
+
+function getCubism2ContextSlot(internalModel: object, gl: WebGLRenderingContext): number {
+  let contexts = cubism2ContextSlots.get(internalModel);
+  if (!contexts) {
+    // Disposal must visit every context used by the model. The weak outer key
+    // still lets discarded models go; explicit disposal releases native tables.
+    contexts = new Map<WebGLRenderingContext, number>();
+    cubism2ContextSlots.set(internalModel, contexts);
+  }
+  let slot = contexts.get(gl);
+  if (slot === undefined) {
+    slot = freeCubism2ContextSlots.pop() ?? nextCubism2ContextSlot++;
+    contexts.set(gl, slot);
+  }
+  return slot;
+}
+
 export class Cubism2BakeRenderCore {
   private bakeRenderTexture: PIXI.RenderTexture | null = null;
-  /** Per-renderer stable slots for the bake virtual GL context. */
-  private readonly cubism2BakeRendererSlots = new WeakMap<object, number>();
-  private nextCubism2BakeRendererSlot = 0;
+
+  /** Release only this model's native masks, including inactive GL contexts. */
+  releaseModelContexts(model: { internalModel?: object; gl?: object | null }): void {
+    const internalModel = model.internalModel;
+    if (!internalModel) return;
+    const contexts = cubism2ContextSlots.get(internalModel);
+    if (!contexts) return;
+    cubism2ContextSlots.delete(internalModel);
+    model.gl = null;
+
+    const tables = getCubism2MaskTables();
+    for (const [gl, slot] of contexts) {
+      const mask = tables?.frameBuffers[slot];
+      if (mask) {
+        gl.deleteFramebuffer(mask.framebuffer);
+        gl.deleteRenderbuffer(mask.renderbuffer);
+      }
+      const texture = mask?.texture ?? tables?.fTexture[slot];
+      if (texture) gl.deleteTexture(texture);
+      if (tables) {
+        delete tables.frameBuffers[slot];
+        delete tables.fTexture[slot];
+      }
+      freeCubism2ContextSlots.push(slot);
+    }
+  }
 
   disposeBakeRenderTexture(): void {
     this.bakeRenderTexture?.destroy(true);
@@ -87,7 +156,7 @@ export class Cubism2BakeRenderCore {
     // caches so the next Pixi draw re-applies its own state.
     guardExternalGl(renderer, () => {
       if (needsBind) {
-        const slot = this.getCubism2BakeRendererSlot(renderer);
+        const slot = getCubism2ContextSlot(internalModel, renderer.gl);
         internalModel.updateWebGLContext(renderer.gl, slot);
         concreteModel.gl = renderer.gl;
       }
@@ -187,8 +256,8 @@ export class Cubism2BakeRenderCore {
 
   /**
    * Wrap InternalModel.updateWebGLContext: isolate the Cubism draw parameters
-   * and clip manager for the bake context so shared framebuffer/mask globals
-   * are not cleared for models still alive on the visible stage.
+   * and clip manager for each model/context pair. Both early preparation and
+   * native draws must preserve other models' shared framebuffer/mask entries.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.
   installInternalModelGuard(internalModel: any): void {
@@ -212,9 +281,10 @@ export class Cubism2BakeRenderCore {
           return originalUpdateWebGLContext?.(gl, glContextID);
         }
 
+        const slot = getCubism2ContextSlot(internalModel, gl);
         drawParamWebGL.firstDraw = true;
         drawParamWebGL.setGL?.(gl);
-        drawParamWebGL.glno = glContextID;
+        drawParamWebGL.glno = slot;
 
         const webGLBufferCtor = this.getWebGLBufferCtor();
         if (webGLBufferCtor) {
@@ -225,9 +295,13 @@ export class Cubism2BakeRenderCore {
           }
         }
 
-        clipManager.curFrameNo = glContextID;
+        clipManager.curFrameNo = slot;
         const framebuffer = gl?.getParameter?.(gl.FRAMEBUFFER_BINDING);
-        clipManager.getMaskRenderTexture?.();
+        // The SDK allocates unconditionally. Returning to a previous context
+        // must reuse its mask instead of overwriting and leaking its resources.
+        if (!getCubism2MaskTables()?.frameBuffers[slot]) {
+          clipManager.getMaskRenderTexture?.();
+        }
         if (framebuffer !== undefined) {
           gl?.bindFramebuffer?.(gl.FRAMEBUFFER, framebuffer);
         }
@@ -239,17 +313,6 @@ export class Cubism2BakeRenderCore {
         return originalUpdateWebGLContext?.(gl, glContextID);
       }
     };
-  }
-
-  private getCubism2BakeRendererSlot(renderer: object): number {
-    const existing = this.cubism2BakeRendererSlots.get(renderer);
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const slot = this.nextCubism2BakeRendererSlot++;
-    this.cubism2BakeRendererSlots.set(renderer, slot);
-    return slot;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Cubism 2 motion/render compatibility code probes private SDK fields and version-specific hooks that are absent from the published declarations.

@@ -89,6 +89,10 @@ export default defineConfig({
       include: [/node_modules/],
     },
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        live2dPreview: path.resolve(__dirname, 'live2d-preview.html'),
+      },
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) {

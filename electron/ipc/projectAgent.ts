@@ -342,7 +342,14 @@ export function registerProjectAgentHandlers(windows: IpcWindowContext) {
     if (!isAgentWindowFrameSender(event) && !isMainWindowFrameSender(event)) {
       return { ok: false, error: 'Unauthorized project Agent settings sender.' };
     }
-    return getProjectAgentTaskCoordinator().openSettings();
+    const result = await getProjectAgentTaskCoordinator().openSettings();
+    if (result.ok && windows.mainWindow && !windows.mainWindow.isDestroyed()) {
+      if (windows.mainWindow.isMinimized?.()) {
+        windows.mainWindow.restore?.();
+      }
+      windows.mainWindow.focus?.();
+    }
+    return result;
   });
 
   // Editor-published project presentation context → Agent window (cached).

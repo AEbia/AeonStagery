@@ -46,6 +46,7 @@ import type {
 } from './AiProseDraftPersistence';
 
 export interface AiProsePipelinePrepareOptions {
+  signal?: AbortSignal;
   targetBatchSize?: number;
   anchorTime?: number;
   scriptReadingSpeed?: number;
@@ -117,6 +118,8 @@ export interface AiProsePipelineExistingCheckpoint {
 }
 
 export interface AiProsePipelineCheckpoint {
+  onSegmentation?: (state: AiProseSegmentationState) => void | Promise<void>;
+  onCharacterExtraction?: (state: AiProseCharacterExtractionState) => void | Promise<void>;
   onPrepared?: (prepared: AiProsePreparedPipeline) => void | Promise<void>;
   onNormalizationTask?: (context: {
     sourceText: string;
@@ -141,6 +144,7 @@ export interface AiProseDraftPersistenceCheckpoint extends AiProsePipelineCheckp
 }
 
 export interface AiProseNormalizationOptions {
+  signal?: AbortSignal;
   existing?: AiProseNormalizationRun;
   existingDraft?: Pick<DraftSession, 'sourceText' | 'sourceRevision' | 'confirmedMainCharacters' | 'segmentation' | 'normalization'>;
   checkpoint?: AiProsePipelineCheckpoint;
@@ -148,11 +152,13 @@ export interface AiProseNormalizationOptions {
 }
 
 export interface AiProseRetryOptions {
+  signal?: AbortSignal;
   checkpoint?: AiProsePipelineCheckpoint;
   onLlmProgress?: (progress: AiProseLlmProgress) => void;
 }
 
 export interface AiProseRhythmOptions {
+  signal?: AbortSignal;
   existing?: AiProseRhythmRun;
   existingDraft?: Pick<DraftSession, 'sourceText' | 'sourceRevision' | 'segmentation' | 'normalization' | 'rhythm'>;
   checkpoint?: AiProsePipelineCheckpoint;
@@ -423,6 +429,17 @@ function fingerprintNormalizationBlocks(blocks: readonly AiProseStatementBlock[]
   })));
 }
 
+// A failed checkpoint must not release the caller while sibling tasks can
+// still write the old source into the scene's single draft slot.
+async function awaitAllTasks<T extends readonly unknown[]>(tasks: T) {
+  try {
+    return await Promise.all(tasks);
+  } catch (error) {
+    await Promise.allSettled(tasks);
+    throw error;
+  }
+}
+
 export class AiProsePipeline {
   constructor(
     private readonly llm: AiProseLlmService,
@@ -453,8 +470,10 @@ export class AiProsePipeline {
     );
     const reuseSegmentation = canReusePrepare && existing?.segmentation?.status === 'succeeded';
     const reuseCharacterExtraction = canReusePrepare && existing?.characterExtraction?.status === 'succeeded';
-    const [segmentationResult, characterResult] = await Promise.all([
-      reuseSegmentation
+    const checkpoint = options.checkpoint ?? this.options.checkpoint;
+    options.signal?.throwIfAborted();
+    const [segmentation, characterExtraction] = await awaitAllTasks([
+      (reuseSegmentation
         ? Promise.resolve({
           status: 'succeeded' as const,
           value: {
@@ -463,17 +482,28 @@ export class AiProsePipeline {
           },
           correctionUsed: false,
         })
-        : this.llm.segment(plan, { onProgress: options.onLlmProgress }),
-      reuseCharacterExtraction
+        : this.llm.segment(plan, { onProgress: options.onLlmProgress, signal: options.signal }))
+        .then(async (result) => {
+          options.signal?.throwIfAborted();
+          const state = createSegmentationState(plan, result);
+          if (!reuseSegmentation) await checkpoint?.onSegmentation?.(state);
+          return state;
+        }),
+      (reuseCharacterExtraction
         ? Promise.resolve({
           status: 'succeeded' as const,
           value: { mainCharacters: [...existing!.characterExtraction!.suggestedNames] },
           correctionUsed: false,
         })
-        : this.llm.extractCharacters(sourceText, { onProgress: options.onLlmProgress }),
-    ]);
-    const segmentation = createSegmentationState(plan, segmentationResult);
-    const characterExtraction = createCharacterExtractionState(characterResult);
+        : this.llm.extractCharacters(sourceText, { onProgress: options.onLlmProgress, signal: options.signal }))
+        .then(async (result) => {
+          options.signal?.throwIfAborted();
+          const state = createCharacterExtractionState(result);
+          if (!reuseCharacterExtraction) await checkpoint?.onCharacterExtraction?.(state);
+          return state;
+        }),
+    ] as const);
+    options.signal?.throwIfAborted();
     const prepared = {
       sourceText,
       sourceRevision: options.sourceRevision ?? existing?.sourceRevision,
@@ -491,7 +521,7 @@ export class AiProsePipeline {
       segments: [...segmentation.segments],
       suggestedMainCharacters: [...characterExtraction.suggestedNames],
     };
-    await (options.checkpoint ?? this.options.checkpoint)?.onPrepared?.(prepared);
+    await checkpoint?.onPrepared?.(prepared);
     return prepared;
   }
 
@@ -518,14 +548,15 @@ export class AiProsePipeline {
     )
       && sameStringList(existing!.confirmedMainCharacters, confirmedMainCharacters);
     const existingTasks = new Map(existing?.tasks.map((task) => [task.segmentIndex, task]));
-    const tasks = await Promise.all(prepared.segments.map(async (segment) => {
+    const tasks = await awaitAllTasks(prepared.segments.map(async (segment) => {
       const existingTask = reuseExisting ? existingTasks.get(segment.index) : undefined;
       const task = existingTask?.status === 'succeeded'
         ? cloneNormalizationTask(existingTask)
         : createNormalizationTask(
           segment.index,
-          await this.llm.normalize(segment, confirmedMainCharacters, { onProgress: options.onLlmProgress }),
+          await this.llm.normalize(segment, confirmedMainCharacters, { onProgress: options.onLlmProgress, signal: options.signal }),
         );
+      options.signal?.throwIfAborted();
       await checkpoint?.onNormalizationTask?.({
         sourceText: prepared.sourceText,
         sourceRevision: prepared.sourceRevision,
@@ -577,8 +608,9 @@ export class AiProsePipeline {
     );
     const retriedTask = createNormalizationTask(
       segmentIndex,
-      await this.llm.normalize(segment, confirmedMainCharacters, { onProgress: options.onLlmProgress }),
+      await this.llm.normalize(segment, confirmedMainCharacters, { onProgress: options.onLlmProgress, signal: options.signal }),
     );
+    options.signal?.throwIfAborted();
     await (options.checkpoint ?? this.options.checkpoint)?.onNormalizationTask?.({
       sourceText: prepared.sourceText,
       sourceRevision: prepared.sourceRevision,
@@ -638,18 +670,20 @@ export class AiProsePipeline {
       && existing?.normalizationFingerprint === normalizationFingerprint;
     const existingTasks = new Map(existing?.tasks.map((task) => [task.segmentIndex, task]));
     const checkpoint = options.checkpoint ?? this.options.checkpoint;
-    const tasks = await Promise.all(prepared.segments.map(async (segment) => {
+    const tasks = await awaitAllTasks(prepared.segments.map(async (segment) => {
       const segmentBlocks = blocksBySegment.get(segment.index) ?? [];
       const existingTask = reuseExisting ? existingTasks.get(segment.index) : undefined;
       const expectedGapCount = Math.max(0, segmentBlocks.length - 1);
       const task = existingTask?.status === 'succeeded'
+        && !existingTask.usedFallback
         && existingTask.gapSeconds.length === expectedGapCount
         ? cloneRhythmTask(existingTask)
         : createRhythmTask(
           segment.index,
           segmentBlocks.length,
-          await this.llm.rhythm(segment.index, segmentBlocks, { onProgress: options.onLlmProgress }),
+          await this.llm.rhythm(segment.index, segmentBlocks, { onProgress: options.onLlmProgress, signal: options.signal }),
         );
+      options.signal?.throwIfAborted();
       await checkpoint?.onRhythmTask?.({
         sourceText: prepared.sourceText,
         sourceRevision: prepared.sourceRevision,
@@ -686,12 +720,16 @@ export function createAiProseDraftPersistenceCheckpoint(options: {
   persistence: Pick<AiProseDraftPersistence, 'saveCheckpoint'>;
   project: AiProseDraftProjectInput;
   draft: DraftSession;
+  signal?: AbortSignal;
 }): AiProseDraftPersistenceCheckpoint {
   let currentDraft = options.draft;
   let pending = Promise.resolve();
 
   const enqueue = (operation: () => void | Promise<void>): Promise<void> => {
-    const result = pending.then(operation);
+    const result = pending.then(() => {
+      options.signal?.throwIfAborted();
+      return operation();
+    });
     pending = result.then(() => undefined, () => undefined);
     return result;
   };
@@ -720,6 +758,18 @@ export function createAiProseDraftPersistenceCheckpoint(options: {
   };
 
   return {
+    onSegmentation: (state) => enqueue(async () => {
+      if (!sameSegmentationState(currentDraft.segmentation, state)) {
+        currentDraft = replaceSegmentation(currentDraft, state);
+      }
+      await save();
+    }),
+    onCharacterExtraction: (state) => enqueue(async () => {
+      if (!sameCharacterExtractionState(currentDraft.characterExtraction, state)) {
+        currentDraft = replaceCharacterExtraction(currentDraft, state);
+      }
+      await save();
+    }),
     onPrepared: (prepared) => enqueue(async () => {
       assertSource(prepared.sourceText, prepared.sourceRevision);
       // prepare() is also used to rehydrate the next stage. When the

@@ -216,7 +216,7 @@ export function WebGalScssImportDialog({
                 }}
               >
                 <IconWarning width={15} height={15} style={{ flexShrink: 0 }} />
-                <span>检测到该样式可能已导入过（{conflicts.length} 处匹配）</span>
+                <span>发现 {conflicts.length} 个已导入样式匹配项</span>
               </div>
               {conflicts.length > 1 ? (
                 replaceableConflicts.length > 0 ? (

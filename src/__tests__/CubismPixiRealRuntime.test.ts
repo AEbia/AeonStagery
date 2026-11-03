@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import * as PIXI from 'pixi.js';
 import { resolveCubismWebCorePath } from './helpers/live2dRuntimeFixture';
-import { installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
+import { createCubismPixiModel, installCubismPixiModelRuntime } from '../engine/CubismPixiModel';
 import { CubismPixiLive2DAdapter } from '../engine/Live2DRuntimeAdapter';
 import type { CharacterEntry } from '../engine/Live2DConfig';
 import Live2DManager from '../engine/Live2DManager';
@@ -94,6 +94,34 @@ describe.skipIf(!corePath || !entry || !fs.existsSync(entry))('real Cubism Core 
     await engine.cubismReady();
   });
   afterAll(() => { models.forEach((model) => model.destroy()); vi.unstubAllGlobals(); });
+  it.each(['absent', 'actual', 'filename', 'stale-absolute'] as const)('resolves bundle resources against the loaded entry with %s JSON url', async (urlKind) => {
+    const modelUrl = 'file://' + entry;
+    const json = JSON.parse(fs.readFileSync(entry!, 'utf8'));
+    if (urlKind === 'absent') delete json.url;
+    else if (urlKind === 'actual') json.url = modelUrl;
+    else if (urlKind === 'filename') json.url = path.basename(entry!);
+    else json.url = 'file:///old-export/model.model3.json';
+    const stop = new Error('stop before GPU resource loading');
+    const resolved: string[] = [];
+    const inspectSettings = (context: { settings: { resolveURL(file: string): string } }) => {
+      for (const file of [json.FileReferences.Moc, ...json.FileReferences.Textures]) {
+        resolved.push(context.settings.resolveURL(file));
+      }
+      throw stop;
+    };
+    const middlewares: unknown[] = engine.Live2DFactory.live2DModelMiddlewares;
+    const index = middlewares.indexOf(engine.Live2DFactory.jsonToSettings) + 1;
+    const load = vi.spyOn(engine.Live2DLoader, 'load').mockResolvedValue(json);
+    middlewares.splice(index, 0, inspectSettings);
+    try {
+      await expect(createCubismPixiModel(modelUrl, {})).rejects.toBe(stop);
+      expect(resolved).toEqual([json.FileReferences.Moc, ...json.FileReferences.Textures]
+        .map((file: string) => new URL(file, modelUrl).href));
+    } finally {
+      middlewares.splice(index, 1);
+      load.mockRestore();
+    }
+  });
   it('plays converted custom motion through timeline seek using real Core geometry', async () => {
     const source: { FileReferences: { Motions: Record<string, { File: string }[]> } } = JSON.parse(fs.readFileSync(entry!, 'utf8'));
     const motionKey = process.env.AEON_CUBISM_TEST_MOTION ?? Object.keys(source.FileReferences.Motions)[0];

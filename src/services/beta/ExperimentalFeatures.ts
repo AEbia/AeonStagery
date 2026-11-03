@@ -25,7 +25,7 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeatureDefinition[] = O
       '依赖本机语音生成服务和已配置模型。',
       '只有明确应用结果后才会修改对白。',
     ]),
-    possibleImpact: '可能需要较长处理时间，并产生新的项目音频素材。',
+    possibleImpact: '语音生成会调用本机服务并创建音频素材；对白会在应用结果后更新。',
   },
   {
     id: 'collaboration-editing',
@@ -45,7 +45,7 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeatureDefinition[] = O
       '首课不使用拼好模。',
       '只在普通角色管理中直接选择时提示。',
     ]),
-    possibleImpact: '模型引用会按包装入口保存，加载结果取决于包装内声明的真实模型。',
+    possibleImpact: '模型引用按包装入口保存，加载时使用包装内声明的真实模型。',
   },
   {
     id: 'advanced-visual',
@@ -55,7 +55,7 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeatureDefinition[] = O
       '覆盖语句库 camera 和 visual 两类。',
       '不解析模板组合、已有项目或场景 JSON。',
     ]),
-    possibleImpact: '可能改变舞台画面、镜头运动或后期视觉效果。',
+    possibleImpact: '结果用于修改镜头运动、舞台画面和后期视觉效果语句。',
   },
 ]);
 

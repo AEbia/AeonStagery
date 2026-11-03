@@ -15,6 +15,7 @@ export interface AiProseDraftFileAccess {
   rename?(temporaryPath: string, destinationPath: string): Promise<void>;
   /** Explicit deletion seam for applied archives and stale drafts. */
   removeFile?(path: string): Promise<void>;
+  readDir?(path: string): Promise<Array<{ name: string; isDirectory: boolean; path: string }>>;
   ensureDir(path: string): Promise<void>;
   join(...parts: string[]): Promise<string> | string;
   dirname(path: string): Promise<string> | string;
@@ -82,6 +83,7 @@ export type AiProseDraftLoadFailure = {
 };
 
 export class AiProseDraftPersistence {
+  private readonly pending = new Map<string, Promise<unknown>>();
   constructor(
     private readonly fileAccess: AiProseDraftFileAccess,
     private readonly pathAccess: AiProseDraftPathAccess = fileAccess,
@@ -90,11 +92,11 @@ export class AiProseDraftPersistence {
   async resolvePath(
     project: AiProseDraftProjectInput,
     sceneId: string,
-    sessionId: string,
+    sessionId?: string,
   ): Promise<string> {
     try {
       assertSafeDraftPathSegment(sceneId, 'sceneId');
-      assertSafeDraftPathSegment(sessionId, 'sessionId');
+      if (sessionId !== undefined) assertSafeDraftPathSegment(sessionId, 'sessionId');
     } catch (cause) {
       throw new AiProseDraftPersistenceError(
         cause instanceof Error ? cause.message : 'sceneId and sessionId must be safe path segments',
@@ -105,7 +107,7 @@ export class AiProseDraftPersistence {
     }
     const context = normalizeProject(project);
     const assetRoot = normalizeAssetRoot(context.assetRoots.project);
-    const relativePath = [assetRoot, 'ai-authoring', sceneId, `${sessionId}.json`].join('/');
+    const relativePath = [assetRoot, 'ai-authoring', sceneId, 'current.json'].join('/');
     try {
       if (this.pathAccess.resolveAbsolute) {
         return await this.pathAccess.resolveAbsolute(context.projectRoot, relativePath);
@@ -118,7 +120,7 @@ export class AiProseDraftPersistence {
         assetRoot,
         'ai-authoring',
         sceneId,
-        `${sessionId}.json`,
+        'current.json',
       );
     } catch (cause) {
       throw new AiProseDraftPersistenceError(
@@ -149,9 +151,51 @@ export class AiProseDraftPersistence {
   async loadResult(
     project: AiProseDraftProjectInput,
     sceneId: string,
-    sessionId: string,
+    sessionId?: string,
   ): Promise<AiProseDraftLoadResult> {
     const path = await this.resolvePath(project, sceneId, sessionId);
+    return this.serialize(path, async () => {
+      const current = await this.readDraft(path, sceneId);
+      if (current.status !== 'loaded' && current.status !== 'missing') return current;
+      const directory = await this.fileAccess.dirname(path);
+      const legacy: Array<Extract<AiProseDraftLoadResult, { status: 'loaded' }>> = [];
+      if (this.fileAccess.readDir && await this.fileAccess.exists(directory)) {
+        const entries = await this.fileAccess.readDir(directory);
+        for (const entry of entries) {
+          if (!entry.isDirectory && /^[A-Za-z0-9_-]+\.json\.tmp-[A-Za-z0-9-]+$/.test(entry.name)) {
+            await this.fileAccess.removeFile?.(await this.fileAccess.join(directory, entry.name));
+            continue;
+          }
+          if (entry.isDirectory || entry.name === 'current.json' || !/^[A-Za-z0-9_-]+\.json$/.test(entry.name)) continue;
+          const legacyPath = await this.fileAccess.join(directory, entry.name);
+          const result = await this.readDraft(legacyPath, sceneId);
+          // Preserve unreadable, corrupt and future-version files instead of deleting them.
+          if (result.status === 'missing') continue;
+          if (result.status !== 'loaded') return result;
+          legacy.push(result);
+        }
+      } else if (current.status === 'missing' && sessionId) {
+        const legacyPath = await this.fileAccess.join(directory, `${sessionId}.json`);
+        const result = await this.readDraft(legacyPath, sceneId);
+        if (result.status !== 'loaded') return result;
+        legacy.push(result);
+      }
+      const selected = current.status === 'loaded' ? current
+        : legacy.find((entry) => entry.draft.sessionId === sessionId)
+          ?? legacy.sort((left, right) => right.draft.updatedAt.localeCompare(left.draft.updatedAt))[0];
+      if (!selected) return current;
+      if (legacy.length > 0) {
+        if (!this.fileAccess.removeFile) {
+          return this.failure(path, 'delete-unavailable', '无法清理旧草稿，原文件已保留');
+        }
+        if (current.status !== 'loaded') await this.writeAt(path, selected.draft);
+        for (const entry of legacy) await this.fileAccess.removeFile(entry.path);
+      }
+      return { ...selected, path };
+    });
+  }
+
+  private async readDraft(path: string, sceneId: string): Promise<AiProseDraftLoadResult> {
     let present: boolean;
     try {
       present = await this.fileAccess.exists(path);
@@ -178,6 +222,17 @@ export class AiProseDraftPersistence {
     const originalVersion = readSchemaVersion(raw);
     try {
       const draft = migrateDraft(raw);
+      if (draft.sceneId !== sceneId) {
+        return this.failure(path, 'invalid-structure', '草稿所属场景与当前场景不一致');
+      }
+      if (draft.status === 'active') {
+        for (const task of [draft.segmentation, draft.characterExtraction, ...draft.normalization, ...draft.rhythm]) {
+          if (task.status === 'running') {
+            task.status = 'failed';
+            task.error = { code: 'interrupted', message: '上次处理已中断，请重试未完成的任务。' };
+          }
+        }
+      }
       return {
         status: 'loaded',
         kind: 'loaded',
@@ -266,6 +321,20 @@ export class AiProseDraftPersistence {
 
   private async write(project: AiProseDraftProjectInput, draft: DraftSession): Promise<string> {
     const path = await this.resolvePath(project, draft.sceneId, draft.sessionId);
+    return this.serialize(path, () => this.writeAt(path, draft));
+  }
+
+  private async serialize<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const next = (this.pending.get(path) ?? Promise.resolve()).catch(() => {}).then(operation);
+    this.pending.set(path, next);
+    try {
+      return await next;
+    } finally {
+      if (this.pending.get(path) === next) this.pending.delete(path);
+    }
+  }
+
+  private async writeAt(path: string, draft: DraftSession): Promise<string> {
     if (!this.fileAccess.replaceFile && !this.fileAccess.rename) {
       throw new AiProseDraftPersistenceError(
         'Atomic draft replacement is unavailable; the formal draft file was not modified',
@@ -288,6 +357,7 @@ export class AiProseDraftPersistence {
         await this.fileAccess.rename!(temporaryPath, path);
       }
     } catch (cause) {
+      await this.fileAccess.removeFile?.(temporaryPath).catch(() => {});
       throw new AiProseDraftPersistenceError(
         'Unable to atomically replace the AI prose draft file',
         'write-failed',

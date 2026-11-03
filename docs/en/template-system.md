@@ -300,6 +300,6 @@ Scene blueprint, template asset calls, environment, text, audio, and export pres
 
 ## Voice Profiles
 
-The unified template package may declare typed `voiceProfiles[]`. A `characterPresets[]` entry selects a default with `voiceProfileId`. Models use logical selectors (`fileName` and optional `relativePathSuffix`), while reference audio must point to stable IDs in `assets.index`.
+The unified template package's optional typed voice profiles use the `voiceProfiles[]` field. A `characterPresets[]` entry selects a default with `voiceProfileId`. Models use logical selectors (`fileName` and optional `relativePathSuffix`), while reference audio must point to stable IDs in `assets.index`.
 
-Complex profiles may use a package-local JSON `file`. The loader still validates selectors, references, and asset IDs; absolute paths and executable scripts are rejected. Applying a template character copies reference audio into `vocal/reference/`, materializes a project voice profile, and stores only the project profile ID in the scene.
+The `file` field stores a complex profile in a package-local JSON file. The loader validates selectors, references, and asset IDs; absolute paths and executable scripts are rejected. Applying a template character copies reference audio into `vocal/reference/`, materializes a project voice profile, and stores only the project profile ID in the scene.

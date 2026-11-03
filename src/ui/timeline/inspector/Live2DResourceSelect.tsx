@@ -1,4 +1,7 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SearchableSelect, type SearchableSelectProps } from '../../SearchableSelect';
+import { Live2DResourcePreview } from '../../live2d/Live2DResourcePreview';
+import type { Live2DPerformanceKind } from '../../../engine/runtime/Live2DRuntimeContracts';
 
 export function resolveCharacterModelHints(
   charId: string | undefined,
@@ -24,21 +27,56 @@ export function resolveCharacterModelHints(
   return { preferredGroup };
 }
 
-interface Live2DResourceSelectProps extends SearchableSelectProps {
+interface Live2DResourceSelectProps extends Omit<SearchableSelectProps, 'onPreview'> {
   charId?: string;
   character?: { id?: string; name?: string; model?: string };
   modelPath?: string;
+  kind: Live2DPerformanceKind;
 }
 
-export function Live2DResourceSelect({ charId, character, modelPath, ...props }: Live2DResourceSelectProps) {
+export function Live2DResourceSelect({ charId, character, modelPath, kind, ...props }: Live2DResourceSelectProps) {
+  const [preview, setPreview] = useState<{ key: string; modelPath: string; playbackId: number } | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const setOverlayElement = useCallback((element: HTMLDivElement | null) => {
+    overlayRef.current = element;
+  }, []);
+  const previewModelPath = modelPath || character?.model;
+  useEffect(() => { setPreview(null); setPreviewOpen(false); }, [previewModelPath, kind, charId]);
+  const closePreview = () => {
+    setPreviewOpen(false);
+    if (previewRef.current?.contains(document.activeElement)) {
+      pickerRef.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus({ preventScroll: true });
+    }
+  };
   const hints = resolveCharacterModelHints(charId, character, modelPath);
   return (
-    <div className="live2d-resource-select">
+    <div ref={pickerRef} className="live2d-resource-select">
       <SearchableSelect
         {...props}
         {...hints}
         header={character ? `角色: ${character.name || character.id}` : undefined}
+        onOverlayElementChange={setOverlayElement}
+        additionalInsideRefs={[...(props.additionalInsideRefs ?? []), previewRef]}
+        onOpenChange={(open) => {
+          if (!open) closePreview();
+          props.onOpenChange?.(open);
+        }}
+        onChange={(value) => { closePreview(); props.onChange(value); }}
+        onPreview={previewModelPath ? (key) => {
+          setPreviewOpen(true);
+          setPreview((previous) => ({
+            key, modelPath: previewModelPath, playbackId: (previous?.playbackId ?? 0) + 1,
+          }));
+        } : undefined}
       />
+      {preview && preview.modelPath === previewModelPath && <Live2DResourcePreview
+        key={preview.modelPath} modelPath={preview.modelPath} kind={kind} resourceKey={preview.key} playbackId={preview.playbackId}
+        anchorRef={pickerRef} overlayRef={overlayRef} panelRef={previewRef} open={previewOpen}
+        characterName={character?.name || charId} onClose={closePreview} onExited={() => setPreview(null)}
+      />}
     </div>
   );
 }

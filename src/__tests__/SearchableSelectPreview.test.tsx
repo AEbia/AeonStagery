@@ -69,7 +69,7 @@ describe('SearchableSelect preview protocol', () => {
     expect(onPreview).toHaveBeenCalledWith('smile');
   });
 
-  it('restores the committed value via onPreview when the mouse leaves the options list', () => {
+  it('keeps preview independent when the mouse leaves the options list', () => {
     const onPreview = vi.fn();
     render(
       <SearchableSelect
@@ -85,7 +85,7 @@ describe('SearchableSelect preview protocol', () => {
     onPreview.mockClear();
     fireEvent.mouseLeave(screen.getByRole('listbox', { name: '可选项' }));
 
-    expect(onPreview).toHaveBeenCalledWith('default');
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it('does not restore on mouse leave when nothing was previewed', () => {
@@ -106,7 +106,7 @@ describe('SearchableSelect preview protocol', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
-  it('restores the committed value and closes when Escape is pressed', () => {
+  it('closes on Escape without issuing another preview', () => {
     const onPreview = vi.fn();
     render(
       <SearchableSelect
@@ -123,7 +123,7 @@ describe('SearchableSelect preview protocol', () => {
     const combobox = screen.getByRole('combobox');
     fireEvent.keyDown(screen.getByRole('searchbox', { name: '搜索选项' }), { key: 'Escape' });
 
-    expect(onPreview).toHaveBeenCalledWith('default');
+    expect(onPreview).not.toHaveBeenCalled();
     expect(combobox.getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -160,7 +160,7 @@ describe('SearchableSelect preview protocol', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
-  it('restores the committed value when the dropdown closes from an outside pointer down', () => {
+  it('closes on outside pointer down without issuing another preview', () => {
     const onPreview = vi.fn();
     render(
       <SearchableSelect
@@ -176,7 +176,7 @@ describe('SearchableSelect preview protocol', () => {
     onPreview.mockClear();
     fireEvent.pointerDown(document.body);
 
-    expect(onPreview).toHaveBeenCalledWith('default');
+    expect(onPreview).not.toHaveBeenCalled();
     expect(screen.getByRole('combobox').getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -200,7 +200,7 @@ describe('SearchableSelect preview protocol', () => {
     expect(onPreview).not.toHaveBeenCalled();
   });
 
-  it('restores an active preview when the component unmounts', () => {
+  it('does not issue another preview when the component unmounts', () => {
     const onPreview = vi.fn();
     const { unmount } = render(
       <SearchableSelect
@@ -216,7 +216,7 @@ describe('SearchableSelect preview protocol', () => {
     onPreview.mockClear();
     unmount();
 
-    expect(onPreview).toHaveBeenCalledWith('default');
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it('shows the full slash-prefixed motion/expression key instead of only the leaf name', () => {

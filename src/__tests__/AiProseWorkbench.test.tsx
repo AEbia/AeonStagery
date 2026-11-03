@@ -1,9 +1,10 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiProseWorkbench } from '../ui/AiProseWorkbench';
+import { useAiProseWorkbench } from '../ui/ai-prose/useAiProseWorkbench';
 import type { AiProseLlmProgress } from '../services/ai-authoring/AiProseContracts';
 import {
   confirmMainCharacters,
@@ -113,6 +114,7 @@ type TestAiProseProgress = AiProseLlmProgress & {
 
 type TestDraftLoadResult =
   | { status: 'loaded'; draft: DraftSession }
+  | { status: 'corrupt-json'; error: Error }
   | { status: 'missing' };
 
 vi.mock('../ui/context/AppContext', () => ({
@@ -176,13 +178,16 @@ function createComposition(options: {
   loadResult?: () => Promise<TestDraftLoadResult>;
 } = {}) {
   let checkpointDraft: DraftSession | null = null;
+  let savedDraft = options.draft;
   let progressHandler: ((progress: TestAiProseProgress) => void) | undefined;
   const persistence = {
-    loadResult: vi.fn(options.loadResult ?? (async () => options.draft
-      ? { status: 'loaded' as const, draft: options.draft }
+    loadResult: vi.fn(options.loadResult ?? (async () => savedDraft
+      ? { status: 'loaded' as const, draft: savedDraft }
       : { status: 'missing' as const })),
-    saveCheckpoint: vi.fn(async () => undefined),
+    saveCheckpoint: vi.fn(async (_project: unknown, draft: DraftSession) => { savedDraft = draft; }),
+    save: vi.fn(async (_project: unknown, draft: DraftSession) => { savedDraft = draft; }),
   };
+  persistence.save = persistence.saveCheckpoint;
   const segmentation = {
     status: 'succeeded' as const,
     planFingerprint: 'plan-1',
@@ -312,6 +317,7 @@ async function renderTraceWorkbench() {
   fireEvent.change(source, { target: { value: '林夏走进房间。\n“你好。”' } });
   fireEvent.click(screen.getAllByRole('button', { name: /开始分析/ })[0]);
   await waitFor(() => expect(created.pipeline.prepare).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole('button', { name: '显示轨迹' }));
   return created;
 }
 
@@ -325,6 +331,134 @@ afterEach(() => {
 describe('AiProseWorkbench', () => {
   afterEach(() => {
     mocks.composition = undefined;
+  });
+
+  it('flushes the last source edit on unmount and restores it without a localStorage pointer', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const view = render(<AiProseWorkbench />);
+    const source = await screen.findByRole('textbox', { name: '完整正文' });
+    fireEvent.change(source, { target: { value: '关闭前的最后一次修改' } });
+    expect(screen.getByText('正在保存…')).toBeTruthy();
+    view.unmount();
+    await waitFor(() => expect(created.persistence.save).toHaveBeenCalledWith(
+      mocks.project, expect.objectContaining({ sourceText: '关闭前的最后一次修改' }),
+    ));
+    localStorage.clear();
+    render(<AiProseWorkbench />);
+    expect((await screen.findByRole('textbox', { name: '完整正文' }) as HTMLTextAreaElement).value)
+      .toBe('关闭前的最后一次修改');
+  });
+
+  it('keeps the panel open after a failed close save and retries it before closing', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const close = vi.fn();
+    render(<AiProseWorkbench onClose={close} />);
+    fireEvent.change(await screen.findByRole('textbox', { name: '完整正文' }), { target: { value: '必须保存的正文' } });
+    created.persistence.save.mockRejectedValueOnce(new Error('disk full'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭 AI 铺戏' }));
+    await screen.findByText('保存异常');
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '关闭 AI 铺戏' }));
+    await waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(created.persistence.save).toHaveBeenLastCalledWith(mocks.project, expect.objectContaining({ sourceText: '必须保存的正文' }));
+  });
+
+  it('restores an applied result as read-only rather than creating another draft', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const applied = { ...createReadyDraft(), status: 'applied' as const };
+    const created = createComposition({ draft: applied });
+    mocks.composition = created.composition;
+    render(<AiProseWorkbench />);
+    const button = await screen.findByRole('button', { name: '已应用到正式时间线' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('你好。')).toBeTruthy();
+    expect(created.persistence.save).not.toHaveBeenCalled();
+    expect(created.composition.applicator.apply).not.toHaveBeenCalled();
+  });
+
+  it('shows a corrupt draft error without offering to overwrite the file', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition({ loadResult: async () => ({ status: 'corrupt-json', error: new Error('草稿文件包含无效 JSON') }) });
+    mocks.composition = created.composition;
+    render(<AiProseWorkbench />);
+    await screen.findByText('草稿未能恢复：草稿文件包含无效 JSON');
+    expect(screen.queryByRole('button', { name: '新建草稿' })).toBeNull();
+    expect(created.persistence.save).not.toHaveBeenCalled();
+  });
+
+  it('restores unconfirmed character edits including empty rows after closing', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition({ draft: createReadyDraft() });
+    mocks.composition = created.composition;
+    const view = render(<AiProseWorkbench />);
+    const charactersTab = await screen.findByRole('tab', { name: /人物确认/ });
+    fireEvent.click(charactersTab);
+    fireEvent.change(screen.getByRole('textbox', { name: '主要人物 1' }), { target: { value: '更正的人名' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加人物' }));
+    view.unmount();
+    await waitFor(() => expect(created.persistence.save).toHaveBeenCalledWith(
+      mocks.project, expect.objectContaining({ mainCharacterEdits: ['更正的人名', ''], mainCharactersConfirmed: false, preview: null }),
+    ));
+    render(<AiProseWorkbench />);
+    const first = await screen.findByRole('textbox', { name: '主要人物 1' });
+    expect((first as HTMLInputElement).value).toBe('更正的人名');
+    expect((screen.getByRole('textbox', { name: '主要人物 2' }) as HTMLInputElement).value).toBe('');
+  });
+
+  it('aborts a closed workbench run and ignores its late completion after reopening', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const created = createComposition();
+    mocks.composition = created.composition;
+    const originalPrepare = created.pipeline.prepare.getMockImplementation()!;
+    let finishRequest: () => void = () => {};
+    let runSignal: AbortSignal | undefined;
+    const gate = new Promise<void>((resolve) => { finishRequest = resolve; });
+    created.pipeline.prepare.mockImplementationOnce(async (...args) => {
+      runSignal = (args[1] as { signal?: AbortSignal }).signal;
+      await gate;
+      return originalPrepare(...args);
+    });
+    const view = render(<AiProseWorkbench />);
+    fireEvent.change(await screen.findByRole('textbox', { name: '完整正文' }), { target: { value: '林夏走进房间。' } });
+    fireEvent.click(screen.getByRole('button', { name: /开始分析/ }));
+    await waitFor(() => expect(created.pipeline.prepare).toHaveBeenCalledOnce());
+    expect((screen.getByRole('button', { name: '新建 AI 草稿' }) as HTMLButtonElement).disabled).toBe(true);
+    view.unmount();
+    expect(runSignal?.aborted).toBe(true);
+    render(<AiProseWorkbench />);
+    await screen.findByRole('textbox', { name: '完整正文' });
+    await act(async () => { finishRequest(); await gate; });
+    expect(screen.getByRole('tab', { name: /原文输入/ }).getAttribute('aria-selected')).toBe('true');
+    expect(created.pipeline.prepare).toHaveBeenCalledOnce();
+  });
+
+  it('shows successful statements beside a failed segment and retries within its group', async () => {
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const ready = createReadyDraft();
+    const secondOffset = ready.sourceText.length;
+    ready.sourceText += '第二段。';
+    ready.segmentation.segments[0].endOffset = secondOffset;
+    ready.segmentation.segments.push({ index: 1, startOffset: secondOffset, endOffset: ready.sourceText.length, sourceText: '第二段。' });
+    localStorage.setItem('aeonstagery.ai-prose.scene-1.session', ready.sessionId);
+    const draft = replaceNormalization(ready, [
+      { segmentIndex: 0, status: 'succeeded', statements: [{ speaker: '林夏', text: '你好。' }] },
+      { segmentIndex: 1, status: 'failed', statements: [], error: { code: 'timeout', message: '请求超时' } },
+    ]);
+    const { composition, pipeline } = createComposition({ draft });
+    mocks.composition = composition;
+    render(<AiProseWorkbench />);
+    fireEvent.click(await screen.findByRole('tab', { name: /语句规范化/ }));
+    expect(await screen.findByText('你好。')).toBeTruthy();
+    const failedGroup = screen.getByRole('region', { name: '故事段 2' });
+    expect(within(failedGroup).getByRole('alert').textContent).toContain('请求超时');
+    fireEvent.click(within(failedGroup).getByRole('button', { name: '重试此段' }));
+    await waitFor(() => expect(pipeline.retrySegment).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), 1, expect.anything(),
+    ));
   });
 
   it('starts at 9 chars/sec and carries slider changes into settings and the draft', async () => {
@@ -381,7 +515,7 @@ describe('AiProseWorkbench', () => {
     rendered.rerender(<AiProseWorkbench />);
     resolveLoad({ status: 'loaded', draft: readyDraft });
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     expect(screen.queryByRole('heading', { name: '正在恢复 AI 草稿' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强。')).toBeTruthy());
@@ -423,15 +557,17 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     expect(screen.getByText('你好。')).toBeTruthy();
+    expect(screen.getAllByRole('slider', { name: 'scriptReadingSpeed' })).toHaveLength(1);
+    expect(screen.queryByRole('group', { name: '可选增强' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: /语句/ })).toBeNull();
 
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    expect(screen.getByRole('dialog').textContent).toContain('确认原子应用');
+    expect(screen.getByRole('dialog').textContent).toContain('确认应用');
 
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       readyDraft,
       mocks.document,
@@ -446,19 +582,15 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('textbox', { name: '完整正文' });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByRole('slider', { name: 'scriptReadingSpeed' }), {
-      target: { value: '10' },
-    });
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    await act(() => result.current.handleReadingSpeedChange(10));
+    await act(() => result.current.handleApply());
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       expect.objectContaining({ scriptReadingSpeed: 10 }),
@@ -476,7 +608,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /人物确认/ }));
 
     const characterInput = screen.getByRole('textbox', { name: '主要人物 1' });
@@ -487,6 +619,37 @@ describe('AiProseWorkbench', () => {
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: '主要人物 1' }));
   });
 
+  it('navigates available stages by keyboard without losing the source draft', async () => {
+    const readyDraft = createReadyDraft();
+    localStorage.setItem('aeonstagery.ai-prose.scene-1.session', readyDraft.sessionId);
+    mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+    const { composition } = createComposition({ draft: readyDraft });
+    mocks.composition = composition;
+
+    render(<AiProseWorkbench />);
+
+    await screen.findByRole('tab', { name: /原文输入/ });
+    const sourceTab = screen.getByRole('tab', { name: /原文输入/ });
+    sourceTab.focus();
+    fireEvent.keyDown(sourceTab, { key: 'End' });
+
+    const timingTab = screen.getByRole('tab', { name: /时间编排/ });
+    expect(document.activeElement).toBe(timingTab);
+    expect(timingTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(timingTab.id);
+    expect(sourceTab.tabIndex).toBe(-1);
+
+    fireEvent.keyDown(timingTab, { key: 'Home' });
+    expect(document.activeElement).toBe(sourceTab);
+    expect(screen.getByRole('textbox', { name: '完整正文' })).toHaveProperty('value', readyDraft.sourceText);
+
+    fireEvent.keyDown(sourceTab, { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: /语义分段/ }));
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }));
+    expect(sourceTab.getAttribute('aria-selected')).toBe('true');
+    expect(composition.applicator.apply).not.toHaveBeenCalled();
+  });
+
   it('applies a draft enhancement bound to the current document version', async () => {
     const readyDraft = createReadyDraft();
     localStorage.setItem('aeonstagery.ai-prose.scene-1.session', readyDraft.sessionId);
@@ -495,16 +658,14 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('textbox', { name: '完整正文' });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    await act(() => result.current.handleApply());
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledTimes(1));
     expect(composition.applicator.apply).toHaveBeenCalledWith(
@@ -524,19 +685,18 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result, rerender } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('textbox', { name: '完整正文' });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
     mocks.documentVersion = 6;
-    fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    rerender();
+    await act(() => result.current.handleApply());
 
-    await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强')).toBeTruthy());
+    await waitFor(() => expect(result.current.enhancementMessage).toBe('场景已变化，请重新运行增强'));
     expect(composition.applicator.apply).not.toHaveBeenCalled();
   });
 
@@ -550,10 +710,10 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
     fireEvent.click(screen.getAllByRole('button', { name: /写入正式时间线/ })[0]);
-    fireEvent.click(screen.getByRole('button', { name: '确认原子应用' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }));
 
     await waitFor(() => expect(composition.applicator.apply).toHaveBeenCalledWith(
       readyDraft,
@@ -600,7 +760,8 @@ describe('AiProseWorkbench', () => {
     const { composition } = createComposition({ draft: readyDraft });
     mocks.composition = composition;
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
     // Restore path replays with the shared capability ports.
     await waitFor(() => expect(restoreMocks.replayEnhancementState).toHaveBeenCalledTimes(1));
@@ -611,10 +772,8 @@ describe('AiProseWorkbench', () => {
     expect(replayCall.ports!.profileProvider).not.toBeNull();
 
     // Run path passes the identical port objects to the processor runner.
-    await screen.findByRole('textbox', { name: '完整正文' });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
 
     const runnerOptions = runnerMocks.constructorOptions as {
@@ -658,13 +817,12 @@ describe('AiProseWorkbench', () => {
       },
     });
 
-    render(<AiProseWorkbench />);
+    const { result } = renderHook(() => useAiProseWorkbench());
+    await waitFor(() => expect(result.current.draft).toBeTruthy());
 
-    await screen.findByRole('textbox', { name: '完整正文' });
-    fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
-    fireEvent.click(screen.getByRole('button', { name: '表演指导' }));
-    fireEvent.click(screen.getByRole('button', { name: '电影感' }));
-    fireEvent.click(screen.getByRole('button', { name: '运行可选增强' }));
+    act(() => result.current.setEnableActing(true));
+    act(() => result.current.setEnableCinematic(true));
+    await act(() => result.current.handleRunDraftEnhancement());
     await waitFor(() => expect(enhancementMocks.runPerformance).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(enhancementMocks.runCinematic).toHaveBeenCalledTimes(1));
 
@@ -702,7 +860,7 @@ describe('AiProseWorkbench', () => {
 
     render(<AiProseWorkbench />);
 
-    await screen.findByRole('textbox', { name: '完整正文' });
+    await screen.findByRole('tab', { name: /原文输入/ });
     fireEvent.click(screen.getByRole('tab', { name: /时间编排/ }));
 
     await waitFor(() => expect(screen.getByText('场景已变化，请重新运行增强。')).toBeTruthy());
@@ -822,5 +980,41 @@ describe('AiProseWorkbench', () => {
     const newCard = await screen.findByTestId('ai-prose-trace-card-request-new');
     expect(screen.queryByTestId('ai-prose-trace-card-request-old')).toBeNull();
     expect(within(newCard).getByText('fresh')).toBeTruthy();
+  });
+
+  it('guides unconfigured users to AI settings and intercepts run attempts before calling the pipeline', async () => {
+    const previousBaseUrl = mocks.settings.aiProse.baseUrl;
+    mocks.settings.aiProse.baseUrl = '';
+    const { eventBus } = await import('../api/events');
+    const openSettingsSpy = vi.fn();
+    const unsubscribe = eventBus.on('ui:openSettings', openSettingsSpy);
+    try {
+      const { composition, pipeline } = createComposition();
+      (composition as Record<string, unknown>).transport = {
+        getCredentialStatus: vi.fn(async () => ({ configured: false })),
+      };
+      mocks.workspace.getCurrentProject.mockReturnValue(mocks.project);
+      mocks.composition = composition;
+
+      render(<AiProseWorkbench />);
+
+      const banner = await screen.findByRole('region', { name: 'AI 配置引导' });
+      expect(within(banner).getByText('尚未配置 AI 服务（API Key）')).toBeTruthy();
+
+      fireEvent.click(within(banner).getByRole('button', { name: '前往 AI 设置' }));
+      expect(openSettingsSpy).toHaveBeenCalledWith({ tab: 'ai' });
+
+      const editor = await screen.findByRole('textbox', { name: '完整正文' });
+      fireEvent.change(editor, { target: { value: '林夏走进房间。\n“你好。”' } });
+      fireEvent.click(screen.getByRole('button', { name: /开始分析/ }));
+
+      expect(pipeline.prepare).not.toHaveBeenCalled();
+      const alert = await screen.findByRole('alert');
+      expect(within(alert).getAllByText(/尚未配置 AI 服务（API 密钥）/).length).toBeGreaterThan(0);
+      expect(within(alert).getByRole('button', { name: '前往 AI 设置' })).toBeTruthy();
+    } finally {
+      unsubscribe();
+      mocks.settings.aiProse.baseUrl = previousBaseUrl;
+    }
   });
 });

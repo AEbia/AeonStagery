@@ -1,6 +1,6 @@
 # ADR Status
 
-本文件是 ADR 新鲜度索引，也是 ADR 编号的唯一权威目录。最后翻新：2026-10-19。
+本文件是 ADR 新鲜度索引，也是 ADR 编号的唯一权威目录。最后翻新：2026-10-27。
 
 历史 ADR 保留原始决策语境，但不再默认代表当前实现。查当前架构时，先读下面的 freshness anchors；只有需要理解迁移背景时再读 archived / historical 文档。
 
@@ -32,7 +32,7 @@
 | [0017 Collaborative Timeline Order](adr/0017-collaborative-timeline-order.md) | current, translated by KSM-0003 | 同时间顺序事实有效；当前名称是 `statementOrder` / `companionOrder`，不是旧 `timelineOrder` action sequence。 |
 | [0020 GPT-SoVITS Voice Authoring and Local Voice Library](adr/0020-gpt-sovits-voice-authoring.md) | current | GPT-SoVITS 用户语音库、候选生成、项目角色默认、template voice profile 与资源采用事务的权威边界；明确不依赖第三方 preset 插件格式。 |
 | [KSM-0001 Unified Template System](ksm-adr/ksm-0001-unified-template-system.md) | current | Versioned template packages、semantic payload、template source precedence 与 template asset materialization 的权威入口。 |
-| [0022 AI Prose-to-Script Normalization](adr/0022-ai-prose-to-script-normalization.md) | proposed | AI 正文无损规范化、角色表演占位、表演/电影感处理器与正式 scene 增强边界的决策入口。 |
+| [0022 AI Prose-to-Script Normalization](adr/0022-ai-prose-to-script-normalization.md) | proposed | AI 正文无损规范化、角色表演占位、表演/电影感处理器与正式 scene 增强边界的决策入口；2026-10-31 收敛为每场景固定文件单草稿，补齐中断恢复和旧布局清理。 |
 | [0023 Tool-Mediated Persistent Project Agent Conversation](adr/0023-tool-mediated-autonomous-project-agent.md) | partially superseded by ADR-0024 | Conversation 生命周期、持久化、exact-version gate、provider/transport、上下文压缩与项目 Agent 主循环仍有效；旧行号写寻址由 ADR-0024 取代；2026-10-17 补充命名空间统计摘要与支持通配符的按需能力查询、搜索去重/字节上限、局部读取及稳定估算校准。 |
 | [0024 Source-Identity Project Agent Authoring](adr/0024-source-identity-project-agent-authoring.md) | current | Project Agent 以稳定 statement/companion identity 读取与写入正式 scene；写工具、回执、诊断与 benchmark gate 以本文为准。 |
 | [0025 External Agent Bridge](adr/0025-external-agent-bridge.md) | proposed | 复用 Project Agent 业务装配的 headless CLI、stdio JSON-RPC 与 benchmark sample port。 |
@@ -46,7 +46,7 @@
 | [0035 开源许可与 Live2D 运行时分发边界](adr/0035-open-source-licensing-and-live2d-runtime-distribution.md) | current, accepted | Apache-2.0 发布下的三方许可声明、运行时 staging（auto/none/verify）、`none`/`verify` 两套打包闸门与"更新不删除已有运行时"不变量的权威入口。 |
 | [0036 更新渠道与差分下载基线](adr/0036-update-channels-and-differential-baselines.md) | current, accepted | OSS / GitHub 渠道、差分更新基线与块图补取、安装缓存 SHA256/签名校验及禁止静默整包回退的权威入口。 |
 | [0037 项目画布与原生分辨率导出](adr/0037-project-video-format-and-native-resolution-export.md) | current, implemented | 项目输出像素、逻辑画布、独立预览质量、导出覆盖、帧率步进及流式转码混音、磁盘空间与输出生命周期契约的权威入口。 |
-| [0038 统一摄像机求值](adr/0038-unified-camera-evaluation.md) | current, partially implemented | 正式时间线按场景时间求值；运镜黑边按可见环境层的实际几何覆盖并集诊断，高频编辑复用覆盖输入未变的任务与结果，并限制图片加载并发和采样批次耗时。临时预览保留独立 `CameraController` 状态，角色跟随使用活动舞台锚点，seek 和导出不重建历史角色姿态。 |
+| [0038 统一摄像机求值](adr/0038-unified-camera-evaluation.md) | current, partially implemented | 正式时间线按场景时间求值；运镜黑边按可见环境层的实际几何覆盖并集诊断，高频编辑复用覆盖输入未变的任务与结果，并限制图片加载并发和采样批次耗时。临时预览保留独立 `CameraController` 状态，角色跟随使用活动舞台锚点，Cubism 3+ 按 DisplayInfo 部件语义与层级排除乐器对身体锚点的影响；seek 和导出不重建历史角色姿态。 |
 
 ## Historical / Superseded
 

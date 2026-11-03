@@ -736,7 +736,7 @@ class StageManager {
         }
       }
 
-      const authoredRotation = config.rotation ?? (sprite as any).__environmentTransform?.rotation ?? 0;
+      const authoredRotation = config.rotation ?? (sprite as StageDisplay).__environmentTransform?.rotation ?? 0;
       sprite.angle = authoredRotation - (camera?.rotation ?? 0);
       if (config.opacity !== undefined) {
         const baseAlpha = (sprite as StageDisplay).__baseAlpha ?? 1;

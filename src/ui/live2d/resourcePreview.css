@@ -1,0 +1,80 @@
+.live2d-resource-preview {
+  position: fixed;
+  z-index: 1600;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-radius: var(--radius-popover, 12px);
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  overflow: hidden;
+  transform-origin: var(--preview-origin);
+}
+
+.live2d-resource-preview[data-state="closing"] {
+  pointer-events: none;
+}
+
+.live2d-resource-preview__header,
+.live2d-resource-preview__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 44px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 6px 12px;
+}
+
+.live2d-resource-preview__header > div {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+.live2d-resource-preview__header { cursor: move; touch-action: none; user-select: none; }
+.live2d-resource-preview__header button { cursor: pointer; }
+.live2d-resource-preview__header strong { font-weight: 600; flex-shrink: 0; }
+.live2d-resource-preview__header button { flex-shrink: 0; }
+.live2d-resource-preview__character {
+  margin-left: 8px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live2d-resource-preview__viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-tertiary);
+}
+
+.live2d-resource-preview__viewport iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+.live2d-resource-preview__status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.live2d-resource-preview__footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live2d-resource-preview__footer .btn { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+[data-perf="low"] .live2d-resource-preview[data-state="closing"] { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .live2d-resource-preview[data-state="closing"] { opacity: 0; }
+}

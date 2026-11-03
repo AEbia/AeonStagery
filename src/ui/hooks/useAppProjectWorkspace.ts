@@ -118,7 +118,6 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     templates?: ProjectTemplateConfiguration;
     webgal?: WebGalImportInput;
   }) => {
-    setIsCollaborationJoinHomeLocked(false);
     const result = await contextValue.services.projectOpenWorkflow.createProjectAndLoadDefaultScene({
       name,
       rootPath,
@@ -126,6 +125,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
       webgal,
       videoFormat,
     });
+    if (result.success) setIsCollaborationJoinHomeLocked(false);
     if (result.success && result.webgalReport) {
       const { stats, characters, unsupportedCommands } = result.webgalReport;
       const parts = [
@@ -141,7 +141,7 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
       );
     }
     showProjectWorkflowResult(result, 'create');
-  }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
+  }, [contextValue.services.projectOpenWorkflow, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult]);
 
   const handleRegenerateWebGalScene = useCallback(async (speed: number) => {
     await trackProjectOperation(async () => {
@@ -281,7 +281,6 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
   }, []);
 
   const handleOpenProject = useCallback(async () => {
-    setIsCollaborationJoinHomeLocked(false);
     const result = await window.aeonStageryAPI.dialog.showOpen({
       title: '打开 AeonStagery 项目',
       properties: ['openFile', 'openDirectory'],
@@ -290,18 +289,19 @@ export function useAppProjectWorkspace(contextValue: BootstrapContext, hasLoaded
     if (result.canceled || !result.filePaths?.[0]) return;
 
     const workflowResult = await contextValue.services.projectOpenWorkflow.openProjectAndLoadDefaultScene(result.filePaths[0]);
+    if (workflowResult.success) setIsCollaborationJoinHomeLocked(false);
     showProjectWorkflowResult(workflowResult, 'open');
-  }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
+  }, [contextValue.services.projectOpenWorkflow, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult]);
 
   useEffect(() => {
     return eventBus.on('ui:openProject', handleOpenProject);
   }, [handleOpenProject]);
 
   const handleOpenRecentProject = useCallback(async (projectFilePath: string) => {
-    setIsCollaborationJoinHomeLocked(false);
     const workflowResult = await contextValue.services.projectOpenWorkflow.openRecentProjectAndLoadDefaultScene(projectFilePath);
+    if (workflowResult.success) setIsCollaborationJoinHomeLocked(false);
     showProjectWorkflowResult(workflowResult, 'recent');
-  }, [contextValue.services.projectOpenWorkflow, showProjectWorkflowResult]);
+  }, [contextValue.services.projectOpenWorkflow, setIsCollaborationJoinHomeLocked, showProjectWorkflowResult]);
 
   const handleRenameProject = useCallback(async (projectFilePath: string, name: string) => {
     const result = await contextValue.services.projectWorkspace.renameProjectAt(projectFilePath, name);

@@ -266,6 +266,34 @@ describe('EnhancementProcessorRunner', () => {
     }
     // Stage reports retryable so host can retry only the failed window.
     expect(result.status).toBe('retryableFailed');
+
+    const retry = vi.fn(async () => ({
+      status: 'succeeded' as const,
+      value: { version: SEMANTIC_SCENE_PATCH_VERSION, operations: [] },
+      correctionUsed: false,
+    }));
+    const resumed = new EnhancementProcessorRunner({
+      llm: { enhancePerformance: retry } as unknown as AiProseLlmService,
+      modelCapabilities: {
+        hasModelConfigured: () => true,
+        motionsForCharacter: () => ['wave'],
+        expressionsForCharacter: () => [],
+      },
+      restoredUnits: result.units,
+    });
+    const completed = await resumed.runPerformance({
+      document,
+      segmentation: {
+        segmentKeys: ['seg-0', 'seg-1'],
+        narrativeBoundaries: [
+          { key: 'seg-0', startGroupIndex: 0, endGroupIndexExclusive: 1 },
+          { key: 'seg-1', startGroupIndex: 1, endGroupIndexExclusive: 2 },
+        ],
+      },
+    });
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(completed.units.every((unit) => unit.status === 'succeeded')).toBe(true);
+    expect(completed.candidate.statements[0]).toEqual(result.candidate.statements[0]);
   });
 
   it('rebases later concurrent unit locators after an earlier structural insert', async () => {
