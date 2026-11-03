@@ -983,6 +983,8 @@ describe('AiProseWorkbench', () => {
   });
 
   it('guides unconfigured users to AI settings and intercepts run attempts before calling the pipeline', async () => {
+    const previousBaseUrl = mocks.settings.aiProse.baseUrl;
+    mocks.settings.aiProse.baseUrl = '';
     const { eventBus } = await import('../api/events');
     const openSettingsSpy = vi.fn();
     const unsubscribe = eventBus.on('ui:openSettings', openSettingsSpy);
@@ -1012,6 +1014,7 @@ describe('AiProseWorkbench', () => {
       expect(within(alert).getByRole('button', { name: '前往 AI 设置' })).toBeTruthy();
     } finally {
       unsubscribe();
+      mocks.settings.aiProse.baseUrl = previousBaseUrl;
     }
   });
 });
