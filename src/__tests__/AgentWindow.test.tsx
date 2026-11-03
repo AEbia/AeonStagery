@@ -2005,6 +2005,7 @@ describe('AgentWindow markdown replies', () => {
   });
 
   it('refreshes saved credentials across windows without focus or settings changes', async () => {
+    localStorage.setItem('aeonstagery_settings', JSON.stringify({ aiProse: { baseUrl: '', defaultModel: 'gpt-default' } }));
     const api = (window as unknown as {
       aeonStageryAPI: { aiProse: Record<string, unknown> };
     }).aeonStageryAPI;
@@ -2086,7 +2087,27 @@ describe('AgentWindow markdown replies', () => {
     expect(mocks.requestStart).toHaveBeenCalledTimes(1);
   });
 
-  it('shows setup guidance on the welcome surface and intercepts task start when API key is unconfigured', async () => {
+  it('submits an Agent task to a LAN endpoint without a configured API key', async () => {
+    localStorage.setItem('aeonstagery_settings', JSON.stringify({
+      aiProse: { baseUrl: 'http://192.168.1.20:11434/v1', defaultModel: 'local-model' },
+    }));
+    const api = (window as unknown as {
+      aeonStageryAPI: { aiProse: Record<string, unknown> };
+    }).aeonStageryAPI;
+    const getCredentialStatus = vi.fn(async () => ({ configured: false }));
+    api.aiProse.getCredentialStatus = getCredentialStatus;
+    render(<AgentWindow />);
+    await waitFor(() => expect(getCredentialStatus).toHaveBeenCalled());
+    fireEvent.change(screen.getByRole('textbox', { name: '任务描述' }), {
+      target: { value: '帮我检查当前场景' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(mocks.requestStart).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('region', { name: 'AI 配置引导' })).toBeNull();
+  });
+
+  it('shows setup guidance on the welcome surface and intercepts task start when endpoint and API key are unconfigured', async () => {
+    localStorage.setItem('aeonstagery_settings', JSON.stringify({ aiProse: { baseUrl: '', defaultModel: 'gpt-default' } }));
     const api = (window as unknown as {
       aeonStageryAPI: { aiProse: Record<string, unknown> };
     }).aeonStageryAPI;

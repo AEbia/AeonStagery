@@ -53,7 +53,9 @@ export function isLocalLoopbackEndpoint(endpoint?: string | null): boolean {
 
 /**
  * Returns true when the environment has explicitly checked the stored credential,
- * confirmed no API key is configured, and the target endpoint is a remote cloud URL.
+ * confirmed no API key is configured, and no endpoint has been configured.
+ * A configured endpoint can accept anonymous requests regardless of its host;
+ * authentication failures are handled by diagnoseAiError after the request.
  */
 export function shouldRequireAiCredentialSetup(options: {
   credentialChecked: boolean;
@@ -63,7 +65,7 @@ export function shouldRequireAiCredentialSetup(options: {
   return (
     options.credentialChecked
     && !options.credentialConfigured
-    && !isLocalLoopbackEndpoint(options.endpoint)
+    && !options.endpoint?.trim()
   );
 }
 

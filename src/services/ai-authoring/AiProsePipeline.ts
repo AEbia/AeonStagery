@@ -429,6 +429,17 @@ function fingerprintNormalizationBlocks(blocks: readonly AiProseStatementBlock[]
   })));
 }
 
+// A failed checkpoint must not release the caller while sibling tasks can
+// still write the old source into the scene's single draft slot.
+async function awaitAllTasks<T extends readonly unknown[]>(tasks: T) {
+  try {
+    return await Promise.all(tasks);
+  } catch (error) {
+    await Promise.allSettled(tasks);
+    throw error;
+  }
+}
+
 export class AiProsePipeline {
   constructor(
     private readonly llm: AiProseLlmService,
@@ -461,7 +472,7 @@ export class AiProsePipeline {
     const reuseCharacterExtraction = canReusePrepare && existing?.characterExtraction?.status === 'succeeded';
     const checkpoint = options.checkpoint ?? this.options.checkpoint;
     options.signal?.throwIfAborted();
-    const [segmentation, characterExtraction] = await Promise.all([
+    const [segmentation, characterExtraction] = await awaitAllTasks([
       (reuseSegmentation
         ? Promise.resolve({
           status: 'succeeded' as const,
@@ -491,7 +502,7 @@ export class AiProsePipeline {
           if (!reuseCharacterExtraction) await checkpoint?.onCharacterExtraction?.(state);
           return state;
         }),
-    ]);
+    ] as const);
     options.signal?.throwIfAborted();
     const prepared = {
       sourceText,
@@ -537,7 +548,7 @@ export class AiProsePipeline {
     )
       && sameStringList(existing!.confirmedMainCharacters, confirmedMainCharacters);
     const existingTasks = new Map(existing?.tasks.map((task) => [task.segmentIndex, task]));
-    const tasks = await Promise.all(prepared.segments.map(async (segment) => {
+    const tasks = await awaitAllTasks(prepared.segments.map(async (segment) => {
       const existingTask = reuseExisting ? existingTasks.get(segment.index) : undefined;
       const task = existingTask?.status === 'succeeded'
         ? cloneNormalizationTask(existingTask)
@@ -659,7 +670,7 @@ export class AiProsePipeline {
       && existing?.normalizationFingerprint === normalizationFingerprint;
     const existingTasks = new Map(existing?.tasks.map((task) => [task.segmentIndex, task]));
     const checkpoint = options.checkpoint ?? this.options.checkpoint;
-    const tasks = await Promise.all(prepared.segments.map(async (segment) => {
+    const tasks = await awaitAllTasks(prepared.segments.map(async (segment) => {
       const segmentBlocks = blocksBySegment.get(segment.index) ?? [];
       const existingTask = reuseExisting ? existingTasks.get(segment.index) : undefined;
       const expectedGapCount = Math.max(0, segmentBlocks.length - 1);
@@ -748,11 +759,15 @@ export function createAiProseDraftPersistenceCheckpoint(options: {
 
   return {
     onSegmentation: (state) => enqueue(async () => {
-      currentDraft = replaceSegmentation(currentDraft, state);
+      if (!sameSegmentationState(currentDraft.segmentation, state)) {
+        currentDraft = replaceSegmentation(currentDraft, state);
+      }
       await save();
     }),
     onCharacterExtraction: (state) => enqueue(async () => {
-      currentDraft = replaceCharacterExtraction(currentDraft, state);
+      if (!sameCharacterExtractionState(currentDraft.characterExtraction, state)) {
+        currentDraft = replaceCharacterExtraction(currentDraft, state);
+      }
       await save();
     }),
     onPrepared: (prepared) => enqueue(async () => {
