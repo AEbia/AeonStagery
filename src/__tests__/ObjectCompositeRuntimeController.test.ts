@@ -63,6 +63,15 @@ vi.mock('../engine/TextLayerManager', () => ({
   },
 }));
 
+function mockCanvasContext(context: Pick<CanvasRenderingContext2D, 'clearRect' | 'drawImage'> & {
+  getImageData: (sx: number, sy: number, sw: number, sh: number) => Pick<ImageData, 'data'>;
+}) {
+  const canvas: {
+    getContext(contextId: '2d', options?: CanvasRenderingContext2DSettings): typeof context | null;
+  } = HTMLCanvasElement.prototype;
+  return vi.spyOn(canvas, 'getContext').mockReturnValue(context);
+}
+
 function makeScene(): SceneScript {
   return {
     sceneId: 'scene',
@@ -116,6 +125,7 @@ function makeScene(): SceneScript {
 
 describe('ObjectCompositeRuntimeController', () => {
   beforeEach(() => {
+    vi.resetModules();
     backgroundSamplingTarget = null;
     stableSampleBounds = null;
     stableWorldSampleBounds = null;
@@ -312,9 +322,9 @@ describe('ObjectCompositeRuntimeController', () => {
     const canvas = { width: 64, height: 36 };
     const extract = vi.fn(() => canvas);
     vi.mocked(stageManager.getApp).mockReturnValue({ renderer: { extract: { canvas: extract } } } as any);
-    const probe = vi.spyOn(controller as any, 'getProbeContext').mockReturnValue({ canvas, context: {
+    const probe = mockCanvasContext({
       clearRect: vi.fn(), drawImage: vi.fn(), getImageData: () => ({ data: pixels }),
-    } });
+    });
     const scene: SceneScript = { sceneId: 'surrounding-colors', meta: { title: 'Surrounding colors' }, timeline: [],
       visual: { visualTargets: { hero: { targetType: 'character', objectCompositeBaseline: {
         integration: { recipeId: 'builtin:integration-soft', ...(legacyColors ? { semanticOverride: {
@@ -365,8 +375,8 @@ describe('ObjectCompositeRuntimeController', () => {
     const canvas = { width: 64, height: 36 };
     const extract = vi.fn(() => canvas);
     vi.mocked(stageManager.getApp).mockReturnValue({ renderer: { extract: { canvas: extract } } } as any);
-    // Use the canvas seam so the controller still executes refresh, derivation and filter updates.
-    const probe = vi.spyOn(controller as any, 'getProbeContext').mockReturnValue({ canvas, context });
+    // Use the canvas adapter so refresh, derivation and filter updates run through the public interface.
+    const probe = mockCanvasContext(context);
     const scene: SceneScript = {
       sceneId: 'environment-composition', meta: { title: 'Environment Composition' }, timeline: [],
       visual: { visualTargets: { hero: { targetType: 'character', objectCompositeBaseline: {
@@ -423,7 +433,7 @@ describe('ObjectCompositeRuntimeController', () => {
       }),
     };
     vi.mocked(stageManager.getApp).mockReturnValue({ renderer: { extract: { canvas: extract } } } as any);
-    const probe = vi.spyOn(controller as any, 'getProbeContext').mockReturnValue({ canvas, context });
+    const probe = mockCanvasContext(context);
     const scene: SceneScript = {
       sceneId: 'stable-environment-scan',
       meta: { title: 'Stable environment scan' },
@@ -471,7 +481,7 @@ describe('ObjectCompositeRuntimeController', () => {
       }),
     };
     vi.mocked(stageManager.getApp).mockReturnValue({ renderer: { extract: { canvas: extract } } } as any);
-    const probe = vi.spyOn(controller as any, 'getProbeContext').mockReturnValue({ canvas, context });
+    const probe = mockCanvasContext(context);
     const scene: SceneScript = {
       sceneId: 'paused-environment-move',
       meta: { title: 'Paused environment move' },
@@ -487,8 +497,6 @@ describe('ObjectCompositeRuntimeController', () => {
       controller.apply(scene, state, 10);
       const overlay = characterContainer.filters!.find(filter => (filter as any).luminanceProtected) as any;
       const initialColor = overlay.color;
-      const environmentState = (controller as any).environmentStates.get('hero');
-      const initialRawColor = environmentState.raw.color;
 
       // A paused authoring edit moves the environment layer without advancing scene time.
       environmentLayerSprite.x = 120;
@@ -496,7 +504,7 @@ describe('ObjectCompositeRuntimeController', () => {
       controller.apply(scene, state, 10);
 
       expect(extract).toHaveBeenCalledTimes(2);
-      expect(environmentState.raw.color).not.toBe(initialRawColor);
+      expect(overlay.color).toBe(0x1e5ae6);
       expect(overlay.color).not.toBe(initialColor);
     } finally {
       probe.mockRestore();
@@ -630,7 +638,9 @@ describe('ObjectCompositeRuntimeController', () => {
         typeof (filter as any).alpha === 'number' &&
         'colorStops' in (filter as any)
       ) as any)?.color;
-      expect((objectCompositeRuntimeController as any).backgroundProbeCache.coordinateSpace).toBe('background-local');
+      expect(fakeContext.drawImage).toHaveBeenCalledWith(
+        { width: 8, height: 4 }, 0, 0, 8, 4, 0, 0, 64, 36,
+      );
 
       cameraOffsetX = 180;
       stableSampleBounds = new PIXI.Rectangle(300, 180, 120, 240);
